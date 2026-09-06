@@ -39,6 +39,12 @@
       "namedRegex": "^/alerts(?:/)?$"
     },
     {
+      "page": "/api-keys",
+      "regex": "^/api\\-keys(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api\\-keys(?:/)?$"
+    },
+    {
       "page": "/audit-logs",
       "regex": "^/audit\\-logs(?:/)?$",
       "routeKeys": {},
@@ -93,6 +99,12 @@
       "namedRegex": "^/firewall(?:/)?$"
     },
     {
+      "page": "/license",
+      "regex": "^/license(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/license(?:/)?$"
+    },
+    {
       "page": "/login",
       "regex": "^/login(?:/)?$",
       "routeKeys": {},
@@ -121,6 +133,12 @@
       "regex": "^/ssl(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/ssl(?:/)?$"
+    },
+    {
+      "page": "/team",
+      "regex": "^/team(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/team(?:/)?$"
     },
     {
       "page": "/websites",

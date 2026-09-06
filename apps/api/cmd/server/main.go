@@ -20,6 +20,7 @@ import (
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/dns"
 	"hostvra/api/internal/handlers"
+	"hostvra/api/internal/license"
 	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/store"
 )
@@ -71,10 +72,14 @@ func main() {
 
 	dnsService := dns.NewService()
 	alertEngine := alerts.NewEngine()
+	licenseManager := license.NewManager()
 
 	dnsHandler := handlers.NewDNSHandler(cfg, dnsService, auditLogger)
 	alertHandler := handlers.NewAlertHandler(cfg, alertEngine, auditLogger)
 	backupHandler := handlers.NewBackupHandler(cfg, dataStore, auditLogger)
+	licenseHandler := handlers.NewLicenseHandler(cfg, licenseManager, auditLogger)
+	teamHandler := handlers.NewTeamHandler(cfg, dataStore, auditLogger)
+	apiKeyHandler := handlers.NewAPIKeyHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -181,6 +186,26 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/", backupHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/", backupHandler.Create)
 				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/restore", backupHandler.Restore)
+			})
+
+			// Commercial & Licensing
+			r.Route("/license", func(r chi.Router) {
+				r.Get("/", licenseHandler.Get)
+				r.With(rbac.RequirePermission(rbac.PermLicensesManage)).Post("/activate", licenseHandler.Activate)
+			})
+
+			// Team & Collaborators
+			r.Route("/team", func(r chi.Router) {
+				r.Get("/members", teamHandler.ListMembers)
+				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Post("/invite", teamHandler.InviteMember)
+				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Delete("/members/{memberID}", teamHandler.RemoveMember)
+			})
+
+			// API Keys
+			r.Route("/api-keys", func(r chi.Router) {
+				r.Get("/", apiKeyHandler.List)
+				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Post("/", apiKeyHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Delete("/{keyID}", apiKeyHandler.Revoke)
 			})
 		})
 	})
