@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/google/uuid"
 
 	"hostvra/api/internal/alerts"
 	"hostvra/api/internal/audit"
@@ -57,6 +58,9 @@ func main() {
 		dataStore = pgStore
 	}
 	defer dataStore.Close()
+
+	// Seed default administrator account for local dev / initial access
+	seedDefaultAdmin(context.Background(), dataStore, logger)
 
 	// Initialize Audit Logger
 	auditLogger := audit.NewLogger(dataStore, logger)
@@ -359,4 +363,43 @@ func main() {
 	}
 
 	logger.Info("Hostvra API server stopped.")
+}
+
+func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
+	_, err := s.GetUserByEmail(ctx, "admin@hostvra.com")
+	if err == nil {
+		return // Already seeded
+	}
+
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	org := &store.Organization{
+		ID:          defaultOrgID,
+		Name:        "Hostvra Cloud",
+		Slug:        "hostvra-cloud",
+		PlanTier:    "enterprise",
+		MaxServers:  100,
+		MaxWebsites: 1000,
+	}
+	_ = s.CreateOrganization(ctx, org)
+
+	passwordHash, err := auth.HashPassword("SuperSecretP@ss123!", nil)
+	if err != nil {
+		logger.Error("Failed to hash default admin password", "error", err)
+		return
+	}
+
+	adminUser := &store.User{
+		ID:           uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		Email:        "admin@hostvra.com",
+		PasswordHash: passwordHash,
+		FullName:     "Hostvra Administrator",
+		IsActive:     true,
+		IsSuperAdmin: true,
+	}
+
+	if err := s.CreateUser(ctx, adminUser, defaultOrgID, "owner"); err != nil {
+		logger.Warn("Failed to seed default admin user", "error", err)
+	} else {
+		logger.Info("Default administrator account successfully seeded", "email", "admin@hostvra.com")
+	}
 }
