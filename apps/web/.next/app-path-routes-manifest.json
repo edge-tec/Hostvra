@@ -1,0 +1,10 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/audit-logs/page": "/audit-logs",
+  "/dashboard/page": "/dashboard",
+  "/login/page": "/login",
+  "/page": "/",
+  "/servers/page": "/servers",
+  "/register/page": "/register",
+  "/settings/page": "/settings"
+}
