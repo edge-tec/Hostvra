@@ -2,10 +2,19 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	_ "github.com/lib/pq"
+)
+
+var (
+	ErrInvalidIdentifier = errors.New("invalid database identifier: must be 1-63 characters, alphanumeric or underscore, starting with letter or underscore")
+	validIdentRegex      = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`)
+	validCharsetRegex    = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
+	validCollationRegex  = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
 )
 
 type DBManager struct{}
@@ -14,7 +23,19 @@ func NewDBManager() *DBManager {
 	return &DBManager{}
 }
 
+func validateIdentifier(name string) error {
+	name = strings.TrimSpace(name)
+	if !validIdentRegex.MatchString(name) {
+		return fmt.Errorf("%w: '%s'", ErrInvalidIdentifier, name)
+	}
+	return nil
+}
+
 func (m *DBManager) CreateMySQLDatabase(rootDSN, dbName, charset, collation string) error {
+	if err := validateIdentifier(dbName); err != nil {
+		return err
+	}
+
 	if charset == "" {
 		charset = "utf8mb4"
 	}
@@ -22,7 +43,10 @@ func (m *DBManager) CreateMySQLDatabase(rootDSN, dbName, charset, collation stri
 		collation = "utf8mb4_unicode_ci"
 	}
 
-	dbName = sanitizeIdentifier(dbName)
+	if !validCharsetRegex.MatchString(charset) || !validCollationRegex.MatchString(collation) {
+		return errors.New("invalid charset or collation format")
+	}
+
 	query := fmt.Sprintf("CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET %s COLLATE %s", dbName, charset, collation)
 
 	db, err := sql.Open("mysql", rootDSN)
@@ -36,7 +60,10 @@ func (m *DBManager) CreateMySQLDatabase(rootDSN, dbName, charset, collation stri
 }
 
 func (m *DBManager) DeleteMySQLDatabase(rootDSN, dbName string) error {
-	dbName = sanitizeIdentifier(dbName)
+	if err := validateIdentifier(dbName); err != nil {
+		return err
+	}
+
 	query := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", dbName)
 
 	db, err := sql.Open("mysql", rootDSN)
@@ -50,8 +77,12 @@ func (m *DBManager) DeleteMySQLDatabase(rootDSN, dbName string) error {
 }
 
 func (m *DBManager) CreatePostgresDatabase(rootDSN, dbName string) error {
-	dbName = sanitizeIdentifier(dbName)
-	query := fmt.Sprintf("CREATE DATABASE %s", dbName)
+	if err := validateIdentifier(dbName); err != nil {
+		return err
+	}
+
+	// Double-quote identifier in PostgreSQL to prevent keyword conflicts
+	query := fmt.Sprintf(`CREATE DATABASE "%s"`, dbName)
 
 	db, err := sql.Open("postgres", rootDSN)
 	if err != nil {
@@ -67,8 +98,11 @@ func (m *DBManager) CreatePostgresDatabase(rootDSN, dbName string) error {
 }
 
 func (m *DBManager) DeletePostgresDatabase(rootDSN, dbName string) error {
-	dbName = sanitizeIdentifier(dbName)
-	query := fmt.Sprintf("DROP DATABASE IF EXISTS %s", dbName)
+	if err := validateIdentifier(dbName); err != nil {
+		return err
+	}
+
+	query := fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, dbName)
 
 	db, err := sql.Open("postgres", rootDSN)
 	if err != nil {
@@ -78,13 +112,4 @@ func (m *DBManager) DeletePostgresDatabase(rootDSN, dbName string) error {
 
 	_, err = db.Exec(query)
 	return err
-}
-
-func sanitizeIdentifier(name string) string {
-	name = strings.ReplaceAll(name, ";", "")
-	name = strings.ReplaceAll(name, "--", "")
-	name = strings.ReplaceAll(name, "'", "")
-	name = strings.ReplaceAll(name, "\"", "")
-	name = strings.ReplaceAll(name, "`", "")
-	return strings.TrimSpace(name)
 }

@@ -52,21 +52,53 @@ func NewFileManager(allowedRoots ...string) *FileManager {
 func (fm *FileManager) ValidatePath(targetPath string) (string, error) {
 	clean := filepath.Clean(targetPath)
 
+	// Step 1: Lexical prefix boundary check against allowed roots
+	withinRoot := false
 	for _, root := range fm.AllowedRoots {
 		if clean == root || strings.HasPrefix(clean, root+string(filepath.Separator)) {
-			return clean, nil
+			withinRoot = true
+			break
 		}
 	}
+	if !withinRoot {
+		return "", fmt.Errorf("%w: %s not within authorized sandboxes", ErrAccessDenied, clean)
+	}
 
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+	// Step 2: Symlink resolution boundary check (Prevent Symlink Escape Attacks)
+	if _, err := os.Lstat(clean); err == nil {
+		resolved, err := filepath.EvalSymlinks(clean)
+		if err != nil {
+			return "", fmt.Errorf("%w: failed to evaluate symlinks: %v", ErrAccessDenied, err)
+		}
+		realWithinRoot := false
 		for _, root := range fm.AllowedRoots {
 			if resolved == root || strings.HasPrefix(resolved, root+string(filepath.Separator)) {
-				return clean, nil
+				realWithinRoot = true
+				break
 			}
+		}
+		if !realWithinRoot {
+			return "", fmt.Errorf("%w: symlink targets outside authorized sandbox (%s -> %s)", ErrAccessDenied, clean, resolved)
+		}
+		return clean, nil
+	}
+
+	// Check parent directory if file is being created
+	parent := filepath.Dir(clean)
+	if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil {
+		realWithinRoot := false
+		for _, root := range fm.AllowedRoots {
+			if resolvedParent == root || strings.HasPrefix(resolvedParent, root+string(filepath.Separator)) {
+				realWithinRoot = true
+				break
+			}
+		}
+		if !realWithinRoot {
+			return "", fmt.Errorf("%w: parent directory symlink targets outside authorized sandbox", ErrAccessDenied)
 		}
 	}
 
-	return "", fmt.Errorf("%w: %s not within authorized sandboxes", ErrAccessDenied, clean)
+	return clean, nil
 }
 
 func (fm *FileManager) List(dirPath string) ([]FileItem, error) {

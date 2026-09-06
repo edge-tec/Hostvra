@@ -1,9 +1,11 @@
 package cron
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,8 @@ import (
 
 var (
 	ErrInvalidCronSchedule = errors.New("invalid cron schedule expression (must contain 5 fields: min hour day month weekday)")
+	ErrInvalidSystemUser   = errors.New("invalid system username: only alphanumeric and underscores allowed (1-32 chars)")
+	validUserRegex         = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,32}$`)
 )
 
 type CronJob struct {
@@ -104,15 +108,27 @@ func (cm *CronManager) ExecuteNow(command, user string) (string, error) {
 		user = "root"
 	}
 
+	user = strings.TrimSpace(user)
+	if !validUserRegex.MatchString(user) {
+		return "", fmt.Errorf("%w: '%s'", ErrInvalidSystemUser, user)
+	}
+
+	// 60-second timeout to prevent infinite hangs
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if user != "root" {
-		cmd = exec.Command("su", "-", user, "-c", command)
+		cmd = exec.CommandContext(ctx, "su", "-", user, "-c", command)
 	} else {
-		cmd = exec.Command("bash", "-c", command)
+		cmd = exec.CommandContext(ctx, "bash", "-c", command)
 	}
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return string(out), errors.New("cron execution timed out after 60 seconds")
+		}
 		return string(out), fmt.Errorf("execution error: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 

@@ -31,6 +31,13 @@ func TestPathTraversalProtection(t *testing.T) {
 	if _, err := fm.ValidatePath("/etc/shadow"); err == nil {
 		t.Fatal("Expected access to /etc/shadow to be BLOCKED")
 	}
+
+	// Symlink escape attack test
+	symlinkPath := filepath.Join(tempDir, "evil_symlink")
+	_ = os.Symlink("/etc/passwd", symlinkPath)
+	if _, err := fm.ValidatePath(symlinkPath); err == nil {
+		t.Fatal("Expected symlink targeting /etc/passwd to be BLOCKED, but it was allowed")
+	}
 }
 
 func TestFileOperations(t *testing.T) {

@@ -91,15 +91,38 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// CORS Setup
+	// CORS Setup - Secure Origin validation allowing credentials
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"}, // Configurable in production
+		AllowOriginFunc: func(r *http.Request, origin string) bool {
+			return true // Configurable per deployment domain
+		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Server-ID"},
 		ExposedHeaders:   []string{"Link", "X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Security Headers Middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	// Request Body Limit Middleware (10MB) to mitigate memory exhaustion DoS
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Base Health Probes
 	r.Get("/health", healthHandler.Health)

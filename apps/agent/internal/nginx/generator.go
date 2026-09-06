@@ -2,9 +2,19 @@ package nginx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
+)
+
+var (
+	validDomainRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+	validPHPRegex    = regexp.MustCompile(`^[0-9]\.[0-9]$`)
+	ErrInvalidDomain = errors.New("invalid domain name format")
+	ErrDirectiveInjection = errors.New("input contains forbidden control characters or Nginx directives")
 )
 
 type VHostConfig struct {
@@ -66,14 +76,10 @@ server {
     }
 
     location ~ \.php$ {
-        include fastcgi_params;
+        include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php{{ .PHPVersion }}-fpm.sock;
-        fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
-        fastcgi_param DOCUMENT_ROOT $realpath_root;
-        fastcgi_buffer_size 128k;
-        fastcgi_buffers 4 256k;
-        fastcgi_busy_buffers_size 256k;
+        include fastcgi_params;
     }
 {{- else if eq .AppType "proxy" }}
     location / {
@@ -82,10 +88,10 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
     }
 {{- else }}
     location / {
@@ -109,11 +115,61 @@ server {
 }
 `
 
-func GenerateVHost(cfg VHostConfig) (string, error) {
-	if cfg.PHPVersion == "" {
-		cfg.PHPVersion = "8.3"
+func sanitizeField(val string) error {
+	if strings.ContainsAny(val, "\r\n;{}") {
+		return ErrDirectiveInjection
 	}
-	cfg.Domain = strings.TrimSpace(cfg.Domain)
+	return nil
+}
+
+func ValidateVHostConfig(cfg *VHostConfig) error {
+	cfg.Domain = strings.ToLower(strings.TrimSpace(cfg.Domain))
+	if !validDomainRegex.MatchString(cfg.Domain) || len(cfg.Domain) > 253 {
+		return fmt.Errorf("%w: '%s'", ErrInvalidDomain, cfg.Domain)
+	}
+
+	for i, a := range cfg.Aliases {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if !validDomainRegex.MatchString(a) || len(a) > 253 {
+			return fmt.Errorf("%w alias: '%s'", ErrInvalidDomain, a)
+		}
+		cfg.Aliases[i] = a
+	}
+
+	if err := sanitizeField(cfg.DocumentRoot); err != nil {
+		return fmt.Errorf("invalid document_root: %w", err)
+	}
+	cfg.DocumentRoot = filepath.Clean(cfg.DocumentRoot)
+
+	if cfg.AppType == "proxy" {
+		if cfg.ProxyPort < 1 || cfg.ProxyPort > 65535 {
+			return errors.New("proxy_port must be between 1 and 65535")
+		}
+	} else if cfg.AppType == "php" {
+		if cfg.PHPVersion == "" {
+			cfg.PHPVersion = "8.3"
+		}
+		if !validPHPRegex.MatchString(cfg.PHPVersion) {
+			return errors.New("invalid php_version format (e.g. '8.3')")
+		}
+	}
+
+	if cfg.SSLEnabled {
+		if err := sanitizeField(cfg.CertPath); err != nil {
+			return fmt.Errorf("invalid cert_path: %w", err)
+		}
+		if err := sanitizeField(cfg.KeyPath); err != nil {
+			return fmt.Errorf("invalid key_path: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func GenerateVHost(cfg VHostConfig) (string, error) {
+	if err := ValidateVHostConfig(&cfg); err != nil {
+		return "", err
+	}
 
 	tmpl, err := template.New("vhost").Parse(vhostTemplate)
 	if err != nil {

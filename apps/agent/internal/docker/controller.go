@@ -1,11 +1,19 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
+	"time"
+)
+
+var (
+	validContainerIDRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+	ErrInvalidContainerID = errors.New("invalid container identifier: must be 1-128 characters, alphanumeric with '.', '_' or '-'")
 )
 
 type ContainerInfo struct {
@@ -24,6 +32,14 @@ func NewDockerController() *DockerController {
 	return &DockerController{}
 }
 
+func validateContainerIdent(idOrName string) error {
+	idOrName = strings.TrimSpace(idOrName)
+	if !validContainerIDRegex.MatchString(idOrName) {
+		return fmt.Errorf("%w: '%s'", ErrInvalidContainerID, idOrName)
+	}
+	return nil
+}
+
 func (d *DockerController) IsInstalled() bool {
 	_, err := exec.LookPath("docker")
 	return err == nil
@@ -33,18 +49,22 @@ func (d *DockerController) IsDaemonRunning() bool {
 	if !d.IsInstalled() {
 		return false
 	}
-	cmd := exec.Command("docker", "info")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "docker", "info")
 	return cmd.Run() == nil
 }
 
 func (d *DockerController) ListContainers() ([]ContainerInfo, error) {
 	if !d.IsDaemonRunning() {
-		// If Docker daemon is not active on this node, return empty list gracefully
 		return []ContainerInfo{}, nil
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	format := `{"id":"{{.ID}}","names":"{{.Names}}","image":"{{.Image}}","status":"{{.Status}}","state":"{{.State}}","ports":"{{.Ports}}","created":"{{.CreatedAt}}"}`
-	cmd := exec.Command("docker", "ps", "-a", "--format", format)
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--format", format)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list docker containers: %w", err)
@@ -68,37 +88,68 @@ func (d *DockerController) ListContainers() ([]ContainerInfo, error) {
 }
 
 func (d *DockerController) StartContainer(idOrName string) error {
+	if err := validateContainerIdent(idOrName); err != nil {
+		return err
+	}
 	if !d.IsDaemonRunning() {
 		return errors.New("docker daemon is not running on this server")
 	}
-	cmd := exec.Command("docker", "start", idOrName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "start", idOrName)
 	return cmd.Run()
 }
 
 func (d *DockerController) StopContainer(idOrName string) error {
+	if err := validateContainerIdent(idOrName); err != nil {
+		return err
+	}
 	if !d.IsDaemonRunning() {
 		return errors.New("docker daemon is not running on this server")
 	}
-	cmd := exec.Command("docker", "stop", idOrName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "stop", idOrName)
 	return cmd.Run()
 }
 
 func (d *DockerController) RestartContainer(idOrName string) error {
+	if err := validateContainerIdent(idOrName); err != nil {
+		return err
+	}
 	if !d.IsDaemonRunning() {
 		return errors.New("docker daemon is not running on this server")
 	}
-	cmd := exec.Command("docker", "restart", idOrName)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "restart", idOrName)
 	return cmd.Run()
 }
 
 func (d *DockerController) GetContainerLogs(idOrName string, tailLines int) (string, error) {
+	if err := validateContainerIdent(idOrName); err != nil {
+		return "", err
+	}
 	if !d.IsDaemonRunning() {
 		return "", errors.New("docker daemon is not running on this server")
 	}
 	if tailLines <= 0 {
 		tailLines = 100
 	}
-	cmd := exec.Command("docker", "logs", "--tail", fmt.Sprintf("%d", tailLines), idOrName)
+	if tailLines > 5000 {
+		tailLines = 5000
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "logs", "--tail", fmt.Sprintf("%d", tailLines), idOrName)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), err
@@ -107,7 +158,10 @@ func (d *DockerController) GetContainerLogs(idOrName string, tailLines int) (str
 }
 
 func (d *DockerController) ComposeUp(projectDir string) error {
-	cmd := exec.Command("docker", "compose", "up", "-d")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "compose", "up", "-d")
 	cmd.Dir = projectDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
