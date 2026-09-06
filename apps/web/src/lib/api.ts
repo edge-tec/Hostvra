@@ -74,6 +74,7 @@ export interface Website {
   document_root: string;
   system_user: string;
   php_version?: string;
+  web_server_type?: string;
   app_type: 'php' | 'static' | 'proxy';
   proxy_port?: number;
   status: 'active' | 'suspended' | 'disabled';
@@ -125,6 +126,84 @@ export interface AuditLog {
   error_message?: string;
   metadata?: Record<string, any>;
   created_at: string;
+}
+
+export interface SystemVersionInfo {
+  api_version: string;
+  agent_version: string;
+  db_schema_version: number;
+  channel: 'stable' | 'beta' | 'nightly';
+  os_arch: string;
+  go_version: string;
+  uptime: string;
+  update_available: boolean;
+  latest_version: string;
+}
+
+export interface ReleaseMetadata {
+  version: string;
+  channel: 'stable' | 'beta' | 'nightly';
+  component: string;
+  release_notes: string;
+  min_supported_version: string;
+  package_url: string;
+  package_size_bytes: number;
+  sha256_checksum?: string;
+  arch_compatibility: string[];
+  os_compatibility: string[];
+  released_at: string;
+}
+
+export interface CompatibilityReport {
+  compatible: boolean;
+  can_upgrade: boolean;
+  is_downgrade: boolean;
+  reasons: string[];
+  os_supported: boolean;
+  arch_supported: boolean;
+  min_version_met: boolean;
+}
+
+export interface UpdateStep {
+  id: string;
+  job_id: string;
+  step_name: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+  started_at?: string;
+  completed_at?: string;
+  error_message?: string;
+  details?: Record<string, any>;
+}
+
+export interface UpdateJob {
+  id: string;
+  target_version: string;
+  previous_version: string;
+  channel: 'stable' | 'beta' | 'nightly';
+  component: string;
+  status:
+    | 'pending'
+    | 'prechecking'
+    | 'backing_up'
+    | 'downloading'
+    | 'verifying'
+    | 'preparing'
+    | 'migrating'
+    | 'installing'
+    | 'activating'
+    | 'health_checking'
+    | 'completed'
+    | 'failed'
+    | 'rolled_back';
+  progress_percent: number;
+  current_step_description?: string;
+  error_message?: string;
+  initiated_by?: string;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+  steps?: UpdateStep[];
 }
 
 export function getStoredToken(): string | null {

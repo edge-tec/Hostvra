@@ -54,6 +54,7 @@ type Store interface {
 	CreateWebsite(ctx context.Context, site *Website) error
 	GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Website, error)
 	ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Website, error)
+	UpdateWebsite(ctx context.Context, site *Website) error
 	UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error
 	DeleteWebsite(ctx context.Context, id uuid.UUID) error
 	UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslEnabled bool) error
@@ -107,6 +108,48 @@ type Store interface {
 	RecordEmailDeliveryLog(ctx context.Context, log *EmailDeliveryLog) error
 	ListEmailDeliveryLogs(ctx context.Context, serverID uuid.UUID, limit int) ([]*EmailDeliveryLog, error)
 
+	// PHP Management
+	UpsertPHPVersion(ctx context.Context, v *PHPInstalledVersion) error
+	GetPHPVersion(ctx context.Context, serverID uuid.UUID, version string) (*PHPInstalledVersion, error)
+	ListPHPVersionsByServer(ctx context.Context, serverID uuid.UUID) ([]*PHPInstalledVersion, error)
+	DeletePHPVersion(ctx context.Context, serverID uuid.UUID, version string) error
+	SetDefaultPHPCli(ctx context.Context, serverID uuid.UUID, version string) error
+	SetDefaultPHPFpm(ctx context.Context, serverID uuid.UUID, version string) error
+
+	UpsertPHPExtension(ctx context.Context, ext *PHPExtension) error
+	ListPHPExtensions(ctx context.Context, serverID uuid.UUID, version string) ([]*PHPExtension, error)
+	GetPHPExtension(ctx context.Context, serverID uuid.UUID, version string, name string) (*PHPExtension, error)
+	DeletePHPExtension(ctx context.Context, serverID uuid.UUID, version string, name string) error
+
+	CreatePHPFPMPool(ctx context.Context, pool *PHPFPMPool) error
+	GetPHPFPMPool(ctx context.Context, id uuid.UUID) (*PHPFPMPool, error)
+	GetPHPFPMPoolByName(ctx context.Context, serverID uuid.UUID, name string) (*PHPFPMPool, error)
+	GetPHPFPMPoolByWebsite(ctx context.Context, websiteID uuid.UUID) (*PHPFPMPool, error)
+	ListPHPFPMPoolsByServer(ctx context.Context, serverID uuid.UUID, version string) ([]*PHPFPMPool, error)
+	UpdatePHPFPMPool(ctx context.Context, pool *PHPFPMPool) error
+	DeletePHPFPMPool(ctx context.Context, id uuid.UUID) error
+
+	UpsertPHPIniOverride(ctx context.Context, override *PHPIniOverride) error
+	ListPHPIniOverrides(ctx context.Context, serverID uuid.UUID, version string, scope string, websiteID *uuid.UUID) ([]*PHPIniOverride, error)
+	DeletePHPIniOverride(ctx context.Context, id uuid.UUID) error
+
+	CreatePHPConfigBackup(ctx context.Context, backup *PHPConfigBackup) error
+	ListPHPConfigBackups(ctx context.Context, serverID uuid.UUID, version string, limit int) ([]*PHPConfigBackup, error)
+
+	// Web Server Management
+	UpsertWebServerInstance(ctx context.Context, instance *WebServerInstance) error
+	GetWebServerInstance(ctx context.Context, serverID uuid.UUID, serverType string) (*WebServerInstance, error)
+	ListWebServerInstances(ctx context.Context, serverID uuid.UUID) ([]*WebServerInstance, error)
+	SetActiveDefaultWebServer(ctx context.Context, serverID uuid.UUID, serverType string) error
+
+	UpsertWebServerVHost(ctx context.Context, vhost *WebServerVHost) error
+	GetWebServerVHost(ctx context.Context, serverID uuid.UUID, serverType string, domain string) (*WebServerVHost, error)
+	ListWebServerVHosts(ctx context.Context, serverID uuid.UUID, serverType string) ([]*WebServerVHost, error)
+	DeleteWebServerVHost(ctx context.Context, serverID uuid.UUID, serverType string, domain string) error
+
+	CreateWebServerConfigBackup(ctx context.Context, backup *WebServerConfigBackup) error
+	ListWebServerConfigBackups(ctx context.Context, serverID uuid.UUID, serverType string, limit int) ([]*WebServerConfigBackup, error)
+
 	// Close
 	Close() error
 }
@@ -135,6 +178,14 @@ type MemoryStore struct {
 	emailAutoresponders map[uuid.UUID]*EmailAutoresponder
 	emailDKIMKeys       map[uuid.UUID]*EmailDKIMKey
 	emailDeliveryLogs   []*EmailDeliveryLog
+	phpVersions         map[string]*PHPInstalledVersion // key: serverID:version
+	phpExtensions       map[string]*PHPExtension        // key: serverID:version:name
+	phpPools            map[uuid.UUID]*PHPFPMPool
+	phpIniOverrides     map[string]*PHPIniOverride // key: serverID:version:scope:siteID:directive
+	phpConfigBackups    []*PHPConfigBackup
+	webServerInstances  map[string]*WebServerInstance // key: serverID:type
+	webServerVHosts     map[string]*WebServerVHost    // key: serverID:type:domain
+	webServerBackups    []*WebServerConfigBackup
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -158,6 +209,14 @@ func NewMemoryStore() *MemoryStore {
 		emailAutoresponders: make(map[uuid.UUID]*EmailAutoresponder),
 		emailDKIMKeys:       make(map[uuid.UUID]*EmailDKIMKey),
 		emailDeliveryLogs:   make([]*EmailDeliveryLog, 0),
+		phpVersions:         make(map[string]*PHPInstalledVersion),
+		phpExtensions:       make(map[string]*PHPExtension),
+		phpPools:            make(map[uuid.UUID]*PHPFPMPool),
+		phpIniOverrides:     make(map[string]*PHPIniOverride),
+		phpConfigBackups:    make([]*PHPConfigBackup, 0),
+		webServerInstances:  make(map[string]*WebServerInstance),
+		webServerVHosts:     make(map[string]*WebServerVHost),
+		webServerBackups:    make([]*WebServerConfigBackup, 0),
 	}
 }
 

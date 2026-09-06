@@ -15,6 +15,7 @@ import {
   X,
   Check,
   Code2,
+  Layers,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server } from '@/lib/api';
@@ -213,14 +214,19 @@ export default function WebsitesPage() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-surface-800 text-slate-200 border border-surface-700">
-                        <Code2 className="w-3.5 h-3.5 text-indigo-400" />
-                        {site.app_type === 'php'
-                          ? `PHP ${site.php_version || '8.3'}`
-                          : site.app_type === 'proxy'
-                          ? `Proxy :${site.proxy_port}`
-                          : 'Static'}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-surface-800 text-slate-200 border border-surface-700">
+                          <Code2 className="w-3.5 h-3.5 text-indigo-400" />
+                          {site.app_type === 'php'
+                            ? `PHP ${site.php_version || '8.3'}`
+                            : site.app_type === 'proxy'
+                            ? `Proxy :${site.proxy_port}`
+                            : 'Static'}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase">
+                          {site.web_server_type || 'nginx'}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 font-mono text-xs text-slate-400 max-w-xs truncate">
                       {site.document_root}
@@ -255,6 +261,22 @@ export default function WebsitesPage() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <a
+                          href="/webservers"
+                          title="Manage Web Server Engine & VHost"
+                          className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-indigo-400 hover:bg-surface-800 transition-colors inline-flex items-center"
+                        >
+                          <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                        </a>
+                        {site.app_type === 'php' && (
+                          <a
+                            href="/php"
+                            title="Configure PHP Settings & Pool"
+                            className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-sky-400 hover:bg-surface-800 transition-colors inline-flex items-center"
+                          >
+                            <Code2 className="w-3.5 h-3.5 text-sky-400" />
+                          </a>
+                        )}
                         <button
                           onClick={() => handleToggleStatus(site)}
                           title={site.status === 'active' ? 'Suspend Website' : 'Activate Website'}

@@ -81,6 +81,9 @@ func main() {
 	teamHandler := handlers.NewTeamHandler(cfg, dataStore, auditLogger)
 	apiKeyHandler := handlers.NewAPIKeyHandler(cfg, dataStore, auditLogger)
 	emailHandler := handlers.NewEmailHandler(cfg, dataStore, dnsService, auditLogger)
+	phpHandler := handlers.NewPHPHandler(cfg, dataStore, auditLogger)
+	webServerHandler := handlers.NewWebServerHandler(cfg, dataStore, auditLogger)
+	updateHandler := handlers.NewUpdateHandler(cfg, dataStore, auditLogger, AppVersion)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -160,6 +163,49 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/enrollment-tokens", serverHandler.CreateEnrollmentToken)
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}", serverHandler.GetServer)
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/metrics", serverHandler.GetServerMetrics)
+
+				// PHP Management Subsystem per Server
+				r.Route("/{serverID}/php", func(r chi.Router) {
+					// Versions
+					r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/versions", phpHandler.ListVersions)
+					r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Post("/versions/install", phpHandler.InstallVersion)
+					r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Delete("/versions/{version}", phpHandler.RemoveVersion)
+					r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Post("/versions/{version}/default-cli", phpHandler.SetDefaultCLI)
+
+					// Extensions
+					r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/extensions", phpHandler.ListExtensions)
+					r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Post("/{version}/extensions/install", phpHandler.InstallExtension)
+					r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Delete("/{version}/extensions/{ext}", phpHandler.RemoveExtension)
+					r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Post("/{version}/extensions/{ext}/toggle", phpHandler.ToggleExtension)
+
+					// PHP.ini Engine
+					r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/ini", phpHandler.GetPHPIni)
+					r.With(rbac.RequirePermission(rbac.PermPHPIniManage)).Put("/{version}/ini", phpHandler.UpdatePHPIni)
+
+					// PHP-FPM Service & Pools
+					r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/fpm", phpHandler.GetFPMStatus)
+					r.With(rbac.RequirePermission(rbac.PermPHPFPMManage)).Post("/{version}/fpm/service", phpHandler.ServiceAction)
+					r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/pools", phpHandler.ListFPMPools)
+					r.With(rbac.RequirePermission(rbac.PermPHPPoolManage)).Post("/{version}/pools", phpHandler.CreateFPMPool)
+
+					// Health Check
+					r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Get("/health", phpHandler.GetHealth)
+					r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Get("/{version}/health", phpHandler.GetHealth)
+				})
+
+				// Web Server Management (Nginx, Apache, OpenLiteSpeed, LiteSpeed Enterprise)
+				r.Route("/{serverID}/webservers", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/", webServerHandler.ListServers)
+					r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/conflicts", webServerHandler.GetPortConflicts)
+					r.With(rbac.RequirePermission(rbac.PermWebServerSwitch)).Post("/migrate", webServerHandler.Migrate)
+					r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/{type}", webServerHandler.GetServer)
+					r.With(rbac.RequirePermission(rbac.PermWebServerInstall)).Post("/{type}/install", webServerHandler.InstallServer)
+					r.With(rbac.RequirePermission(rbac.PermWebServerManage)).Post("/{type}/uninstall", webServerHandler.UninstallServer)
+					r.With(rbac.RequirePermission(rbac.PermWebServerManage)).Post("/{type}/service", webServerHandler.ServiceAction)
+					r.With(rbac.RequirePermission(rbac.PermWebServerConfig)).Get("/{type}/config", webServerHandler.GetMasterConfig)
+					r.With(rbac.RequirePermission(rbac.PermWebServerConfig)).Put("/{type}/config", webServerHandler.UpdateMasterConfig)
+					r.With(rbac.RequirePermission(rbac.PermVHostManage)).Get("/{type}/vhosts", webServerHandler.ListVHosts)
+				})
 			})
 
 			// Websites & Vhosts
@@ -170,6 +216,15 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/status", websiteHandler.UpdateStatus)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesDelete)).Delete("/{id}", websiteHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl", websiteHandler.IssueSSL)
+
+				// Per-Website PHP Integration
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{id}/php", phpHandler.GetWebsitePHP)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/php/switch", phpHandler.SwitchWebsitePHP)
+				r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Post("/{id}/php/test", phpHandler.TestWebsitePHP)
+
+				// Per-Website Web Server Integration
+				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/{id}/webserver", webServerHandler.GetWebsiteWebServer)
+				r.With(rbac.RequirePermission(rbac.PermWebServerSwitch)).Post("/{id}/webserver/switch", webServerHandler.SwitchWebsiteWebServer)
 			})
 
 			// Databases & DB Users
@@ -216,6 +271,18 @@ func main() {
 			r.Route("/license", func(r chi.Router) {
 				r.Get("/", licenseHandler.Get)
 				r.With(rbac.RequirePermission(rbac.PermLicensesManage)).Post("/activate", licenseHandler.Activate)
+			})
+
+			// Live System Updates Management
+			r.Route("/system/updates", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateView)).Get("/status", updateHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateCheck)).Post("/check", updateHandler.CheckUpdates)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateStart)).Post("/start", updateHandler.StartUpdate)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateView)).Get("/jobs", updateHandler.ListJobs)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateView)).Get("/jobs/{id}", updateHandler.GetJobStatus)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateRollback)).Post("/rollback", updateHandler.TriggerRollback)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateManage)).Put("/channel", updateHandler.SetChannel)
+				r.With(rbac.RequirePermission(rbac.PermSystemUpdateSchedule)).Post("/schedule", updateHandler.ScheduleUpdate)
 			})
 
 			// Team & Collaborators

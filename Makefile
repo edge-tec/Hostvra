@@ -39,7 +39,7 @@ test-agent:
 test-web:
 	cd apps/web && npm run build
 
-build: build-api build-agent build-web
+build: build-api build-agent build-cli build-web
 
 build-api:
 	@mkdir -p bin
@@ -48,6 +48,10 @@ build-api:
 build-agent:
 	@mkdir -p bin
 	cd apps/agent && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../../bin/hostvra-agent cmd/agent/main.go
+
+build-cli:
+	@mkdir -p bin
+	cd apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o ../../bin/hostvra cmd/hostvra/main.go
 
 build-web:
 	cd apps/web && npm run build
@@ -58,4 +62,6 @@ compile-linux:
 	cd apps/api && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../../bin/hostvra-api-linux-arm64 cmd/server/main.go
 	cd apps/agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../../bin/hostvra-agent-linux-amd64 cmd/agent/main.go
 	cd apps/agent && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../../bin/hostvra-agent-linux-arm64 cmd/agent/main.go
+	cd apps/api && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../../bin/hostvra-linux-amd64 cmd/hostvra/main.go
+	cd apps/api && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o ../../bin/hostvra-linux-arm64 cmd/hostvra/main.go
 	@ls -lh bin/

@@ -37,6 +37,14 @@ type Entitlements struct {
 	MaxMailboxes    int  `json:"max_mailboxes"` // -1 for unlimited, 10 for community
 	Webmail         bool `json:"webmail"`
 	EmailAntiSpam   bool `json:"email_anti_spam"`
+	PHPMultiVersion bool `json:"php_multi_version"`
+	PHPExtensionMgr bool `json:"php_extension_mgr"`
+	PHPAdvancedIni  bool `json:"php_advanced_ini"`
+	PHPAdvancedFPM  bool `json:"php_advanced_fpm"`
+	ApacheSupport   bool `json:"apache_support"`
+	OpenLiteSpeed   bool `json:"openlitespeed_support"`
+	LiteSpeedEnt    bool `json:"litespeed_enterprise_support"`
+	MultiWebSwitch  bool `json:"multi_web_server_switch"`
 }
 
 type LicensePayload struct {
@@ -81,6 +89,14 @@ func NewManager() *Manager {
 				MaxMailboxes:    25,
 				Webmail:         true,
 				EmailAntiSpam:   true,
+				PHPMultiVersion: true,
+				PHPExtensionMgr: true,
+				PHPAdvancedIni:  true,
+				PHPAdvancedFPM:  true,
+				ApacheSupport:   true,
+				OpenLiteSpeed:   true,
+				LiteSpeedEnt:    true,
+				MultiWebSwitch:  true,
 			},
 		},
 	}

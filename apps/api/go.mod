@@ -9,6 +9,9 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	golang.org/x/crypto v0.56.0
+	hostvra/agent v0.0.0
 )
+
+replace hostvra/agent => ../agent
 
 require golang.org/x/sys v0.47.0 // indirect

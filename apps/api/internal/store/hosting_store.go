@@ -73,6 +73,20 @@ func (m *MemoryStore) UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 
+func (m *MemoryStore) UpdateWebsite(ctx context.Context, site *Website) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.websites[site.ID]
+	if !exists || existing.DeletedAt != nil {
+		return ErrNotFound
+	}
+	site.CreatedAt = existing.CreatedAt
+	site.UpdatedAt = time.Now().UTC()
+	m.websites[site.ID] = site
+	return nil
+}
+
 func (m *MemoryStore) DeleteWebsite(ctx context.Context, id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -270,6 +284,20 @@ func (p *PostgresStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) 
 func (p *PostgresStore) UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error {
 	query := `UPDATE websites SET status = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	_, err := p.db.ExecContext(ctx, query, id, status)
+	return err
+}
+
+func (p *PostgresStore) UpdateWebsite(ctx context.Context, site *Website) error {
+	query := `
+		UPDATE websites SET
+			php_version = $2,
+			php_fpm_pool_id = $3,
+			status = $4,
+			ssl_enabled = $5,
+			updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	_, err := p.db.ExecContext(ctx, query, site.ID, site.PHPVersion, site.PHPFPMPoolID, site.Status, site.SSLEnabled)
 	return err
 }
 

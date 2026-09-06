@@ -13,14 +13,17 @@ type Website struct {
 	PrimaryDomain  string     `json:"primary_domain"`
 	DocumentRoot   string     `json:"document_root"`
 	SystemUser     string     `json:"system_user"`
-	PHPVersion     *string    `json:"php_version,omitempty"` // e.g. "8.3", "8.2", or nil for proxy/static
-	AppType        string     `json:"app_type"`              // php, static, proxy, nodejs, python
-	ProxyPort      *int       `json:"proxy_port,omitempty"`
-	Status         string     `json:"status"`                // active, suspended, disabled
-	SSLEnabled     bool       `json:"ssl_enabled"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	PHPVersion          *string           `json:"php_version,omitempty"` // e.g. "8.3", "8.2", or nil for proxy/static
+	PHPFPMPoolID        *uuid.UUID        `json:"php_fpm_pool_id,omitempty"`
+	PHPSettingsOverride map[string]string `json:"php_settings_override,omitempty"`
+	WebServerType       string            `json:"web_server_type"` // nginx, apache, openlitespeed, litespeed
+	AppType             string            `json:"app_type"`        // php, laravel, static, proxy, nodejs, python
+	ProxyPort           *int              `json:"proxy_port,omitempty"`
+	Status              string            `json:"status"` // active, suspended, disabled
+	SSLEnabled          bool              `json:"ssl_enabled"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	DeletedAt           *time.Time        `json:"deleted_at,omitempty"`
 }
 
 type Database struct {

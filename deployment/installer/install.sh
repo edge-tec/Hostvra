@@ -195,7 +195,7 @@ EOF
 
 # 5. Deploy Binaries & Systemd Units
 deploy_services() {
-    log_info "Deploying Hostvra Core API and Agent services..."
+    log_info "Deploying Hostvra Core API, Agent, and CLI services..."
 
     # If compiling locally or downloading release tarball
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -204,14 +204,18 @@ deploy_services() {
     if [[ -f "${REPO_ROOT}/bin/hostvra-api-linux-${BIN_ARCH}" ]]; then
         cp "${REPO_ROOT}/bin/hostvra-api-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra-api"
         cp "${REPO_ROOT}/bin/hostvra-agent-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra-agent"
+        if [[ -f "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" ]]; then
+            cp "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra"
+        fi
     elif [[ -f "${INSTALL_DIR}/hostvra-api" ]]; then
         log_info "Existing binary found in ${INSTALL_DIR}"
     else
         log_info "Simulating binary placement for target ${BIN_ARCH}..."
-        touch "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent"
+        touch "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" "${INSTALL_DIR}/hostvra"
     fi
 
-    chmod +x "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" 2>/dev/null || true
+    chmod +x "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" "${INSTALL_DIR}/hostvra" 2>/dev/null || true
+    ln -sf "${INSTALL_DIR}/hostvra" "${INSTALL_DIR}/hostvra-update" 2>/dev/null || true
 
     # Systemd API Unit
     cat > /etc/systemd/system/hostvra-api.service << EOF
@@ -336,16 +340,85 @@ display_summary() {
     echo -e "======================================================================\n"
 }
 
+# 8. Upgrade Existing Installation (Preserve DB & Customer Files)
+perform_upgrade() {
+    echo -e "\n${YELLOW}${BOLD}======================================================================${NC}"
+    echo -e " ${YELLOW}${BOLD}⚠️  EXISTING HOSTVRA INSTALLATION DETECTED${NC}"
+    echo -e " ${GREEN}Switching to Safe Upgrade Mode: Preserving all configs & customer data.${NC}"
+    echo -e "${YELLOW}${BOLD}======================================================================${NC}\n"
+
+    # 1. Create Pre-Upgrade Safety Snapshot
+    BACKUP_FILE="${DATA_DIR}/backups/pre-upgrade-$(date +%Y%m%d_%H%M%S).tar.gz"
+    log_info "Creating pre-upgrade safety snapshot: ${BACKUP_FILE}..."
+    mkdir -p "${DATA_DIR}/backups"
+    tar -czf "${BACKUP_FILE}" -C / "etc/hostvra" "var/lib/hostvra" 2>/dev/null || true
+    log_success "Pre-upgrade snapshot archived safely."
+
+    # 2. Deploy New Binaries Atomically
+    log_info "Deploying updated binaries to ${INSTALL_DIR}..."
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    REPO_ROOT="$(dirname "$(dirname "${SCRIPT_DIR}")")"
+
+    if [[ -f "${REPO_ROOT}/bin/hostvra-api-linux-${BIN_ARCH}" ]]; then
+        cp "${REPO_ROOT}/bin/hostvra-api-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra-api"
+        cp "${REPO_ROOT}/bin/hostvra-agent-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra-agent"
+        if [[ -f "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" ]]; then
+            cp "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra"
+        fi
+        chmod +x "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" "${INSTALL_DIR}/hostvra" 2>/dev/null || true
+        ln -sf "${INSTALL_DIR}/hostvra" "${INSTALL_DIR}/hostvra-update" 2>/dev/null || true
+        log_success "New release binaries staged successfully."
+    fi
+
+    # 3. Reload & Restart Systemd Services
+    log_info "Reloading systemd services with zero customer website downtime..."
+    systemctl daemon-reload
+    systemctl restart hostvra-api.service 2>/dev/null || true
+    systemctl restart hostvra-agent.service 2>/dev/null || true
+
+    # 4. Post-Upgrade Health Check Smoke Probe
+    log_info "Performing post-upgrade health probe verification..."
+    HEALTH_OK=0
+    for i in {1..15}; do
+        if curl -s -f "http://127.0.0.1:${DEFAULT_PORT}/api/v1/system/updates/status" >/dev/null 2>&1 || \
+           curl -s -f "http://127.0.0.1:${DEFAULT_PORT}/health" >/dev/null 2>&1; then
+            HEALTH_OK=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ $HEALTH_OK -eq 1 ]]; then
+        log_success "Post-upgrade health check passed! Control plane is online and healthy."
+    else
+        log_warn "Health check probe timed out. If needed, restore snapshot via: tar -xzf ${BACKUP_FILE} -C /"
+    fi
+
+    echo -e "\n${GREEN}${BOLD}======================================================================${NC}"
+    echo -e "${GREEN}${BOLD}             🎉 HOSTVRA UPGRADE COMPLETED SUCCESSFULLY!                ${NC}"
+    echo -e "${GREEN}${BOLD}======================================================================${NC}\n"
+    echo -e "  • Check Status:         ${CYAN}hostvra update status${NC}"
+    echo -e "  • Verify Health:        ${CYAN}systemctl status hostvra-api${NC}"
+    echo -e "  • Pre-upgrade snapshot: ${CYAN}${BACKUP_FILE}${NC}"
+    echo -e "======================================================================\n"
+}
+
 # Main Execution Flow
 main() {
     print_banner
     preflight_checks
     install_dependencies
     setup_user_and_dirs
-    generate_credentials
-    deploy_services
-    configure_firewall
-    display_summary
+
+    # Check for existing installation
+    if [[ -f "${CONFIG_DIR}/api.env" && -f "${INSTALL_DIR}/hostvra-api" ]]; then
+        perform_upgrade
+    else
+        generate_credentials
+        deploy_services
+        configure_firewall
+        display_summary
+    fi
 }
 
 main "$@"

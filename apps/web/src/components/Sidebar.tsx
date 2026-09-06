@@ -25,6 +25,9 @@ import {
   Settings,
   Flame,
   Mail,
+  Code2,
+  Layers,
+  RefreshCw,
 } from 'lucide-react';
 
 interface NavItem {
@@ -38,6 +41,8 @@ const mainNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Servers', href: '/servers', icon: Server },
   { label: 'Websites', href: '/websites', icon: Globe },
+  { label: 'Web Servers', href: '/webservers', icon: Layers, badge: 'Multi' },
+  { label: 'PHP Management', href: '/php', icon: Code2 },
   { label: 'Email Hosting', href: '/email', icon: Mail },
   { label: 'Databases', href: '/databases', icon: Database },
   { label: 'Docker', href: '/docker', icon: Container },
@@ -52,6 +57,7 @@ const mainNavItems: NavItem[] = [
 ];
 
 const secondaryNavItems: NavItem[] = [
+  { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live' },
   { label: 'Team', href: '/team', icon: Users },
   { label: 'API Keys', href: '/api-keys', icon: KeyRound },
   { label: 'Licensing', href: '/license', icon: BadgePercent, badge: 'Free' },

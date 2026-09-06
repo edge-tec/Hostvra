@@ -51,6 +51,33 @@ const (
 	PermEmailAliasManage   = "email.alias.manage"
 	PermEmailLogsView      = "email.logs.view"
 	PermEmailQueueManage   = "email.queue.manage"
+
+	// PHP Permissions
+	PermPHPView            = "php.view"
+	PermPHPVersionManage   = "php.version.manage"
+	PermPHPExtensionManage = "php.extension.manage"
+	PermPHPIniManage       = "php.ini.manage"
+	PermPHPFPMManage       = "php.fpm.manage"
+	PermPHPPoolManage      = "php.pool.manage"
+	PermPHPHealthCheck     = "php.health.check"
+
+	// Web Server Permissions
+	PermWebServerView       = "webserver.view"
+	PermWebServerManage     = "webserver.manage"
+	PermWebServerInstall    = "webserver.install"
+	PermWebServerSwitch     = "webserver.switch"
+	PermWebServerConfig     = "webserver.config"
+	PermWebServerLogs       = "webserver.logs"
+	PermVHostManage         = "vhost.manage"
+	PermReverseProxyManage  = "reverseproxy.manage"
+
+	// Live Update System Permissions
+	PermSystemUpdateView     = "system.update.view"
+	PermSystemUpdateCheck    = "system.update.check"
+	PermSystemUpdateStart    = "system.update.start"
+	PermSystemUpdateSchedule = "system.update.schedule"
+	PermSystemUpdateRollback = "system.update.rollback"
+	PermSystemUpdateManage   = "system.update.manage"
 )
 
 // RolePermissionMatrix defines default entitlements per role
@@ -63,6 +90,9 @@ var RolePermissionMatrix = map[string][]string{
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
+		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
+		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
+		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
 	},
 	RoleAdmin: {
 		PermServersView, PermServersManage,
@@ -72,6 +102,9 @@ var RolePermissionMatrix = map[string][]string{
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
+		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
+		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
+		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,
 	},
 	RoleManager: {
 		PermServersView,
@@ -81,6 +114,8 @@ var RolePermissionMatrix = map[string][]string{
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit,
 		PermBackupsCreate, PermAuditView,
 		PermEmailView, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView,
+		PermPHPView, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPHealthCheck,
+		PermWebServerView, PermWebServerManage, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 	},
 	RoleDeveloper: {
 		PermServersView,
@@ -90,6 +125,8 @@ var RolePermissionMatrix = map[string][]string{
 		PermDockerManage,
 		PermAuditView,
 		PermEmailView, PermEmailLogsView,
+		PermPHPView, PermPHPIniManage, PermPHPHealthCheck,
+		PermWebServerView, PermWebServerLogs, PermVHostManage,
 	},
 	RoleViewer: {
 		PermServersView,
@@ -98,6 +135,8 @@ var RolePermissionMatrix = map[string][]string{
 		PermFirewallView,
 		PermAuditView,
 		PermEmailView,
+		PermPHPView,
+		PermWebServerView,
 	},
 }
 

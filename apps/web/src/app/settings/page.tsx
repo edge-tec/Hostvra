@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Server,
   Globe,
+  RefreshCw,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, User, Organization } from '@/lib/api';
@@ -132,6 +133,32 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* System Updates Navigation Card */}
+        <div className="bg-gradient-to-r from-indigo-950/60 via-surface-900 to-surface-900 border border-indigo-500/20 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+              <RefreshCw className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                Live Update & Engine Upgrades
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  Zero Downtime
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Manage control plane patches, agent binaries, database schema migrations, and instant rollbacks.
+              </p>
+            </div>
+          </div>
+          <a
+            href="/settings/updates"
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition shadow-lg shadow-indigo-600/20 flex items-center gap-2 flex-shrink-0"
+          >
+            Manage Updates
+          </a>
         </div>
       </div>
     </DashboardShell>
