@@ -1,6 +1,30 @@
 {
   "version": 4,
   "routes": {
+    "/cron": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/cron",
+      "dataRoute": "/cron.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/_not-found": {
       "initialStatus": 404,
       "experimentalBypassFor": [
@@ -26,7 +50,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/ssl": {
+    "/": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -39,8 +63,80 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/ssl",
-      "dataRoute": "/ssl.rsc",
+      "srcRoute": "/",
+      "dataRoute": "/index.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/firewall": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/firewall",
+      "dataRoute": "/firewall.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/databases": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/databases",
+      "dataRoute": "/databases.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/servers": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "next-action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/servers",
+      "dataRoute": "/servers.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -122,7 +218,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/dashboard": {
+    "/docker": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -135,8 +231,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/dashboard",
-      "dataRoute": "/dashboard.rsc",
+      "srcRoute": "/docker",
+      "dataRoute": "/docker.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -194,7 +290,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/": {
+    "/files": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -207,8 +303,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/",
-      "dataRoute": "/index.rsc",
+      "srcRoute": "/files",
+      "dataRoute": "/files.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -218,7 +314,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/databases": {
+    "/ssl": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -231,8 +327,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/databases",
-      "dataRoute": "/databases.rsc",
+      "srcRoute": "/ssl",
+      "dataRoute": "/ssl.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -242,7 +338,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/servers": {
+    "/dashboard": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -255,8 +351,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/servers",
-      "dataRoute": "/servers.rsc",
+      "srcRoute": "/dashboard",
+      "dataRoute": "/dashboard.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",

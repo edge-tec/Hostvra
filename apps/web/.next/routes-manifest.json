@@ -39,6 +39,12 @@
       "namedRegex": "^/audit\\-logs(?:/)?$"
     },
     {
+      "page": "/cron",
+      "regex": "^/cron(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/cron(?:/)?$"
+    },
+    {
       "page": "/dashboard",
       "regex": "^/dashboard(?:/)?$",
       "routeKeys": {},
@@ -49,6 +55,24 @@
       "regex": "^/databases(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/databases(?:/)?$"
+    },
+    {
+      "page": "/docker",
+      "regex": "^/docker(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/docker(?:/)?$"
+    },
+    {
+      "page": "/files",
+      "regex": "^/files(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/files(?:/)?$"
+    },
+    {
+      "page": "/firewall",
+      "regex": "^/firewall(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/firewall(?:/)?$"
     },
     {
       "page": "/login",
