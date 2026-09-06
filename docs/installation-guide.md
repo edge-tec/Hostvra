@@ -44,15 +44,16 @@ Before generating Let's Encrypt SSL certificates, point the following DNS `A` re
 
 ### Method A: One-Line Automated Quick Install (Recommended)
 
-Run the official production installer script with root privileges:
+Run the official production installer directly from the GitHub repository with root privileges:
 
 ```bash
-curl -fsSL https://install.hostvra.com | sudo bash
+curl -fsSL https://raw.githubusercontent.com/edge-tec/Hostvra/main/deployment/installer/install.sh | sudo bash
 ```
+*(Alternatively, via shortlink if DNS is configured: `curl -fsSL https://install.hostvra.com | sudo bash`)*
 
 ### Method B: Git Source / Repository Installation
 
-If you have cloned or downloaded the Hostvra repository locally:
+If you prefer cloning the repository directly:
 
 ```bash
 git clone https://github.com/edge-tec/Hostvra.git
@@ -60,6 +61,24 @@ cd Hostvra
 
 # Run the production installer
 sudo bash deployment/installer/install.sh
+```
+
+### Method C: Local Development & Evaluation Setup
+
+To evaluate Hostvra on your local workstation (macOS / Linux):
+
+```bash
+git clone https://github.com/edge-tec/Hostvra.git
+cd Hostvra
+
+# Terminal 1: Launch Backend API Server (starts on http://localhost:8080)
+cd apps/api
+go run ./cmd/server
+
+# Terminal 2: Launch Frontend Web Panel (starts on http://localhost:3000)
+cd apps/web
+npm install
+npm run dev
 ```
 
 ---
@@ -228,19 +247,48 @@ The following network ports must be allowed in your firewall:
 
 ---
 
-## 7. First-Time Setup & Security Checklist
+## 7. Administrator Login Credentials & First-Time Setup
 
+### Default Credentials Matrix
+
+| Environment | Panel URL | Administrator Email | Password | Role |
+|---|---|---|---|---|
+| **Local Dev / Demo** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
+| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | Randomly generated during install | Super Admin / Owner |
+
+> 💡 **Tip for Local Testing**: On the Web UI login page, clicking the **"Prefill Demo Credentials"** button automatically populates `admin@hostvra.com` and `SuperSecretP@ss123!`.
+
+### Retrieving Server Credentials
+On a production Linux server, your environment configuration and credentials are saved at `/etc/hostvra/api.env`:
+```bash
+sudo cat /etc/hostvra/api.env
+```
+
+### Creating Additional Administrator Accounts
+You can register an additional administrator account via API at any time:
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@yourdomain.com",
+    "password": "YourStrongPassword123!",
+    "full_name": "System Administrator",
+    "organization_name": "Hostvra Enterprise"
+  }'
+```
+
+### Initial Post-Install Checklist
 1. **Initial Login**:
-   - Open your browser to `http://<YOUR_SERVER_IP>:8080`.
-   - Log in using the administrator email (`admin@hostvra.local`) and the generated password from the installer summary.
+   - Open your browser to `http://<YOUR_SERVER_IP>:8080` (or `http://localhost:3000` for local dev).
+   - Sign in using the administrator credentials.
 2. **Change Temporary Credentials**:
-   - Immediately change the administrator password under **Settings > Profile**.
+   - Change your administrator password under **Settings > Profile**.
 3. **Configure SSL for Panel**:
    - Navigate to **SSL Certificates**, add your domain (`panel.yourdomain.com`), and issue a free Let's Encrypt SSL certificate.
 4. **Deploy Web Server Engines**:
    - In **Web Servers**, select and activate your desired web server stack: **Nginx**, **Apache**, **OpenLiteSpeed**, or **LiteSpeed Enterprise**.
 5. **Multi-Version PHP Setup**:
-   - Under **PHP Management**, install required PHP runtimes (e.g. PHP 8.3, 8.2, 8.1) with required extensions (`mysqli`, `curl`, `redis`, `opcache`).
+   - Under **PHP Management**, install required PHP runtimes (e.g. PHP 8.4, 8.3, 8.2, 8.1) with required extensions (`mysqli`, `curl`, `redis`, `opcache`).
 6. **Configure Off-Site Backups**:
    - Go to **Backups > Storage Providers** and connect your AWS S3, Cloudflare R2, or Wasabi bucket for automated encrypted off-site disaster recovery.
 

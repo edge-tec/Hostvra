@@ -67,16 +67,29 @@ hostvra/
 
 ## 4. Production Installation (One-Command Deployment)
 
-To install Hostvra on an Ubuntu, Debian, AlmaLinux, Rocky Linux, or RHEL server:
+To install Hostvra on an Ubuntu, Debian, AlmaLinux, Rocky Linux, or RHEL server directly from GitHub:
 
 ```bash
-curl -fsSL https://install.hostvra.com | sudo bash
+curl -fsSL https://raw.githubusercontent.com/edge-tec/Hostvra/main/deployment/installer/install.sh | sudo bash
 ```
+
+*(Alternatively via shortlink if DNS is configured: `curl -fsSL https://install.hostvra.com | sudo bash`)*
 
 Or clone the repository and run:
 ```bash
+git clone https://github.com/edge-tec/Hostvra.git
+cd Hostvra
 sudo bash deployment/installer/install.sh
 ```
+
+### Administrator Login Credentials
+
+| Environment | Web Panel URL | Email | Password | Role |
+|---|---|---|---|---|
+| **Local Dev / Demo** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
+| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | Auto-generated in installer summary (`/etc/hostvra/api.env`) | Super Admin / Owner |
+
+> 💡 **Tip**: On the local Web UI login page, click **"Prefill Demo Credentials"** to instantly sign in.
 
 > **Detailed Installation Guidelines**:
 > - [Complete Production Installation Guideline (English)](docs/installation-guide.md)
@@ -97,12 +110,12 @@ The installer automatically:
 ### Prerequisites
 - **Go**: 1.22+ (`go version`)
 - **Node.js**: 20+ (`node -v`)
-- **Docker**: Optional for PostgreSQL (falls back to memory store automatically)
+- **Docker**: Optional for PostgreSQL (falls back to in-memory persistence automatically)
 
 ### Step 1: Clone and Test Monorepo
 ```bash
-git clone https://github.com/hostvra/hostvra.git
-cd hostvra
+git clone https://github.com/edge-tec/Hostvra.git
+cd Hostvra
 
 # Run full test suite with Go race detector and Next.js build
 make test

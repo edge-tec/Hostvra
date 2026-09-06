@@ -23,20 +23,39 @@
 
 ## ২. ইনস্টলেশন পদ্ধতি
 
-### পদ্ধতি ক: অটোমেটিক ওয়ান-লাইন ইনস্টল (রেকমেন্ডেড)
+### পদ্ধতি ক: অটোমেটিক ওয়ান-লাইন ইনস্টল (GitHub থেকে সরাসরি - রেকমেন্ডেড)
 
-আপনার লিনাক্স সার্ভারে রুট প্রিভিলেজ সহ নিচের কমান্ডটি রান করুন:
+আপনার লিনাক্স সার্ভারে (Ubuntu/Debian) রুট প্রিভিলেজ সহ সরাসরি GitHub রিপোজিটরি থেকে নিচের কমান্ডটি রান করুন:
 
 ```bash
-curl -fsSL https://install.hostvra.com | sudo bash
+curl -fsSL https://raw.githubusercontent.com/edge-tec/Hostvra/main/deployment/installer/install.sh | sudo bash
 ```
+*(অথবা শর্টলিংক ডোমেইন কনফিগার করা থাকলে: `curl -fsSL https://install.hostvra.com | sudo bash`)*
 
-### পদ্ধতি খ: গিট রিপোজিটরি থেকে লোকাল ইনস্টল
+### পদ্ধতি খ: গিট রিপোজিটরি ক্লোন করে ইনস্টল
 
 ```bash
 git clone https://github.com/edge-tec/Hostvra.git
 cd Hostvra
 sudo bash deployment/installer/install.sh
+```
+
+### পদ্ধতি গ: লোকাল ডেভেলপমেন্ট ও ডেমো টেস্ট (Local Workstation)
+
+আপনার পার্সোনাল কম্পিউটার বা ল্যাপটপে পরীক্ষা করতে:
+
+```bash
+git clone https://github.com/edge-tec/Hostvra.git
+cd Hostvra
+
+# টার্মিনাল ১: ব্যাকএন্ড API সার্ভার চালু (http://localhost:8080)
+cd apps/api
+go run ./cmd/server
+
+# টার্মিনাল ২: ফ্রন্টএন্ড ওয়েব কন্ট্রোল প্যানেল চালু (http://localhost:3000)
+cd apps/web
+npm install
+npm run dev
 ```
 
 ইনস্টলার যা যা নিজে কনফিগার করে:
@@ -136,13 +155,42 @@ sudo systemctl enable --now hostvra-agent.service
 
 ---
 
-## ৫. প্রাথমিক সেটআপ ও সিকিউরিটি চেকলিস্ট
+## ৫. অ্যাডমিন লগইন ও প্রাথমিক সেটআপ চেকলিস্ট
 
-1. ব্রাউজারে `http://<SERVER_IP>:8080` এ ঢুকে অ্যাডমিন ইমেইল ও ইনস্টলারে দেওয়া পাসওয়ার্ড দিয়ে লগইন করুন।
-2. অবিলম্বে **Settings > Profile** থেকে ডিফল্ট পাসওয়ার্ড পরিবর্তন করুন।
+### ডিফল্ট লগইন ক্রেডেনশিয়ালস
+
+| পরিবেশ (Environment) | প্যানেল URL | অ্যাডমিন ইমেইল | পাসওয়ার্ড | রোল |
+|---|---|---|---|---|
+| **লোকাল টেস্ট / ডেমো** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
+| **প্রোডাকশন সার্ভার** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | ইনস্টলেশন সামারিতে জেনারেট হওয়া পাসওয়ার্ড | Super Admin / Owner |
+
+> 💡 **ডেমো টিপস**: ব্রাউজারের লগইন পেজে সরাসরি **"Prefill Demo Credentials"** বাটনে ক্লিক করলে `admin@hostvra.com` এবং `SuperSecretP@ss123!` অটো-ফিল হয়ে যাবে।
+
+### সার্ভার থেকে পাসওয়ার্ড দেখা
+প্রোডাকশন সার্ভারের এনভায়রনমেন্ট কনফিগারেশন দেখতে:
+```bash
+sudo cat /etc/hostvra/api.env
+```
+
+### নতুন অ্যাডমিন ইউজার রেজিস্টার করার কমান্ড
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@yourdomain.com",
+    "password": "YourStrongPassword123!",
+    "full_name": "System Administrator",
+    "organization_name": "Hostvra Enterprise"
+  }'
+```
+
+### প্রাথমিক সিকিউরিটি চেকলিস্ট
+1. ব্রাউজারে `http://<SERVER_IP>:8080` (বা লোকাল মেশিনে `http://localhost:3000`) এ ঢুকে অ্যাডমিন ক্রেডেনশিয়ালস দিয়ে লগইন করুন।
+2. **Settings > Profile** থেকে এডমিন পাসওয়ার্ড পরিবর্তন করে নিজস্ব শক্তিশালী পাসওয়ার্ড দিন।
 3. **SSL Certificates** মেনুতে গিয়ে কন্ট্রোল প্যানেলের জন্য ফ্রি Let's Encrypt SSL ইস্যু করুন।
 4. **Web Servers** মেনুতে গিয়ে প্রয়োজন অনুসারে **Nginx**, **Apache**, **OpenLiteSpeed** বা **LiteSpeed Enterprise** এক্টিভেট করুন।
-5. **PHP Management** থেকে প্রয়োজনীয় PHP সংস্করণ (8.3, 8.2, 8.1) এবং এক্সটেনশন ইনস্টল করুন।
+5. **PHP Management** থেকে প্রয়োজনীয় PHP সংস্করণ (8.4, 8.3, 8.2, 8.1) এবং এক্সটেনশন ইনস্টল করুন।
+6. **Backups > Storage Providers** এ গিয়ে S3 / Cloudflare R2 কানেক্ট করে অফ-সাইট ব্যাকআপ নিশ্চিত করুন।
 
 ---
 
