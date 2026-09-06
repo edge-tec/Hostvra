@@ -78,12 +78,16 @@ Or clone the repository and run:
 sudo bash deployment/installer/install.sh
 ```
 
+> **Detailed Installation Guidelines**:
+> - [Complete Production Installation Guideline (English)](docs/installation-guide.md)
+> - [সম্পূর্ণ প্রোডাকশন ইনস্টলেশন নির্দেশিকা (বাংলা)](docs/installation-guide-bn.md)
+
 The installer automatically:
 1. Detects OS and CPU architecture (`x86_64` or `aarch64/arm64`).
 2. Creates an unprivileged system user `hostvra` with restricted home directory `/var/lib/hostvra`.
 3. Generates cryptographic JWT secrets and random administrator passwords.
 4. Registers and starts sandboxed systemd services (`hostvra-api` and `hostvra-agent`).
-5. Configures the firewall (ports 22, 80, 443, 8080).
+5. Configures the firewall (ports 22, 80, 443, 8080, and email stack 25, 465, 587, 993, 995).
 6. Outputs a formatted completion banner with web panel URL and login credentials.
 
 ---
