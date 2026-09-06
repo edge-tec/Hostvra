@@ -1,0 +1,24 @@
+[Unit]
+Description=Hostvra Node Management Daemon
+Documentation=https://docs.hostvra.com/agent
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/var/lib/hostvra
+ExecStart=/usr/local/bin/hostvra-agent --daemon --config /etc/hostvra/agent.json
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+KillMode=process
+TimeoutStopSec=15
+
+# Sandboxing & Security
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
