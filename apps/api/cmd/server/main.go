@@ -14,9 +14,11 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
+	"hostvra/api/internal/alerts"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/dns"
 	"hostvra/api/internal/handlers"
 	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/store"
@@ -66,6 +68,13 @@ func main() {
 	databaseHandler := handlers.NewDatabaseHandler(cfg, dataStore, auditLogger)
 	auditHandler := handlers.NewAuditHandler(dataStore)
 	healthHandler := handlers.NewHealthHandler(AppVersion)
+
+	dnsService := dns.NewService()
+	alertEngine := alerts.NewEngine()
+
+	dnsHandler := handlers.NewDNSHandler(cfg, dnsService, auditLogger)
+	alertHandler := handlers.NewAlertHandler(cfg, alertEngine, auditLogger)
+	backupHandler := handlers.NewBackupHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -145,6 +154,33 @@ func main() {
 			// Audit Logs
 			r.Route("/audit-logs", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermAuditView)).Get("/", auditHandler.List)
+			})
+
+			// DNS Management
+			r.Route("/dns", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones", dnsHandler.ListZones)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Post("/zones", dnsHandler.CreateZone)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones/{zoneID}/records", dnsHandler.ListRecords)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Post("/zones/{zoneID}/records", dnsHandler.CreateRecord)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Delete("/zones/{zoneID}/records/{recordID}", dnsHandler.DeleteRecord)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones/{zoneID}/export/bind", dnsHandler.ExportBindZone)
+			})
+
+			// Fleet Alerts & Notifications
+			r.Route("/alerts", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Get("/", alertHandler.ListIncidents)
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Get("/rules", alertHandler.ListRules)
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Post("/rules", alertHandler.CreateRule)
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Get("/channels", alertHandler.ListChannels)
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Post("/channels", alertHandler.CreateChannel)
+				r.With(rbac.RequirePermission(rbac.PermAlertsManage)).Post("/test", alertHandler.TestTrigger)
+			})
+
+			// Automated & On-demand Backups
+			r.Route("/backups", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/", backupHandler.List)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/", backupHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/restore", backupHandler.Restore)
 			})
 		})
 	})

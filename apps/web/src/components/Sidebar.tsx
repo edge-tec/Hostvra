@@ -17,6 +17,8 @@ import {
   HardDriveDownload,
   Activity,
   ScrollText,
+  Network,
+  BellRing,
   Users,
   KeyRound,
   BadgePercent,
@@ -40,9 +42,10 @@ const mainNavItems: NavItem[] = [
   { label: 'File Manager', href: '/files', icon: FolderTree },
   { label: 'Cron Jobs', href: '/cron', icon: Clock },
   { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
+  { label: 'DNS Zones', href: '/dns', icon: Network },
   { label: 'Firewall', href: '/firewall', icon: ShieldAlert },
   { label: 'Backups', href: '/backups', icon: HardDriveDownload },
-  { label: 'Monitoring', href: '/monitoring', icon: Activity },
+  { label: 'Alerts & Incidents', href: '/alerts', icon: BellRing },
   { label: 'Audit Logs', href: '/audit-logs', icon: ScrollText },
 ];
 

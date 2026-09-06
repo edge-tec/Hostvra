@@ -38,6 +38,8 @@ const (
 	PermTerminalAccess  = "terminal.access"
 	PermBackupsCreate   = "backups.create"
 	PermBackupsRestore  = "backups.restore"
+	PermDNSManage       = "dns.manage"
+	PermAlertsManage    = "alerts.manage"
 	PermUsersManage     = "users.manage"
 	PermLicensesManage  = "licenses.manage"
 	PermAuditView       = "audit.view"
@@ -51,7 +53,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
 		PermSSLManage, PermFirewallView, PermFirewallManage,
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
-		PermBackupsCreate, PermBackupsRestore, PermUsersManage, PermLicensesManage, PermAuditView,
+		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
 	},
 	RoleAdmin: {
 		PermServersView, PermServersManage,
@@ -59,7 +61,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
 		PermSSLManage, PermFirewallView, PermFirewallManage,
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
-		PermBackupsCreate, PermBackupsRestore, PermUsersManage, PermAuditView,
+		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
 	},
 	RoleManager: {
 		PermServersView,

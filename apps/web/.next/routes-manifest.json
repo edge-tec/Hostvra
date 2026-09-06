@@ -33,10 +33,22 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
+      "page": "/alerts",
+      "regex": "^/alerts(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/alerts(?:/)?$"
+    },
+    {
       "page": "/audit-logs",
       "regex": "^/audit\\-logs(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/audit\\-logs(?:/)?$"
+    },
+    {
+      "page": "/backups",
+      "regex": "^/backups(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/backups(?:/)?$"
     },
     {
       "page": "/cron",
@@ -55,6 +67,12 @@
       "regex": "^/databases(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/databases(?:/)?$"
+    },
+    {
+      "page": "/dns",
+      "regex": "^/dns(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dns(?:/)?$"
     },
     {
       "page": "/docker",
