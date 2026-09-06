@@ -27,31 +27,35 @@ const (
 )
 
 type Entitlements struct {
-	MaxServers       int  `json:"max_servers"` // -1 for unlimited
-	S3Backups        bool `json:"s3_backups"`
-	TeamCollab       bool `json:"team_collab"`
-	DockerManager    bool `json:"docker_manager"`
-	WhiteLabel       bool `json:"white_label"`
-	PrioritySupport  bool `json:"priority_support"`
+	MaxServers      int  `json:"max_servers"` // -1 for unlimited
+	S3Backups       bool `json:"s3_backups"`
+	TeamCollab      bool `json:"team_collab"`
+	DockerManager   bool `json:"docker_manager"`
+	WhiteLabel      bool `json:"white_label"`
+	PrioritySupport bool `json:"priority_support"`
+	EmailHosting    bool `json:"email_hosting"`
+	MaxMailboxes    int  `json:"max_mailboxes"` // -1 for unlimited, 10 for community
+	Webmail         bool `json:"webmail"`
+	EmailAntiSpam   bool `json:"email_anti_spam"`
 }
 
 type LicensePayload struct {
-	LicenseID    string       `json:"license_id"`
-	CustomerName string       `json:"customer_name"`
-	CustomerEmail string      `json:"customer_email"`
-	Tier         Tier         `json:"tier"`
-	IssuedAt     time.Time    `json:"issued_at"`
-	ExpiresAt    time.Time    `json:"expires_at"` // Zero time for lifetime
-	Entitlements Entitlements `json:"entitlements"`
+	LicenseID     string       `json:"license_id"`
+	CustomerName  string       `json:"customer_name"`
+	CustomerEmail string       `json:"customer_email"`
+	Tier          Tier         `json:"tier"`
+	IssuedAt      time.Time    `json:"issued_at"`
+	ExpiresAt     time.Time    `json:"expires_at"` // Zero time for lifetime
+	Entitlements  Entitlements `json:"entitlements"`
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	currentTier  Tier
-	activeKey    string
-	activeInfo   *LicensePayload
-	publicKey    ed25519.PublicKey
-	privateKey   ed25519.PrivateKey // Used by issuer or in self-hosted license minting
+	mu          sync.RWMutex
+	currentTier Tier
+	activeKey   string
+	activeInfo  *LicensePayload
+	publicKey   ed25519.PublicKey
+	privateKey  ed25519.PrivateKey // Used by issuer or in self-hosted license minting
 }
 
 func NewManager() *Manager {
@@ -73,6 +77,10 @@ func NewManager() *Manager {
 				DockerManager:   true,
 				WhiteLabel:      false,
 				PrioritySupport: false,
+				EmailHosting:    true,
+				MaxMailboxes:    25,
+				Webmail:         true,
+				EmailAntiSpam:   true,
 			},
 		},
 	}

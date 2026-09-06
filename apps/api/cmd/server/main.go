@@ -80,6 +80,7 @@ func main() {
 	licenseHandler := handlers.NewLicenseHandler(cfg, licenseManager, auditLogger)
 	teamHandler := handlers.NewTeamHandler(cfg, dataStore, auditLogger)
 	apiKeyHandler := handlers.NewAPIKeyHandler(cfg, dataStore, auditLogger)
+	emailHandler := handlers.NewEmailHandler(cfg, dataStore, dnsService, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -229,6 +230,32 @@ func main() {
 				r.Get("/", apiKeyHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Post("/", apiKeyHandler.Create)
 				r.With(rbac.RequirePermission(rbac.PermUsersManage)).Delete("/{keyID}", apiKeyHandler.Revoke)
+			})
+
+			// Email Hosting Subsystem
+			r.Route("/email", func(r chi.Router) {
+				// Domains
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains", emailHandler.ListDomains)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/domains", emailHandler.CreateDomain)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}", emailHandler.GetDomain)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/domains/{id}", emailHandler.DeleteDomain)
+
+				// Mailboxes
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes", emailHandler.ListMailboxes)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes", emailHandler.CreateMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}", emailHandler.GetMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}", emailHandler.UpdateMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/mailboxes/{id}", emailHandler.DeleteMailbox)
+
+				// Aliases
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/aliases", emailHandler.ListAliases)
+				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Post("/aliases", emailHandler.CreateAlias)
+				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Delete("/aliases/{id}", emailHandler.DeleteAlias)
+
+				// Delivery Logs & Health
+				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
 			})
 		})
 	})

@@ -127,16 +127,18 @@ preflight_checks() {
 
 # 2. Package Dependencies
 install_dependencies() {
-    log_info "Updating system packages and installing required core tools..."
+    log_info "Updating system packages and installing required core tools & email stack..."
 
     if [[ "$PKG_MGR" == "apt" ]]; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq curl wget tar gzip openssl ufw nginx ca-certificates > /dev/null
+        apt-get install -y -qq curl wget tar gzip openssl ufw nginx ca-certificates \
+            postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd rspamd > /dev/null
     elif [[ "$PKG_MGR" == "dnf" ]]; then
-        dnf install -y -q curl wget tar gzip openssl firewalld nginx ca-certificates > /dev/null
+        dnf install -y -q curl wget tar gzip openssl firewalld nginx ca-certificates \
+            postfix dovecot rspamd > /dev/null
     fi
-    log_success "System dependencies satisfied."
+    log_success "System and email dependencies satisfied."
 }
 
 # 3. Create Hostvra System User & Directories
@@ -148,15 +150,26 @@ setup_user_and_dirs() {
         log_success "Created dedicated unprivileged system user 'hostvra'"
     fi
 
+    # Dedicated non-root vmail user (UID/GID 5000) for Maildir isolation
+    if ! id "vmail" &>/dev/null; then
+        groupadd -g 5000 vmail 2>/dev/null || true
+        useradd -r -u 5000 -g vmail -s /usr/sbin/nologin -d /var/mail/vhosts -m vmail 2>/dev/null || true
+        log_success "Created dedicated unprivileged virtual mail user 'vmail' (5000:5000)"
+    fi
+
     mkdir -p "${CONFIG_DIR}"
     mkdir -p "${DATA_DIR}/backups"
     mkdir -p "${DATA_DIR}/www"
+    mkdir -p "${DATA_DIR}/dkim"
     mkdir -p "${LOG_DIR}"
+    mkdir -p "/var/mail/vhosts"
 
     chown -R hostvra:hostvra "${DATA_DIR}" "${LOG_DIR}"
+    chown -R vmail:vmail "/var/mail/vhosts"
     chmod 750 "${DATA_DIR}" "${LOG_DIR}"
+    chmod 770 "/var/mail/vhosts"
     chmod 700 "${CONFIG_DIR}"
-    log_success "Runtime filesystem initialized at ${DATA_DIR}"
+    log_success "Runtime filesystem and mail storage initialized."
 }
 
 # 4. Generate Production Secrets & Environment
@@ -274,14 +287,25 @@ configure_firewall() {
         ufw allow 80/tcp comment 'HTTP Web' >/dev/null 2>&1 || true
         ufw allow 443/tcp comment 'HTTPS Web' >/dev/null 2>&1 || true
         ufw allow "${DEFAULT_PORT}/tcp" comment 'Hostvra Panel' >/dev/null 2>&1 || true
-        log_success "UFW rules configured."
+        # Email Stack Ports
+        ufw allow 25/tcp comment 'SMTP MTA' >/dev/null 2>&1 || true
+        ufw allow 465/tcp comment 'SMTPS' >/dev/null 2>&1 || true
+        ufw allow 587/tcp comment 'Submission' >/dev/null 2>&1 || true
+        ufw allow 993/tcp comment 'IMAPS' >/dev/null 2>&1 || true
+        ufw allow 995/tcp comment 'POP3S' >/dev/null 2>&1 || true
+        log_success "UFW rules configured (including email ports 25, 465, 587, 993, 995)."
     elif command -v firewall-cmd &>/dev/null; then
         firewall-cmd --permanent --add-port=22/tcp >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port=80/tcp >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port=443/tcp >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port="${DEFAULT_PORT}/tcp" >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=25/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=465/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=587/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=993/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=995/tcp >/dev/null 2>&1 || true
         firewall-cmd --reload >/dev/null 2>&1 || true
-        log_success "Firewalld rules configured."
+        log_success "Firewalld rules configured (including email ports)."
     fi
 }
 

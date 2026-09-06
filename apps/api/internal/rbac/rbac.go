@@ -43,6 +43,14 @@ const (
 	PermUsersManage     = "users.manage"
 	PermLicensesManage  = "licenses.manage"
 	PermAuditView       = "audit.view"
+
+	// Email Permissions
+	PermEmailView          = "email.view"
+	PermEmailDomainManage  = "email.domain.manage"
+	PermEmailMailboxManage = "email.mailbox.manage"
+	PermEmailAliasManage   = "email.alias.manage"
+	PermEmailLogsView      = "email.logs.view"
+	PermEmailQueueManage   = "email.queue.manage"
 )
 
 // RolePermissionMatrix defines default entitlements per role
@@ -54,6 +62,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermSSLManage, PermFirewallView, PermFirewallManage,
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
 	},
 	RoleAdmin: {
 		PermServersView, PermServersManage,
@@ -62,6 +71,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermSSLManage, PermFirewallView, PermFirewallManage,
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
 	},
 	RoleManager: {
 		PermServersView,
@@ -70,6 +80,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermSSLManage, PermFirewallView,
 		PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit,
 		PermBackupsCreate, PermAuditView,
+		PermEmailView, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView,
 	},
 	RoleDeveloper: {
 		PermServersView,
@@ -78,6 +89,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermFilesBrowse, PermFilesEdit,
 		PermDockerManage,
 		PermAuditView,
+		PermEmailView, PermEmailLogsView,
 	},
 	RoleViewer: {
 		PermServersView,
@@ -85,6 +97,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermDatabasesView,
 		PermFirewallView,
 		PermAuditView,
+		PermEmailView,
 	},
 }
 

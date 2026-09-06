@@ -267,3 +267,110 @@ func (s *Service) GenerateBindZoneFile(ctx context.Context, zoneID uuid.UUID) (s
 
 	return b.String(), nil
 }
+
+// ConfigureEmailDNS configures all required email DNS records (MX, A, SPF, DKIM, DMARC) with RFC compliance
+func (s *Service) ConfigureEmailDNS(ctx context.Context, orgID uuid.UUID, domain, mailHostname, serverIP, dkimSelector, dkimPublicRecord string) error {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+
+	// Find or create zone
+	var zone *Zone
+	s.mu.RLock()
+	for _, z := range s.zones {
+		if z.OrganizationID == orgID && z.Domain == domain {
+			zone = z
+			break
+		}
+	}
+	s.mu.RUnlock()
+
+	if zone == nil {
+		var err error
+		zone, err = s.CreateZone(ctx, orgID, domain, "local")
+		if err != nil {
+			return fmt.Errorf("failed to create DNS zone: %w", err)
+		}
+	}
+
+	// 1. A record for mailHostname (e.g. "mail" -> serverIP)
+	mailSub := "mail"
+	if strings.HasSuffix(mailHostname, "."+domain) {
+		mailSub = strings.TrimSuffix(mailHostname, "."+domain)
+	}
+	_ = s.AddRecord(ctx, &Record{
+		ZoneID:  zone.ID,
+		Type:    TypeA,
+		Name:    mailSub,
+		Content: serverIP,
+		TTL:     300,
+	})
+
+	// 2. MX record (@ -> mailHostname, priority 10)
+	prio := 10
+	_ = s.AddRecord(ctx, &Record{
+		ZoneID:   zone.ID,
+		Type:     TypeMX,
+		Name:     "@",
+		Content:  mailHostname + ".",
+		Priority: &prio,
+		TTL:      300,
+	})
+
+	// 3. SPF record with intelligent merge to prevent duplicate TXT violation
+	spfValue := "v=spf1 mx ~all"
+	recs, _ := s.ListRecords(ctx, zone.ID)
+	var existingSPF *Record
+	for _, r := range recs {
+		if r.Type == TypeTXT && (r.Name == "@" || r.Name == domain) && strings.HasPrefix(r.Content, "v=spf1") {
+			existingSPF = r
+			break
+		}
+	}
+
+	if existingSPF != nil {
+		if !strings.Contains(existingSPF.Content, "mx") {
+			// Merge mx before ~all / -all / ?all
+			if strings.Contains(existingSPF.Content, "~all") {
+				existingSPF.Content = strings.Replace(existingSPF.Content, "~all", "mx ~all", 1)
+			} else if strings.Contains(existingSPF.Content, "-all") {
+				existingSPF.Content = strings.Replace(existingSPF.Content, "-all", "mx -all", 1)
+			} else {
+				existingSPF.Content = existingSPF.Content + " mx"
+			}
+			existingSPF.UpdatedAt = time.Now().UTC()
+		}
+	} else {
+		_ = s.AddRecord(ctx, &Record{
+			ZoneID:  zone.ID,
+			Type:    TypeTXT,
+			Name:    "@",
+			Content: spfValue,
+			TTL:     300,
+		})
+	}
+
+	// 4. DKIM record (<selector>._domainkey -> dkimPublicRecord)
+	if dkimSelector == "" {
+		dkimSelector = "default"
+	}
+	dkimName := fmt.Sprintf("%s._domainkey", dkimSelector)
+	_ = s.AddRecord(ctx, &Record{
+		ZoneID:  zone.ID,
+		Type:    TypeTXT,
+		Name:    dkimName,
+		Content: dkimPublicRecord,
+		TTL:     300,
+	})
+
+	// 5. DMARC record (_dmarc -> v=DMARC1; p=none; rua=mailto:dmarc@domain)
+	dmarcContent := fmt.Sprintf("v=DMARC1; p=none; rua=mailto:dmarc@%s", domain)
+	_ = s.AddRecord(ctx, &Record{
+		ZoneID:  zone.ID,
+		Type:    TypeTXT,
+		Name:    "_dmarc",
+		Content: dmarcContent,
+		TTL:     300,
+	})
+
+	return nil
+}
+

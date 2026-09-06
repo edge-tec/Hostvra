@@ -28,6 +28,7 @@ const (
 	TypeWebsite    BackupType = "website"
 	TypeDatabase   BackupType = "database"
 	TypeFullConfig BackupType = "full_config"
+	TypeMailbox    BackupType = "mailbox"
 )
 
 type StorageType string
@@ -140,6 +141,51 @@ func (m *Manager) CreateWebsiteBackup(siteDomain, docRoot string, extraExclusion
 		meta.Status = "failed"
 		meta.ErrorMessage = err.Error()
 		os.Remove(destPath)
+		return meta, err
+	}
+
+	meta.Status = "completed"
+	meta.FileCount = fileCount
+	meta.SizeBytes = sizeBytes
+	meta.SHA256 = checksum
+
+	m.mu.Lock()
+	m.history = append(m.history, meta)
+	m.mu.Unlock()
+
+	return meta, nil
+}
+
+// CreateMailboxBackup archives a specific virtual mailbox Maildir with checksum
+func (m *Manager) CreateMailboxBackup(domain, localPart, mailDirBase string) (*BackupMetadata, error) {
+	if mailDirBase == "" {
+		mailDirBase = "/var/mail/vhosts"
+	}
+	mailboxDir := filepath.Join(mailDirBase, domain, localPart)
+	if _, err := os.Stat(mailboxDir); err != nil {
+		return nil, fmt.Errorf("mailbox directory does not exist: %w", err)
+	}
+
+	backupID := newUUID()
+	timestamp := time.Now().UTC().Format("20060102-150405")
+	cleanEmail := fmt.Sprintf("%s_%s", localPart, strings.ReplaceAll(domain, "/", "_"))
+	fileName := fmt.Sprintf("mail-%s-%s.tar.gz", cleanEmail, timestamp)
+	destPath := filepath.Join(m.backupRoot, fileName)
+
+	meta := &BackupMetadata{
+		ID:          backupID,
+		Type:        TypeMailbox,
+		SourcePath:  mailboxDir,
+		ArchivePath: destPath,
+		FileName:    fileName,
+		CreatedAt:   time.Now().UTC(),
+		Status:      "in_progress",
+	}
+
+	fileCount, sizeBytes, checksum, err := m.archiveDirectory(mailboxDir, destPath, m.defaultExcl)
+	if err != nil {
+		meta.Status = "failed"
+		meta.ErrorMessage = err.Error()
 		return meta, err
 	}
 

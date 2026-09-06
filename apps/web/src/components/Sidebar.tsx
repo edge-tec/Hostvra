@@ -24,6 +24,7 @@ import {
   BadgePercent,
   Settings,
   Flame,
+  Mail,
 } from 'lucide-react';
 
 interface NavItem {
@@ -37,6 +38,7 @@ const mainNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Servers', href: '/servers', icon: Server },
   { label: 'Websites', href: '/websites', icon: Globe },
+  { label: 'Email Hosting', href: '/email', icon: Mail },
   { label: 'Databases', href: '/databases', icon: Database },
   { label: 'Docker', href: '/docker', icon: Container },
   { label: 'File Manager', href: '/files', icon: FolderTree },

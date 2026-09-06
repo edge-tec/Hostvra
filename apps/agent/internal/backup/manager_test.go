@@ -146,3 +146,32 @@ func TestMaliciousTarTraversalDetection(t *testing.T) {
 		t.Fatal("expected RestoreArchive to reject traversal attack, got nil")
 	}
 }
+
+func TestCreateMailboxBackup(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-mailbox-backup-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	backupRoot := filepath.Join(tempDir, "backups")
+	mailRoot := filepath.Join(tempDir, "vhosts")
+	mailboxPath := filepath.Join(mailRoot, "example.com", "info", "cur")
+	if err := os.MkdirAll(mailboxPath, 0700); err != nil {
+		t.Fatalf("failed to create maildir: %v", err)
+	}
+	_ = os.WriteFile(filepath.Join(mailboxPath, "1600000000.M123P1Q1.hostvra:2,S"), []byte("Subject: Hi\n\nHello!"), 0600)
+
+	mgr, err := NewManager(backupRoot)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	meta, err := mgr.CreateMailboxBackup("example.com", "info", mailRoot)
+	if err != nil {
+		t.Fatalf("CreateMailboxBackup failed: %v", err)
+	}
+	if meta.Type != TypeMailbox || meta.Status != "completed" {
+		t.Errorf("expected completed mailbox backup, got: %+v", meta)
+	}
+}

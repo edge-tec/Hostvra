@@ -69,6 +69,44 @@ type Store interface {
 	CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error
 	GetSSLByWebsiteID(ctx context.Context, websiteID uuid.UUID) (*SSLCertificate, error)
 
+	// Email Domains
+	CreateEmailDomain(ctx context.Context, domain *EmailDomain) error
+	GetEmailDomainByID(ctx context.Context, id uuid.UUID) (*EmailDomain, error)
+	GetEmailDomainByName(ctx context.Context, serverID uuid.UUID, domainName string) (*EmailDomain, error)
+	ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UUID) ([]*EmailDomain, error)
+	ListEmailDomainsByServer(ctx context.Context, serverID uuid.UUID) ([]*EmailDomain, error)
+	UpdateEmailDomain(ctx context.Context, domain *EmailDomain) error
+	DeleteEmailDomain(ctx context.Context, id uuid.UUID) error
+
+	// Email Mailboxes
+	CreateEmailMailbox(ctx context.Context, mb *EmailMailbox) error
+	GetEmailMailboxByID(ctx context.Context, id uuid.UUID) (*EmailMailbox, error)
+	GetEmailMailboxByEmail(ctx context.Context, email string) (*EmailMailbox, error)
+	ListEmailMailboxesByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailMailbox, error)
+	ListEmailMailboxesByServer(ctx context.Context, serverID uuid.UUID) ([]*EmailMailbox, error)
+	UpdateEmailMailbox(ctx context.Context, mb *EmailMailbox) error
+	UpdateEmailMailboxPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+	DeleteEmailMailbox(ctx context.Context, id uuid.UUID) error
+
+	// Email Aliases & Forwarders
+	CreateEmailAlias(ctx context.Context, alias *EmailAlias) error
+	ListEmailAliasesByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailAlias, error)
+	DeleteEmailAlias(ctx context.Context, id uuid.UUID) error
+	CreateEmailForwarder(ctx context.Context, fwd *EmailForwarder) error
+	ListEmailForwardersByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailForwarder, error)
+	DeleteEmailForwarder(ctx context.Context, id uuid.UUID) error
+
+	// Email Autoresponders & DKIM
+	SetEmailAutoresponder(ctx context.Context, ar *EmailAutoresponder) error
+	GetEmailAutoresponderByMailbox(ctx context.Context, mailboxID uuid.UUID) (*EmailAutoresponder, error)
+	DeleteEmailAutoresponder(ctx context.Context, mailboxID uuid.UUID) error
+	SaveEmailDKIMKey(ctx context.Context, dkim *EmailDKIMKey) error
+	GetEmailDKIMKeyByDomain(ctx context.Context, domainID uuid.UUID) (*EmailDKIMKey, error)
+
+	// Email Delivery Logs
+	RecordEmailDeliveryLog(ctx context.Context, log *EmailDeliveryLog) error
+	ListEmailDeliveryLogs(ctx context.Context, serverID uuid.UUID, limit int) ([]*EmailDeliveryLog, error)
+
 	// Close
 	Close() error
 }
@@ -77,35 +115,49 @@ type Store interface {
 // IN-MEMORY STORE (Production-grade fallback & unit test engine)
 // ============================================================================
 type MemoryStore struct {
-	mu            sync.RWMutex
-	orgs          map[uuid.UUID]*Organization
-	orgsBySlug    map[string]uuid.UUID
-	users         map[uuid.UUID]*User
-	usersByEmail  map[string]uuid.UUID
-	servers       map[uuid.UUID]*Server
-	tokens        map[string]*ServerEnrollmentToken
-	metrics       map[uuid.UUID][]*ServerMetric
-	auditLogs     []*AuditLog
-	websites      map[uuid.UUID]*Website
-	databases     map[uuid.UUID]*Database
-	databaseUsers map[uuid.UUID]*DatabaseUser
-	sslCerts      map[uuid.UUID]*SSLCertificate
+	mu                  sync.RWMutex
+	orgs                map[uuid.UUID]*Organization
+	orgsBySlug          map[string]uuid.UUID
+	users               map[uuid.UUID]*User
+	usersByEmail        map[string]uuid.UUID
+	servers             map[uuid.UUID]*Server
+	tokens              map[string]*ServerEnrollmentToken
+	metrics             map[uuid.UUID][]*ServerMetric
+	auditLogs           []*AuditLog
+	websites            map[uuid.UUID]*Website
+	databases           map[uuid.UUID]*Database
+	databaseUsers       map[uuid.UUID]*DatabaseUser
+	sslCerts            map[uuid.UUID]*SSLCertificate
+	emailDomains        map[uuid.UUID]*EmailDomain
+	emailMailboxes      map[uuid.UUID]*EmailMailbox
+	emailAliases        map[uuid.UUID]*EmailAlias
+	emailForwarders     map[uuid.UUID]*EmailForwarder
+	emailAutoresponders map[uuid.UUID]*EmailAutoresponder
+	emailDKIMKeys       map[uuid.UUID]*EmailDKIMKey
+	emailDeliveryLogs   []*EmailDeliveryLog
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		orgs:          make(map[uuid.UUID]*Organization),
-		orgsBySlug:    make(map[string]uuid.UUID),
-		users:         make(map[uuid.UUID]*User),
-		usersByEmail:  make(map[string]uuid.UUID),
-		servers:       make(map[uuid.UUID]*Server),
-		tokens:        make(map[string]*ServerEnrollmentToken),
-		metrics:       make(map[uuid.UUID][]*ServerMetric),
-		auditLogs:     make([]*AuditLog, 0),
-		websites:      make(map[uuid.UUID]*Website),
-		databases:     make(map[uuid.UUID]*Database),
-		databaseUsers: make(map[uuid.UUID]*DatabaseUser),
-		sslCerts:      make(map[uuid.UUID]*SSLCertificate),
+		orgs:                make(map[uuid.UUID]*Organization),
+		orgsBySlug:          make(map[string]uuid.UUID),
+		users:               make(map[uuid.UUID]*User),
+		usersByEmail:        make(map[string]uuid.UUID),
+		servers:             make(map[uuid.UUID]*Server),
+		tokens:              make(map[string]*ServerEnrollmentToken),
+		metrics:             make(map[uuid.UUID][]*ServerMetric),
+		auditLogs:           make([]*AuditLog, 0),
+		websites:            make(map[uuid.UUID]*Website),
+		databases:           make(map[uuid.UUID]*Database),
+		databaseUsers:       make(map[uuid.UUID]*DatabaseUser),
+		sslCerts:            make(map[uuid.UUID]*SSLCertificate),
+		emailDomains:        make(map[uuid.UUID]*EmailDomain),
+		emailMailboxes:      make(map[uuid.UUID]*EmailMailbox),
+		emailAliases:        make(map[uuid.UUID]*EmailAlias),
+		emailForwarders:     make(map[uuid.UUID]*EmailForwarder),
+		emailAutoresponders: make(map[uuid.UUID]*EmailAutoresponder),
+		emailDKIMKeys:       make(map[uuid.UUID]*EmailDKIMKey),
+		emailDeliveryLogs:   make([]*EmailDeliveryLog, 0),
 	}
 }
 
