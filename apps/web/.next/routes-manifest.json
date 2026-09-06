@@ -45,6 +45,12 @@
       "namedRegex": "^/dashboard(?:/)?$"
     },
     {
+      "page": "/databases",
+      "regex": "^/databases(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/databases(?:/)?$"
+    },
+    {
       "page": "/login",
       "regex": "^/login(?:/)?$",
       "routeKeys": {},
@@ -67,6 +73,18 @@
       "regex": "^/settings(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/settings(?:/)?$"
+    },
+    {
+      "page": "/ssl",
+      "regex": "^/ssl(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/ssl(?:/)?$"
+    },
+    {
+      "page": "/websites",
+      "regex": "^/websites(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/websites(?:/)?$"
     }
   ],
   "dataRoutes": [],

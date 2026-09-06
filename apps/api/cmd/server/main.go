@@ -62,6 +62,8 @@ func main() {
 	authHandler := handlers.NewAuthHandler(cfg, dataStore, auditLogger)
 	serverHandler := handlers.NewServerHandler(cfg, dataStore, auditLogger)
 	agentHandler := handlers.NewAgentHandler(cfg, dataStore, auditLogger)
+	websiteHandler := handlers.NewWebsiteHandler(cfg, dataStore, auditLogger)
+	databaseHandler := handlers.NewDatabaseHandler(cfg, dataStore, auditLogger)
 	auditHandler := handlers.NewAuditHandler(dataStore)
 	healthHandler := handlers.NewHealthHandler(AppVersion)
 
@@ -120,6 +122,24 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/enrollment-tokens", serverHandler.CreateEnrollmentToken)
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}", serverHandler.GetServer)
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/metrics", serverHandler.GetServerMetrics)
+			})
+
+			// Websites & Vhosts
+			r.Route("/websites", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", websiteHandler.List)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesCreate)).Post("/", websiteHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}", websiteHandler.Get)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/status", websiteHandler.UpdateStatus)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesDelete)).Delete("/{id}", websiteHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl", websiteHandler.IssueSSL)
+			})
+
+			// Databases & DB Users
+			r.Route("/databases", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/", databaseHandler.List)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/", databaseHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesDelete)).Delete("/{id}", databaseHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/users", databaseHandler.CreateUser)
 			})
 
 			// Audit Logs

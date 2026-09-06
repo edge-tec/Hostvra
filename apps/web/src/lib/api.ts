@@ -66,6 +66,55 @@ export interface EnrollmentTokenResponse {
   install_command: string;
 }
 
+export interface Website {
+  id: string;
+  server_id: string;
+  organization_id: string;
+  primary_domain: string;
+  document_root: string;
+  system_user: string;
+  php_version?: string;
+  app_type: 'php' | 'static' | 'proxy';
+  proxy_port?: number;
+  status: 'active' | 'suspended' | 'disabled';
+  ssl_enabled: boolean;
+  created_at: string;
+}
+
+export interface Database {
+  id: string;
+  server_id: string;
+  db_type: 'mysql' | 'mariadb' | 'postgresql';
+  name: string;
+  character_set: string;
+  collation: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface DatabaseUser {
+  id: string;
+  server_id: string;
+  db_type: 'mysql' | 'mariadb' | 'postgresql';
+  username: string;
+  host_allow: string;
+  created_at: string;
+}
+
+export interface SSLCertificate {
+  id: string;
+  website_id: string;
+  domain_list: string[];
+  issuer: string;
+  cert_path: string;
+  key_path: string;
+  issued_at: string;
+  expires_at: string;
+  auto_renew: boolean;
+  status: 'valid' | 'expired' | 'renewing' | 'failed';
+  created_at: string;
+}
+
 export interface AuditLog {
   id: string;
   action: string;

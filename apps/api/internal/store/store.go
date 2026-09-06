@@ -50,6 +50,25 @@ type Store interface {
 	CreateAuditLog(ctx context.Context, log *AuditLog) error
 	ListAuditLogsByOrg(ctx context.Context, orgID uuid.UUID, limit int) ([]*AuditLog, error)
 
+	// Websites
+	CreateWebsite(ctx context.Context, site *Website) error
+	GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Website, error)
+	ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Website, error)
+	UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error
+	DeleteWebsite(ctx context.Context, id uuid.UUID) error
+	UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslEnabled bool) error
+
+	// Databases
+	CreateDatabase(ctx context.Context, db *Database) error
+	ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error)
+	DeleteDatabase(ctx context.Context, id uuid.UUID) error
+	CreateDatabaseUser(ctx context.Context, user *DatabaseUser) error
+	ListDatabaseUsersByServer(ctx context.Context, serverID uuid.UUID) ([]*DatabaseUser, error)
+
+	// SSL
+	CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error
+	GetSSLByWebsiteID(ctx context.Context, websiteID uuid.UUID) (*SSLCertificate, error)
+
 	// Close
 	Close() error
 }
@@ -58,27 +77,35 @@ type Store interface {
 // IN-MEMORY STORE (Production-grade fallback & unit test engine)
 // ============================================================================
 type MemoryStore struct {
-	mu           sync.RWMutex
-	orgs         map[uuid.UUID]*Organization
-	orgsBySlug   map[string]uuid.UUID
-	users        map[uuid.UUID]*User
-	usersByEmail map[string]uuid.UUID
-	servers      map[uuid.UUID]*Server
-	tokens       map[string]*ServerEnrollmentToken
-	metrics      map[uuid.UUID][]*ServerMetric
-	auditLogs    []*AuditLog
+	mu            sync.RWMutex
+	orgs          map[uuid.UUID]*Organization
+	orgsBySlug    map[string]uuid.UUID
+	users         map[uuid.UUID]*User
+	usersByEmail  map[string]uuid.UUID
+	servers       map[uuid.UUID]*Server
+	tokens        map[string]*ServerEnrollmentToken
+	metrics       map[uuid.UUID][]*ServerMetric
+	auditLogs     []*AuditLog
+	websites      map[uuid.UUID]*Website
+	databases     map[uuid.UUID]*Database
+	databaseUsers map[uuid.UUID]*DatabaseUser
+	sslCerts      map[uuid.UUID]*SSLCertificate
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		orgs:         make(map[uuid.UUID]*Organization),
-		orgsBySlug:   make(map[string]uuid.UUID),
-		users:        make(map[uuid.UUID]*User),
-		usersByEmail: make(map[string]uuid.UUID),
-		servers:      make(map[uuid.UUID]*Server),
-		tokens:       make(map[string]*ServerEnrollmentToken),
-		metrics:      make(map[uuid.UUID][]*ServerMetric),
-		auditLogs:    make([]*AuditLog, 0),
+		orgs:          make(map[uuid.UUID]*Organization),
+		orgsBySlug:    make(map[string]uuid.UUID),
+		users:         make(map[uuid.UUID]*User),
+		usersByEmail:  make(map[string]uuid.UUID),
+		servers:       make(map[uuid.UUID]*Server),
+		tokens:        make(map[string]*ServerEnrollmentToken),
+		metrics:       make(map[uuid.UUID][]*ServerMetric),
+		auditLogs:     make([]*AuditLog, 0),
+		websites:      make(map[uuid.UUID]*Website),
+		databases:     make(map[uuid.UUID]*Database),
+		databaseUsers: make(map[uuid.UUID]*DatabaseUser),
+		sslCerts:      make(map[uuid.UUID]*SSLCertificate),
 	}
 }
 

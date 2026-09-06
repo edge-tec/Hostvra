@@ -1,10 +1,13 @@
 {
   "/_not-found/page": "/_not-found",
-  "/audit-logs/page": "/audit-logs",
   "/dashboard/page": "/dashboard",
-  "/login/page": "/login",
+  "/audit-logs/page": "/audit-logs",
+  "/databases/page": "/databases",
   "/page": "/",
-  "/servers/page": "/servers",
+  "/login/page": "/login",
   "/register/page": "/register",
-  "/settings/page": "/settings"
+  "/servers/page": "/servers",
+  "/settings/page": "/settings",
+  "/websites/page": "/websites",
+  "/ssl/page": "/ssl"
 }
