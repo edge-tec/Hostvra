@@ -1,0 +1,31 @@
+[Unit]
+Description=Hostvra Core Control Plane API
+Documentation=https://docs.hostvra.com/api
+After=network.target network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hostvra
+Group=hostvra
+WorkingDirectory=/var/lib/hostvra
+EnvironmentFile=-/etc/hostvra/api.env
+ExecStart=/usr/local/bin/hostvra-api
+Restart=always
+RestartSec=3s
+LimitNOFILE=65536
+KillMode=process
+TimeoutStopSec=15
+
+# Security Sandboxing
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/hostvra /var/log/hostvra
+
+[Install]
+WantedBy=multi-user.target
