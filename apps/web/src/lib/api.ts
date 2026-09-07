@@ -672,7 +672,33 @@ export interface WAFAttackEvent {
   matched_data: string;
 }
 
+export interface OneClickAppTemplate {
+  id: string;
+  name: string;
+  version: string;
+  category: 'cms' | 'framework' | 'tool';
+  description: string;
+  icon: string;
+  min_php_version?: string;
+  requires_db: boolean;
+  recommended_ram: string;
+  admin_path: string;
+}
 
+export interface InstalledAppInfo {
+  app_id: string;
+  name: string;
+  version: string;
+  document_root: string;
+  installed_at: string;
+  db_name?: string;
+  db_user?: string;
+  admin_url: string;
+  config_file: string;
+  status: 'healthy' | 'warning' | 'unconfigured';
+}
 
-
-
+export interface WebsiteAppStatus {
+  has_app: boolean;
+  app?: InstalledAppInfo;
+}

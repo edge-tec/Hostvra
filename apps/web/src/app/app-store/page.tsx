@@ -30,14 +30,18 @@ import {
   Wrench,
   Bookmark,
   BookmarkCheck,
+  Zap,
+  Globe,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, AppPackage, AppInstallJob } from '@/lib/api';
+import { apiFetch, AppPackage, AppInstallJob, Website } from '@/lib/api';
 import { AppControlModal } from '@/components/AppControlModal';
+import { OneClickAppModal } from '@/components/OneClickAppModal';
 import { getPinnedAppIds, togglePinApp } from '@/lib/appstore-utils';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Software', icon: Boxes },
+  { id: 'web_apps', label: '1-Click CMS & Apps', icon: Sparkles },
   { id: 'web_server', label: 'Web Servers', icon: Server },
   { id: 'runtime', label: 'PHP & Runtimes', icon: Code2 },
   { id: 'database', label: 'Databases & Cache', icon: Database },
@@ -61,15 +65,24 @@ export default function AppStorePage() {
   const [controlModalOpen, setControlModalOpen] = useState(false);
   const [pinnedAppIds, setPinnedAppIds] = useState<string[]>([]);
 
+  const [websites, setWebsites] = useState<Website[]>([]);
+  const [deploySite, setDeploySite] = useState<Website | null>(null);
+  const [sitePickerApp, setSitePickerApp] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Load applications
+  // Load applications and websites
   const loadApps = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<AppPackage[]>('/api/v1/apps');
-      if (res.success && res.data) {
-        setApps(res.data);
+      const [appRes, siteRes] = await Promise.all([
+        apiFetch<AppPackage[]>('/api/v1/apps'),
+        apiFetch<Website[]>('/api/v1/websites'),
+      ]);
+      if (appRes.success && appRes.data) {
+        setApps(appRes.data);
+      }
+      if (siteRes.success && siteRes.data) {
+        setWebsites(siteRes.data);
       }
     } finally {
       setLoading(false);
@@ -296,8 +309,111 @@ export default function AppStorePage() {
           </div>
         </div>
 
-        {/* Software Table View (aaPanel Style) */}
-        {viewMode === 'table' ? (
+        {/* Software Views */}
+        {activeCategory === 'web_apps' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[
+              {
+                id: 'wordpress',
+                name: 'WordPress',
+                version: '6.7.x',
+                category: 'Content Management System',
+                desc: 'World\'s #1 open-source CMS for blogs, e-commerce (WooCommerce), and enterprise portals. Auto-configures MySQL, wp-config.php and security salts.',
+                icon: Globe,
+                badge: 'v6.7 LTS',
+                specs: 'PHP 8.1+ • MySQL 5.7+ • 512MB RAM',
+              },
+              {
+                id: 'laravel',
+                name: 'Laravel',
+                version: '11.x',
+                category: 'PHP MVC Framework',
+                desc: 'Full-stack enterprise framework with queue workers, migration scaffolding, artisan CLI, and environment key generation.',
+                icon: Code2,
+                badge: 'v11.x',
+                specs: 'PHP 8.2+ • MySQL / SQLite • 1GB RAM',
+              },
+              {
+                id: 'nextjs',
+                name: 'Next.js Starter',
+                version: '15.x',
+                category: 'Full-Stack React Framework',
+                desc: 'High-performance React application framework with hybrid static & server rendering and PM2 ecosystem process configuration.',
+                icon: Cpu,
+                badge: 'v15.1',
+                specs: 'Node.js 18+ • PM2 • 1GB RAM',
+              },
+              {
+                id: 'drupal',
+                name: 'Drupal',
+                version: '10.x',
+                category: 'Enterprise CMS',
+                desc: 'High-security modular digital experience platform with robust content modeling, multilingual support, and taxonomy workflows.',
+                icon: Layers,
+                badge: 'v10.3',
+                specs: 'PHP 8.2+ • MySQL 8.0+ • 1GB RAM',
+              },
+              {
+                id: 'phpmyadmin',
+                name: 'phpMyAdmin',
+                version: '5.2.x',
+                category: 'Database Administration',
+                desc: 'Web-based graphical user interface for managing MySQL and MariaDB databases, tables, columns, indexes, and queries.',
+                icon: Database,
+                badge: 'v5.2.1',
+                specs: 'PHP 8.0+ • MySQL / MariaDB',
+              },
+            ].map((app) => {
+              const Icon = app.icon;
+              return (
+                <div
+                  key={app.id}
+                  className="p-5 rounded-2xl bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 shadow-xs hover:border-purple-500/40 dark:hover:border-purple-500/40 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                        {app.badge}
+                      </span>
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-950 dark:text-white">{app.name}</h3>
+                    <div className="text-[11px] font-semibold text-purple-600 dark:text-purple-400 mt-0.5 mb-2">{app.category}</div>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{app.desc}</p>
+                  </div>
+
+                  <div className="mt-5 pt-3 border-t border-slate-100 dark:border-surface-800 flex items-center justify-between gap-2">
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono truncate">
+                      {app.specs}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (websites.length === 0) {
+                          alert('Please add a website under Websites first to deploy applications.');
+                          return;
+                        }
+                        if (websites.length === 1) {
+                          setDeploySite(websites[0]);
+                          setSitePickerApp(app.id);
+                        } else {
+                          setSitePickerApp(app.id);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs transition-all flex-shrink-0"
+                    >
+                      <Zap className="w-3 h-3" />
+                      <span>Deploy App</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : viewMode === 'table' ? (
           <div className="rounded-2xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -692,6 +808,66 @@ export default function AppStorePage() {
           onServiceControl={handleServiceControl}
           isActing={actionLoadingId === selectedControlApp?.id}
         />
+
+        {/* Site Picker Modal if multiple websites exist */}
+        {sitePickerApp && !deploySite && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-150">
+            <div className="w-full max-w-md rounded-2xl bg-white dark:bg-[#12161f] border border-slate-200 dark:border-slate-800 shadow-2xl p-6">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  <h3 className="text-base font-bold text-slate-950 dark:text-white">
+                    Select Target Website
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSitePickerApp(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 mb-4">
+                Choose the domain or website where you want to deploy this application:
+              </p>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {websites.map((site) => (
+                  <button
+                    key={site.id}
+                    onClick={() => setDeploySite(site)}
+                    className="w-full text-left p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-purple-500 hover:bg-purple-500/5 transition-all flex items-center justify-between group"
+                  >
+                    <div>
+                      <div className="text-xs font-bold text-slate-950 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400">
+                        {site.primary_domain}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        {site.document_root} • {site.php_version || 'Node.js'}
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-purple-500 transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 1-Click Application Installer Modal */}
+        {deploySite && (
+          <OneClickAppModal
+            isOpen={!!deploySite}
+            onClose={() => {
+              setDeploySite(null);
+              setSitePickerApp(null);
+            }}
+            website={deploySite}
+            initialAppId={sitePickerApp || undefined}
+            onSuccess={() => {
+              loadApps();
+            }}
+          />
+        )}
       </div>
     </DashboardShell>
   );

@@ -24,9 +24,11 @@ import {
   Shield,
   CheckCircle2,
   AlertTriangle,
+  Zap,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
+import { OneClickAppModal } from '@/components/OneClickAppModal';
 
 export default function WebsitesPage() {
   const [websites, setWebsites] = useState<Website[]>([]);
@@ -46,6 +48,7 @@ export default function WebsitesPage() {
 
   // User Isolation & cgroups Modal State
   const [isolationModalSite, setIsolationModalSite] = useState<Website | null>(null);
+  const [appModalSite, setAppModalSite] = useState<Website | null>(null);
   const [isolationInfo, setIsolationInfo] = useState<UserIsolationInfo | null>(null);
   const [isolationLoading, setIsolationLoading] = useState(false);
   const [isolationSaving, setIsolationSaving] = useState(false);
@@ -399,6 +402,16 @@ export default function WebsitesPage() {
 
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {/* 1-Click App Installer Button */}
+                          <button
+                            onClick={() => setAppModalSite(site)}
+                            title="1-Click App Installer (WordPress, Laravel, Next.js)"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/20 text-xs font-semibold transition-colors"
+                          >
+                            <Zap className="w-3.5 h-3.5" />
+                            <span className="capitalize">{site.app_type && site.app_type !== 'static' && site.app_type !== 'php' ? site.app_type : 'Deploy App'}</span>
+                          </button>
+
                           {/* Resource Limits & Isolation (cgroups) Button */}
                           <button
                             onClick={() => openIsolationModal(site)}
@@ -846,6 +859,18 @@ export default function WebsitesPage() {
               </form>
             </div>
           </div>
+        )}
+
+        {/* 1-Click App Installer Modal */}
+        {appModalSite && (
+          <OneClickAppModal
+            website={appModalSite}
+            isOpen={!!appModalSite}
+            onClose={() => setAppModalSite(null)}
+            onSuccess={() => {
+              fetchData();
+            }}
+          />
         )}
       </div>
     </DashboardShell>

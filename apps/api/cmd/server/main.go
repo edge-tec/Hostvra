@@ -100,6 +100,7 @@ func main() {
 	ftpHandler := handlers.NewFTPHandler(cfg, dataStore, auditLogger)
 	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
 	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
+	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -251,6 +252,16 @@ func main() {
 				// Per-Website User Isolation & cgroups v2
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/isolation", websiteHandler.GetIsolation)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/isolation", websiteHandler.UpdateIsolation)
+
+				// Per-Website 1-Click Application Installer (WordPress, Laravel, Next.js, Drupal, phpMyAdmin)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/app", installerHandler.GetWebsiteApp)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/app/install", installerHandler.InstallWebsiteApp)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/app/uninstall", installerHandler.UninstallWebsiteApp)
+			})
+
+			// 1-Click Application Installer Catalog
+			r.Route("/installer", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/templates", installerHandler.ListTemplates)
 			})
 
 			// Databases & DB Users
