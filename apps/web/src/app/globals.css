@@ -1,42 +1,51 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 17, 24, 39;
-  --bg-app: #F8FAFC;
+  --foreground-rgb: 23, 32, 51;
+  --bg-app: #F5F7FA;
   --bg-card: #FFFFFF;
-  --bg-sidebar: #FFFFFF;
+  --bg-sidebar: #0F172A;
+  --bg-sidebar-secondary: #162033;
+  --sidebar-text: #CBD5E1;
   --bg-header: #FFFFFF;
-  --text-primary: #111827;
-  --text-secondary: #4B5563;
-  --text-muted: #6B7280;
-  --border-default: #E5E7EB;
-  --border-hover: #D1D5DB;
+  --primary-blue: #2563EB;
+  --primary-blue-hover: #1D4ED8;
+  --primary-blue-soft: #EFF6FF;
+  --text-primary: #172033;
+  --text-secondary: #64748B;
+  --text-muted: #94A3B8;
+  --border-default: #E2E8F0;
+  --border-hover: #CBD5E1;
   --color-success: #16A34A;
-  --color-warning: #EA580C;
+  --color-success-bg: #F0FDF4;
+  --color-warning: #D97706;
+  --color-warning-bg: #FFFBEB;
   --color-danger: #DC2626;
-  --color-info: #2563EB;
+  --color-danger-bg: #FEF2F2;
+  --color-info: #0284C7;
+  --color-info-bg: #F0F9FF;
 }
 
 html.dark {
   --foreground-rgb: 241, 245, 249;
-  --bg-app: #090d16;
+  --bg-app: #0F172A;
   color-scheme: dark;
 }
 
 html:not(.dark) {
-  --foreground-rgb: 17, 24, 39;
-  --bg-app: #F8FAFC;
+  --foreground-rgb: 23, 32, 51;
+  --bg-app: #F5F7FA;
   color-scheme: light;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: var(--bg-app);
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #172033;
+  background: #F5F7FA;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.01em;
@@ -47,57 +56,201 @@ code, pre, kbd, samp {
 }
 
 /* ==========================================================================
-   HOSTVRA UNIFIED DESIGN SYSTEM (PREMIUM LIGHT MODE ENGINE)
-   Guarantees clean white surfaces, #F8FAFC background, #111827 primary text,
-   #E5E7EB borders, and accessible high-contrast buttons, tables, and inputs.
+   HOSTVRA SOFT PREMIUM ENTERPRISE SAAS DESIGN SYSTEM
+   - Clean white workspace cards (#FFFFFF)
+   - Subtle workspace background (#F5F7FA)
+   - Deep navy navigation (#0F172A)
+   - Subtle blue accents (#2563EB)
+   - Thin borders (#E2E8F0)
+   - WCAG AAA high-contrast text (#172033, #64748B, #94A3B8)
    ========================================================================== */
 
-/* 1. Light Mode Core Backgrounds - 100% Clean, Eye-Friendly Surfaces */
+/* 1. Deep Navy Sidebar Invariant (#0F172A) */
+aside,
+.hostvra-sidebar,
+aside[data-component="sidebar"] {
+  background-color: #0F172A !important;
+  border-right: 1px solid #162033 !important;
+  color: #CBD5E1 !important;
+}
+
+aside .sidebar-nav-item,
+aside a {
+  color: #CBD5E1 !important;
+}
+
+aside a:hover {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  color: #FFFFFF !important;
+}
+
+aside a.active,
+aside a[data-active="true"] {
+  background-color: #2563EB !important;
+  color: #FFFFFF !important;
+}
+
+/* 2. Light Mode Content Workspace: Clean White & Eye-Friendly Slate Surfaces */
 html:not(.dark) body {
-  background-color: #F8FAFC !important;
-  color: #0F172A !important;
+  background-color: #F5F7FA !important;
+  color: #172033 !important;
 }
 
-html:not(.dark) .bg-\[\#090d16\],
-html:not(.dark) .bg-\[\#0b0f19\],
-html:not(.dark) .bg-\[\#121824\],
-html:not(.dark) .bg-\[\#0e1420\],
-html:not(.dark) .bg-\[\#080b10\],
-html:not(.dark) .bg-\[\#10141d\] {
-  background-color: #FFFFFF !important;
+html:not(.dark) main,
+html:not(.dark) .workspace-container {
+  background-color: #F5F7FA !important;
 }
 
-html:not(.dark) .bg-surface-950,
-html:not(.dark) .bg-surface-900,
-html:not(.dark) .bg-surface-850,
-html:not(.dark) [class*="bg-surface-950"],
-html:not(.dark) [class*="bg-surface-900"],
-html:not(.dark) [class*="from-surface-900"],
-html:not(.dark) [class*="from-surface-950"],
-html:not(.dark) [class*="from-brand-950"] {
+/* Card surfaces inside main workspace */
+html:not(.dark) main .bg-surface-950,
+html:not(.dark) main .bg-surface-900,
+html:not(.dark) main .bg-surface-850,
+html:not(.dark) main [class*="bg-surface-950"],
+html:not(.dark) main [class*="bg-surface-900"],
+html:not(.dark) main [class*="from-surface-900"],
+html:not(.dark) main [class*="from-surface-950"],
+html:not(.dark) main .bg-\[\#090d16\],
+html:not(.dark) main .bg-\[\#0b0f19\],
+html:not(.dark) main .bg-\[\#121824\],
+html:not(.dark) main .bg-\[\#0e1420\],
+html:not(.dark) main .bg-\[\#10141d\] {
   background-color: #FFFFFF !important;
   background-image: none !important;
+  border-color: #E2E8F0 !important;
 }
 
-html:not(.dark) .bg-surface-800,
-html:not(.dark) .bg-surface-800\/20,
-html:not(.dark) .bg-surface-800\/30,
-html:not(.dark) .bg-surface-800\/40,
-html:not(.dark) .bg-surface-800\/50,
-html:not(.dark) .bg-surface-800\/60,
-html:not(.dark) .bg-surface-800\/70,
-html:not(.dark) .bg-surface-800\/80,
-html:not(.dark) .bg-slate-800\/30,
-html:not(.dark) .bg-slate-800\/40,
-html:not(.dark) .bg-slate-800\/50 {
+html:not(.dark) main .bg-surface-800,
+html:not(.dark) main .bg-surface-800\/20,
+html:not(.dark) main .bg-surface-800\/30,
+html:not(.dark) main .bg-surface-800\/40,
+html:not(.dark) main .bg-surface-800\/50,
+html:not(.dark) main .bg-surface-800\/60,
+html:not(.dark) main .bg-slate-800\/30,
+html:not(.dark) main .bg-slate-800\/40 {
   background-color: #F8FAFC !important;
 }
 
-/* Hover surfaces in Light Mode: always soft, clean and soothing to the eyes */
-html:not(.dark) .hover\:bg-surface-950:hover,
-html:not(.dark) .hover\:bg-surface-900:hover,
-html:not(.dark) .hover\:bg-surface-850:hover,
-html:not(.dark) .hover\:bg-surface-800:hover,
+/* 3. Reusable Enterprise Component Classes */
+.card-enterprise {
+  background-color: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+  padding: 24px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #2563EB;
+  color: #FFFFFF !important;
+  font-weight: 500;
+  font-size: 14px;
+  height: 38px;
+  padding: 0 1rem;
+  border-radius: 8px;
+  transition: all 150ms ease-in-out;
+  box-shadow: 0 1px 2px 0 rgba(37, 99, 235, 0.15);
+}
+.btn-primary:hover {
+  background-color: #1D4ED8;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #FFFFFF;
+  color: #2563EB !important;
+  border: 1px solid #2563EB;
+  font-weight: 500;
+  font-size: 13px;
+  height: 34px;
+  padding: 0 0.875rem;
+  border-radius: 8px;
+  transition: all 150ms ease-in-out;
+}
+.btn-secondary:hover {
+  background-color: #EFF6FF;
+}
+
+.btn-neutral {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #FFFFFF;
+  color: #172033 !important;
+  border: 1px solid #E2E8F0;
+  font-weight: 500;
+  font-size: 13px;
+  height: 34px;
+  padding: 0 0.875rem;
+  border-radius: 8px;
+  transition: all 150ms ease-in-out;
+}
+.btn-neutral:hover {
+  background-color: #F8FAFC;
+  border-color: #CBD5E1;
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #FEF2F2;
+  color: #DC2626 !important;
+  border: 1px solid #FECACA;
+  font-weight: 500;
+  font-size: 13px;
+  height: 34px;
+  padding: 0 0.875rem;
+  border-radius: 8px;
+  transition: all 150ms ease-in-out;
+}
+.btn-danger:hover {
+  background-color: #FEE2E2;
+}
+
+/* Status Badges with Soft Backgrounds and High Contrast */
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  line-height: 1;
+}
+.badge-status-active {
+  background-color: #F0FDF4 !important;
+  color: #16A34A !important;
+  border: 1px solid #DCFCE7 !important;
+}
+.badge-status-warning {
+  background-color: #FFFBEB !important;
+  color: #D97706 !important;
+  border: 1px solid #FEF3C7 !important;
+}
+.badge-status-danger {
+  background-color: #FEF2F2 !important;
+  color: #DC2626 !important;
+  border: 1px solid #FEE2E2 !important;
+}
+.badge-status-info {
+  background-color: #F0F9FF !important;
+  color: #0284C7 !important;
+  border: 1px solid #E0F2FE !important;
+}
 html:not(.dark) .hover\:bg-surface-750:hover,
 html:not(.dark) .hover\:bg-surface-700:hover,
 html:not(.dark) .hover\:bg-slate-900:hover,
