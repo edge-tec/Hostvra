@@ -613,6 +613,22 @@ func (r *Registry) registerDefaults() {
 			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && echo 'postfix postfix/main_mailer_type select Internet Site' | debconf-set-selections && echo 'postfix postfix/mailname string localhost' | debconf-set-selections && DEBIAN_FRONTEND=noninteractive apt-get install -y postfix mailutils && systemctl enable postfix && systemctl start postfix",
 			UninstallScript: "systemctl stop postfix && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y postfix mailutils",
 		},
+		{
+			ID:             "roundcube",
+			Name:           "Roundcube Webmail 1.6",
+			DisplayName:    "Roundcube Browser Webmail Client",
+			Version:        "1.6.x",
+			Category:       CategoryMail,
+			Description:    "Browser-based multilingual IMAP webmail client with rich text composer, address book, and message management.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "mail",
+			BinaryPath:     "/usr/share/roundcube",
+			ConfigPath:     "/etc/roundcube/config.inc.php",
+			DefaultPort:    80,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y roundcube roundcube-core roundcube-plugins roundcube-sqlite3 && mkdir -p /var/www/html && ln -sf /usr/share/roundcube /var/www/html/webmail 2>/dev/null || true",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y roundcube roundcube-core roundcube-plugins",
+		},
 	}
 
 	for _, p := range defaults {

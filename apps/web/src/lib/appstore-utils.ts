@@ -81,6 +81,26 @@ export function getAppLaunchTarget(app: AppPackage, hostname?: string): AppLaunc
         hasWebUi: true,
       };
 
+    case 'roundcube':
+      return {
+        type: 'route',
+        url: '/webmail',
+        terminalCmd: 'systemctl status dovecot postfix',
+        label: 'Webmail Suite',
+        badge: 'Webmail',
+        hasWebUi: true,
+      };
+
+    case 'postfix':
+      return {
+        type: 'route',
+        url: '/email',
+        terminalCmd: 'postfix status',
+        label: 'Email Hosting & Postfix',
+        badge: 'MTA Control',
+        hasWebUi: true,
+      };
+
     case 'netdata':
       return {
         type: 'external',

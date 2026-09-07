@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
+import { WebmailClient } from '@/components/WebmailClient';
 import {
   Mail,
   Plus,
@@ -135,7 +136,8 @@ const initialMailboxes: EmailMailbox[] = [
 ];
 
 export default function EmailHostingPage() {
-  const [activeTab, setActiveTab] = useState<'mailboxes' | 'domains' | 'health' | 'queue' | 'logs'>('mailboxes');
+  const [activeTab, setActiveTab] = useState<'mailboxes' | 'webmail' | 'domains' | 'health' | 'queue' | 'logs'>('mailboxes');
+  const [selectedWebmailEmail, setSelectedWebmailEmail] = useState<string | undefined>(undefined);
   const [domains, setDomains] = useState<EmailDomain[]>(initialDomains);
   const [mailboxes, setMailboxes] = useState<EmailMailbox[]>(initialMailboxes);
   const [search, setSearch] = useState('');
@@ -303,17 +305,15 @@ export default function EmailHostingPage() {
 
           <div className="flex items-center gap-3">
             <button
-              onClick={() =>
-                setWebmailModalMailbox(
-                  mailboxes[0] ||
-                    ({ email: 'webmail@hostvra.com', name: 'Webmail User' } as EmailMailbox)
-                )
-              }
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-800 text-slate-200 hover:bg-surface-700 border border-surface-700 transition shadow-sm"
-              title="Open Webmail Portal & Client Access"
+              onClick={() => {
+                setSelectedWebmailEmail(mailboxes[0]?.email);
+                setActiveTab('webmail');
+              }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-indigo-600/10 text-indigo-300 hover:bg-indigo-600/20 hover:text-white border border-indigo-500/30 transition shadow-sm"
+              title="Open Built-in Webmail Client"
             >
-              <ExternalLink className="w-4 h-4 text-indigo-400" />
-              <span>Webmail</span>
+              <Inbox className="w-4 h-4 text-indigo-400" />
+              <span>Webmail (Inbox)</span>
             </button>
             <button
               onClick={() => setShowAddDomainModal(true)}
@@ -389,9 +389,23 @@ export default function EmailHostingPage() {
               activeTab === 'mailboxes' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Inbox className="w-4 h-4" />
+            <Server className="w-4 h-4" />
             <span>Mailboxes ({mailboxes.length})</span>
             {activeTab === 'mailboxes' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('webmail')}
+            className={`pb-3 relative transition flex items-center gap-2 ${
+              activeTab === 'webmail' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Inbox className="w-4 h-4" />
+            <span>Webmail Suite</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              Live
+            </span>
+            {activeTab === 'webmail' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
@@ -509,6 +523,17 @@ export default function EmailHostingPage() {
                         </td>
                         <td className="px-6 py-4 text-right space-x-2">
                           <button
+                            onClick={() => {
+                              setSelectedWebmailEmail(mb.email);
+                              setActiveTab('webmail');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-300 hover:text-white text-xs font-semibold border border-indigo-500/30 transition shadow-sm"
+                            title={`Open Webmail Suite for ${mb.email}`}
+                          >
+                            <Inbox className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>Webmail</span>
+                          </button>
+                          <button
                             onClick={() => setShowPasswordModal(mb)}
                             className="p-1.5 rounded-lg hover:bg-surface-700 text-slate-400 hover:text-slate-200 transition"
                             title="Change Password"
@@ -536,6 +561,18 @@ export default function EmailHostingPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* Tab Content: Webmail Client */}
+        {activeTab === 'webmail' && (
+          <div className="space-y-4">
+            <WebmailClient
+              mailboxes={mailboxes}
+              initialSelectedEmail={selectedWebmailEmail}
+              onBackToEmailSettings={() => setActiveTab('mailboxes')}
+              showBackToSettings={true}
+            />
           </div>
         )}
 
