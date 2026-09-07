@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"hostvra/agent/pkg/files"
 	"hostvra/api/internal/audit"
@@ -315,16 +316,32 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out, err := os.OpenFile(validatedDest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	// Atomic upload: stream to a private temporary file in the same directory, then rename
+	tmpDest := fmt.Sprintf("%s.tmp.%d", validatedDest, time.Now().UnixNano())
+	out, err := os.OpenFile(tmpDest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "FILE_CREATE_ERROR", err.Error(), nil, "")
 		return
 	}
-	defer out.Close()
 
 	written, err := io.Copy(out, file)
+	out.Close()
 	if err != nil {
+		_ = os.Remove(tmpDest)
 		response.Error(w, http.StatusInternalServerError, "STREAM_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	// Re-verify destination before atomic rename to prevent TOCTOU race
+	if fi, err := os.Lstat(validatedDest); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		_ = os.Remove(tmpDest)
+		response.Error(w, http.StatusForbidden, "SYMLINK_OVERWRITE_FORBIDDEN", "Destination is an existing symlink", nil, "")
+		return
+	}
+
+	if err := os.Rename(tmpDest, validatedDest); err != nil {
+		_ = os.Remove(tmpDest)
+		response.Error(w, http.StatusInternalServerError, "FILE_FINALIZE_ERROR", err.Error(), nil, "")
 		return
 	}
 

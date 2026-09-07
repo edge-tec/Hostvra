@@ -10,6 +10,7 @@ import (
 
 	"hostvra/agent/pkg/docker"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -266,6 +267,14 @@ func (h *DockerHandler) RunContainer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if len(req.VolumeMounts) > 0 {
+		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+			response.Error(w, http.StatusForbidden, "VOLUME_MOUNT_FORBIDDEN", "Only administrators can mount host volumes into containers", nil, "")
+			return
+		}
+	}
+
 	containerID, err := h.dockerMgr.RunContainer(req)
 	if err != nil {
 		if errors.Is(err, docker.ErrDockerDaemonOffline) {
@@ -290,6 +299,12 @@ func (h *DockerHandler) RunContainer(w http.ResponseWriter, r *http.Request) {
 
 // PruneSystem cleans unused Docker data
 func (h *DockerHandler) PruneSystem(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+		response.Error(w, http.StatusForbidden, "PRUNE_FORBIDDEN", "Only administrators can prune the Docker system", nil, "")
+		return
+	}
+
 	out, err := h.dockerMgr.PruneSystem()
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "PRUNE_FAILED", err.Error(), nil, "")

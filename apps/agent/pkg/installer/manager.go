@@ -69,13 +69,14 @@ func NewInstallerManager(opts ...Option) *InstallerManager {
 			// Real MySQL / MariaDB provisioning when root access available
 			if _, err := exec.LookPath("mysql"); err == nil && os.Geteuid() == 0 {
 				query := fmt.Sprintf(
-					"CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; "+
-						"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
-						"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; "+
-						"FLUSH PRIVILEGES;",
+					"CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"+
+						"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\n"+
+						"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';\n"+
+						"FLUSH PRIVILEGES;\n",
 					dbName, dbUser, safePass, dbName, dbUser,
 				)
-				cmd := exec.CommandContext(ctx, "mysql", "-e", query)
+				cmd := exec.CommandContext(ctx, "mysql")
+				cmd.Stdin = strings.NewReader(query)
 				_ = cmd.Run()
 			}
 			return nil

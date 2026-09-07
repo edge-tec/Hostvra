@@ -202,5 +202,30 @@ func TestCronHandler_NonAdminForbiddenFromRunningRootJob(t *testing.T) {
 	if recRun.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for non-admin running root cron job, got %d: %s", recRun.Code, recRun.Body.String())
 	}
+
+	// Non-admin attempting to delete root job must be forbidden
+	rDel := chi.NewRouter()
+	rDel.Delete("/api/v1/cron/jobs/{id}", h.DeleteJob)
+	reqDel := httptest.NewRequest(http.MethodDelete, "/api/v1/cron/jobs/"+jobID, nil)
+	reqDel = reqDel.WithContext(context.WithValue(reqDel.Context(), auth.UserContextKey, devClaims))
+	recDel := httptest.NewRecorder()
+	rDel.ServeHTTP(recDel, reqDel)
+
+	if recDel.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for non-admin deleting root cron job, got %d: %s", recDel.Code, recDel.Body.String())
+	}
+
+	// Non-admin attempting to toggle root job must be forbidden
+	rToggle := chi.NewRouter()
+	rToggle.Post("/api/v1/cron/jobs/{id}/toggle", h.ToggleJob)
+	reqToggle := httptest.NewRequest(http.MethodPost, "/api/v1/cron/jobs/"+jobID+"/toggle", nil)
+	reqToggle = reqToggle.WithContext(context.WithValue(reqToggle.Context(), auth.UserContextKey, devClaims))
+	recToggle := httptest.NewRecorder()
+	rToggle.ServeHTTP(recToggle, reqToggle)
+
+	if recToggle.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for non-admin toggling root cron job, got %d: %s", recToggle.Code, recToggle.Body.String())
+	}
 }
+
 

@@ -1059,8 +1059,17 @@ func extractTarGz(archivePath, destDir string) error {
 			return err
 		}
 
-		// Security: Strict path traversal prevention
-		target := filepath.Join(cleanDest, header.Name)
+		// Security: Strict path traversal and symlink prevention
+		cleanName := filepath.Clean(strings.ReplaceAll(header.Name, "\\", "/"))
+		if strings.Contains(cleanName, "\x00") || strings.HasPrefix(cleanName, "/") {
+			return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
+		}
+
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			return fmt.Errorf("security error: backup contains forbidden symlink/link entry %s", header.Name)
+		}
+
+		target := filepath.Join(cleanDest, cleanName)
 		cleanTarget := filepath.Clean(target)
 		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
 			return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
@@ -1072,18 +1081,38 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 		case tar.TypeReg:
+			// Prevent overwriting through pre-existing symlinks
+			if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("security error: destination entry %s is an existing symlink", cleanTarget)
+			}
+
 			if err := os.MkdirAll(filepath.Dir(cleanTarget), 0755); err != nil {
 				return err
 			}
-			out, err := os.OpenFile(cleanTarget, os.O_CREATE|os.O_RDWR|os.O_TRUNC, header.FileInfo().Mode().Perm())
+
+			tmpTarget := fmt.Sprintf("%s.tmp.%d", cleanTarget, time.Now().UnixNano())
+			out, err := os.OpenFile(tmpTarget, os.O_CREATE|os.O_RDWR|os.O_EXCL, header.FileInfo().Mode().Perm())
 			if err != nil {
 				return err
 			}
+
 			if _, err := io.Copy(out, tr); err != nil {
 				out.Close()
+				_ = os.Remove(tmpTarget)
 				return err
 			}
 			out.Close()
+
+			// Re-verify destination before atomic rename to prevent TOCTOU race
+			if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(tmpTarget)
+				return fmt.Errorf("security error: destination entry %s is an existing symlink", cleanTarget)
+			}
+
+			if err := os.Rename(tmpTarget, cleanTarget); err != nil {
+				_ = os.Remove(tmpTarget)
+				return err
+			}
 		}
 	}
 	return nil

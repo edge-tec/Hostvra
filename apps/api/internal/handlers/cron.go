@@ -131,11 +131,30 @@ func (h *CronHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, created, nil)
 }
 
+func (h *CronHandler) isRootJob(jobID string) bool {
+	jobs, err := h.cronMgr.ListJobs()
+	if err != nil {
+		return false
+	}
+	for _, j := range jobs {
+		if j.ID == jobID {
+			return j.SystemUser == "root" || j.SystemUser == ""
+		}
+	}
+	return false
+}
+
 // UpdateJob modifies an existing cron job
 func (h *CronHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if jobID == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_ID", "Job ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
+		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can modify a root cron job", nil, "")
 		return
 	}
 
@@ -145,7 +164,6 @@ func (h *CronHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, _ := auth.GetClaims(r.Context())
 	sysUser := strings.TrimSpace(req.SystemUser)
 	if sysUser == "" || sysUser == "root" {
 		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
@@ -203,6 +221,12 @@ func (h *CronHandler) DeleteJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
+		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can delete a root cron job", nil, "")
+		return
+	}
+
 	err := h.cronMgr.DeleteJob(jobID)
 	if err != nil {
 		if errors.Is(err, cron.ErrJobNotFound) {
@@ -226,6 +250,12 @@ func (h *CronHandler) ToggleJob(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if jobID == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_ID", "Job ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
+		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can toggle a root cron job", nil, "")
 		return
 	}
 
@@ -254,20 +284,10 @@ func (h *CronHandler) RunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := h.cronMgr.ListJobs()
-	if err == nil {
-		for _, j := range jobs {
-			if j.ID == jobID {
-				if j.SystemUser == "root" || j.SystemUser == "" {
-					claims, _ := auth.GetClaims(r.Context())
-					if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-						response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can execute root cron jobs", nil, "")
-						return
-					}
-				}
-				break
-			}
-		}
+	claims, _ := auth.GetClaims(r.Context())
+	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
+		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can execute root cron jobs", nil, "")
+		return
 	}
 
 	res, err := h.cronMgr.ExecuteJobNow(jobID)

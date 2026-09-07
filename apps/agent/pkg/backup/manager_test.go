@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -271,14 +272,68 @@ func TestExtractTarGz_ZipSlipDefense(t *testing.T) {
 	_, _ = tw.Write(content)
 	_ = tw.Close()
 	_ = gw.Close()
-	_ = f.Close()
-
 	// Verify extract rejects traversal
 	err = extractTarGz(maliciousTar, extractDir)
 	if err == nil {
 		t.Fatalf("expected path traversal error, got nil")
 	}
 }
+
+func TestExtractTarGz_SymlinkAndOverwriteDefense(t *testing.T) {
+	tempDir := t.TempDir()
+	extractDir := filepath.Join(tempDir, "extract")
+	_ = os.MkdirAll(extractDir, 0755)
+
+	// 1. Verify archive with symlink entry is rejected
+	symlinkTar := filepath.Join(tempDir, "symlink.tar.gz")
+	f, err := os.Create(symlinkTar)
+	if err != nil {
+		t.Fatalf("create tar failed: %v", err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	_ = tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeSymlink,
+		Name:     "symlink_entry",
+		Linkname: "/etc/shadow",
+	})
+	_ = tw.Close()
+	_ = gw.Close()
+	_ = f.Close()
+
+	err = extractTarGz(symlinkTar, extractDir)
+	if err == nil || !strings.Contains(err.Error(), "forbidden symlink") {
+		t.Errorf("expected symlink archive entry to be rejected, got: %v", err)
+	}
+
+	// 2. Verify extraction over an existing symlink is blocked
+	regTar := filepath.Join(tempDir, "regular.tar.gz")
+	f2, _ := os.Create(regTar)
+	gw2 := gzip.NewWriter(f2)
+	tw2 := tar.NewWriter(gw2)
+	_ = tw2.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     "attack_link.txt",
+		Mode:     0644,
+		Size:     4,
+	})
+	_, _ = tw2.Write([]byte("evil"))
+	_ = tw2.Close()
+	_ = gw2.Close()
+	_ = f2.Close()
+
+	// Pre-create existing symlink at extractDir/attack_link.txt
+	outsideFile := filepath.Join(tempDir, "outside.txt")
+	_ = os.WriteFile(outsideFile, []byte("safe"), 0644)
+	_ = os.Symlink(outsideFile, filepath.Join(extractDir, "attack_link.txt"))
+
+	err = extractTarGz(regTar, extractDir)
+	if err == nil || !strings.Contains(err.Error(), "existing symlink") {
+		t.Errorf("expected extraction over existing symlink to be blocked, got: %v", err)
+	}
+}
+
 
 func TestS3SigV4Signing(t *testing.T) {
 	client := NewS3Client(S3Config{

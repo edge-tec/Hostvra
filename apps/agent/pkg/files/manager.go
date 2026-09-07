@@ -532,7 +532,9 @@ func extractZip(zipPath, destDir string) error {
 			return err
 		}
 
-		outFile, err := os.OpenFile(cleanTarget, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		// Atomic extraction: stream to temporary file in same directory, then rename
+		tmpTarget := fmt.Sprintf("%s.tmp.%d", cleanTarget, time.Now().UnixNano())
+		outFile, err := os.OpenFile(tmpTarget, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.Mode())
 		if err != nil {
 			return err
 		}
@@ -540,6 +542,7 @@ func extractZip(zipPath, destDir string) error {
 		rc, err := f.Open()
 		if err != nil {
 			outFile.Close()
+			_ = os.Remove(tmpTarget)
 			return err
 		}
 
@@ -548,6 +551,7 @@ func extractZip(zipPath, destDir string) error {
 		if remainingAllowance <= 0 {
 			rc.Close()
 			outFile.Close()
+			_ = os.Remove(tmpTarget)
 			return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
 		}
 
@@ -555,12 +559,25 @@ func extractZip(zipPath, destDir string) error {
 		rc.Close()
 		outFile.Close()
 		if err != nil {
+			_ = os.Remove(tmpTarget)
 			return err
 		}
 
 		totalExtractedBytes += written
 		if totalExtractedBytes > MaxArchiveDecompressedBytes {
+			_ = os.Remove(tmpTarget)
 			return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
+		}
+
+		// Re-verify destination before atomic rename to prevent TOCTOU race
+		if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			_ = os.Remove(tmpTarget)
+			return fmt.Errorf("%w: destination entry %s is an existing symlink", ErrSymlinkBlocked, cleanTarget)
+		}
+
+		if err := os.Rename(tmpTarget, cleanTarget); err != nil {
+			_ = os.Remove(tmpTarget)
+			return err
 		}
 	}
 	return nil
@@ -627,7 +644,10 @@ func extractTarGz(tarPath, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(cleanTarget), 0755); err != nil {
 				return err
 			}
-			outFile, err := os.OpenFile(cleanTarget, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
+
+			// Atomic extraction: stream to temporary file in same directory, then rename
+			tmpTarget := fmt.Sprintf("%s.tmp.%d", cleanTarget, time.Now().UnixNano())
+			outFile, err := os.OpenFile(tmpTarget, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.FileMode(header.Mode))
 			if err != nil {
 				return err
 			}
@@ -635,18 +655,32 @@ func extractTarGz(tarPath, destDir string) error {
 			remainingAllowance := MaxArchiveDecompressedBytes - totalExtractedBytes
 			if remainingAllowance <= 0 {
 				outFile.Close()
+				_ = os.Remove(tmpTarget)
 				return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
 			}
 
 			written, err := io.Copy(outFile, io.LimitReader(tr, remainingAllowance+1))
 			outFile.Close()
 			if err != nil {
+				_ = os.Remove(tmpTarget)
 				return err
 			}
 
 			totalExtractedBytes += written
 			if totalExtractedBytes > MaxArchiveDecompressedBytes {
+				_ = os.Remove(tmpTarget)
 				return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
+			}
+
+			// Re-verify destination before atomic rename to prevent TOCTOU race
+			if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(tmpTarget)
+				return fmt.Errorf("%w: destination entry %s is an existing symlink", ErrSymlinkBlocked, cleanTarget)
+			}
+
+			if err := os.Rename(tmpTarget, cleanTarget); err != nil {
+				_ = os.Remove(tmpTarget)
+				return err
 			}
 		}
 	}
