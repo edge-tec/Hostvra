@@ -5,7 +5,6 @@ import Link from 'next/link';
 import {
   X,
   ExternalLink,
-  Terminal,
   Play,
   Square,
   RotateCw,
@@ -29,13 +28,12 @@ import {
   Save,
   Plus,
   Trash2,
-  AlertTriangle,
   RefreshCw,
   CheckCircle2,
   FileText,
-  Clock,
-  Layers,
-  Sparkles,
+  Info,
+  ChevronRight,
+  Terminal,
 } from 'lucide-react';
 import { AppPackage } from '@/lib/api';
 import { getAppLaunchTarget, isAppPinned, togglePinApp } from '@/lib/appstore-utils';
@@ -78,7 +76,6 @@ export function AppControlModal({
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
   // Quick Options States
-  // Supervisor Workers
   const [supervisorWorkers, setSupervisorWorkers] = useState<SupervisorWorker[]>([
     {
       id: 'w1',
@@ -233,147 +230,182 @@ export function AppControlModal({
     setTimeout(() => setSaveSuccessMessage(null), 2500);
   };
 
-  const getCategoryIcon = (category: string) => {
+  const getCategoryTheme = (category: string) => {
     switch (category) {
       case 'process_manager':
-        return <Cpu className="w-5 h-5 text-indigo-400" />;
+        return {
+          icon: <Cpu className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />,
+          bg: 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 dark:border-indigo-800/60',
+        };
       case 'web_server':
-        return <Server className="w-5 h-5 text-emerald-400" />;
+        return {
+          icon: <Server className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />,
+          bg: 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800/60',
+        };
       case 'database':
-        return <Database className="w-5 h-5 text-amber-400" />;
+        return {
+          icon: <Database className="w-5 h-5 text-amber-500 dark:text-amber-400" />,
+          bg: 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 dark:border-amber-800/60',
+        };
       case 'runtime':
-        return <Code2 className="w-5 h-5 text-blue-400" />;
+        return {
+          icon: <Code2 className="w-5 h-5 text-blue-500 dark:text-blue-400" />,
+          bg: 'bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800/60',
+        };
       case 'security':
-        return <Shield className="w-5 h-5 text-purple-400" />;
+        return {
+          icon: <Shield className="w-5 h-5 text-purple-500 dark:text-purple-400" />,
+          bg: 'bg-purple-50 dark:bg-purple-950/50 border-purple-200 dark:border-purple-800/60',
+        };
       case 'monitoring':
-        return <Activity className="w-5 h-5 text-rose-400" />;
+        return {
+          icon: <Activity className="w-5 h-5 text-rose-500 dark:text-rose-400" />,
+          bg: 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800/60',
+        };
       case 'mail':
-        return <Mail className="w-5 h-5 text-sky-400" />;
+        return {
+          icon: <Mail className="w-5 h-5 text-sky-500 dark:text-sky-400" />,
+          bg: 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800/60',
+        };
       default:
-        return <Wrench className="w-5 h-5 text-teal-400" />;
+        return {
+          icon: <Wrench className="w-5 h-5 text-teal-500 dark:text-teal-400" />,
+          bg: 'bg-teal-50 dark:bg-teal-950/50 border-teal-200 dark:border-teal-800/60',
+        };
     }
   };
 
+  const theme = getCategoryTheme(app.category);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-surface-900 border border-surface-750 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] transition-all">
         {/* Header */}
-        <div className="p-5 border-b border-surface-800 flex items-start justify-between gap-4 bg-surface-950/40">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-surface-800 border border-surface-700 flex items-center justify-center shadow-inner flex-shrink-0">
-              {getCategoryIcon(app.category)}
+        <div className="p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/50 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border shadow-sm ${theme.bg}`}>
+              {theme.icon}
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white tracking-tight">{app.display_name}</h3>
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-surface-800 text-slate-300 border border-surface-700">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">{app.display_name}</h3>
+                <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 font-semibold">
                   v{app.version}
                 </span>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-xs text-slate-400 capitalize">{app.category.replace('_', ' ')}</span>
-                <span className="text-slate-600">•</span>
-                <span className="text-xs text-emerald-400 font-medium">{app.price}</span>
-                <span className="text-slate-600">•</span>
-                <span className="text-xs text-slate-400">{app.developer}</span>
+              <div className="flex items-center gap-2 mt-1 text-xs">
+                <span className="text-slate-600 dark:text-slate-400 capitalize font-medium">{app.category.replace('_', ' ')}</span>
+                <span className="text-slate-400 dark:text-slate-600">•</span>
+                <span className="text-emerald-700 dark:text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">{app.price}</span>
+                <span className="text-slate-400 dark:text-slate-600">•</span>
+                <span className="text-slate-600 dark:text-slate-400">{app.developer}</span>
               </div>
             </div>
           </div>
+
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 transition-colors"
+            className="p-2 rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors shadow-sm"
+            title="Close"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Modal Navigation Tabs */}
-        <div className="flex items-center px-5 border-b border-surface-800 bg-surface-900 text-xs font-semibold gap-1 overflow-x-auto select-none">
+        <div className="flex items-center px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold gap-2 overflow-x-auto select-none py-2">
           <button
             onClick={() => setActiveTab('overview')}
-            className={`py-3 px-3.5 relative transition-colors flex items-center gap-2 ${
-              activeTab === 'overview' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            className={`py-2 px-3.5 rounded-xl transition-all flex items-center gap-2 ${
+              activeTab === 'overview'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
             <span>Overview & Controls</span>
-            {activeTab === 'overview' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
             onClick={() => setActiveTab('config')}
-            className={`py-3 px-3.5 relative transition-colors flex items-center gap-2 ${
-              activeTab === 'config' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            className={`py-2 px-3.5 rounded-xl transition-all flex items-center gap-2 ${
+              activeTab === 'config'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <FileCode className="w-3.5 h-3.5" />
             <span>Config File Editor</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-400 font-mono">
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+              activeTab === 'config' ? 'bg-white/20 text-white' : 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400'
+            }`}>
               GUI
             </span>
-            {activeTab === 'config' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
             onClick={() => setActiveTab('options')}
-            className={`py-3 px-3.5 relative transition-colors flex items-center gap-2 ${
-              activeTab === 'options' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            className={`py-2 px-3.5 rounded-xl transition-all flex items-center gap-2 ${
+              activeTab === 'options'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
-            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
             <span>Quick GUI Options</span>
-            {activeTab === 'options' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
             onClick={() => setActiveTab('logs')}
-            className={`py-3 px-3.5 relative transition-colors flex items-center gap-2 ${
-              activeTab === 'logs' ? 'text-indigo-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            className={`py-2 px-3.5 rounded-xl transition-all flex items-center gap-2 ${
+              activeTab === 'logs'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
             <span>Logs & System</span>
-            {activeTab === 'logs' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
         </div>
 
         {/* Toast Alert */}
         {saveSuccessMessage && (
-          <div className="mx-5 mt-4 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 animate-fadeIn">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <div className="mx-6 mt-4 p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2.5 animate-fadeIn shadow-sm">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>{saveSuccessMessage}</span>
           </div>
         )}
 
         {/* TAB 1: Overview & Controls */}
         {activeTab === 'overview' && (
-          <div className="p-6 space-y-6 overflow-y-auto flex-1">
-            {/* Description */}
-            <p className="text-xs text-slate-300 leading-relaxed bg-surface-950/40 p-3.5 rounded-xl border border-surface-800/80">
-              {app.description}
-            </p>
+          <div className="p-6 space-y-5 overflow-y-auto flex-1">
+            {/* Description Box */}
+            <div className="p-4 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-slate-700 dark:text-slate-300 text-xs leading-relaxed flex items-start gap-3 shadow-sm">
+              <Info className="w-4 h-4 text-indigo-600 dark:text-indigo-400 mt-0.5 shrink-0" />
+              <p>{app.description}</p>
+            </div>
 
             {/* Live Service Status & Switch */}
-            <div className="p-4 rounded-xl bg-surface-950/60 border border-surface-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
               <div className="flex items-center gap-3">
                 <span
-                  className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
+                  className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold ${
                     isRunning
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                      : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                      ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 shadow-sm'
+                      : 'bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 shadow-sm'
                   }`}
                 >
                   <span
                     className={`w-2 h-2 rounded-full ${
-                      isRunning ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                      isRunning ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                     }`}
                   />
                   {isRunning ? 'Service Running' : 'Service Stopped'}
                 </span>
 
                 {app.service_name && (
-                  <span className="text-xs text-slate-400 font-mono">
-                    systemd: {app.service_name}
+                  <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+                    systemd: <strong className="text-slate-800 dark:text-slate-200">{app.service_name}</strong>
                   </span>
                 )}
               </div>
@@ -384,10 +416,10 @@ export function AppControlModal({
                   <button
                     onClick={() => onServiceControl(app, isRunning ? 'stop' : 'start')}
                     disabled={isActing}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm ${
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm ${
                       isRunning
-                        ? 'bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 border border-amber-500/30'
-                        : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 hover:bg-amber-100 dark:hover:bg-amber-500/25'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
                     } disabled:opacity-50`}
                   >
                     {isRunning ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -397,39 +429,41 @@ export function AppControlModal({
                   <button
                     onClick={() => onServiceControl(app, 'restart')}
                     disabled={isActing}
-                    className="px-3 py-1.5 rounded-lg bg-surface-800 hover:bg-surface-750 text-slate-300 hover:text-white text-xs font-semibold border border-surface-700 flex items-center gap-1.5 transition-all disabled:opacity-50"
+                    className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 text-xs font-bold border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition-all shadow-sm disabled:opacity-50"
                     title="Restart Service"
                   >
-                    <RotateCw className="w-3.5 h-3.5 text-indigo-400" />
+                    <RotateCw className="w-3.5 h-3.5 text-indigo-500" />
                     Restart
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Direct GUI Management Target (No Terminal Required!) */}
+            {/* GUI Management Portals Cards (No Terminal Required) */}
             <div className="space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <Zap className="w-4 h-4 text-amber-500" />
                 GUI Management Portals (No Terminal Required)
               </h4>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. Dedicated Route or External GUI */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Dedicated Route or External GUI */}
                 {target.type === 'route' && target.url && (
                   <Link
                     href={target.url}
                     onClick={onClose}
-                    className="p-3.5 rounded-xl bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 hover:text-white transition-all flex items-center justify-between group shadow-sm"
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 hover:bg-indigo-50/50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500/50 transition-all flex items-center justify-between group shadow-sm"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Boxes className="w-4 h-4 text-indigo-400" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                        <Boxes className="w-4 h-4" />
+                      </div>
                       <div>
-                        <span className="text-xs font-bold block">{target.label}</span>
-                        <span className="text-[10px] text-indigo-400/80">Full Control Hub</span>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white block">{target.label}</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Open Full Control Hub</span>
                       </div>
                     </div>
-                    <ExternalLink className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-transform group-hover:translate-x-0.5" />
                   </Link>
                 )}
 
@@ -438,65 +472,71 @@ export function AppControlModal({
                     href={target.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-3.5 rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 hover:text-white transition-all flex items-center justify-between group shadow-sm"
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 hover:bg-emerald-50/50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 dark:hover:border-emerald-500/50 transition-all flex items-center justify-between group shadow-sm"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <ExternalLink className="w-4 h-4 text-emerald-400" />
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                        <ExternalLink className="w-4 h-4" />
+                      </div>
                       <div>
-                        <span className="text-xs font-bold block">{target.label}</span>
-                        <span className="text-[10px] text-emerald-400/80 font-mono">{target.badge}</span>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white block">{target.label}</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono font-medium">{target.badge}</span>
                       </div>
                     </div>
-                    <ExternalLink className="w-3.5 h-3.5 opacity-70 group-hover:opacity-100 transition-opacity" />
+                    <ExternalLink className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition" />
                   </a>
                 )}
 
-                {/* 2. Direct In-Modal Configuration Editor */}
+                {/* Direct In-Modal Configuration Editor */}
                 <button
                   onClick={() => setActiveTab('config')}
-                  className="p-3.5 rounded-xl bg-surface-800 hover:bg-surface-750 border border-surface-700 text-slate-200 transition-all flex items-center justify-between group shadow-sm text-left"
+                  className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 hover:bg-indigo-50/50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500/50 transition-all flex items-center justify-between group shadow-sm text-left"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <FileCode className="w-4 h-4 text-indigo-400" />
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                      <FileCode className="w-4 h-4" />
+                    </div>
                     <div>
-                      <span className="text-xs font-bold block text-white">Edit Config File</span>
-                      <span className="text-[10px] text-slate-400 font-mono truncate max-w-[180px] block">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block">Edit Config File</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate max-w-[180px] block">
                         {app.config_path || `/etc/${app.id}/${app.id}.conf`}
                       </span>
                     </div>
                   </div>
-                  <Sliders className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-400 transition" />
+                  <Sliders className="w-4 h-4 text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition" />
                 </button>
 
-                {/* 3. Quick Options & Workers */}
+                {/* Quick Options & Workers */}
                 <button
                   onClick={() => setActiveTab('options')}
-                  className="p-3.5 rounded-xl bg-surface-800 hover:bg-surface-750 border border-surface-700 text-slate-200 transition-all flex items-center justify-between group shadow-sm text-left"
+                  className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 hover:bg-amber-50/50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-amber-400 dark:hover:border-amber-500/50 transition-all flex items-center justify-between group shadow-sm text-left"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <Zap className="w-4 h-4 text-amber-400" />
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                      <Zap className="w-4 h-4" />
+                    </div>
                     <div>
-                      <span className="text-xs font-bold block text-white">Interactive Settings</span>
-                      <span className="text-[10px] text-slate-400">Parameters, Workers & Cache</span>
+                      <span className="text-xs font-bold text-slate-900 dark:text-white block">Interactive Settings</span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Parameters, Workers & Cache</span>
                     </div>
                   </div>
-                  <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-amber-400 transition" />
+                  <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition" />
                 </button>
               </div>
             </div>
 
             {/* Config Path Card */}
-            <div className="p-3.5 rounded-xl bg-surface-950/60 border border-surface-800 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2 truncate">
-                <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                <span className="text-slate-400">Config:</span>
-                <code className="text-slate-200 font-mono font-medium truncate">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs shadow-sm">
+              <div className="flex items-center gap-2.5 truncate">
+                <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span className="text-slate-500 dark:text-slate-400 font-medium">Config:</span>
+                <code className="text-slate-900 dark:text-slate-100 font-mono font-bold truncate">
                   {app.config_path || `/etc/${app.id}/${app.id}.conf`}
                 </code>
               </div>
               <button
                 onClick={() => setActiveTab('config')}
-                className="px-3 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-xs font-semibold border border-indigo-500/30 transition shrink-0"
+                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm shadow-indigo-600/20 transition shrink-0"
               >
                 Edit in GUI
               </button>
@@ -508,13 +548,13 @@ export function AppControlModal({
         {activeTab === 'config' && (
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Editor Sub-Header */}
-            <div className="px-5 py-3 border-b border-surface-800 bg-surface-950/60 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <FileCode className="w-4 h-4 text-indigo-400" />
-                <span className="font-mono text-slate-200 font-semibold truncate max-w-sm">
+            <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2.5">
+                <FileCode className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span className="font-mono text-slate-900 dark:text-slate-100 font-bold truncate max-w-sm">
                   {configMeta?.path || app.config_path || `/etc/${app.id}/${app.id}.conf`}
                 </span>
-                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-surface-800 text-slate-400">
+                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-md bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono">
                   {configMeta?.syntax || 'conf'}
                 </span>
               </div>
@@ -522,7 +562,7 @@ export function AppControlModal({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleResetConfig}
-                  className="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 text-xs transition"
+                  className="px-3 py-1.5 rounded-xl text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-slate-200/70 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-xs font-semibold transition"
                   title="Reset to default template"
                 >
                   Reset Default
@@ -531,24 +571,24 @@ export function AppControlModal({
             </div>
 
             {/* Textarea Code Editor */}
-            <div className="flex-1 p-4 bg-surface-950 overflow-hidden flex flex-col">
+            <div className="flex-1 p-4 bg-slate-950 overflow-hidden flex flex-col">
               <textarea
                 value={configContent}
                 onChange={(e) => setConfigContent(e.target.value)}
                 spellCheck={false}
-                className="w-full flex-1 bg-surface-950 text-slate-200 font-mono text-xs leading-relaxed p-4 rounded-xl border border-surface-800 focus:outline-none focus:border-indigo-500 resize-none selection:bg-indigo-500/30"
+                className="w-full flex-1 bg-slate-950 text-slate-100 font-mono text-xs leading-relaxed p-4 rounded-2xl border border-slate-800 focus:outline-none focus:border-indigo-500 resize-none selection:bg-indigo-500/40"
                 placeholder="Enter server configuration directives here..."
               />
             </div>
 
             {/* Editor Footer / Save Controls */}
-            <div className="px-5 py-3 border-t border-surface-800 bg-surface-900 flex items-center justify-between text-xs">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-300">
+            <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-between text-xs">
+              <label className="flex items-center gap-2.5 cursor-pointer text-slate-700 dark:text-slate-300 font-medium select-none">
                 <input
                   type="checkbox"
                   checked={autoRestartOnSave}
                   onChange={(e) => setAutoRestartOnSave(e.target.checked)}
-                  className="rounded bg-surface-800 border-surface-700 text-indigo-600 focus:ring-0"
+                  className="w-4 h-4 rounded text-indigo-600 border-slate-300 dark:border-slate-700 focus:ring-indigo-500"
                 />
                 <span>Automatically reload service on save</span>
               </label>
@@ -556,16 +596,16 @@ export function AppControlModal({
               <button
                 onClick={handleSaveConfig}
                 disabled={isSavingConfig}
-                className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/25 transition active:scale-95 disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition active:scale-95 disabled:opacity-50"
               >
                 {isSavingConfig ? (
                   <>
-                    <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                    <RotateCw className="w-4 h-4 animate-spin" />
                     <span>Saving...</span>
                   </>
                 ) : (
                   <>
-                    <Save className="w-3.5 h-3.5" />
+                    <Save className="w-4 h-4" />
                     <span>Save & Apply Changes</span>
                   </>
                 )}
@@ -582,19 +622,19 @@ export function AppControlModal({
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-indigo-400" />
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                       Supervisor Worker Processes
                     </h4>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                       Manage background workers, queue consumers, and daemon jobs without CLI.
                     </p>
                   </div>
                   <button
                     onClick={() => setShowAddWorker(!showAddWorker)}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition"
+                    className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shadow-indigo-600/20 transition"
                   >
-                    <Plus className="w-3.5 h-3.5" />
+                    <Plus className="w-4 h-4" />
                     <span>Add Worker</span>
                   </button>
                 </div>
@@ -603,30 +643,30 @@ export function AppControlModal({
                 {showAddWorker && (
                   <form
                     onSubmit={handleAddWorker}
-                    className="p-4 rounded-xl bg-surface-950 border border-indigo-500/30 space-y-3 animate-fadeIn"
+                    className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-indigo-200 dark:border-indigo-500/30 space-y-3.5 animate-fadeIn shadow-sm"
                   >
-                    <h5 className="text-xs font-bold text-indigo-300">Create New Managed Program</h5>
+                    <h5 className="text-xs font-bold text-indigo-700 dark:text-indigo-300">Create New Managed Program</h5>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                       <div>
-                        <label className="block text-slate-400 mb-1">Program Name</label>
+                        <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">Program Name</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. queue-worker"
                           value={newWorkerName}
                           onChange={(e) => setNewWorkerName(e.target.value)}
-                          className="w-full px-3 py-2 bg-surface-900 border border-surface-800 rounded-lg text-white font-mono focus:outline-none focus:border-indigo-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:border-indigo-500"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">Command to Execute</label>
+                        <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1">Command to Execute</label>
                         <input
                           type="text"
                           required
                           placeholder="e.g. php artisan queue:work"
                           value={newWorkerCmd}
                           onChange={(e) => setNewWorkerCmd(e.target.value)}
-                          className="w-full px-3 py-2 bg-surface-900 border border-surface-800 rounded-lg text-white font-mono focus:outline-none focus:border-indigo-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono focus:outline-none focus:border-indigo-500"
                         />
                       </div>
                     </div>
@@ -634,13 +674,13 @@ export function AppControlModal({
                       <button
                         type="button"
                         onClick={() => setShowAddWorker(false)}
-                        className="px-3 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-surface-800"
+                        className="px-3.5 py-1.5 rounded-xl text-xs text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800 font-semibold"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold"
+                        className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-sm"
                       >
                         Start & Save Worker
                       </button>
@@ -649,45 +689,46 @@ export function AppControlModal({
                 )}
 
                 {/* Workers List Table */}
-                <div className="border border-surface-800 rounded-xl overflow-hidden divide-y divide-surface-800 bg-surface-950/40">
+                <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950/40 shadow-sm">
                   {supervisorWorkers.map((w) => (
-                    <div key={w.id} className="p-3.5 flex items-center justify-between gap-4 text-xs">
+                    <div key={w.id} className="p-4 flex items-center justify-between gap-4 text-xs">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-white font-mono">{w.name}</span>
+                          <span className="font-bold text-slate-900 dark:text-white font-mono text-sm">{w.name}</span>
                           <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                               w.status === 'RUNNING'
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                                : 'bg-slate-800 text-slate-400'
+                                ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30'
+                                : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-400'
                             }`}
                           >
                             {w.status}
                           </span>
-                          {w.pid && <span className="text-slate-500 text-[10px] font-mono">PID {w.pid}</span>}
+                          {w.pid && <span className="text-slate-500 dark:text-slate-400 text-[11px] font-mono">PID {w.pid}</span>}
+                          <span className="text-slate-400 text-[11px] font-mono">• uptime: {w.uptime}</span>
                         </div>
-                        <p className="text-[11px] text-slate-400 font-mono truncate mt-0.5">{w.command}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate mt-1">{w.command}</p>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           onClick={() => handleToggleWorker(w.id)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm ${
                             w.status === 'RUNNING'
-                              ? 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30'
-                              : 'bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30'
+                              ? 'bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 hover:bg-amber-200'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white'
                           }`}
                         >
-                          {w.status === 'RUNNING' ? <Square className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                          {w.status === 'RUNNING' ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                           <span>{w.status === 'RUNNING' ? 'Stop' : 'Start'}</span>
                         </button>
 
                         <button
                           onClick={() => handleDeleteWorker(w.id)}
-                          className="p-1 rounded-lg text-slate-500 hover:text-red-400 transition"
+                          className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 transition"
                           title="Delete worker"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
@@ -699,18 +740,18 @@ export function AppControlModal({
             {/* REDIS SPECIFIC: Memory, Cache, and Flush Tools */}
             {app.id === 'redis' && (
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Database className="w-4 h-4 text-amber-400" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-500" />
                   Redis In-Memory Cache Control
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                  <div className="p-4 rounded-xl bg-surface-950 border border-surface-800 space-y-2">
-                    <label className="text-slate-400 font-semibold block">Max Memory Limit</label>
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 shadow-sm">
+                    <label className="text-slate-800 dark:text-slate-200 font-bold block">Max Memory Limit</label>
                     <select
                       value={redisMaxMemory}
                       onChange={(e) => setRedisMaxMemory(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-900 border border-surface-800 rounded-lg text-white"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-medium"
                     >
                       <option value="256mb">256 MB</option>
                       <option value="512mb">512 MB (Recommended)</option>
@@ -719,12 +760,12 @@ export function AppControlModal({
                     </select>
                   </div>
 
-                  <div className="p-4 rounded-xl bg-surface-950 border border-surface-800 space-y-2">
-                    <label className="text-slate-400 font-semibold block">Eviction Policy</label>
+                  <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2 shadow-sm">
+                    <label className="text-slate-800 dark:text-slate-200 font-bold block">Eviction Policy</label>
                     <select
                       value={redisPolicy}
                       onChange={(e) => setRedisPolicy(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-900 border border-surface-800 rounded-lg text-white"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-medium"
                     >
                       <option value="allkeys-lru">allkeys-lru (Evict least recently used)</option>
                       <option value="volatile-lru">volatile-lru (Evict keys with expiry)</option>
@@ -733,10 +774,10 @@ export function AppControlModal({
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between">
+                <div className="p-5 rounded-2xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/25 flex items-center justify-between shadow-sm">
                   <div>
-                    <h5 className="text-xs font-bold text-amber-300">Flush Cache Database</h5>
-                    <p className="text-[11px] text-slate-300 mt-0.5">Purge all cache keys immediately from RAM</p>
+                    <h5 className="text-xs font-bold text-amber-900 dark:text-amber-300">Flush Cache Database</h5>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">Purge all cache keys immediately from RAM</p>
                   </div>
                   <button
                     onClick={() => {
@@ -745,7 +786,7 @@ export function AppControlModal({
                         setTimeout(() => setSaveSuccessMessage(null), 3000);
                       }
                     }}
-                    className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition"
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-sm transition"
                   >
                     Flush RAM Cache
                   </button>
@@ -756,38 +797,38 @@ export function AppControlModal({
             {/* GIT SPECIFIC: Global User & Credentials GUI */}
             {app.id === 'git' && (
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Wrench className="w-4 h-4 text-teal-400" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Wrench className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                   Global Git System Configuration
                 </h4>
 
-                <div className="space-y-3 text-xs">
+                <div className="space-y-3.5 text-xs">
                   <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">user.name</label>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1 font-bold">user.name</label>
                     <input
                       type="text"
                       value={gitUserName}
                       onChange={(e) => setGitUserName(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-950 border border-surface-800 rounded-lg text-white font-mono"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">user.email</label>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1 font-bold">user.email</label>
                     <input
                       type="email"
                       value={gitUserEmail}
                       onChange={(e) => setGitUserEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-950 border border-surface-800 rounded-lg text-white font-mono"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1 font-semibold">init.defaultBranch</label>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1 font-bold">init.defaultBranch</label>
                     <select
                       value={gitDefaultBranch}
                       onChange={(e) => setGitDefaultBranch(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-950 border border-surface-800 rounded-lg text-white"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-medium"
                     >
                       <option value="main">main</option>
                       <option value="master">master</option>
@@ -800,7 +841,7 @@ export function AppControlModal({
                         setSaveSuccessMessage('Global Git configuration updated successfully!');
                         setTimeout(() => setSaveSuccessMessage(null), 3000);
                       }}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs"
+                      className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/25"
                     >
                       Save Git Config
                     </button>
@@ -812,8 +853,8 @@ export function AppControlModal({
             {/* NODE.JS SPECIFIC: Global Packages & NPM */}
             {app.id === 'nodejs' && (
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Code2 className="w-4 h-4 text-emerald-400" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   Global NPM Packages & Cache
                 </h4>
 
@@ -823,7 +864,7 @@ export function AppControlModal({
                     placeholder="Package name (e.g. pm2, yarn, express)"
                     value={newPkgName}
                     onChange={(e) => setNewPkgName(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-surface-950 border border-surface-800 rounded-xl text-xs text-white"
+                    className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white"
                   />
                   <button
                     onClick={() => {
@@ -833,7 +874,7 @@ export function AppControlModal({
                       setSaveSuccessMessage(`Installed global package ${newPkgName.trim()}!`);
                       setTimeout(() => setSaveSuccessMessage(null), 3000);
                     }}
-                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl"
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-600/25"
                   >
                     Install Global
                   </button>
@@ -843,7 +884,7 @@ export function AppControlModal({
                   {installedGlobalPkgs.map((pkg, idx) => (
                     <span
                       key={idx}
-                      className="px-2.5 py-1 rounded-lg bg-surface-950 border border-surface-800 text-xs font-mono text-slate-300"
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 shadow-sm"
                     >
                       {pkg}
                     </span>
@@ -855,8 +896,8 @@ export function AppControlModal({
             {/* PYTHON SPECIFIC: Pip Packages */}
             {app.id === 'python3' && (
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Code2 className="w-4 h-4 text-blue-400" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Code2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   Python 3 & Pip Package Control
                 </h4>
 
@@ -866,7 +907,7 @@ export function AppControlModal({
                     placeholder="Pip package (e.g. fastapi, requests, celery)"
                     value={newPkgName}
                     onChange={(e) => setNewPkgName(e.target.value)}
-                    className="flex-1 px-3 py-2 bg-surface-950 border border-surface-800 rounded-xl text-xs text-white"
+                    className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white"
                   />
                   <button
                     onClick={() => {
@@ -876,7 +917,7 @@ export function AppControlModal({
                       setSaveSuccessMessage(`Installed pip package ${newPkgName.trim()}!`);
                       setTimeout(() => setSaveSuccessMessage(null), 3000);
                     }}
-                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-xl"
+                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-600/25"
                   >
                     Install Pip Package
                   </button>
@@ -886,7 +927,7 @@ export function AppControlModal({
                   {installedPipPkgs.map((pkg, idx) => (
                     <span
                       key={idx}
-                      className="px-2.5 py-1 rounded-lg bg-surface-950 border border-surface-800 text-xs font-mono text-slate-300"
+                      className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 shadow-sm"
                     >
                       {pkg}
                     </span>
@@ -898,29 +939,31 @@ export function AppControlModal({
             {/* GENERAL CONTROLS FOR ALL OTHER APPS */}
             {!['supervisor', 'redis', 'git', 'nodejs', 'python3'].includes(app.id) && (
               <div className="space-y-4">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sliders className="w-4 h-4 text-indigo-400" />
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                   Service Parameters & Daemon Settings
                 </h4>
 
-                <div className="p-4 rounded-xl bg-surface-950 border border-surface-800 space-y-3 text-xs">
+                <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5 text-xs shadow-sm">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-white font-semibold block">Auto-Start on Boot</span>
-                      <span className="text-slate-400 text-[11px]">Systemd service enabled status</span>
+                      <span className="text-slate-900 dark:text-white font-bold block text-sm">Auto-Start on Boot</span>
+                      <span className="text-slate-500 dark:text-slate-400 text-xs">Systemd service enabled status</span>
                     </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/20">
+                    <span className="px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 text-xs font-bold border border-emerald-300 dark:border-emerald-500/30">
                       Enabled
                     </span>
                   </div>
 
                   {app.default_port && (
-                    <div className="flex items-center justify-between pt-2 border-t border-surface-800">
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
                       <div>
-                        <span className="text-white font-semibold block">Listening Network Port</span>
-                        <span className="text-slate-400 text-[11px]">Default TCP socket binding</span>
+                        <span className="text-slate-900 dark:text-white font-bold block text-sm">Listening Network Port</span>
+                        <span className="text-slate-500 dark:text-slate-400 text-xs">Default TCP socket binding</span>
                       </div>
-                      <span className="font-mono text-indigo-300 font-bold text-xs">{app.default_port}</span>
+                      <span className="font-mono text-indigo-600 dark:text-indigo-400 font-bold text-sm bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-xl border border-indigo-200 dark:border-indigo-900/40">
+                        {app.default_port}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -928,7 +971,7 @@ export function AppControlModal({
                 <div className="pt-2">
                   <button
                     onClick={() => setActiveTab('config')}
-                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 shadow-md transition"
+                    className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition"
                   >
                     <FileCode className="w-4 h-4" />
                     <span>Open Full Config Editor for {app.name}</span>
@@ -943,10 +986,10 @@ export function AppControlModal({
         {activeTab === 'logs' && (
           <div className="p-6 space-y-5 overflow-y-auto flex-1">
             {/* Live Service Logs Output */}
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   Live Service Output (journalctl)
                 </h4>
                 <button
@@ -954,16 +997,16 @@ export function AppControlModal({
                     setSaveSuccessMessage('Service logs synchronized');
                     setTimeout(() => setSaveSuccessMessage(null), 2000);
                   }}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-bold flex items-center gap-1"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>Refresh</span>
                 </button>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-800 font-mono text-[11px] text-slate-300 space-y-1.5 max-h-56 overflow-y-auto">
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-slate-300 space-y-1.5 max-h-56 overflow-y-auto shadow-inner">
                 <p className="text-slate-500">systemd[1]: Starting {app.display_name}...</p>
-                <p className="text-emerald-400">systemd[1]: Started {app.display_name}.</p>
+                <p className="text-emerald-400 font-semibold">systemd[1]: Started {app.display_name}.</p>
                 <p className="text-slate-400">
                   [{new Date().toISOString().slice(11, 19)}] process daemon running on pid{' '}
                   {Math.floor(Math.random() * 5000) + 1000}.
@@ -973,55 +1016,55 @@ export function AppControlModal({
                   {app.config_path || `/etc/${app.id}/${app.id}.conf`}.
                 </p>
                 <p className="text-indigo-300">
-                  [{new Date().toISOString().slice(11, 19)}] ready to handle incoming connections.
+                  [{new Date().toISOString().slice(11, 19)}] ready to handle incoming requests without terminal.
                 </p>
               </div>
             </div>
 
             {/* System Paths */}
-            <div className="space-y-3 pt-3 border-t border-surface-800">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                <FolderOpen className="w-3.5 h-3.5 text-indigo-400" />
+            <div className="space-y-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-2">
+                <FolderOpen className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                 System Paths & Environment
               </h4>
 
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2.5 text-xs">
                 {app.binary_path && (
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-950/40 border border-surface-800">
-                    <span className="text-slate-400">Binary Path:</span>
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Binary Path:</span>
                     <div className="flex items-center gap-2">
-                      <code className="text-slate-200 font-mono">{app.binary_path}</code>
+                      <code className="text-slate-900 dark:text-slate-100 font-mono font-bold">{app.binary_path}</code>
                       <button
                         onClick={() => handleCopy(app.binary_path!, 'bin')}
-                        className="text-slate-400 hover:text-white"
+                        className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1"
                         title="Copy binary path"
                       >
-                        {copiedKey === 'bin' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedKey === 'bin' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
                     </div>
                   </div>
                 )}
 
                 {app.config_path && (
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-950/40 border border-surface-800">
-                    <span className="text-slate-400">Config File:</span>
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Config File:</span>
                     <div className="flex items-center gap-2">
-                      <code className="text-slate-200 font-mono">{app.config_path}</code>
+                      <code className="text-slate-900 dark:text-slate-100 font-mono font-bold">{app.config_path}</code>
                       <button
                         onClick={() => handleCopy(app.config_path!, 'conf')}
-                        className="text-slate-400 hover:text-white"
+                        className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1"
                         title="Copy config path"
                       >
-                        {copiedKey === 'conf' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        {copiedKey === 'conf' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
                       </button>
                     </div>
                   </div>
                 )}
 
                 {app.default_port && (
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface-950/40 border border-surface-800">
-                    <span className="text-slate-400">Default Port:</span>
-                    <span className="text-slate-200 font-mono font-bold">{app.default_port}</span>
+                  <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-600 dark:text-slate-400 font-medium">Default Port:</span>
+                    <span className="text-indigo-600 dark:text-indigo-400 font-mono font-bold text-sm">{app.default_port}</span>
                   </div>
                 )}
               </div>
@@ -1029,19 +1072,19 @@ export function AppControlModal({
           </div>
         )}
 
-        {/* Footer with Pin to Dashboard */}
-        <div className="p-4 bg-surface-950 border-t border-surface-800 flex items-center justify-between select-none">
+        {/* Footer with Pin to Dashboard & Close */}
+        <div className="p-5 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between select-none">
           <button
             onClick={handleTogglePin}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all border ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all border shadow-sm ${
               pinned
-                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                : 'bg-surface-800 text-slate-300 border-surface-700 hover:bg-surface-700 hover:text-white'
+                ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/30'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-750'
             }`}
           >
             {pinned ? (
               <>
-                <BookmarkCheck className="w-4 h-4 text-amber-400" />
+                <BookmarkCheck className="w-4 h-4 text-amber-500" />
                 Pinned to Dashboard
               </>
             ) : (
@@ -1054,7 +1097,7 @@ export function AppControlModal({
 
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-surface-800 hover:bg-surface-700 text-slate-300 text-xs font-medium transition-colors"
+            className="px-6 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 text-xs font-bold transition-all shadow-sm"
           >
             Close
           </button>

@@ -43,12 +43,18 @@ html:not(.dark) .bg-\[\#090d16\] {
 }
 
 html:not(.dark) .bg-surface-950,
+html:not(.dark) .bg-surface-950\/30,
+html:not(.dark) .bg-surface-950\/40,
+html:not(.dark) .bg-surface-950\/50,
 html:not(.dark) .bg-surface-950\/60,
 html:not(.dark) .bg-surface-950\/80 {
-  background-color: #f1f5f9 !important;
+  background-color: #f8fafc !important;
 }
 
 html:not(.dark) .bg-surface-900,
+html:not(.dark) .bg-surface-900\/30,
+html:not(.dark) .bg-surface-900\/40,
+html:not(.dark) .bg-surface-900\/50,
 html:not(.dark) .bg-surface-900\/60,
 html:not(.dark) .bg-surface-900\/80 {
   background-color: #ffffff !important;
@@ -60,12 +66,15 @@ html:not(.dark) .bg-surface-850 {
 }
 
 html:not(.dark) .bg-surface-800,
+html:not(.dark) .bg-surface-800\/30,
+html:not(.dark) .bg-surface-800\/40,
 html:not(.dark) .bg-surface-800\/60,
 html:not(.dark) .bg-surface-800\/80 {
   background-color: #f1f5f9 !important;
 }
 
 html:not(.dark) .hover\:bg-surface-800:hover,
+html:not(.dark) .hover\:bg-surface-750:hover,
 html:not(.dark) .hover\:bg-surface-700:hover {
   background-color: #e2e8f0 !important;
 }
@@ -74,6 +83,7 @@ html:not(.dark) .hover\:bg-surface-700:hover {
 html:not(.dark) .border-surface-800,
 html:not(.dark) .border-surface-800\/60,
 html:not(.dark) .border-surface-800\/80,
+html:not(.dark) .border-surface-750,
 html:not(.dark) .border-surface-700,
 html:not(.dark) .border-surface-700\/60 {
   border-color: #e2e8f0 !important;
