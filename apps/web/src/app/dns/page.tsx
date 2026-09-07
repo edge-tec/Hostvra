@@ -524,7 +524,6 @@ export default function DNSPage() {
                   onChange={(e) => setSelectedProvider(e.target.value)}
                   className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer"
                 >
-                  <option value="HostvraDns (Hostvra built-in DNS)">aaPanelDns (aaPanel built-in DNS)</option>
                   <option value="HostvraDns (Hostvra built-in DNS)">HostvraDns (Hostvra built-in DNS)</option>
                   <option value="Cloudflare">Cloudflare DNS</option>
                   <option value="AliDNS">Alibaba Cloud AliDNS</option>

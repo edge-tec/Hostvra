@@ -345,7 +345,7 @@ export default function SettingsPage() {
               { id: 'page', label: 'Page' },
               { id: 'alarm', label: 'Alarm' },
               { id: 'backup', label: 'Backup Restore' },
-              { id: 'migrate', label: 'aaPanel Migrate' },
+              { id: 'migrate', label: 'Hostvra Migrate' },
               { id: 'other_migrate', label: 'Other Panel Migrate' },
               { id: 'service', label: 'Service' },
             ].map((tab) => (
@@ -787,7 +787,7 @@ export default function SettingsPage() {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Bind Hostvra / aaPanel account
+                      Bind Hostvra account
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -1153,7 +1153,7 @@ export default function SettingsPage() {
                     >
                       Save
                     </button>
-                    <span className="text-slate-400 font-normal">Take alias for aaPanel</span>
+                    <span className="text-slate-400 font-normal">Take alias for Hostvra</span>
                   </div>
                 </div>
 
@@ -1621,7 +1621,7 @@ export default function SettingsPage() {
 
         {activeTab === 'migrate' && (
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">One-Click Server Migration (Hostvra / aaPanel)</h3>
+            <h3 className="font-bold text-sm text-slate-900 dark:text-white">One-Click Server Migration (Hostvra)</h3>
             <p className="text-xs text-slate-500">Migrate all websites, databases, FTP accounts, and DNS zones between servers</p>
             <div className="max-w-md space-y-3 text-xs font-semibold">
               <div>
