@@ -33,6 +33,7 @@ type Store interface {
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip string) error
+	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 
 	// Servers & Enrollment
 	CreateServer(ctx context.Context, server *Server) error
@@ -456,6 +457,20 @@ func (m *MemoryStore) UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip 
 	return nil
 }
 
+func (m *MemoryStore) UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, exists := m.users[id]
+	if !exists {
+		return ErrNotFound
+	}
+	user.PasswordHash = passwordHash
+	user.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
+	return nil
+}
+
 func (m *MemoryStore) CreateServer(ctx context.Context, server *Server) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -771,6 +786,12 @@ func (p *PostgresStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, e
 func (p *PostgresStore) UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip string) error {
 	query := `UPDATE users SET last_login_at = NOW(), last_login_ip = $2 WHERE id = $1`
 	_, err := p.db.ExecContext(ctx, query, id, ip)
+	return err
+}
+
+func (p *PostgresStore) UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	query := `UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`
+	_, err := p.db.ExecContext(ctx, query, passwordHash, id)
 	return err
 }
 

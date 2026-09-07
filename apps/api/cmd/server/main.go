@@ -386,9 +386,21 @@ func main() {
 }
 
 func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
-	_, err := s.GetUserByEmail(ctx, "admin@hostvra.com")
-	if err == nil {
-		return // Already seeded
+	passwordHash, err := auth.HashPassword("SuperSecretP@ss123!", nil)
+	if err != nil {
+		logger.Error("Failed to hash default admin password", "error", err)
+		return
+	}
+
+	existingUser, err := s.GetUserByEmail(ctx, "admin@hostvra.com")
+	if err == nil && existingUser != nil {
+		// Sync existing admin account with the known default password
+		if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
+			logger.Warn("Failed to synchronize default admin password", "error", err)
+		} else {
+			logger.Info("Default administrator password synchronized successfully", "email", "admin@hostvra.com")
+		}
+		return
 	}
 
 	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
@@ -401,12 +413,6 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
 		MaxWebsites: 1000,
 	}
 	_ = s.CreateOrganization(ctx, org)
-
-	passwordHash, err := auth.HashPassword("SuperSecretP@ss123!", nil)
-	if err != nil {
-		logger.Error("Failed to hash default admin password", "error", err)
-		return
-	}
 
 	adminUser := &store.User{
 		ID:           uuid.MustParse("00000000-0000-0000-0000-000000000002"),
