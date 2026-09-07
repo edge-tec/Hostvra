@@ -45,9 +45,9 @@ export function Header() {
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/80 border border-surface-700 text-sm font-medium text-slate-200">
           <Building2 className="w-4 h-4 text-indigo-400" />
-          <span>{org ? org.name : 'Hostvra Cloud'}</span>
+          <span>{org?.name || 'Hostvra Cloud'}</span>
           <span className="text-[11px] font-semibold uppercase px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-            {org ? org.plan_tier : 'Free'}
+            {org?.plan_tier || 'Free'}
           </span>
         </div>
       </div>
@@ -85,14 +85,14 @@ export function Header() {
             className="flex items-center gap-3 px-2 py-1.5 rounded-lg hover:bg-surface-800 transition-colors"
           >
             <div className="w-8 h-8 rounded-lg bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-sm font-bold text-indigo-300">
-              {user ? user.full_name.charAt(0).toUpperCase() : 'A'}
+              {(user?.full_name && user.full_name.length > 0 ? user.full_name[0] : 'A').toUpperCase()}
             </div>
             <div className="text-left hidden sm:block">
               <div className="text-sm font-medium text-slate-200 leading-none">
-                {user ? user.full_name : 'Administrator'}
+                {user?.full_name || 'Administrator'}
               </div>
               <div className="text-xs text-slate-400 capitalize mt-1">
-                {user ? user.role : 'Owner'}
+                {user?.role || 'Owner'}
               </div>
             </div>
             <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -102,7 +102,7 @@ export function Header() {
             <div className="absolute right-0 mt-2 w-56 rounded-xl bg-surface-850 border border-surface-700 shadow-2xl py-1 text-sm z-50">
               <div className="px-4 py-2 border-b border-surface-700">
                 <p className="text-xs text-slate-400">Signed in as</p>
-                <p className="font-medium text-slate-200 truncate">{user ? user.email : 'admin@hostvra.com'}</p>
+                <p className="font-medium text-slate-200 truncate">{user?.email || 'admin@hostvra.com'}</p>
               </div>
 
               <div className="py-1">
