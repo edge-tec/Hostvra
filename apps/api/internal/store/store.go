@@ -216,6 +216,10 @@ type Store interface {
 	SaveCannedResponse(ctx context.Context, c *CannedResponse) error
 	GetSupportStats(ctx context.Context, orgID uuid.UUID) (*SupportStats, error)
 
+	// System Settings
+	GetSystemSettings(ctx context.Context) (*SystemSettings, error)
+	UpdateSystemSettings(ctx context.Context, settings *SystemSettings) error
+
 	// Close
 	Close() error
 }
@@ -263,6 +267,7 @@ type MemoryStore struct {
 	ticketReplies       []TicketReply
 	articles            []KnowledgeArticle
 	cannedResponses     []CannedResponse
+	systemSettings      *SystemSettings
 	filePath            string
 }
 
@@ -293,6 +298,7 @@ type memoryDumpData struct {
 	TicketReplies      []TicketReply                          `json:"ticket_replies,omitempty"`
 	Articles           []KnowledgeArticle                     `json:"articles,omitempty"`
 	CannedResponses    []CannedResponse                       `json:"canned_responses,omitempty"`
+	SystemSettings     *SystemSettings                        `json:"system_settings,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -345,6 +351,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		TicketReplies:      m.ticketReplies,
 		Articles:           m.articles,
 		CannedResponses:    m.cannedResponses,
+		SystemSettings:     m.systemSettings,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -443,6 +450,9 @@ func (m *MemoryStore) loadFromDisk() {
 	}
 	if len(data.CannedResponses) > 0 {
 		m.cannedResponses = data.CannedResponses
+	}
+	if data.SystemSettings != nil {
+		m.systemSettings = data.SystemSettings
 	}
 }
 

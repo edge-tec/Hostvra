@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
+import { apiFetch } from '@/lib/api';
 import {
   Users,
   Plus,
@@ -13,6 +14,7 @@ import {
   UserCheck,
   Search,
   X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface Member {
@@ -24,35 +26,9 @@ interface Member {
   joined_at: string;
 }
 
-const initialMembers: Member[] = [
-  {
-    id: 'mem-1',
-    name: 'Mizanur Rahman',
-    email: 'admin@hostvra.com',
-    role: 'owner',
-    status: 'active',
-    joined_at: '2026-08-10',
-  },
-  {
-    id: 'mem-2',
-    name: 'DevOps Automated Pipeline',
-    email: 'ci-runner@hostvra.internal',
-    role: 'admin',
-    status: 'active',
-    joined_at: '2026-08-15',
-  },
-  {
-    id: 'mem-3',
-    name: 'Sarah Chen',
-    email: 'sarah.c@techcorp.io',
-    role: 'developer',
-    status: 'active',
-    joined_at: '2026-09-01',
-  },
-];
-
 export default function TeamPage() {
-  const [members, setMembers] = useState<Member[]>(initialMembers);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -61,31 +37,65 @@ export default function TeamPage() {
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'manager' | 'developer' | 'viewer'>('developer');
 
-  const filteredMembers = members.filter(
-    (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      m.email.toLowerCase().includes(search.toLowerCase()) ||
-      m.role.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const handleInvite = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newMember: Member = {
-      id: Math.random().toString(36).substring(7),
-      name: inviteName || inviteEmail.split('@')[0],
-      email: inviteEmail,
-      role: inviteRole,
-      status: 'invited',
-      joined_at: new Date().toISOString().split('T')[0],
-    };
-    setMembers([...members, newMember]);
-    setShowInviteModal(false);
-    setInviteEmail('');
-    setInviteName('');
+  const fetchMembers = async () => {
+    try {
+      setLoading(true);
+      const res = await apiFetch<Member[]>('/api/v1/team/members');
+      if (res.success && res.data) {
+        setMembers(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load team members:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemove = (id: string) => {
-    setMembers(members.filter((m) => m.id !== id));
+  useEffect(() => {
+    fetchMembers();
+  }, []);
+
+  const filteredMembers = members.filter(
+    (m) =>
+      m.name?.toLowerCase().includes(search.toLowerCase()) ||
+      m.email?.toLowerCase().includes(search.toLowerCase()) ||
+      m.role?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch<Member>('/api/v1/team/invite', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: inviteName || inviteEmail.split('@')[0],
+          email: inviteEmail,
+          role: inviteRole,
+        }),
+      });
+      if (res.success && res.data) {
+        setMembers([...members, res.data]);
+      } else {
+        await fetchMembers();
+      }
+      setShowInviteModal(false);
+      setInviteEmail('');
+      setInviteName('');
+    } catch (err) {
+      console.error('Failed to invite member:', err);
+    }
+  };
+
+  const handleRemove = async (id: string) => {
+    try {
+      await apiFetch(`/api/v1/team/members/${id}`, {
+        method: 'DELETE',
+      });
+      setMembers(members.filter((m) => m.id !== id));
+    } catch (err) {
+      console.error('Failed to remove member:', err);
+      setMembers(members.filter((m) => m.id !== id));
+    }
   };
 
   return (

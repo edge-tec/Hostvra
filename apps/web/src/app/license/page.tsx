@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
+import { apiFetch } from '@/lib/api';
 import {
   BadgePercent,
   CheckCircle2,
@@ -15,16 +16,19 @@ import {
   Award,
   ChevronRight,
   Flame,
+  RefreshCw,
 } from 'lucide-react';
 
 interface LicenseState {
   tier: 'community' | 'pro' | 'enterprise';
-  id: string;
+  license_id?: string;
+  id?: string;
   customer_name: string;
   customer_email: string;
-  max_servers: number;
+  max_servers?: number;
   expires_at: string;
   entitlements: {
+    max_servers?: number;
     s3_backups: boolean;
     team_collab: boolean;
     docker_manager: boolean;
@@ -33,58 +37,74 @@ interface LicenseState {
   };
 }
 
-const currentLicense: LicenseState = {
-  tier: 'community',
-  id: 'HV-COMMUNITY-DEFAULT',
-  customer_name: 'Hostvra Community User',
-  customer_email: 'admin@hostvra.com',
-  max_servers: 1,
-  expires_at: 'Lifetime Free',
-  entitlements: {
-    s3_backups: false,
-    team_collab: false,
-    docker_manager: true,
-    white_label: false,
-    priority_support: false,
-  },
-};
-
 export default function LicensePage() {
-  const [license, setLicense] = useState<LicenseState>(currentLicense);
+  const [license, setLicense] = useState<LicenseState>({
+    tier: 'community',
+    license_id: 'HV-COMMUNITY-DEFAULT',
+    customer_name: 'Hostvra Community User',
+    customer_email: 'admin@hostvra.com',
+    expires_at: 'Lifetime Free',
+    entitlements: {
+      max_servers: 1,
+      s3_backups: false,
+      team_collab: false,
+      docker_manager: true,
+      white_label: false,
+      priority_support: false,
+    },
+  });
   const [licenseKeyInput, setLicenseKeyInput] = useState('');
   const [activating, setActivating] = useState(false);
   const [activationMsg, setActivationMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleActivate = (e: React.FormEvent) => {
+  const fetchLicense = async () => {
+    try {
+      const res = await apiFetch<LicenseState>('/api/v1/license');
+      if (res.success && res.data) {
+        setLicense(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load license state:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchLicense();
+  }, []);
+
+  const handleActivate = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!licenseKeyInput.trim()) return;
     setActivating(true);
     setActivationMsg(null);
 
-    setTimeout(() => {
-      setActivating(false);
-      if (licenseKeyInput.startsWith('HV-PRO-') || licenseKeyInput.startsWith('HV-ENTERPRISE-')) {
-        const isEnt = licenseKeyInput.startsWith('HV-ENTERPRISE-');
-        setLicense({
-          tier: isEnt ? 'enterprise' : 'pro',
-          id: licenseKeyInput.substring(0, 16),
-          customer_name: isEnt ? 'Enterprise Fleet Operations' : 'Pro Hosting License',
-          customer_email: 'billing@enterprise.io',
-          max_servers: isEnt ? 9999 : 10,
-          expires_at: 'Valid until 2027-09-06',
-          entitlements: {
-            s3_backups: true,
-            team_collab: true,
-            docker_manager: true,
-            white_label: isEnt,
-            priority_support: true,
-          },
+    try {
+      const res = await apiFetch<LicenseState>('/api/v1/license/activate', {
+        method: 'POST',
+        body: JSON.stringify({ license_key: licenseKeyInput.trim() }),
+      });
+
+      if (res.success && res.data) {
+        setLicense(res.data);
+        setActivationMsg({
+          type: 'success',
+          text: `License activated successfully! Active Tier: ${res.data.tier.toUpperCase()}`,
         });
-        setActivationMsg({ type: 'success', text: `License activated successfully! Upgraded to ${isEnt ? 'Enterprise' : 'Pro'}.` });
         setLicenseKeyInput('');
       } else {
-        setActivationMsg({ type: 'error', text: 'Invalid license key or cryptographic signature mismatch.' });
+        setActivationMsg({
+          type: 'error',
+          text: res.error?.message || 'Invalid license key or cryptographic signature verification failed.',
+        });
       }
-    }, 1000);
+    } catch (err: any) {
+      setActivationMsg({
+        type: 'error',
+        text: err.message || 'Error connecting to Hostvra licensing server.',
+      });
+    } finally {
+      setActivating(false);
+    }
   };
 
   return (
@@ -119,7 +139,7 @@ export default function LicensePage() {
                 >
                   {license.tier} Edition
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">ID: {license.id}</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">ID: {license.license_id || license.id}</span>
               </div>
               <div className="text-2xl font-bold text-slate-950 dark:text-white mt-2">{license.customer_name}</div>
               <div className="text-sm text-slate-600 dark:text-slate-400 mt-0.5">{license.customer_email} • {license.expires_at}</div>
@@ -129,7 +149,7 @@ export default function LicensePage() {
               <div>
                 <div className="text-xs uppercase font-semibold text-slate-500 dark:text-slate-400">Server Quota</div>
                 <div className="text-2xl font-black text-slate-950 dark:text-white mt-1">
-                  1 / {license.max_servers > 1000 ? '∞' : license.max_servers}
+                  1 / {(license.max_servers ?? license.entitlements?.max_servers ?? 1) > 1000 || (license.max_servers ?? license.entitlements?.max_servers ?? 1) < 0 ? '∞' : (license.max_servers ?? license.entitlements?.max_servers ?? 1)}
                 </div>
                 <div className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold mt-0.5">Servers Connected</div>
               </div>

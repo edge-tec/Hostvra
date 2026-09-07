@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { WebmailClient } from '@/components/WebmailClient';
+import { apiFetch } from '@/lib/api';
 import {
   Mail,
   Plus,
@@ -62,85 +63,12 @@ interface HealthItem {
   value?: string;
 }
 
-const initialDomains: EmailDomain[] = [
-  {
-    id: 'd1',
-    domain: 'hostvra.com',
-    mail_hostname: 'mail.hostvra.com',
-    status: 'active',
-    storage_limit_bytes: 53687091200,
-    storage_used_bytes: 1428571420,
-    mailbox_count: 4,
-    alias_count: 2,
-    dkim_selector: 'default',
-    created_at: '2026-09-01T08:00:00Z',
-  },
-  {
-    id: 'd2',
-    domain: 'mycompany.org',
-    mail_hostname: 'mail.mycompany.org',
-    status: 'active',
-    storage_limit_bytes: 21474836480,
-    storage_used_bytes: 428571420,
-    mailbox_count: 2,
-    alias_count: 1,
-    dkim_selector: 'default',
-    created_at: '2026-09-03T11:30:00Z',
-  },
-];
-
-const initialMailboxes: EmailMailbox[] = [
-  {
-    id: 'm1',
-    domain_id: 'd1',
-    email: 'info@hostvra.com',
-    local_part: 'info',
-    name: 'General Information',
-    quota_bytes: 5368709120,
-    used_bytes: 482344960,
-    is_active: true,
-    is_suspended: false,
-  },
-  {
-    id: 'm2',
-    domain_id: 'd1',
-    email: 'admin@hostvra.com',
-    local_part: 'admin',
-    name: 'System Administrator',
-    quota_bytes: 10737418240,
-    used_bytes: 946226460,
-    is_active: true,
-    is_suspended: false,
-  },
-  {
-    id: 'm3',
-    domain_id: 'd1',
-    email: 'support@hostvra.com',
-    local_part: 'support',
-    name: 'Customer Support Desk',
-    quota_bytes: 5368709120,
-    used_bytes: 154226460,
-    is_active: true,
-    is_suspended: false,
-  },
-  {
-    id: 'm4',
-    domain_id: 'd2',
-    email: 'contact@mycompany.org',
-    local_part: 'contact',
-    name: 'Official Contact',
-    quota_bytes: 5368709120,
-    used_bytes: 428571420,
-    is_active: true,
-    is_suspended: false,
-  },
-];
-
 export default function EmailHostingPage() {
   const [activeTab, setActiveTab] = useState<'mailboxes' | 'webmail' | 'domains' | 'health' | 'queue' | 'logs'>('mailboxes');
   const [selectedWebmailEmail, setSelectedWebmailEmail] = useState<string | undefined>(undefined);
-  const [domains, setDomains] = useState<EmailDomain[]>(initialDomains);
-  const [mailboxes, setMailboxes] = useState<EmailMailbox[]>(initialMailboxes);
+  const [domains, setDomains] = useState<EmailDomain[]>([]);
+  const [mailboxes, setMailboxes] = useState<EmailMailbox[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -155,10 +83,37 @@ export default function EmailHostingPage() {
   // Form states
   const [newDomainName, setNewDomainName] = useState('');
   const [newLocalPart, setNewLocalPart] = useState('');
-  const [newMailboxDomain, setNewMailboxDomain] = useState(domains[0]?.id || '');
+  const [newMailboxDomain, setNewMailboxDomain] = useState('');
   const [newMailboxName, setNewMailboxName] = useState('');
   const [newMailboxPass, setNewMailboxPass] = useState('');
   const [newMailboxQuotaGB, setNewMailboxQuotaGB] = useState(5);
+
+  const fetchEmailData = async () => {
+    try {
+      setLoading(true);
+      const [domRes, mbRes] = await Promise.all([
+        apiFetch<EmailDomain[]>('/api/v1/email/domains'),
+        apiFetch<EmailMailbox[]>('/api/v1/email/mailboxes'),
+      ]);
+      if (domRes.success && domRes.data) {
+        setDomains(domRes.data);
+        if (domRes.data.length > 0 && !newMailboxDomain) {
+          setNewMailboxDomain(domRes.data[0].id);
+        }
+      }
+      if (mbRes.success && mbRes.data) {
+        setMailboxes(mbRes.data);
+      }
+    } catch (err) {
+      console.error('Failed to load email data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchEmailData();
+  }, []);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -166,71 +121,109 @@ export default function EmailHostingPage() {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleAddDomain = (e: React.FormEvent) => {
+  const handleAddDomain = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDomainName.trim()) return;
 
     const domainClean = newDomainName.toLowerCase().trim();
-    const newDom: EmailDomain = {
-      id: 'd' + (domains.length + 1),
-      domain: domainClean,
-      mail_hostname: `mail.${domainClean}`,
-      status: 'active',
-      storage_limit_bytes: 53687091200,
-      storage_used_bytes: 0,
-      mailbox_count: 0,
-      alias_count: 0,
-      dkim_selector: 'default',
-      created_at: new Date().toISOString(),
-    };
+    try {
+      const res = await apiFetch<EmailDomain>('/api/v1/email/domains', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain: domainClean,
+          mail_hostname: `mail.${domainClean}`,
+        }),
+      });
 
-    setDomains([...domains, newDom]);
-    setNewDomainName('');
-    setShowAddDomainModal(false);
-    setShowDNSModal(newDom);
+      if (res.success && res.data) {
+        setDomains([...domains, res.data]);
+        setShowDNSModal(res.data);
+      } else {
+        await fetchEmailData();
+      }
+      setNewDomainName('');
+      setShowAddDomainModal(false);
+    } catch (err) {
+      console.error('Failed to add domain:', err);
+    }
   };
 
-  const handleAddMailbox = (e: React.FormEvent) => {
+  const handleAddMailbox = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLocalPart.trim() || !newMailboxPass) return;
 
     const selectedDom = domains.find((d) => d.id === newMailboxDomain) || domains[0];
+    if (!selectedDom) return;
     const fullEmail = `${newLocalPart.toLowerCase().trim()}@${selectedDom.domain}`;
 
-    const newMb: EmailMailbox = {
-      id: 'm' + (mailboxes.length + 1),
-      domain_id: selectedDom.id,
-      email: fullEmail,
-      local_part: newLocalPart.toLowerCase().trim(),
-      name: newMailboxName || fullEmail,
-      quota_bytes: newMailboxQuotaGB * 1024 * 1024 * 1024,
-      used_bytes: 0,
-      is_active: true,
-      is_suspended: false,
-    };
+    try {
+      const res = await apiFetch<EmailMailbox>('/api/v1/email/mailboxes', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain_id: selectedDom.id,
+          local_part: newLocalPart.toLowerCase().trim(),
+          password: newMailboxPass,
+          name: newMailboxName || fullEmail,
+          quota_bytes: newMailboxQuotaGB * 1024 * 1024 * 1024,
+        }),
+      });
 
-    setMailboxes([...mailboxes, newMb]);
-    // update domain count
-    setDomains(
-      domains.map((d) => (d.id === selectedDom.id ? { ...d, mailbox_count: d.mailbox_count + 1 } : d))
-    );
-
-    setNewLocalPart('');
-    setNewMailboxName('');
-    setNewMailboxPass('');
-    setShowAddMailboxModal(false);
-  };
-
-  const handleDeleteMailbox = (id: string) => {
-    if (confirm('Are you sure you want to delete this mailbox? All stored emails will be purged.')) {
-      setMailboxes(mailboxes.filter((m) => m.id !== id));
+      if (res.success && res.data) {
+        setMailboxes([...mailboxes, res.data]);
+      } else {
+        await fetchEmailData();
+      }
+      setNewLocalPart('');
+      setNewMailboxName('');
+      setNewMailboxPass('');
+      setShowAddMailboxModal(false);
+    } catch (err) {
+      console.error('Failed to add mailbox:', err);
     }
   };
 
-  const handleDeleteDomain = (id: string) => {
+  const handleDeleteMailbox = async (id: string) => {
+    if (confirm('Are you sure you want to delete this mailbox? All stored emails will be purged.')) {
+      try {
+        await apiFetch(`/api/v1/email/mailboxes/${id}`, { method: 'DELETE' });
+        setMailboxes(mailboxes.filter((m) => m.id !== id));
+      } catch (err) {
+        console.error('Failed to delete mailbox:', err);
+        setMailboxes(mailboxes.filter((m) => m.id !== id));
+      }
+    }
+  };
+
+  const handleDeleteDomain = async (id: string) => {
     if (confirm('Delete email domain and all associated mailboxes?')) {
-      setDomains(domains.filter((d) => d.id !== id));
-      setMailboxes(mailboxes.filter((m) => m.domain_id !== id));
+      try {
+        await apiFetch(`/api/v1/email/domains/${id}`, { method: 'DELETE' });
+        setDomains(domains.filter((d) => d.id !== id));
+        setMailboxes(mailboxes.filter((m) => m.domain_id !== id));
+      } catch (err) {
+        console.error('Failed to delete domain:', err);
+        setDomains(domains.filter((d) => d.id !== id));
+      }
+    }
+  };
+
+  const handleSavePassword = async () => {
+    if (!showPasswordModal || !newPassword) return;
+    if (newPassword.length < 8) {
+      alert('Password must be at least 8 characters long');
+      return;
+    }
+    try {
+      await apiFetch(`/api/v1/email/mailboxes/${showPasswordModal}/password`, {
+        method: 'PUT',
+        body: JSON.stringify({ password: newPassword }),
+      });
+      alert('Mailbox password updated successfully.');
+      setShowPasswordModal(null);
+      setNewPassword('');
+    } catch (err: any) {
+      console.error('Failed to update mailbox password:', err);
+      alert(err.message || 'Failed to update mailbox password');
     }
   };
 
@@ -1049,11 +1042,7 @@ export default function EmailHostingPage() {
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      alert('Password updated successfully.');
-                      setShowPasswordModal(null);
-                      setNewPassword('');
-                    }}
+                    onClick={handleSavePassword}
                     className="px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20"
                   >
                     Save Password

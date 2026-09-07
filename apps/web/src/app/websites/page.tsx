@@ -383,7 +383,7 @@ const DEFAULT_SEED_WEBSITES: Website[] = [
 export default function WebsitesPage() {
   // Navigation & Tabs State
   const [activeTab, setActiveTab] = useState<ProjectTab>('php');
-  const [websites, setWebsites] = useState<Website[]>(DEFAULT_SEED_WEBSITES);
+  const [websites, setWebsites] = useState<Website[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedServer, setSelectedServer] = useState('');
   const [loading, setLoading] = useState(false);
@@ -498,7 +498,7 @@ export default function WebsitesPage() {
         apiFetch<Server[]>('/api/v1/servers'),
       ]);
 
-      if (sitesRes.success && sitesRes.data && sitesRes.data.length > 0) {
+      if (sitesRes.success && sitesRes.data) {
         setWebsites(sitesRes.data);
       }
       if (serversRes.success && serversRes.data) {

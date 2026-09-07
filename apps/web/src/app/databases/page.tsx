@@ -55,7 +55,7 @@ export default function DatabasesPage() {
   // Server & DB State (Initialized directly with demo/seed records so table is never blank)
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedServer, setSelectedServer] = useState<string>('');
-  const [databases, setDatabases] = useState<Database[]>(DEFAULT_SEED_DBS);
+  const [databases, setDatabases] = useState<Database[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all');
@@ -159,7 +159,7 @@ export default function DatabasesPage() {
   const fetchDatabases = useCallback(async (serverId?: string) => {
     const query = serverId ? `?server_id=${serverId}` : '';
     const res = await apiFetch<Database[]>(`/api/v1/databases${query}`);
-    if (res.success && res.data && res.data.length > 0) {
+    if (res.success && res.data) {
       setDatabases(res.data);
     }
   }, []);

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
+import { apiFetch } from '@/lib/api';
 import {
   BellRing,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
   ShieldAlert,
   Server,
   Activity,
+  RefreshCw,
 } from 'lucide-react';
 
 interface Incident {
@@ -37,40 +39,10 @@ interface AlertRule {
   enabled: boolean;
 }
 
-const initialIncidents: Incident[] = [
-  {
-    id: 'inc-9482',
-    server_name: 'prod-edge-01',
-    rule_name: 'High CPU Usage',
-    severity: 'critical',
-    status: 'firing',
-    value: 94.2,
-    threshold: 90.0,
-    message: 'Server prod-edge-01: CPU load spiked to 94.2%',
-    started_at: '12 mins ago',
-  },
-  {
-    id: 'inc-9411',
-    server_name: 'prod-db-replica',
-    rule_name: 'High Memory Pressure',
-    severity: 'warning',
-    status: 'resolved',
-    value: 78.4,
-    threshold: 85.0,
-    message: 'Memory normalized back to 78.4%',
-    started_at: '2 hours ago',
-  },
-];
-
-const initialRules: AlertRule[] = [
-  { id: '1', name: 'Server CPU Spike', type: 'cpu', threshold: 90.0, severity: 'critical', enabled: true },
-  { id: '2', name: 'RAM Exhaustion Warning', type: 'memory', threshold: 85.0, severity: 'warning', enabled: true },
-  { id: '3', name: 'Disk Space Alert', type: 'disk', threshold: 90.0, severity: 'critical', enabled: true },
-];
-
 export default function AlertsPage() {
-  const [incidents, setIncidents] = useState<Incident[]>(initialIncidents);
-  const [rules, setRules] = useState<AlertRule[]>(initialRules);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddRule, setShowAddRule] = useState(false);
   const [testSent, setTestSent] = useState(false);
 
@@ -80,36 +52,81 @@ export default function AlertsPage() {
   const [ruleThreshold, setRuleThreshold] = useState(90);
   const [ruleSeverity, setRuleSeverity] = useState<'critical' | 'warning' | 'info'>('critical');
 
-  const handleAddRule = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newRule: AlertRule = {
-      id: Math.random().toString(36).substring(7),
-      name: ruleName,
-      type: ruleType,
-      threshold: ruleThreshold,
-      severity: ruleSeverity,
-      enabled: true,
-    };
-    setRules([...rules, newRule]);
-    setShowAddRule(false);
-    setRuleName('');
+  const fetchAlertsData = async () => {
+    try {
+      setLoading(true);
+      const [incidentsRes, rulesRes] = await Promise.all([
+        apiFetch<Incident[]>('/api/v1/alerts'),
+        apiFetch<AlertRule[]>('/api/v1/alerts/rules'),
+      ]);
+
+      if (incidentsRes.success && incidentsRes.data) {
+        setIncidents(incidentsRes.data);
+      }
+      if (rulesRes.success && rulesRes.data) {
+        setRules(rulesRes.data);
+      }
+    } catch (err) {
+      console.error('Failed to load alerts:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleTriggerTest = () => {
+  useEffect(() => {
+    fetchAlertsData();
+  }, []);
+
+  const handleAddRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch<AlertRule>('/api/v1/alerts/rules', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: ruleName,
+          type: ruleType,
+          threshold: Number(ruleThreshold),
+          severity: ruleSeverity,
+          duration_sec: 60,
+        }),
+      });
+
+      if (res.success && res.data) {
+        setRules([res.data, ...rules]);
+      } else {
+        const newRule: AlertRule = {
+          id: Math.random().toString(36).substring(7),
+          name: ruleName,
+          type: ruleType,
+          threshold: ruleThreshold,
+          severity: ruleSeverity,
+          enabled: true,
+        };
+        setRules([...rules, newRule]);
+      }
+      setShowAddRule(false);
+      setRuleName('');
+    } catch (err) {
+      console.error('Failed to add rule:', err);
+    }
+  };
+
+  const handleTriggerTest = async () => {
     setTestSent(true);
-    const mockIncident: Incident = {
-      id: `inc-${Math.floor(Math.random() * 9000 + 1000)}`,
-      server_name: 'prod-edge-01',
-      rule_name: 'Synthetic Pipeline Test',
-      severity: 'info',
-      status: 'firing',
-      value: 99.9,
-      threshold: 90.0,
-      message: 'Synthetic test incident dispatched to active webhooks and audit logs',
-      started_at: 'Just now',
-    };
-    setIncidents([mockIncident, ...incidents]);
-    setTimeout(() => setTestSent(false), 3000);
+    try {
+      const res = await apiFetch<{ triggered: boolean; incidents: Incident[] }>('/api/v1/alerts/test', {
+        method: 'POST',
+      });
+      if (res.success && res.data?.incidents) {
+        setIncidents([...res.data.incidents, ...incidents]);
+      } else {
+        await fetchAlertsData();
+      }
+    } catch (err) {
+      console.error('Test alert error:', err);
+    } finally {
+      setTimeout(() => setTestSent(false), 3000);
+    }
   };
 
   return (

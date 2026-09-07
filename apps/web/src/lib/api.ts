@@ -973,3 +973,44 @@ export interface AIAssistantResponse {
   suggested_ticket: boolean;
 }
 
+export interface SystemSettings {
+  panel_domain: string;
+  panel_port: string;
+  security_entrance: string;
+  ssl_enabled: boolean;
+  ssl_days_remaining: number;
+  dev_mode: boolean;
+  api_enabled: boolean;
+  api_key: string;
+  panel_user: string;
+  panel_pass?: string;
+  bound_account: string;
+  menu_bar_hidden: string;
+  close_panel: boolean;
+  ipv6_enabled: boolean;
+  offline_mode: boolean;
+  cdn_proxy: boolean;
+  home_bulletin: boolean;
+  site_monitor: boolean;
+  auto_fetch_favicon: boolean;
+  auto_backup_panel: boolean;
+  panel_theme: string;
+  panel_language: string;
+  panel_alias: string;
+  session_timeout: string;
+  default_site_folder: string;
+  default_backup_folder: string;
+  server_ip: string;
+  server_time: string;
+  timezone_region: string;
+  timezone_city: string;
+  security_alarm: boolean;
+  basic_auth: boolean;
+  google_auth: boolean;
+  strong_password: boolean;
+  authorized_ip: string;
+  not_logged_in_response: string;
+  password_expire: string;
+  updated_at?: string;
+}
+

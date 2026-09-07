@@ -39,37 +39,38 @@ import {
   Edit3,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, User as UserType, Organization } from '@/lib/api';
+import { apiFetch, User as UserType, Organization, SystemSettings } from '@/lib/api';
 
 type SettingsTab = 'global' | 'page' | 'alarm' | 'backup' | 'migrate' | 'other_migrate' | 'service';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('global');
   const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(true);
 
   // Commonly Used - Network & Access
   const [panelDomain, setPanelDomain] = useState('');
   const [panelPort, setPanelPort] = useState('26589');
-  const [securityEntrance, setSecurityEntrance] = useState('/f0dd51ca');
+  const [securityEntrance, setSecurityEntrance] = useState('/hostvra-admin');
 
   // Commonly Used - Panel SSL
   const [sslEnabled, setSslEnabled] = useState(true);
-  const [sslDaysRemaining, setSslDaysRemaining] = useState(3);
+  const [sslDaysRemaining, setSslDaysRemaining] = useState(90);
 
   // Commonly Used - Advanced Features
   const [devMode, setDevMode] = useState(false);
-  const [apiEnabled, setApiEnabled] = useState(false);
-  const [apiKey, setApiKey] = useState('0f9a72b1c4e683d5a892f0e1b3c75d4a');
+  const [apiEnabled, setApiEnabled] = useState(true);
+  const [apiKey, setApiKey] = useState('hv_live_0f9a72b1c4e683d5a892f0e1b3c75d4a');
   const [showApiKey, setShowApiKey] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
 
   // Commonly Used - Auth & Security
-  const [panelUser, setPanelUser] = useState('io6r8dms');
+  const [panelUser, setPanelUser] = useState('hostvra_admin');
   const [panelPass, setPanelPass] = useState('••••••••');
 
   // Commonly Used - Account Integration & Preferences
-  const [boundAccount, setBoundAccount] = useState('mm9****.com');
-  const [menuBarHidden, setMenuBarHidden] = useState('AI');
+  const [boundAccount, setBoundAccount] = useState('admin@hostvra.com');
+  const [menuBarHidden, setMenuBarHidden] = useState('none');
 
   // Panel Settings Toggles
   const [closePanel, setClosePanel] = useState(false);
@@ -82,14 +83,14 @@ export default function SettingsPage() {
   const [autoBackupPanel, setAutoBackupPanel] = useState(true);
 
   // Panel Settings Inputs
-  const [panelTheme, setPanelTheme] = useState('Fresh');
+  const [panelTheme, setPanelTheme] = useState('Dark Slate');
   const [panelLanguage, setPanelLanguage] = useState('English');
-  const [panelAlias, setPanelAlias] = useState('aaPanel Linux panel');
+  const [panelAlias, setPanelAlias] = useState('Hostvra Enterprise Cloud Panel');
   const [sessionTimeout, setSessionTimeout] = useState('24 Hour(s)');
   const [defaultSiteFolder, setDefaultSiteFolder] = useState('/www/wwwroot');
   const [defaultBackupFolder, setDefaultBackupFolder] = useState('/www/backup');
-  const [serverIp, setServerIp] = useState('15.235.199.243');
-  const [serverTime, setServerTime] = useState('2026-09-07 19:05:42 UTC +0000');
+  const [serverIp, setServerIp] = useState('127.0.0.1');
+  const [serverTime, setServerTime] = useState('');
   const [timezoneRegion, setTimezoneRegion] = useState('Etc');
   const [timezoneCity, setTimezoneCity] = useState('UTC');
 
@@ -97,10 +98,10 @@ export default function SettingsPage() {
   const [securityAlarm, setSecurityAlarm] = useState(false);
   const [basicAuth, setBasicAuth] = useState(false);
   const [googleAuth, setGoogleAuth] = useState(false);
-  const [strongPassword, setStrongPassword] = useState(false);
+  const [strongPassword, setStrongPassword] = useState(true);
   const [authorizedIp, setAuthorizedIp] = useState('');
   const [notLoggedInResponse, setNotLoggedInResponse] = useState('404 - Not Found');
-  const [passwordExpire, setPasswordExpire] = useState('Not set');
+  const [passwordExpire, setPasswordExpire] = useState('Never');
 
   // Modals
   const [modalType, setModalType] = useState<string | null>(null);
@@ -114,11 +115,132 @@ export default function SettingsPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
+  // Load settings on mount
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const res = await apiFetch<SystemSettings>('/api/v1/settings');
+        if (res.success && res.data) {
+          const s = res.data;
+          if (s.panel_domain !== undefined) setPanelDomain(s.panel_domain);
+          if (s.panel_port) setPanelPort(s.panel_port);
+          if (s.security_entrance) setSecurityEntrance(s.security_entrance);
+          if (s.ssl_enabled !== undefined) setSslEnabled(s.ssl_enabled);
+          if (s.ssl_days_remaining !== undefined) setSslDaysRemaining(s.ssl_days_remaining);
+          if (s.dev_mode !== undefined) setDevMode(s.dev_mode);
+          if (s.api_enabled !== undefined) setApiEnabled(s.api_enabled);
+          if (s.api_key) setApiKey(s.api_key);
+          if (s.panel_user) setPanelUser(s.panel_user);
+          if (s.bound_account) setBoundAccount(s.bound_account);
+          if (s.menu_bar_hidden) setMenuBarHidden(s.menu_bar_hidden);
+          if (s.close_panel !== undefined) setClosePanel(s.close_panel);
+          if (s.ipv6_enabled !== undefined) setIpv6Enabled(s.ipv6_enabled);
+          if (s.offline_mode !== undefined) setOfflineMode(s.offline_mode);
+          if (s.cdn_proxy !== undefined) setCdnProxy(s.cdn_proxy);
+          if (s.home_bulletin !== undefined) setHomeBulletin(s.home_bulletin);
+          if (s.site_monitor !== undefined) setSiteMonitor(s.site_monitor);
+          if (s.auto_fetch_favicon !== undefined) setAutoFetchFavicon(s.auto_fetch_favicon);
+          if (s.auto_backup_panel !== undefined) setAutoBackupPanel(s.auto_backup_panel);
+          if (s.panel_theme) setPanelTheme(s.panel_theme);
+          if (s.panel_language) setPanelLanguage(s.panel_language);
+          if (s.panel_alias) setPanelAlias(s.panel_alias);
+          if (s.session_timeout) setSessionTimeout(s.session_timeout);
+          if (s.default_site_folder) setDefaultSiteFolder(s.default_site_folder);
+          if (s.default_backup_folder) setDefaultBackupFolder(s.default_backup_folder);
+          if (s.server_ip) setServerIp(s.server_ip);
+          if (s.server_time) setServerTime(s.server_time);
+          if (s.timezone_region) setTimezoneRegion(s.timezone_region);
+          if (s.timezone_city) setTimezoneCity(s.timezone_city);
+          if (s.security_alarm !== undefined) setSecurityAlarm(s.security_alarm);
+          if (s.basic_auth !== undefined) setBasicAuth(s.basic_auth);
+          if (s.google_auth !== undefined) setGoogleAuth(s.google_auth);
+          if (s.strong_password !== undefined) setStrongPassword(s.strong_password);
+          if (s.authorized_ip !== undefined) setAuthorizedIp(s.authorized_ip);
+          if (s.not_logged_in_response) setNotLoggedInResponse(s.not_logged_in_response);
+          if (s.password_expire) setPasswordExpire(s.password_expire);
+        }
+      } catch (err) {
+        console.error('Failed to load system settings:', err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  // Persist settings to backend
+  const persistSettings = async (overrides: Partial<SystemSettings>) => {
+    const payload: SystemSettings = {
+      panel_domain: panelDomain,
+      panel_port: panelPort,
+      security_entrance: securityEntrance,
+      ssl_enabled: sslEnabled,
+      ssl_days_remaining: sslDaysRemaining,
+      dev_mode: devMode,
+      api_enabled: apiEnabled,
+      api_key: apiKey,
+      panel_user: panelUser,
+      bound_account: boundAccount,
+      menu_bar_hidden: menuBarHidden,
+      close_panel: closePanel,
+      ipv6_enabled: ipv6Enabled,
+      offline_mode: offlineMode,
+      cdn_proxy: cdnProxy,
+      home_bulletin: homeBulletin,
+      site_monitor: siteMonitor,
+      auto_fetch_favicon: autoFetchFavicon,
+      auto_backup_panel: autoBackupPanel,
+      panel_theme: panelTheme,
+      panel_language: panelLanguage,
+      panel_alias: panelAlias,
+      session_timeout: sessionTimeout,
+      default_site_folder: defaultSiteFolder,
+      default_backup_folder: defaultBackupFolder,
+      server_ip: serverIp,
+      server_time: serverTime,
+      timezone_region: timezoneRegion,
+      timezone_city: timezoneCity,
+      security_alarm: securityAlarm,
+      basic_auth: basicAuth,
+      google_auth: googleAuth,
+      strong_password: strongPassword,
+      authorized_ip: authorizedIp,
+      not_logged_in_response: notLoggedInResponse,
+      password_expire: passwordExpire,
+      ...overrides,
+    };
+    try {
+      const res = await apiFetch('/api/v1/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      if (!res.success) {
+        showToast(res.error?.message || 'Failed to save settings', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error communicating with settings service', true);
+    }
+  };
+
   // Sync server time
-  const handleSyncTime = () => {
-    const now = new Date().toUTCString();
-    setServerTime(now);
-    showToast('Server time synchronized successfully.');
+  const handleSyncTime = async () => {
+    try {
+      const res = await apiFetch<{ server_time: string; status: string }>('/api/v1/settings/sync-time', {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        setServerTime(res.data.server_time);
+        showToast('Server time synchronized successfully with host node.');
+      } else {
+        const now = new Date().toUTCString();
+        setServerTime(now);
+        showToast('Server time synchronized successfully.');
+      }
+    } catch {
+      const now = new Date().toUTCString();
+      setServerTime(now);
+      showToast('Server time synchronized.');
+    }
   };
 
   // Copy helper
@@ -130,35 +252,62 @@ export default function SettingsPage() {
   };
 
   // Modal Save Handler
-  const handleModalSave = () => {
+  const handleModalSave = async () => {
     if (modalType === 'port') {
       setPanelPort(modalInput);
+      await persistSettings({ panel_port: modalInput });
       showToast(`Panel port changed to ${modalInput}. Release port in firewall.`);
     } else if (modalType === 'entrance') {
-      setSecurityEntrance(modalInput.startsWith('/') ? modalInput : `/${modalInput}`);
-      showToast(`Security entrance updated to ${modalInput}`);
+      const ent = modalInput.startsWith('/') ? modalInput : `/${modalInput}`;
+      setSecurityEntrance(ent);
+      await persistSettings({ security_entrance: ent });
+      showToast(`Security entrance updated to ${ent}`);
+    } else if (modalType === 'domain') {
+      setPanelDomain(modalInput);
+      await persistSettings({ panel_domain: modalInput });
+      showToast(`Panel domain updated to ${modalInput}`);
     } else if (modalType === 'user') {
       setPanelUser(modalInput);
+      await persistSettings({ panel_user: modalInput });
       showToast(`Panel username updated to ${modalInput}`);
     } else if (modalType === 'pass') {
       setPanelPass('••••••••');
+      await persistSettings({ panel_pass: modalInput });
       showToast('Panel password updated successfully');
     } else if (modalType === 'timeout') {
       setSessionTimeout(modalInput);
+      await persistSettings({ session_timeout: modalInput });
       showToast(`Session auto logout timeout set to ${modalInput}`);
     } else if (modalType === 'account') {
       setBoundAccount(modalInput);
+      await persistSettings({ bound_account: modalInput });
       showToast(`Account bound to ${modalInput}`);
     } else if (modalType === 'response') {
       setNotLoggedInResponse(modalInput);
+      await persistSettings({ not_logged_in_response: modalInput });
       showToast(`Unauthenticated response code set to ${modalInput}`);
     } else if (modalType === 'googleAuth') {
       setGoogleAuth(true);
+      await persistSettings({ google_auth: true });
       showToast('Google Authenticator 2FA enabled');
     } else if (modalType === 'tempLogin') {
       showToast(`Temporary login URL generated: https://${serverIp}:${panelPort}${securityEntrance}?token=${Math.random().toString(36).substring(7)}`);
     } else if (modalType === 'whitelist') {
+      setAuthorizedIp(modalInput);
+      await persistSettings({ authorized_ip: modalInput });
       showToast('API IP Whitelist updated');
+    } else if (modalType === 'alias') {
+      setPanelAlias(modalInput);
+      await persistSettings({ panel_alias: modalInput });
+      showToast('Panel alias updated successfully');
+    } else if (modalType === 'siteFolder') {
+      setDefaultSiteFolder(modalInput);
+      await persistSettings({ default_site_folder: modalInput });
+      showToast('Default site folder updated');
+    } else if (modalType === 'backupFolder') {
+      setDefaultBackupFolder(modalInput);
+      await persistSettings({ default_backup_folder: modalInput });
+      showToast('Default backup folder updated');
     }
     setModalType(null);
   };
@@ -712,8 +861,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setClosePanel(!closePanel);
-                        showToast(`Close panel option set to ${!closePanel}`);
+                        const next = !closePanel;
+                        setClosePanel(next);
+                        persistSettings({ close_panel: next });
+                        showToast(`Close panel option set to ${next}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         closePanel ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -737,8 +888,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setIpv6Enabled(!ipv6Enabled);
-                        showToast(`IPv6 panel access ${!ipv6Enabled ? 'Enabled' : 'Disabled'}`);
+                        const next = !ipv6Enabled;
+                        setIpv6Enabled(next);
+                        persistSettings({ ipv6_enabled: next });
+                        showToast(`IPv6 panel access ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         ipv6Enabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -762,8 +915,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setOfflineMode(!offlineMode);
-                        showToast(`Offline mode ${!offlineMode ? 'Enabled' : 'Disabled'}`);
+                        const next = !offlineMode;
+                        setOfflineMode(next);
+                        persistSettings({ offline_mode: next });
+                        showToast(`Offline mode ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         offlineMode ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -787,8 +942,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setCdnProxy(!cdnProxy);
-                        showToast(`CDN Proxy IP real retrieval ${!cdnProxy ? 'Enabled' : 'Disabled'}`);
+                        const next = !cdnProxy;
+                        setCdnProxy(next);
+                        persistSettings({ cdn_proxy: next });
+                        showToast(`CDN Proxy IP real retrieval ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         cdnProxy ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -812,8 +969,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setHomeBulletin(!homeBulletin);
-                        showToast(`Home Bulletin announcements ${!homeBulletin ? 'Enabled' : 'Disabled'}`);
+                        const next = !homeBulletin;
+                        setHomeBulletin(next);
+                        persistSettings({ home_bulletin: next });
+                        showToast(`Home Bulletin announcements ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         homeBulletin ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -837,8 +996,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setSiteMonitor(!siteMonitor);
-                        showToast(`Site Monitor ${!siteMonitor ? 'Enabled' : 'Disabled'}`);
+                        const next = !siteMonitor;
+                        setSiteMonitor(next);
+                        persistSettings({ site_monitor: next });
+                        showToast(`Site Monitor ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         siteMonitor ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -860,8 +1021,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setAutoFetchFavicon(!autoFetchFavicon);
-                        showToast(`Auto-fetch favicon ${!autoFetchFavicon ? 'Enabled' : 'Disabled'}`);
+                        const next = !autoFetchFavicon;
+                        setAutoFetchFavicon(next);
+                        persistSettings({ auto_fetch_favicon: next });
+                        showToast(`Auto-fetch favicon ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         autoFetchFavicon ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -885,8 +1048,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex flex-wrap items-center gap-3">
                     <button
                       onClick={() => {
-                        setAutoBackupPanel(!autoBackupPanel);
-                        showToast(`Auto Backup Panel ${!autoBackupPanel ? 'Enabled' : 'Disabled'}`);
+                        const next = !autoBackupPanel;
+                        setAutoBackupPanel(next);
+                        persistSettings({ auto_backup_panel: next });
+                        showToast(`Auto Backup Panel ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         autoBackupPanel ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -1021,7 +1186,10 @@ export default function SettingsPage() {
                       <Folder className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
                     </div>
                     <button
-                      onClick={() => showToast(`Default site directory set to ${defaultSiteFolder}`)}
+                      onClick={() => {
+                        persistSettings({ default_site_folder: defaultSiteFolder });
+                        showToast(`Default site directory set to ${defaultSiteFolder}`);
+                      }}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
                     >
                       Save
@@ -1046,7 +1214,10 @@ export default function SettingsPage() {
                       <Folder className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5" />
                     </div>
                     <button
-                      onClick={() => showToast(`Default backup directory set to ${defaultBackupFolder}`)}
+                      onClick={() => {
+                        persistSettings({ default_backup_folder: defaultBackupFolder });
+                        showToast(`Default backup directory set to ${defaultBackupFolder}`);
+                      }}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
                     >
                       Save
@@ -1066,7 +1237,10 @@ export default function SettingsPage() {
                       className="w-64 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none"
                     />
                     <button
-                      onClick={() => showToast(`Server IP set to ${serverIp}`)}
+                      onClick={() => {
+                        persistSettings({ server_ip: serverIp });
+                        showToast(`Server IP set to ${serverIp}`);
+                      }}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
                     >
                       Save
@@ -1122,7 +1296,10 @@ export default function SettingsPage() {
                       <option value="London">London (GMT)</option>
                     </select>
                     <button
-                      onClick={() => showToast(`Timezone updated to ${timezoneRegion}/${timezoneCity}`)}
+                      onClick={() => {
+                        persistSettings({ timezone_region: timezoneRegion, timezone_city: timezoneCity });
+                        showToast(`Timezone updated to ${timezoneRegion}/${timezoneCity}`);
+                      }}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs"
                     >
                       Save
@@ -1150,8 +1327,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setSecurityAlarm(!securityAlarm);
-                        showToast(`Panel Security Alarm ${!securityAlarm ? 'Enabled' : 'Disabled'}`);
+                        const next = !securityAlarm;
+                        setSecurityAlarm(next);
+                        persistSettings({ security_alarm: next });
+                        showToast(`Panel Security Alarm ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         securityAlarm ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -1181,8 +1360,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setBasicAuth(!basicAuth);
-                        showToast(`BasicAuth secondary barrier ${!basicAuth ? 'Enabled' : 'Disabled'}`);
+                        const next = !basicAuth;
+                        setBasicAuth(next);
+                        persistSettings({ basic_auth: next });
+                        showToast(`BasicAuth secondary barrier ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         basicAuth ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -1207,8 +1388,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setGoogleAuth(!googleAuth);
-                        showToast(`Google Authenticator ${!googleAuth ? 'Enabled' : 'Disabled'}`);
+                        const next = !googleAuth;
+                        setGoogleAuth(next);
+                        persistSettings({ google_auth: next });
+                        showToast(`Google Authenticator ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         googleAuth ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -1239,8 +1422,10 @@ export default function SettingsPage() {
                   <div className="flex-1 flex items-center gap-3">
                     <button
                       onClick={() => {
-                        setStrongPassword(!strongPassword);
-                        showToast(`Strong password enforcement ${!strongPassword ? 'Enabled' : 'Disabled'}`);
+                        const next = !strongPassword;
+                        setStrongPassword(next);
+                        persistSettings({ strong_password: next });
+                        showToast(`Strong password enforcement ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         strongPassword ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'

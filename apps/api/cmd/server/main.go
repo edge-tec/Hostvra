@@ -105,6 +105,7 @@ func main() {
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
 	domainRegistrarHandler := handlers.NewDomainRegistrarHandler(cfg, dataStore, auditLogger)
 	supportHandler := handlers.NewSupportHandler(cfg, dataStore, auditLogger)
+	settingsHandler := handlers.NewSettingsHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -596,6 +597,13 @@ func main() {
 				r.Post("/ai-assistant", supportHandler.AskAIAssistant)
 				r.Post("/articles/{id}/vote", supportHandler.VoteArticle)
 				r.Post("/articles", supportHandler.SaveArticle)
+			})
+
+			// System Settings (Global Panel Preferences, Port, Entrance, Security)
+			r.Route("/settings", func(r chi.Router) {
+				r.Get("/", settingsHandler.Get)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Put("/", settingsHandler.Update)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/sync-time", settingsHandler.SyncTime)
 			})
 		})
 	})
