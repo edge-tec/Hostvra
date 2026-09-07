@@ -87,12 +87,21 @@ export interface Website {
 
 export interface Database {
   id: string;
-  server_id: string;
-  db_type: 'mysql' | 'mariadb' | 'postgresql';
+  server_id?: string;
+  db_type: 'mysql' | 'mariadb' | 'postgresql' | 'pgsql' | 'sqlserver' | 'mongodb' | 'redis';
   name: string;
-  character_set: string;
-  collation: string;
-  size_bytes: number;
+  username?: string;
+  password?: string;
+  character_set?: string;
+  collation?: string;
+  size_bytes?: number;
+  quota?: string;
+  backup_status?: string;
+  backup_count?: number;
+  location?: string;
+  note?: string;
+  host_allow?: string;
+  in_recycle_bin?: boolean;
   created_at: string;
 }
 

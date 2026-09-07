@@ -131,17 +131,41 @@ func (m *MemoryStore) CreateDatabase(ctx context.Context, db *Database) error {
 	return nil
 }
 
+func (m *MemoryStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	db, exists := m.databases[id]
+	if !exists || db.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	return db, nil
+}
+
 func (m *MemoryStore) ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	dbs := make([]*Database, 0)
 	for _, d := range m.databases {
-		if d.ServerID == serverID && d.DeletedAt == nil {
+		if (serverID == uuid.Nil || d.ServerID == serverID) && d.DeletedAt == nil {
 			dbs = append(dbs, d)
 		}
 	}
 	return dbs, nil
+}
+
+func (m *MemoryStore) UpdateDatabase(ctx context.Context, db *Database) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.databases[db.ID]
+	if !exists || existing.DeletedAt != nil {
+		return ErrNotFound
+	}
+	db.CreatedAt = existing.CreatedAt
+	m.databases[db.ID] = db
+	return nil
 }
 
 func (m *MemoryStore) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
@@ -154,6 +178,20 @@ func (m *MemoryStore) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
 	}
 	now := time.Now().UTC()
 	db.DeletedAt = &now
+	db.InRecycleBin = true
+	return nil
+}
+
+func (m *MemoryStore) RestoreDatabase(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	db, exists := m.databases[id]
+	if !exists {
+		return ErrNotFound
+	}
+	db.DeletedAt = nil
+	db.InRecycleBin = false
 	return nil
 }
 
@@ -373,11 +411,27 @@ func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error 
 	).Scan(&db.CreatedAt)
 }
 
+func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error) {
+	query := `
+		SELECT id, server_id, db_type, name, character_set, collation, size_bytes, created_at
+		FROM databases
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	d := &Database{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&d.ID, &d.ServerID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return d, err
+}
+
 func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error) {
 	query := `
 		SELECT id, server_id, db_type, name, character_set, collation, size_bytes, created_at
 		FROM databases
-		WHERE server_id = $1 AND deleted_at IS NULL
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, serverID)
@@ -398,8 +452,24 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 	return dbs, nil
 }
 
+func (p *PostgresStore) UpdateDatabase(ctx context.Context, db *Database) error {
+	query := `
+		UPDATE databases
+		SET name = $2, character_set = $3, collation = $4, size_bytes = $5
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	_, err := p.db.ExecContext(ctx, query, db.ID, db.Name, db.CharacterSet, db.Collation, db.SizeBytes)
+	return err
+}
+
 func (p *PostgresStore) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
 	query := `UPDATE databases SET deleted_at = NOW() WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (p *PostgresStore) RestoreDatabase(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE databases SET deleted_at = NULL WHERE id = $1`
 	_, err := p.db.ExecContext(ctx, query, id)
 	return err
 }

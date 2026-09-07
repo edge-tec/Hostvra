@@ -29,11 +29,20 @@ type Website struct {
 type Database struct {
 	ID             uuid.UUID  `json:"id"`
 	ServerID       uuid.UUID  `json:"server_id"`
-	DBType         string     `json:"db_type"` // mysql, mariadb, postgresql
+	DBType         string     `json:"db_type"` // mysql, mariadb, postgresql, sqlserver, mongodb, redis
 	Name           string     `json:"name"`
+	Username       string     `json:"username,omitempty"`
+	Password       string     `json:"password,omitempty"`
 	CharacterSet   string     `json:"character_set"`
 	Collation      string     `json:"collation"`
 	SizeBytes      int64      `json:"size_bytes"`
+	Quota          string     `json:"quota,omitempty"`
+	BackupStatus   string     `json:"backup_status,omitempty"`
+	BackupCount    int        `json:"backup_count,omitempty"`
+	Location       string     `json:"location,omitempty"`
+	Note           string     `json:"note,omitempty"`
+	HostAllow      string     `json:"host_allow,omitempty"`
+	InRecycleBin   bool       `json:"in_recycle_bin,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
 }
