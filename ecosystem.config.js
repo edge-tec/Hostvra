@@ -17,6 +17,7 @@ module.exports = {
       args: 'run start',
       cwd: './apps/web',
       instances: 1,
+      exec_mode: 'fork',
       autorestart: true,
       max_memory_restart: '1G',
       env: {
