@@ -92,6 +92,7 @@ func main() {
 	updateHandler := handlers.NewUpdateHandler(cfg, dataStore, auditLogger, AppVersion)
 	terminalHandler := handlers.NewTerminalHandler(cfg, dataStore, auditLogger)
 	appStoreHandler := handlers.NewAppStoreHandler(cfg, dataStore, auditLogger)
+	dashboardHandler := handlers.NewDashboardHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -164,6 +165,12 @@ func main() {
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(cfg.JWTSecret))
+
+			// Real-Time Dashboard & Telemetry
+			r.Get("/dashboard/overview", dashboardHandler.GetOverview)
+			r.Get("/system/telemetry", dashboardHandler.GetOverview)
+			r.Post("/system/fix", dashboardHandler.RunFix)
+			r.Post("/system/restart", dashboardHandler.RestartTarget)
 
 			// Server Fleet
 			r.Route("/servers", func(r chi.Router) {

@@ -39,7 +39,7 @@ func TestAdminLoginSuccess(t *testing.T) {
 		MaxServers:  100,
 		MaxWebsites: 1000,
 	}
-	if err := memStore.CreateOrganization(context.Background(), org); err != nil {
+	if err := memStore.CreateOrganization(context.Background(), org); err != nil && err != store.ErrAlreadyExists {
 		t.Fatalf("failed to create default org: %v", err)
 	}
 
@@ -57,7 +57,11 @@ func TestAdminLoginSuccess(t *testing.T) {
 		IsSuperAdmin: true,
 	}
 	if err := memStore.CreateUser(context.Background(), adminUser, defaultOrgID, "owner"); err != nil {
-		t.Fatalf("failed to seed admin user: %v", err)
+		if err == store.ErrAlreadyExists {
+			_ = memStore.UpdateUserPassword(context.Background(), adminUser.ID, passwordHash)
+		} else {
+			t.Fatalf("failed to seed admin user: %v", err)
+		}
 	}
 
 	authHandler := NewAuthHandler(cfg, memStore, auditLogger)

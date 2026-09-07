@@ -262,6 +262,81 @@ export interface AppInstallJob {
   ended_at?: string;
 }
 
+export interface DashboardTelemetry {
+  load: {
+    text: string;
+    avg: string;
+    percent: number;
+    load_1m: number;
+    load_5m: number;
+    load_15m: number;
+  };
+  cpu: {
+    cores: number;
+    model: string;
+    percent: number;
+  };
+  ram: {
+    used_mb: number;
+    total_mb: number;
+    used: string;
+    total: string;
+    percent: number;
+  };
+  disk: {
+    path: string;
+    used_gb: number;
+    total_gb: number;
+    used: string;
+    total: string;
+    percent: number;
+  };
+  network: {
+    interface: string;
+    upstream_mb: string;
+    downstream_mb: string;
+    total_sent_gb: string;
+    total_received_gb: string;
+    upstream_kbps: number;
+    downstream_kbps: number;
+  };
+  disk_io: {
+    read_mb: string;
+    write_mb: string;
+    total_read_gb: string;
+    total_write_gb: string;
+    read_kbps: number;
+    write_kbps: number;
+  };
+  uptime_seconds: number;
+  hostname: string;
+  os_name: string;
+  os_version: string;
+  kernel_version: string;
+}
+
+export interface DashboardCounts {
+  websites_running: number;
+  websites_stopped: number;
+  websites_total: number;
+  databases_total: number;
+  ftp_accounts_total: number;
+  servers_total: number;
+  security_risks: number;
+  last_security_scan: string;
+}
+
+export interface DashboardOverview {
+  telemetry: DashboardTelemetry;
+  counts: DashboardCounts;
+}
+
+export interface SystemFixResponse {
+  success: boolean;
+  logs: string[];
+  health: string;
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('hostvra_access_token');
