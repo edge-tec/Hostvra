@@ -10,11 +10,15 @@ import {
   Shield,
   User as UserIcon,
   Server,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { clearStoredAuth, apiFetch, User, Organization } from '@/lib/api';
+import { useTheme } from '@/components/ThemeProvider';
 
 export function Header() {
   const router = useRouter();
+  const { theme, toggleTheme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [org, setOrg] = useState<Organization | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -36,7 +40,7 @@ export function Header() {
   };
 
   return (
-    <header className="h-16 border-b border-surface-800 bg-surface-900/60 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-20">
+    <header className="h-16 border-b border-surface-800 bg-surface-900/80 dark:bg-surface-900/60 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-20 transition-colors">
       {/* Organization Switcher */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-800/80 border border-surface-700 text-sm font-medium text-slate-200">
@@ -49,9 +53,23 @@ export function Header() {
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        {/* Light / Dark Mode Toggle */}
         <button
-          className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-surface-800 transition-colors relative"
+          onClick={toggleTheme}
+          className="p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-surface-800 transition-all border border-transparent hover:border-surface-700 relative"
+          title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+          aria-label="Toggle theme mode"
+        >
+          {theme === 'dark' ? (
+            <Sun className="w-4 h-4 text-amber-400 transition-transform rotate-0 hover:rotate-45" />
+          ) : (
+            <Moon className="w-4 h-4 text-indigo-500 transition-transform -rotate-12 hover:rotate-0" />
+          )}
+        </button>
+
+        <button
+          className="p-2 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-surface-800 transition-colors relative"
           title="Notifications"
         >
           <Bell className="w-4 h-4" />
