@@ -6,7 +6,7 @@ import { Header } from './Header';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen bg-[#f2f5f8] dark:bg-[#0b0f19] text-slate-900 dark:text-slate-100 transition-colors duration-150 font-sans">
+    <div className="flex min-h-screen bg-[#F8FAFC] dark:bg-[#0b0f19] text-[#111827] dark:text-slate-100 transition-colors duration-150 font-sans">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Header />

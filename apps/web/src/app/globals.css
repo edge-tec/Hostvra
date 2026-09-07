@@ -5,8 +5,20 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --bg-app: #ffffff;
+  --foreground-rgb: 17, 24, 39;
+  --bg-app: #F8FAFC;
+  --bg-card: #FFFFFF;
+  --bg-sidebar: #FFFFFF;
+  --bg-header: #FFFFFF;
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-muted: #6B7280;
+  --border-default: #E5E7EB;
+  --border-hover: #D1D5DB;
+  --color-success: #16A34A;
+  --color-warning: #EA580C;
+  --color-danger: #DC2626;
+  --color-info: #2563EB;
 }
 
 html.dark {
@@ -16,8 +28,8 @@ html.dark {
 }
 
 html:not(.dark) {
-  --foreground-rgb: 0, 0, 0;
-  --bg-app: #ffffff;
+  --foreground-rgb: 17, 24, 39;
+  --bg-app: #F8FAFC;
   color-scheme: light;
 }
 
@@ -35,22 +47,24 @@ code, pre, kbd, samp {
 }
 
 /* ==========================================================================
-   HOSTVRA ADAPTIVE DESIGN SYSTEM (PURE WHITE & DEEP BLACK LIGHT ENGINE)
-   Guarantees pure white backgrounds, crisp pitch-black text, and 100% visible buttons
+   HOSTVRA UNIFIED DESIGN SYSTEM (PREMIUM LIGHT MODE ENGINE)
+   Guarantees clean white surfaces, #F8FAFC background, #111827 primary text,
+   #E5E7EB borders, and accessible high-contrast buttons, tables, and inputs.
    ========================================================================== */
 
-/* Light Mode Core Backgrounds */
+/* 1. Light Mode Core Backgrounds */
 html:not(.dark) body {
-  background-color: #f8fafc !important;
-  color: #000000 !important;
+  background-color: #F8FAFC !important;
+  color: #111827 !important;
 }
 
 html:not(.dark) .bg-\[\#090d16\],
 html:not(.dark) .bg-\[\#0b0f19\],
 html:not(.dark) .bg-\[\#121824\],
 html:not(.dark) .bg-\[\#0e1420\],
-html:not(.dark) .bg-\[\#080b10\] {
-  background-color: #ffffff !important;
+html:not(.dark) .bg-\[\#080b10\],
+html:not(.dark) .bg-\[\#10141d\] {
+  background-color: #FFFFFF !important;
 }
 
 html:not(.dark) .bg-surface-950,
@@ -58,7 +72,7 @@ html:not(.dark) .bg-surface-900,
 html:not(.dark) .bg-surface-850,
 html:not(.dark) [class*="bg-surface-950"],
 html:not(.dark) [class*="bg-surface-900"] {
-  background-color: #ffffff !important;
+  background-color: #FFFFFF !important;
 }
 
 html:not(.dark) .bg-surface-800,
@@ -69,30 +83,40 @@ html:not(.dark) .bg-surface-800\/50,
 html:not(.dark) .bg-surface-800\/60,
 html:not(.dark) .bg-surface-800\/70,
 html:not(.dark) .bg-surface-800\/80 {
-  background-color: #f1f5f9 !important;
+  background-color: #F8FAFC !important;
 }
 
 html:not(.dark) .hover\:bg-surface-800:hover,
 html:not(.dark) .hover\:bg-surface-750:hover,
-html:not(.dark) .hover\:bg-surface-700:hover {
-  background-color: #e2e8f0 !important;
+html:not(.dark) .hover\:bg-surface-700:hover,
+html:not(.dark) .hover\:bg-slate-100:hover {
+  background-color: #F1F5F9 !important;
 }
 
-/* Light Mode Borders - Clearly visible slate delineation */
+/* 2. Light Mode Borders - Clean #E5E7EB Standard with #D1D5DB on Hover */
 html:not(.dark) .border-surface-800,
 html:not(.dark) .border-surface-750,
 html:not(.dark) .border-surface-700,
 html:not(.dark) .border-slate-800,
 html:not(.dark) .border-slate-700,
+html:not(.dark) .border-slate-300,
+html:not(.dark) .border-slate-200,
 html:not(.dark) [class*="border-surface-800"],
 html:not(.dark) [class*="border-surface-700"] {
-  border-color: #cbd5e1 !important;
+  border-color: #E5E7EB !important;
+}
+
+html:not(.dark) .border-surface-800:hover,
+html:not(.dark) .border-slate-200:hover,
+html:not(.dark) .border-slate-300:hover {
+  border-color: #D1D5DB !important;
 }
 
 /* ==========================================================================
-   LIGHT MODE TYPOGRAPHY: 100% VISIBLE, CRISP, BLACK CONTRAST
+   3. LIGHT MODE TYPOGRAPHY: 100% VISIBLE, WCAG AA ACCESSIBLE
    ========================================================================== */
 
+/* Primary Headings & Labels: #111827 */
 html:not(.dark) h1,
 html:not(.dark) h2,
 html:not(.dark) h3,
@@ -101,47 +125,73 @@ html:not(.dark) h5,
 html:not(.dark) h6,
 html:not(.dark) label,
 html:not(.dark) th {
-  color: #000000 !important;
+  color: #111827 !important;
   font-weight: 700;
 }
 
-/* Base text elements in light mode */
+/* Base Body Text Elements in Light Mode */
 html:not(.dark) p,
 html:not(.dark) td,
 html:not(.dark) li,
-html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*="text-emerald"]):not([class*="text-indigo"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-purple"]):not([class*="text-blue"]) {
-  color: #000000;
+html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*="text-emerald"]):not([class*="text-indigo"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-purple"]):not([class*="text-blue"]):not([class*="text-green"]) {
+  color: #111827;
 }
 
-/* High contrast dark text for slate & surface color classes in Light Mode */
+/* High-contrast text mapping */
+html:not(.dark) .text-slate-950,
+html:not(.dark) .text-slate-900,
+html:not(.dark) .text-slate-800,
+html:not(.dark) .text-slate-700,
 html:not(.dark) .text-slate-100,
 html:not(.dark) .text-slate-200,
 html:not(.dark) .text-slate-300,
 html:not(.dark) .text-surface-100,
 html:not(.dark) .text-surface-200,
 html:not(.dark) .text-surface-300 {
-  color: #000000 !important;
+  color: #111827 !important;
 }
 
-/* Secondary text: solid dark charcoal (never faint or unreadable) */
-html:not(.dark) .text-slate-400,
-html:not(.dark) .text-slate-500,
+/* Secondary Text: #4B5563 (Clean, readable, never faint) */
 html:not(.dark) .text-slate-600,
+html:not(.dark) .text-slate-500,
 html:not(.dark) .text-surface-400,
 html:not(.dark) .text-surface-500 {
-  color: #0f172a !important;
+  color: #4B5563 !important;
+}
+
+/* Muted Captions & Placeholders: #6B7280 */
+html:not(.dark) .text-slate-400 {
+  color: #6B7280 !important;
 }
 
 /* Overriding white text ONLY when not inside solid colored badges or buttons */
-html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="from-"]):not([class*="bg-gradient"]) {
-  color: #000000 !important;
+html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="from-"]):not([class*="bg-gradient"]) {
+  color: #111827 !important;
 }
 
 /* ==========================================================================
-   BUTTON VISIBILITY GUARANTEE: HIGH CONTRAST, BOLD, NEVER FAINT OR INVISIBLE
+   4. BUTTON ARCHITECTURE: 8-12px RADIUS, HIGH CONTRAST, PREVENT TEXT INVISIBILITY
    ========================================================================== */
 
-/* 1. Primary Solid Buttons (Always vibrant, high contrast, pure white text) */
+/* Base button shape & transitions */
+button,
+a[class*="px-"][class*="py-"][class*="rounded"] {
+  border-radius: 10px !important;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* Active & disabled states */
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+/* 4.1 Primary Solid Buttons (Always vibrant, high contrast, pure white text) */
 html:not(.dark) button[class*="bg-indigo"],
 html:not(.dark) button[class*="bg-emerald"],
 html:not(.dark) button[class*="bg-[#20a53a]"],
@@ -149,20 +199,35 @@ html:not(.dark) button[class*="bg-purple"],
 html:not(.dark) button[class*="bg-blue"],
 html:not(.dark) button[class*="bg-amber"],
 html:not(.dark) button[class*="bg-rose"],
+html:not(.dark) button[class*="bg-green"],
 html:not(.dark) a[class*="bg-indigo"],
 html:not(.dark) a[class*="bg-emerald"],
 html:not(.dark) a[class*="bg-[#20a53a]"],
 html:not(.dark) a[class*="bg-purple"],
 html:not(.dark) a[class*="bg-blue"],
 html:not(.dark) a[class*="bg-amber"],
-html:not(.dark) a[class*="bg-rose"] {
-  color: #ffffff !important;
-  font-weight: 700 !important;
+html:not(.dark) a[class*="bg-rose"],
+html:not(.dark) a[class*="bg-green"] {
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
   opacity: 1 !important;
-  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.18) !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08) !important;
 }
 
-/* Ensure text & SVG icons inside colored primary buttons remain 100% white */
+/* Hover micro-interaction for solid primary buttons */
+html:not(.dark) button[class*="bg-indigo"]:hover:not(:disabled),
+html:not(.dark) button[class*="bg-emerald"]:hover:not(:disabled),
+html:not(.dark) button[class*="bg-[#20a53a]"]:hover:not(:disabled),
+html:not(.dark) button[class*="bg-purple"]:hover:not(:disabled),
+html:not(.dark) button[class*="bg-blue"]:hover:not(:disabled),
+html:not(.dark) a[class*="bg-indigo"]:hover,
+html:not(.dark) a[class*="bg-emerald"]:hover,
+html:not(.dark) a[class*="bg-[#20a53a]"]:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Text & SVG icons inside primary buttons remain 100% white */
 html:not(.dark) button[class*="bg-indigo"] *,
 html:not(.dark) button[class*="bg-emerald"] *,
 html:not(.dark) button[class*="bg-[#20a53a]"] *,
@@ -170,181 +235,201 @@ html:not(.dark) button[class*="bg-purple"] *,
 html:not(.dark) button[class*="bg-blue"] *,
 html:not(.dark) button[class*="bg-amber"] *,
 html:not(.dark) button[class*="bg-rose"] *,
+html:not(.dark) button[class*="bg-green"] *,
 html:not(.dark) a[class*="bg-indigo"] *,
 html:not(.dark) a[class*="bg-emerald"] *,
 html:not(.dark) a[class*="bg-[#20a53a]"] *,
 html:not(.dark) a[class*="bg-purple"] *,
 html:not(.dark) a[class*="bg-blue"] *,
 html:not(.dark) a[class*="bg-amber"] *,
-html:not(.dark) a[class*="bg-rose"] * {
-  color: #ffffff !important;
-  stroke: #ffffff !important;
+html:not(.dark) a[class*="bg-rose"] *,
+html:not(.dark) a[class*="bg-green"] * {
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
 }
 
-/* 2. Secondary / Outline / Action Buttons in Light Mode */
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-transparent"]) {
-  background-color: #ffffff !important;
-  color: #000000 !important;
-  border: 1px solid #cbd5e1 !important;
+/* 4.2 Secondary / Neutral Action Buttons in Light Mode */
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-green"]):not([class*="bg-transparent"]) {
+  background-color: #FFFFFF !important;
+  color: #111827 !important;
+  border: 1px solid #E5E7EB !important;
   font-weight: 600 !important;
+  border-radius: 10px !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-transparent"]):hover {
-  background-color: #f1f5f9 !important;
-  border-color: #94a3b8 !important;
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-green"]):not([class*="bg-transparent"]):hover:not(:disabled) {
+  background-color: #F8FAFC !important;
+  border-color: #D1D5DB !important;
+  color: #111827 !important;
 }
 
-/* 3. Icon & Control Buttons */
-html:not(.dark) button svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg) {
-  stroke: #0f172a !important;
+/* 4.3 Icon & Control Buttons */
+html:not(.dark) button svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg):not(button[class*="bg-green"] svg):not(button[class*="bg-blue"] svg) {
+  stroke: #4B5563 !important;
+}
+
+html:not(.dark) button:hover svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg):not(button[class*="bg-green"] svg):not(button[class*="bg-blue"] svg) {
+  stroke: #111827 !important;
 }
 
 /* ==========================================================================
-   FORM INPUTS, TEXTAREAS & SELECTS (WHITE BG & CRISP BLACK TEXT)
+   5. FORMS & INPUTS (CLEAN WHITE BG, #E5E7EB BORDER, ACCENT FOCUS RING)
    ========================================================================== */
 
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
 html:not(.dark) textarea,
 html:not(.dark) select {
-  background-color: #ffffff !important;
-  color: #000000 !important;
-  border: 1.5px solid #cbd5e1 !important;
+  background-color: #FFFFFF !important;
+  color: #111827 !important;
+  border: 1.5px solid #E5E7EB !important;
+  border-radius: 10px !important;
   font-weight: 500 !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):hover,
+html:not(.dark) textarea:hover,
+html:not(.dark) select:hover {
+  border-color: #D1D5DB !important;
 }
 
 html:not(.dark) input:focus,
 html:not(.dark) textarea:focus,
 html:not(.dark) select:focus {
-  border-color: #4f46e5 !important;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15) !important;
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
   outline: none !important;
 }
 
 html:not(.dark) input::placeholder,
 html:not(.dark) textarea::placeholder {
-  color: #64748b !important;
+  color: #9CA3AF !important;
   opacity: 1 !important;
 }
 
 html:not(.dark) select option {
-  background-color: #ffffff !important;
-  color: #000000 !important;
+  background-color: #FFFFFF !important;
+  color: #111827 !important;
 }
 
 /* ==========================================================================
-   SIDEBAR & HEADER IN LIGHT MODE (WHITE SURFACES & SHARP CONTRAST)
+   6. SIDEBAR & HEADER IN LIGHT MODE (WHITE SURFACES & SHARP CONTRAST)
    ========================================================================== */
 
 html:not(.dark) aside {
-  background-color: #ffffff !important;
-  border-right: 1px solid #e2e8f0 !important;
-  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.03);
+  background-color: #FFFFFF !important;
+  border-right: 1px solid #E5E7EB !important;
+  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.02);
 }
 
 html:not(.dark) header {
-  background-color: rgba(255, 255, 255, 0.95) !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  border-bottom: 1px solid #E5E7EB !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 }
 
 /* Sidebar active item */
 html:not(.dark) aside a.bg-\[\#20a53a\] {
   background-color: #20a53a !important;
-  color: #ffffff !important;
+  color: #FFFFFF !important;
 }
 
 html:not(.dark) aside a.bg-\[\#20a53a\] * {
-  color: #ffffff !important;
-  stroke: #ffffff !important;
+  color: #FFFFFF !important;
+  stroke: #FFFFFF !important;
 }
 
 /* Sidebar inactive items */
 html:not(.dark) aside a:not(.bg-\[\#20a53a\]) {
-  color: #0f172a !important;
+  color: #4B5563 !important;
 }
 
 html:not(.dark) aside a:not(.bg-\[\#20a53a\]):hover {
-  background-color: #f1f5f9 !important;
-  color: #000000 !important;
+  background-color: #F8FAFC !important;
+  color: #111827 !important;
 }
 
 /* ==========================================================================
-   CARDS & PANELS: WHITE BACKGROUNDS & ELEGANT SUBTLE ELEVATION
+   7. CARDS & CONTAINERS: WHITE SURFACES & ELEGANT SUBTLE SHADOW
    ========================================================================== */
 
 html:not(.dark) .rounded-2xl.border,
 html:not(.dark) .rounded-xl.border {
-  background-color: #ffffff !important;
-  border-color: #e2e8f0 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+  background-color: #FFFFFF !important;
+  border-color: #E5E7EB !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
 }
 
-/* High Contrast Accent Badges & Status Indicators in Light Mode */
+/* Status Colors (WCAG AA Compliant) */
 html:not(.dark) .text-indigo-400,
 html:not(.dark) .text-indigo-300 {
-  color: #4338ca !important;
+  color: #4338CA !important;
 }
 
 html:not(.dark) .text-emerald-400,
-html:not(.dark) .text-emerald-300 {
-  color: #047857 !important;
+html:not(.dark) .text-emerald-300,
+html:not(.dark) .text-green-500 {
+  color: #16A34A !important;
 }
 
 html:not(.dark) .text-amber-400,
-html:not(.dark) .text-amber-300 {
-  color: #b45309 !important;
+html:not(.dark) .text-amber-300,
+html:not(.dark) .text-orange-500 {
+  color: #EA580C !important;
 }
 
 html:not(.dark) .text-purple-400,
 html:not(.dark) .text-purple-300 {
-  color: #6d28d9 !important;
+  color: #7C3AED !important;
 }
 
 html:not(.dark) .text-blue-400,
 html:not(.dark) .text-blue-300 {
-  color: #1d4ed8 !important;
+  color: #2563EB !important;
 }
 
 html:not(.dark) .text-rose-400,
-html:not(.dark) .text-rose-300 {
-  color: #be123c !important;
+html:not(.dark) .text-rose-300,
+html:not(.dark) .text-red-500 {
+  color: #DC2626 !important;
 }
 
-/* Vibrant Light Mode Badge Backgrounds */
+/* Soft Light Mode Badge Backgrounds */
 html:not(.dark) [class*="bg-indigo-500\/"],
 html:not(.dark) [class*="bg-indigo-600\/"] {
-  background-color: #eef2ff !important;
-  border-color: #c7d2fe !important;
+  background-color: #EEF2FF !important;
+  border-color: #C7D2FE !important;
 }
 
 html:not(.dark) [class*="bg-emerald-500\/"],
 html:not(.dark) [class*="bg-emerald-600\/"] {
-  background-color: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
+  background-color: #ECFDF5 !important;
+  border-color: #A7F3D0 !important;
 }
 
 html:not(.dark) [class*="bg-amber-500\/"],
 html:not(.dark) [class*="bg-amber-600\/"] {
-  background-color: #fffbeb !important;
-  border-color: #fde68a !important;
+  background-color: #FFFBEB !important;
+  border-color: #FDE68A !important;
 }
 
 html:not(.dark) [class*="bg-purple-500\/"],
 html:not(.dark) [class*="bg-purple-600\/"] {
-  background-color: #faf5ff !important;
-  border-color: #e9d5ff !important;
+  background-color: #FAF5FF !important;
+  border-color: #E9D5FF !important;
 }
 
 html:not(.dark) [class*="bg-blue-500\/"],
 html:not(.dark) [class*="bg-blue-600\/"] {
-  background-color: #eff6ff !important;
-  border-color: #bfdbfe !important;
+  background-color: #EFF6FF !important;
+  border-color: #BFDBFE !important;
 }
 
 html:not(.dark) [class*="bg-rose-500\/"],
 html:not(.dark) [class*="bg-rose-600\/"] {
-  background-color: #fff1f2 !important;
-  border-color: #fecdd3 !important;
+  background-color: #FEF2F2 !important;
+  border-color: #FECACA !important;
 }
 
 /* Smooth Scrollbars */
@@ -405,7 +490,7 @@ html.dark .gauge-track {
 }
 
 /* ==========================================================================
-   PROFESSIONAL DATA TABLES & ROWS SYSTEM (DUAL MODE)
+   8. PROFESSIONAL DATA TABLES & ROWS SYSTEM (DUAL MODE)
    ========================================================================== */
 
 table {
@@ -426,14 +511,14 @@ thead th {
 }
 
 html:not(.dark) thead tr {
-  background-color: #f8fafc !important;
-  border-bottom: 1.5px solid #cbd5e1 !important;
+  background-color: #F8FAFC !important;
+  border-bottom: 1px solid #E5E7EB !important;
 }
 
 html:not(.dark) thead th {
-  color: #0f172a !important;
-  background-color: #f8fafc !important;
-  border-bottom: 1.5px solid #cbd5e1 !important;
+  color: #4B5563 !important;
+  background-color: #F8FAFC !important;
+  border-bottom: 1px solid #E5E7EB !important;
 }
 
 html.dark thead tr {
@@ -455,18 +540,18 @@ tbody td {
 }
 
 html:not(.dark) tbody tr {
-  background-color: #ffffff !important;
-  border-bottom: 1px solid #e2e8f0 !important;
+  background-color: #FFFFFF !important;
+  border-bottom: 1px solid #E5E7EB !important;
   transition: background-color 0.15s ease !important;
 }
 
 html:not(.dark) tbody tr:hover {
-  background-color: #f8fafc !important;
+  background-color: #F8FAFC !important;
 }
 
 html:not(.dark) tbody td {
-  color: #000000 !important;
-  border-bottom: 1px solid #e2e8f0 !important;
+  color: #111827 !important;
+  border-bottom: 1px solid #E5E7EB !important;
 }
 
 html.dark tbody tr {
@@ -485,28 +570,33 @@ html.dark tbody td {
 }
 
 /* ==========================================================================
-   PROFESSIONAL SEARCH BOX & FILTER BAR SYSTEM
+   9. SEARCH BOX & FILTER BAR SYSTEM
    ========================================================================== */
 
 /* Universal Search & Filter Container */
 div:has(> input[placeholder*="Search"]),
 div:has(> input[placeholder*="Filter"]),
 div:has(> svg + input) {
-  border-radius: 12px !important;
+  border-radius: 10px !important;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 html:not(.dark) div:has(> input[placeholder*="Search"]),
 html:not(.dark) div:has(> input[placeholder*="Filter"]) {
-  background-color: #ffffff !important;
-  border: 1.5px solid #cbd5e1 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+  background-color: #FFFFFF !important;
+  border: 1.5px solid #E5E7EB !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+html:not(.dark) div:has(> input[placeholder*="Search"]):hover,
+html:not(.dark) div:has(> input[placeholder*="Filter"]):hover {
+  border-color: #D1D5DB !important;
 }
 
 html:not(.dark) div:has(> input[placeholder*="Search"]):focus-within,
 html:not(.dark) div:has(> input[placeholder*="Filter"]):focus-within {
-  border-color: #20a53a !important;
-  box-shadow: 0 0 0 3px rgba(32, 165, 58, 0.15) !important;
+  border-color: #2563EB !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
 }
 
 html.dark div:has(> input[placeholder*="Search"]),
@@ -533,12 +623,12 @@ input[placeholder*="Filter"] {
 
 html:not(.dark) input[placeholder*="Search"],
 html:not(.dark) input[placeholder*="Filter"] {
-  color: #000000 !important;
+  color: #111827 !important;
 }
 
 html:not(.dark) input[placeholder*="Search"]::placeholder,
 html:not(.dark) input[placeholder*="Filter"]::placeholder {
-  color: #64748b !important;
+  color: #9CA3AF !important;
   font-weight: 400 !important;
 }
 
@@ -552,16 +642,19 @@ html.dark input[placeholder*="Filter"]::placeholder {
   color: #64748b !important;
 }
 
-/* Table Card Wrapper & Outer Containers */
+/* ==========================================================================
+   10. TABLE CARD WRAPPER & OUTER CONTAINERS
+   ========================================================================== */
+
 div:has(> table),
 div:has(> div > table) {
-  border-radius: 16px;
+  border-radius: 12px;
 }
 
 html:not(.dark) div:has(> table),
 html:not(.dark) div:has(> div > table) {
-  background-color: #ffffff !important;
-  border-color: #e2e8f0 !important;
+  background-color: #FFFFFF !important;
+  border-color: #E5E7EB !important;
 }
 
 html.dark div:has(> table),
@@ -573,17 +666,37 @@ html.dark div:has(> div > table) {
 .table-responsive-wrapper {
   width: 100%;
   overflow-x: auto;
-  border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 html:not(.dark) .table-responsive-wrapper {
-  background-color: #ffffff !important;
-  border: 1px solid #e2e8f0 !important;
+  background-color: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
 }
 
 html.dark .table-responsive-wrapper {
   background-color: #10141d !important;
   border: 1px solid #1e2536 !important;
+}
+
+/* ==========================================================================
+   11. MODALS, POPUPS & DROPDOWNS
+   ========================================================================== */
+
+html:not(.dark) [role="dialog"],
+html:not(.dark) .modal-sheet,
+html:not(.dark) div[class*="fixed inset-0"] > div[class*="rounded-"] {
+  background-color: #FFFFFF !important;
+  border-color: #E5E7EB !important;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04) !important;
+}
+
+html:not(.dark) [role="menu"],
+html:not(.dark) div[class*="absolute right-0"][class*="rounded-"],
+html:not(.dark) div[class*="absolute left-0"][class*="rounded-"] {
+  background-color: #FFFFFF !important;
+  border: 1px solid #E5E7EB !important;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.03) !important;
 }
 
