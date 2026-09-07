@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { ChunkLoadRecovery } from '@/components/ChunkLoadRecovery';
 
 export const metadata: Metadata = {
   title: 'Hostvra — Modern Self-Hosted Cloud & Server Control Panel',
@@ -15,6 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <body className="min-h-screen antialiased transition-colors duration-150" suppressHydrationWarning>
+        <ChunkLoadRecovery />
         <ThemeProvider>
           {children}
         </ThemeProvider>
