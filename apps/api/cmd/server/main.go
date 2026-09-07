@@ -98,6 +98,7 @@ func main() {
 	cronHandler := handlers.NewCronHandler(cfg, dataStore, auditLogger)
 	dockerHandler := handlers.NewDockerHandler(cfg, dataStore, auditLogger)
 	ftpHandler := handlers.NewFTPHandler(cfg, dataStore, auditLogger)
+	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -361,6 +362,18 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/banned", firewallHandler.ListBannedIPs)
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/ban", firewallHandler.BanIP)
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/unban", firewallHandler.UnbanIP)
+			})
+
+			// Web Application Firewall (ModSecurity v3 + OWASP CRS)
+			r.Route("/waf", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/status", wafHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/config", wafHandler.UpdateConfig)
+				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/rules", wafHandler.ListRules)
+				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/rules/toggle", wafHandler.ToggleRule)
+				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/events", wafHandler.GetEvents)
+				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/websites/{domain}", wafHandler.GetWebsiteWAF)
+				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/websites/{domain}", wafHandler.UpdateWebsiteWAF)
+				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/probe", wafHandler.SimulateProbe)
 			})
 
 			// Scheduled Tasks (Linux Crontab) Subsystem

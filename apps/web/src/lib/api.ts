@@ -604,6 +604,59 @@ export interface UserIsolationInfo {
   created_at: string;
 }
 
+export interface WAFStatus {
+  is_installed: boolean;
+  is_enabled: boolean;
+  engine: string;
+  mode: 'On' | 'DetectionOnly' | 'Off';
+  paranoia_level: number;
+  anomaly_threshold: number;
+  rules_count: number;
+  active_categories_count: number;
+  total_attacks_blocked: number;
+  total_attacks_detected: number;
+  last_blocked_at?: string;
+  active_websites_count: number;
+  config_path: string;
+}
+
+export interface WAFRuleCategory {
+  id: string;
+  name: string;
+  description: string;
+  crs_range: string;
+  rules_count: number;
+  is_enabled: boolean;
+}
+
+export interface WebsiteWAFConfig {
+  domain: string;
+  enabled: boolean;
+  mode: 'Inherit' | 'On' | 'DetectionOnly' | 'Off';
+  paranoia_level: number;
+  cms_preset: 'none' | 'wordpress' | 'drupal' | 'nextjs';
+  excluded_rule_ids: number[];
+  last_attack_at?: string;
+  updated_at: string;
+}
+
+export interface WAFAttackEvent {
+  id: string;
+  timestamp: string;
+  client_ip: string;
+  domain: string;
+  method: string;
+  uri: string;
+  rule_id: number;
+  rule_category: string;
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  action: 'BLOCKED' | 'DETECTED' | 'PASSED';
+  message: string;
+  anomaly_score: number;
+  matched_data: string;
+}
+
+
 
 
 
