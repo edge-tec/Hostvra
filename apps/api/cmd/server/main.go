@@ -102,7 +102,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(300 * time.Second))
 
 	// CORS Setup - Secure Origin validation allowing credentials
 	r.Use(cors.Handler(cors.Options{
