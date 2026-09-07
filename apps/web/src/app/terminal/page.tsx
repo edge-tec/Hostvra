@@ -63,6 +63,14 @@ export default function TerminalPage() {
       }
     }
     loadInfo();
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const initialCmd = params.get('cmd');
+      if (initialCmd) {
+        setCommand(initialCmd);
+      }
+    }
   }, []);
 
   // Auto-scroll terminal to bottom when new entries arrive

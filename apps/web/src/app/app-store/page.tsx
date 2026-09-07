@@ -28,9 +28,13 @@ import {
   Activity,
   Mail,
   Wrench,
+  Bookmark,
+  BookmarkCheck,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, AppPackage, AppInstallJob } from '@/lib/api';
+import { AppControlModal } from '@/components/AppControlModal';
+import { getPinnedAppIds, togglePinApp } from '@/lib/appstore-utils';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Software', icon: Boxes },
@@ -53,6 +57,9 @@ export default function AppStorePage() {
   const [jobModalOpen, setJobModalOpen] = useState(false);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  const [selectedControlApp, setSelectedControlApp] = useState<AppPackage | null>(null);
+  const [controlModalOpen, setControlModalOpen] = useState(false);
+  const [pinnedAppIds, setPinnedAppIds] = useState<string[]>([]);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -71,7 +78,16 @@ export default function AppStorePage() {
 
   useEffect(() => {
     loadApps();
+    setPinnedAppIds(getPinnedAppIds());
+    const handlePinnedChange = () => setPinnedAppIds(getPinnedAppIds());
+    window.addEventListener('hostvra_pinned_apps_changed', handlePinnedChange);
+    return () => window.removeEventListener('hostvra_pinned_apps_changed', handlePinnedChange);
   }, []);
+
+  const handleOpenApp = (app: AppPackage) => {
+    setSelectedControlApp(app);
+    setControlModalOpen(true);
+  };
 
   // Poll active install/uninstall job
   useEffect(() => {
@@ -402,7 +418,37 @@ export default function AppStorePage() {
                               Install
                             </button>
                           ) : (
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Open / Launch Button */}
+                              <button
+                                onClick={() => handleOpenApp(app)}
+                                className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                                title="Open & Manage Application"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                Open
+                              </button>
+
+                              {/* Pin to Dashboard */}
+                              <button
+                                onClick={() => {
+                                  togglePinApp(app.id);
+                                  setPinnedAppIds(getPinnedAppIds());
+                                }}
+                                className={`p-1.5 rounded-lg border transition-all ${
+                                  pinnedAppIds.includes(app.id)
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                    : 'hover:bg-surface-200 dark:hover:bg-surface-700 text-slate-400 border-surface-200 dark:border-surface-700'
+                                }`}
+                                title={pinnedAppIds.includes(app.id) ? 'Pinned to Dashboard' : 'Pin to Dashboard'}
+                              >
+                                {pinnedAppIds.includes(app.id) ? (
+                                  <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" />
+                                ) : (
+                                  <Bookmark className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+
                               {app.service_name && (
                                 <button
                                   onClick={() => handleServiceControl(app, 'restart')}
@@ -412,9 +458,10 @@ export default function AppStorePage() {
                                   <RotateCw className="w-3.5 h-3.5" />
                                 </button>
                               )}
+
                               <button
                                 onClick={() => handleUninstall(app)}
-                                className="px-2.5 py-1 rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors"
+                                className="px-2 py-1 rounded-md text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors"
                               >
                                 Uninstall
                               </button>
@@ -496,7 +543,36 @@ export default function AppStorePage() {
                           1-Click Install
                         </button>
                       ) : (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          {/* Open / Manage Button */}
+                          <button
+                            onClick={() => handleOpenApp(app)}
+                            className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            Open
+                          </button>
+
+                          {/* Pin to Dashboard */}
+                          <button
+                            onClick={() => {
+                              togglePinApp(app.id);
+                              setPinnedAppIds(getPinnedAppIds());
+                            }}
+                            className={`p-1.5 rounded-lg border transition-all ${
+                              pinnedAppIds.includes(app.id)
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : 'hover:bg-surface-200 dark:hover:bg-surface-700 text-slate-400 border-surface-200 dark:border-surface-700'
+                            }`}
+                            title={pinnedAppIds.includes(app.id) ? 'Pinned to Dashboard' : 'Pin to Dashboard'}
+                          >
+                            {pinnedAppIds.includes(app.id) ? (
+                              <BookmarkCheck className="w-3.5 h-3.5 text-amber-400" />
+                            ) : (
+                              <Bookmark className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+
                           {app.service_name && (
                             <button
                               onClick={() =>
@@ -505,14 +581,14 @@ export default function AppStorePage() {
                                   app.status === 'running' ? 'stop' : 'start'
                                 )
                               }
-                              className="px-2.5 py-1 rounded-lg bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors"
+                              className="px-2 py-1 rounded-lg bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors"
                             >
                               {app.status === 'running' ? 'Stop' : 'Start'}
                             </button>
                           )}
                           <button
                             onClick={() => handleUninstall(app)}
-                            className="px-2.5 py-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors"
+                            className="px-2 py-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-xs font-medium transition-colors"
                           >
                             Uninstall
                           </button>
@@ -607,6 +683,15 @@ export default function AppStorePage() {
             </div>
           </div>
         )}
+
+        {/* Interactive App Open & Control Modal */}
+        <AppControlModal
+          app={selectedControlApp}
+          isOpen={controlModalOpen}
+          onClose={() => setControlModalOpen(false)}
+          onServiceControl={handleServiceControl}
+          isActing={actionLoadingId === selectedControlApp?.id}
+        />
       </div>
     </DashboardShell>
   );
