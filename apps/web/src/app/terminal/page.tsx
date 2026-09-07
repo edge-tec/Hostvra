@@ -316,15 +316,15 @@ Available shortcuts & capabilities:
 
         {/* Quick Action Chips */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-          <span className="text-slate-400 font-medium text-[11px] uppercase tracking-wider whitespace-nowrap mr-1 flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-indigo-400" /> Quick:
+          <span className="text-slate-700 dark:text-slate-300 font-bold text-xs uppercase tracking-wider whitespace-nowrap mr-1 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" /> Quick:
           </span>
           {quickCommands.map((q) => (
             <button
               key={q.cmd}
               onClick={() => handleExecute(q.cmd)}
               disabled={isExecuting}
-              className="px-2.5 py-1 rounded-md bg-surface-100 dark:bg-surface-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-400 text-slate-600 dark:text-slate-300 border border-surface-200 dark:border-surface-700 whitespace-nowrap transition-all duration-150 active:scale-95 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:border-indigo-300 dark:hover:border-indigo-600 shadow-xs font-semibold whitespace-nowrap transition-all duration-150 active:scale-95 disabled:opacity-50"
             >
               {q.label}
             </button>
@@ -344,7 +344,7 @@ Available shortcuts & capabilities:
               <span className="w-3 h-3 rounded-full bg-[#ff5f56] inline-block shadow-sm" />
               <span className="w-3 h-3 rounded-full bg-[#ffbd2e] inline-block shadow-sm" />
               <span className="w-3 h-3 rounded-full bg-[#27c93f] inline-block shadow-sm" />
-              <span className="ml-3 text-xs text-slate-400 font-sans font-medium flex items-center gap-1.5">
+              <span className="ml-3 text-xs text-slate-300 font-sans font-medium flex items-center gap-1.5">
                 <TerminalIcon className="w-3.5 h-3.5 text-indigo-400" />
                 hostvra-terminal — bash — {info?.hostname || 'node'}
               </span>
@@ -354,10 +354,10 @@ Available shortcuts & capabilities:
               <button
                 onClick={() => setAutoScroll(!autoScroll)}
                 title={autoScroll ? 'Auto-scroll is Enabled' : 'Auto-scroll is Paused'}
-                className={`text-xs px-2 py-0.5 rounded font-sans transition-colors ${
+                className={`text-xs px-2.5 py-1 rounded-md font-sans font-medium transition-colors border ${
                   autoScroll
-                    ? 'text-emerald-400 bg-emerald-500/10'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'text-emerald-300 bg-emerald-950/70 border-emerald-700/60'
+                    : 'text-slate-300 hover:text-white bg-slate-800/80 border-slate-700'
                 }`}
               >
                 Auto-scroll
@@ -365,14 +365,14 @@ Available shortcuts & capabilities:
               <button
                 onClick={() => setHistory([])}
                 title="Clear Terminal Output (Ctrl+L)"
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-md text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-700 border border-slate-700/60 transition-colors"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
               <button
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                className="p-1.5 rounded-md text-slate-300 hover:text-white bg-slate-800/60 hover:bg-slate-700 border border-slate-700/60 transition-colors"
               >
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
@@ -446,8 +446,8 @@ Available shortcuts & capabilities:
                   <pre
                     className={`whitespace-pre-wrap break-all pl-2 leading-relaxed p-2.5 rounded-lg border ${
                       entry.exitCode === 0
-                        ? 'text-slate-400 bg-slate-900/40 border-slate-800/80'
-                        : 'text-rose-400 bg-rose-950/20 border-rose-900/30'
+                        ? 'text-slate-300 bg-slate-900/60 border-slate-800'
+                        : 'text-rose-300 font-mono bg-rose-950/40 border-rose-800/60'
                     }`}
                   >
                     {entry.stderr}

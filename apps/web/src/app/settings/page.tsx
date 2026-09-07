@@ -34,128 +34,128 @@ export default function SettingsPage() {
     <DashboardShell>
       <div className="space-y-8 max-w-4xl">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Organization & System Settings</h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">Organization & System Settings</h1>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
             Manage your Hostvra organization, team entitlements, and licensing tier.
           </p>
         </div>
 
         {/* Organization Card */}
-        <div className="bg-surface-900 border border-surface-800 rounded-2xl p-6 shadow-xl space-y-6">
-          <div className="flex items-center gap-3 border-b border-surface-800 pb-4">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-3 border-b border-slate-200 dark:border-surface-800 pb-4">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
               <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Organization Profile</h2>
-              <p className="text-xs text-slate-400">Primary tenant details and resource quotas</p>
+              <h2 className="text-base font-bold text-slate-950 dark:text-white">Organization Profile</h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400">Primary tenant details and resource quotas</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                 Organization Name
               </label>
               <input
                 type="text"
                 disabled
                 value={org ? org.name : 'Hostvra Cloud'}
-                className="w-full px-3.5 py-2 rounded-xl bg-surface-950 border border-surface-700 text-slate-300 text-sm font-medium"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-slate-300 text-sm font-semibold shadow-xs"
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
                 Tenant Slug
               </label>
               <input
                 type="text"
                 disabled
                 value={org ? org.slug : 'hostvra-cloud-default'}
-                className="w-full px-3.5 py-2 rounded-xl bg-surface-950 border border-surface-700 text-slate-400 font-mono text-xs"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-400 font-mono text-xs shadow-xs"
               />
             </div>
           </div>
 
-          <div className="pt-2 border-t border-surface-800 flex items-center justify-between text-xs text-slate-400">
+          <div className="pt-2 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 font-medium">
             <span>Fleet Allocation: {org ? org.max_servers : 1} Server Quota</span>
             <span>Virtual Host Allocation: {org ? org.max_websites : 5} Websites</span>
           </div>
         </div>
 
         {/* Licensing & Feature Flags */}
-        <div className="bg-surface-900 border border-surface-800 rounded-2xl p-6 shadow-xl space-y-5">
-          <div className="flex items-center justify-between border-b border-surface-800 pb-4">
+        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-xs space-y-5">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-surface-800 pb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                 <BadgePercent className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-base font-bold text-white">Licensing & Entitlements</h2>
-                <p className="text-xs text-slate-400">Current tier and active capability flags</p>
+                <h2 className="text-base font-bold text-slate-950 dark:text-white">Licensing & Entitlements</h2>
+                <p className="text-xs text-slate-600 dark:text-slate-400">Current tier and active capability flags</p>
               </div>
             </div>
-            <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+            <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-500/20">
               Community Free Edition
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-800 flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center gap-3 shadow-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
               <div>
-                <p className="font-semibold text-slate-200">Native Go Agent Daemon</p>
-                <p className="text-slate-400 text-[11px]">Real-time systemd telemetry and typed operations</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200">Native Go Agent Daemon</p>
+                <p className="text-slate-600 dark:text-slate-400 text-[11px]">Real-time systemd telemetry and typed operations</p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-800 flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center gap-3 shadow-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
               <div>
-                <p className="font-semibold text-slate-200">Granular Role-Based Access Control</p>
-                <p className="text-slate-400 text-[11px]">Owner, Admin, Manager, Developer, Viewer</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200">Granular Role-Based Access Control</p>
+                <p className="text-slate-600 dark:text-slate-400 text-[11px]">Owner, Admin, Manager, Developer, Viewer</p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-800 flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-slate-800 flex items-center gap-3 shadow-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
               <div>
-                <p className="font-semibold text-slate-200">Immutable Audit Logging</p>
-                <p className="text-slate-400 text-[11px]">Security events, IP tracing, and action auditing</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200">Immutable Audit Logging</p>
+                <p className="text-slate-600 dark:text-slate-400 text-[11px]">Security events, IP tracing, and action auditing</p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-surface-950 border border-surface-800 flex items-center gap-3">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center gap-3 shadow-xs">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
               <div>
-                <p className="font-semibold text-slate-200">One-Command Agent Enrollment</p>
-                <p className="text-slate-400 text-[11px]">Single-use signed tokens with automatic rollback</p>
+                <p className="font-bold text-slate-900 dark:text-slate-200">One-Command Agent Enrollment</p>
+                <p className="text-slate-600 dark:text-slate-400 text-[11px]">Single-use signed tokens with automatic rollback</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* System Updates Navigation Card */}
-        <div className="bg-gradient-to-r from-indigo-950/60 via-surface-900 to-surface-900 border border-indigo-500/20 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="bg-gradient-to-r from-indigo-50/80 via-white to-white dark:from-indigo-950/60 dark:via-surface-900 dark:to-surface-900 border border-indigo-100 dark:border-indigo-500/20 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+            <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
               <RefreshCw className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-950 dark:text-white flex items-center gap-2">
                 Live Update & Engine Upgrades
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
                   Zero Downtime
                 </span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 font-medium">
                 Manage control plane patches, agent binaries, database schema migrations, and instant rollbacks.
               </p>
             </div>
           </div>
           <a
             href="/settings/updates"
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition shadow-lg shadow-indigo-600/20 flex items-center gap-2 flex-shrink-0"
+            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition shadow-md shadow-indigo-600/20 flex items-center gap-2 flex-shrink-0"
           >
             Manage Updates
           </a>

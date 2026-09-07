@@ -376,10 +376,10 @@ export default function FirewallPage() {
             <button
               onClick={handleToggleFirewall}
               disabled={togglingFirewall}
-              className={`p-2 rounded-xl border transition-all text-xs font-semibold flex items-center gap-1.5 ${
+              className={`px-3.5 py-1.5 rounded-xl border transition-all text-xs font-semibold flex items-center gap-1.5 ${
                 status?.is_active
-                  ? 'border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
-                  : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
+                  ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-transparent shadow-xs'
               }`}
             >
               <Power className="w-3.5 h-3.5" />

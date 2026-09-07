@@ -71,8 +71,12 @@ html:not(.dark) .bg-surface-950,
 html:not(.dark) .bg-surface-900,
 html:not(.dark) .bg-surface-850,
 html:not(.dark) [class*="bg-surface-950"],
-html:not(.dark) [class*="bg-surface-900"] {
+html:not(.dark) [class*="bg-surface-900"],
+html:not(.dark) [class*="from-surface-900"],
+html:not(.dark) [class*="from-surface-950"],
+html:not(.dark) [class*="from-brand-950"] {
   background-color: #FFFFFF !important;
+  background-image: none !important;
 }
 
 html:not(.dark) .bg-surface-800,
@@ -164,8 +168,8 @@ html:not(.dark) .text-slate-400 {
   color: #6B7280 !important;
 }
 
-/* Overriding white text ONLY when not inside solid colored badges or buttons */
-html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="from-"]):not([class*="bg-gradient"]) {
+/* Overriding white text ONLY when not inside solid colored badges, buttons, or code blocks */
+html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="from-"]):not([class*="bg-gradient"]):not(pre *):not(pre):not(code):not(code *) {
   color: #111827 !important;
 }
 
@@ -192,22 +196,22 @@ button:disabled {
 }
 
 /* 4.1 Primary Solid Buttons (Always vibrant, high contrast, pure white text) */
-html:not(.dark) button[class*="bg-indigo"],
-html:not(.dark) button[class*="bg-emerald"],
+html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
 html:not(.dark) button[class*="bg-[#20a53a]"],
-html:not(.dark) button[class*="bg-purple"],
-html:not(.dark) button[class*="bg-blue"],
-html:not(.dark) button[class*="bg-amber"],
-html:not(.dark) button[class*="bg-rose"],
-html:not(.dark) button[class*="bg-green"],
-html:not(.dark) a[class*="bg-indigo"],
-html:not(.dark) a[class*="bg-emerald"],
+html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
 html:not(.dark) a[class*="bg-[#20a53a]"],
-html:not(.dark) a[class*="bg-purple"],
-html:not(.dark) a[class*="bg-blue"],
-html:not(.dark) a[class*="bg-amber"],
-html:not(.dark) a[class*="bg-rose"],
-html:not(.dark) a[class*="bg-green"] {
+html:not(.dark) a[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
   color: #FFFFFF !important;
   font-weight: 600 !important;
   opacity: 1 !important;
@@ -215,35 +219,35 @@ html:not(.dark) a[class*="bg-green"] {
 }
 
 /* Hover micro-interaction for solid primary buttons */
-html:not(.dark) button[class*="bg-indigo"]:hover:not(:disabled),
-html:not(.dark) button[class*="bg-emerald"]:hover:not(:disabled),
+html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
 html:not(.dark) button[class*="bg-[#20a53a]"]:hover:not(:disabled),
-html:not(.dark) button[class*="bg-purple"]:hover:not(:disabled),
-html:not(.dark) button[class*="bg-blue"]:hover:not(:disabled),
-html:not(.dark) a[class*="bg-indigo"]:hover,
-html:not(.dark) a[class*="bg-emerald"]:hover,
+html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover,
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover,
 html:not(.dark) a[class*="bg-[#20a53a]"]:hover {
   filter: brightness(1.05);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Text & SVG icons inside primary buttons remain 100% white */
-html:not(.dark) button[class*="bg-indigo"] *,
-html:not(.dark) button[class*="bg-emerald"] *,
+html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
 html:not(.dark) button[class*="bg-[#20a53a]"] *,
-html:not(.dark) button[class*="bg-purple"] *,
-html:not(.dark) button[class*="bg-blue"] *,
-html:not(.dark) button[class*="bg-amber"] *,
-html:not(.dark) button[class*="bg-rose"] *,
-html:not(.dark) button[class*="bg-green"] *,
-html:not(.dark) a[class*="bg-indigo"] *,
-html:not(.dark) a[class*="bg-emerald"] *,
+html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
 html:not(.dark) a[class*="bg-[#20a53a]"] *,
-html:not(.dark) a[class*="bg-purple"] *,
-html:not(.dark) a[class*="bg-blue"] *,
-html:not(.dark) a[class*="bg-amber"] *,
-html:not(.dark) a[class*="bg-rose"] *,
-html:not(.dark) a[class*="bg-green"] * {
+html:not(.dark) a[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) * {
   color: #FFFFFF !important;
   stroke: #FFFFFF !important;
 }
