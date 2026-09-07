@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -146,7 +148,38 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
+	err = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
+	if err != nil {
+		// Server not found in database (e.g. after fresh restart), auto-restore node so fleet never drops it!
+		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		hostname := "hostvra-node"
+		if h, err := os.Hostname(); err == nil && h != "" {
+			hostname = h
+		}
+		clientIP := r.Header.Get("X-Forwarded-For")
+		if clientIP == "" {
+			clientIP = r.RemoteAddr
+		}
+		now := time.Now().UTC()
+		recoveredServer := &store.Server{
+			ID:              serverID,
+			OrganizationID:  defaultOrgID,
+			Name:            hostname,
+			Hostname:        hostname,
+			IPAddress:       clientIP,
+			OSName:          "Linux",
+			OSVersion:       "Ubuntu",
+			Architecture:    "amd64",
+			AgentVersion:    "1.0.0",
+			Status:          "online",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			LastHeartbeatAt: &now,
+			UptimeSeconds:   req.UptimeSeconds,
+		}
+		_ = h.store.CreateServer(r.Context(), recoveredServer)
+		_ = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
+	}
 
 	if req.Metric != nil {
 		req.Metric.ServerID = serverID

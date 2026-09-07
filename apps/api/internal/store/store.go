@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -186,10 +188,138 @@ type MemoryStore struct {
 	webServerInstances  map[string]*WebServerInstance // key: serverID:type
 	webServerVHosts     map[string]*WebServerVHost    // key: serverID:type:domain
 	webServerBackups    []*WebServerConfigBackup
+	filePath            string
+}
+
+type memoryDumpData struct {
+	Orgs               map[uuid.UUID]*Organization       `json:"orgs"`
+	OrgsBySlug         map[string]uuid.UUID              `json:"orgs_by_slug"`
+	Users              map[uuid.UUID]*User               `json:"users"`
+	UsersByEmail       map[string]uuid.UUID              `json:"users_by_email"`
+	Servers            map[uuid.UUID]*Server             `json:"servers"`
+	Tokens             map[string]*ServerEnrollmentToken `json:"tokens"`
+	Websites           map[uuid.UUID]*Website            `json:"websites"`
+	Databases          map[uuid.UUID]*Database           `json:"databases"`
+	DatabaseUsers      map[uuid.UUID]*DatabaseUser       `json:"database_users"`
+	SSLCerts           map[uuid.UUID]*SSLCertificate     `json:"ssl_certs"`
+	EmailDomains       map[uuid.UUID]*EmailDomain        `json:"email_domains"`
+	EmailMailboxes     map[uuid.UUID]*EmailMailbox       `json:"email_mailboxes"`
+	EmailAliases       map[uuid.UUID]*EmailAlias         `json:"email_aliases"`
+	WebServerInstances map[string]*WebServerInstance     `json:"web_server_instances"`
+	WebServerVHosts    map[string]*WebServerVHost        `json:"web_server_vhosts"`
+}
+
+func determineStoreFilePath() string {
+	if p := os.Getenv("HOSTVRA_STORE_FILE"); p != "" {
+		return p
+	}
+	if _, err := os.Stat("/var/lib/hostvra"); err == nil {
+		return "/var/lib/hostvra/store.json"
+	}
+	if err := os.MkdirAll("/var/lib/hostvra", 0755); err == nil {
+		return "/var/lib/hostvra/store.json"
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		dir := filepath.Join(home, ".hostvra")
+		_ = os.MkdirAll(dir, 0755)
+		return filepath.Join(dir, "store.json")
+	}
+	return "hostvra_store.json"
+}
+
+func (m *MemoryStore) saveToDiskLocked() {
+	if m.filePath == "" {
+		return
+	}
+	data := memoryDumpData{
+		Orgs:               m.orgs,
+		OrgsBySlug:         m.orgsBySlug,
+		Users:              m.users,
+		UsersByEmail:       m.usersByEmail,
+		Servers:            m.servers,
+		Tokens:             m.tokens,
+		Websites:           m.websites,
+		Databases:          m.databases,
+		DatabaseUsers:      m.databaseUsers,
+		SSLCerts:           m.sslCerts,
+		EmailDomains:       m.emailDomains,
+		EmailMailboxes:     m.emailMailboxes,
+		EmailAliases:       m.emailAliases,
+		WebServerInstances: m.webServerInstances,
+		WebServerVHosts:    m.webServerVHosts,
+	}
+	bytes, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(m.filePath), 0755)
+	_ = os.WriteFile(m.filePath, bytes, 0644)
+}
+
+func (m *MemoryStore) loadFromDisk() {
+	if m.filePath == "" {
+		return
+	}
+	bytes, err := os.ReadFile(m.filePath)
+	if err != nil {
+		return
+	}
+	var data memoryDumpData
+	if err := json.Unmarshal(bytes, &data); err != nil {
+		return
+	}
+	if data.Orgs != nil {
+		m.orgs = data.Orgs
+	}
+	if data.OrgsBySlug != nil {
+		m.orgsBySlug = data.OrgsBySlug
+	}
+	if data.Users != nil {
+		m.users = data.Users
+	}
+	if data.UsersByEmail != nil {
+		m.usersByEmail = data.UsersByEmail
+	}
+	if data.Servers != nil {
+		m.servers = data.Servers
+	}
+	if data.Tokens != nil {
+		m.tokens = data.Tokens
+	}
+	if data.Websites != nil {
+		m.websites = data.Websites
+	}
+	if data.Databases != nil {
+		m.databases = data.Databases
+	}
+	if data.DatabaseUsers != nil {
+		m.databaseUsers = data.DatabaseUsers
+	}
+	if data.SSLCerts != nil {
+		m.sslCerts = data.SSLCerts
+	}
+	if data.EmailDomains != nil {
+		m.emailDomains = data.EmailDomains
+	}
+	if data.EmailMailboxes != nil {
+		m.emailMailboxes = data.EmailMailboxes
+	}
+	if data.EmailAliases != nil {
+		m.emailAliases = data.EmailAliases
+	}
+	if data.WebServerInstances != nil {
+		m.webServerInstances = data.WebServerInstances
+	}
+	if data.WebServerVHosts != nil {
+		m.webServerVHosts = data.WebServerVHosts
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{
+	storePath := determineStoreFilePath()
+	m := &MemoryStore{
+		filePath:            storePath,
 		orgs:                make(map[uuid.UUID]*Organization),
 		orgsBySlug:          make(map[string]uuid.UUID),
 		users:               make(map[uuid.UUID]*User),
@@ -218,6 +348,8 @@ func NewMemoryStore() *MemoryStore {
 		webServerVHosts:     make(map[string]*WebServerVHost),
 		webServerBackups:    make([]*WebServerConfigBackup, 0),
 	}
+	m.loadFromDisk()
+	return m
 }
 
 func (m *MemoryStore) Close() error {
@@ -239,6 +371,7 @@ func (m *MemoryStore) CreateOrganization(ctx context.Context, org *Organization)
 
 	m.orgs[org.ID] = org
 	m.orgsBySlug[org.Slug] = org.ID
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -282,6 +415,7 @@ func (m *MemoryStore) CreateUser(ctx context.Context, user *User, orgID uuid.UUI
 
 	m.users[user.ID] = user
 	m.usersByEmail[user.Email] = user.ID
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -318,6 +452,7 @@ func (m *MemoryStore) UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip 
 	now := time.Now().UTC()
 	user.LastLoginAt = &now
 	user.LastLoginIP = ip
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -332,6 +467,7 @@ func (m *MemoryStore) CreateServer(ctx context.Context, server *Server) error {
 	server.CreatedAt = now
 	server.UpdatedAt = now
 	m.servers[server.ID] = server
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -372,6 +508,7 @@ func (m *MemoryStore) UpdateServerHeartbeat(ctx context.Context, id uuid.UUID, u
 	server.UptimeSeconds = uptime
 	server.Status = "online"
 	server.UpdatedAt = now
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -384,6 +521,7 @@ func (m *MemoryStore) CreateEnrollmentToken(ctx context.Context, token *ServerEn
 	}
 	token.CreatedAt = time.Now().UTC()
 	m.tokens[token.TokenHash] = token
+	m.saveToDiskLocked()
 	return nil
 }
 

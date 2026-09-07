@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -61,6 +62,7 @@ func main() {
 
 	// Seed default administrator account for local dev / initial access
 	seedDefaultAdmin(context.Background(), dataStore, logger)
+	autoRecoverLocalAgentNode(context.Background(), dataStore, logger)
 
 	// Initialize Audit Logger
 	auditLogger := audit.NewLogger(dataStore, logger)
@@ -421,3 +423,73 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
 		logger.Info("Default administrator account successfully seeded", "email", "admin@hostvra.com")
 	}
 }
+
+func autoRecoverLocalAgentNode(ctx context.Context, s store.Store, logger *slog.Logger) {
+	agentCfgPaths := []string{
+		"/etc/hostvra/agent.json",
+		"/var/lib/hostvra/agent.json",
+	}
+
+	var agentCfgFile string
+	for _, p := range agentCfgPaths {
+		if _, err := os.Stat(p); err == nil {
+			agentCfgFile = p
+			break
+		}
+	}
+
+	if agentCfgFile == "" {
+		return
+	}
+
+	type agentConfigFile struct {
+		ServerID uuid.UUID `json:"server_id"`
+		AgentKey string    `json:"agent_key"`
+	}
+
+	rawBytes, err := os.ReadFile(agentCfgFile)
+	if err != nil {
+		return
+	}
+
+	var cfg agentConfigFile
+	if err := json.Unmarshal(rawBytes, &cfg); err != nil || cfg.ServerID == uuid.Nil {
+		return
+	}
+
+	existing, err := s.GetServerByID(ctx, cfg.ServerID)
+	if err == nil && existing != nil {
+		logger.Info("Local node verified in server fleet registry", "server_id", cfg.ServerID)
+		return
+	}
+
+	hostname := "hostvra-node"
+	if h, err := os.Hostname(); err == nil && h != "" {
+		hostname = h
+	}
+
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	now := time.Now().UTC()
+	recovered := &store.Server{
+		ID:              cfg.ServerID,
+		OrganizationID:  defaultOrgID,
+		Name:            hostname,
+		Hostname:        hostname,
+		IPAddress:       "127.0.0.1",
+		OSName:          "Linux",
+		OSVersion:       "Ubuntu",
+		Architecture:    "amd64",
+		AgentVersion:    "1.0.0",
+		Status:          "online",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		LastHeartbeatAt: &now,
+	}
+
+	if err := s.CreateServer(ctx, recovered); err != nil {
+		logger.Warn("Failed to auto-recover server node from agent config", "error", err)
+	} else {
+		logger.Info("Successfully auto-recovered server node into fleet registry", "server_id", cfg.ServerID, "hostname", hostname)
+	}
+}
+
