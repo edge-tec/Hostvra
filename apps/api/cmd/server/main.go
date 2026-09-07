@@ -314,6 +314,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/recycle-bin/{id}/restore", databaseHandler.RestoreRecycleBin)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/batch", databaseHandler.Batch)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/users", databaseHandler.CreateUser)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/tables", databaseHandler.GetTables)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/query", databaseHandler.ExecuteQuery)
 			})
 
 			// Audit Logs

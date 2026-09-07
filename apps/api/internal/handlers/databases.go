@@ -590,3 +590,51 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusCreated, user, nil)
 }
+
+// GetTables returns the live tables for a given database name
+func (h *DatabaseHandler) GetTables(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		idStr := chi.URLParam(r, "id")
+		if id, err := uuid.Parse(idStr); err == nil {
+			if db, err := h.store.GetDatabaseByID(r.Context(), id); err == nil {
+				dbName = db.Name
+			}
+		}
+	}
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name or ID required", nil, "")
+		return
+	}
+
+	tables, err := h.dbMgr.GetDatabaseTables(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "TABLES_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"database": dbName,
+		"tables":   tables,
+	}, nil)
+}
+
+// ExecuteQuery runs a SQL command on the requested database
+func (h *DatabaseHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database string `json:"database"`
+		Query    string `json:"query"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Query == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database name and SQL query required", nil, "")
+		return
+	}
+
+	res, err := h.dbMgr.ExecuteQuery(r.Context(), req.Database, req.Query)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "QUERY_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, res, nil)
+}
