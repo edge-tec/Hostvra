@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -156,12 +158,7 @@ func (fm *FirewallManager) ListRules() ([]FirewallRule, error) {
 		return parseUFWNumberedRules(string(out)), nil
 	}
 
-	// Dev mock rules if not running on Linux
-	return []FirewallRule{
-		{ID: "1", Number: 1, To: "22/tcp", Action: "ALLOW", From: "Anywhere", Protocol: "tcp", Comment: "SSH Management"},
-		{ID: "2", Number: 2, To: "80/tcp", Action: "ALLOW", From: "Anywhere", Protocol: "tcp", Comment: "HTTP Web Traffic"},
-		{ID: "3", Number: 3, To: "443/tcp", Action: "ALLOW", From: "Anywhere", Protocol: "tcp", Comment: "HTTPS Web Traffic"},
-	}, nil
+	return []FirewallRule{}, nil
 }
 
 // AddRule adds an allow or deny rule for a port or IP
@@ -453,9 +450,41 @@ func validatePortSpec(port string) error {
 	return nil
 }
 
+func DetectSSHPort() int {
+	// Check /etc/ssh/sshd_config and sshd_config.d/*.conf
+	paths := []string{"/etc/ssh/sshd_config"}
+	if matches, err := filepath.Glob("/etc/ssh/sshd_config.d/*.conf"); err == nil {
+		paths = append(paths, matches...)
+	}
+
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(strings.ToLower(line), "port ") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					if port, err := strconv.Atoi(fields[1]); err == nil && port > 0 && port <= 65535 {
+						return port
+					}
+				}
+			}
+		}
+	}
+	return 22 // Default SSH port
+}
+
 func isSSHPort(portStr string) bool {
 	p, err := strconv.Atoi(strings.TrimSpace(portStr))
-	return err == nil && p == 22
+	if err != nil {
+		return false
+	}
+	activeSSHPort := DetectSSHPort()
+	return p == 22 || p == activeSSHPort
 }
 
 func isValidCIDR(cidrStr string) bool {

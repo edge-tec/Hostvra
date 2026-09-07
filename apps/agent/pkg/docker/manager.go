@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,7 +15,12 @@ import (
 
 var (
 	validContainerIdentRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+	validImageRegex          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_./:-]{0,255}$`)
+	validPortMappingRegex    = regexp.MustCompile(`^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:)?([0-9]{1,5}:)?[0-9]{1,5}(/(tcp|udp))?$`)
 	ErrInvalidContainerIdent = errors.New("invalid container identifier: must be 1-128 characters, alphanumeric with '.', '_' or '-'")
+	ErrInvalidDockerImage    = errors.New("invalid docker image specification: only alphanumeric, '.', '_', '/', ':', and '-' allowed")
+	ErrInvalidPortMapping    = errors.New("invalid docker port mapping format (e.g. '8080:80' or '127.0.0.1:8080:80/tcp')")
+	ErrDangerousVolumeMount  = errors.New("volume mount rejected: mounting host root or sensitive system directories (/etc, /root, /var/run/docker.sock, etc.) is forbidden")
 	ErrDockerNotInstalled    = errors.New("docker binary is not installed on this host")
 	ErrDockerDaemonOffline   = errors.New("docker daemon is offline or not responding")
 )
@@ -400,6 +406,10 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 	if req.Image == "" {
 		return "", errors.New("docker image is required")
 	}
+	req.Image = strings.TrimSpace(req.Image)
+	if !validImageRegex.MatchString(req.Image) {
+		return "", fmt.Errorf("%w: '%s'", ErrInvalidDockerImage, req.Image)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -421,6 +431,9 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 	for _, p := range req.PortMappings {
 		p = strings.TrimSpace(p)
 		if p != "" {
+			if !validPortMappingRegex.MatchString(p) {
+				return "", fmt.Errorf("%w: '%s'", ErrInvalidPortMapping, p)
+			}
 			args = append(args, "-p", p)
 		}
 	}
@@ -432,6 +445,9 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 	for _, v := range req.VolumeMounts {
 		v = strings.TrimSpace(v)
 		if v != "" {
+			if err := validateVolumeMount(v); err != nil {
+				return "", err
+			}
 			args = append(args, "-v", v)
 		}
 	}
@@ -445,6 +461,32 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 	}
 
 	return strings.TrimSpace(string(out)), nil
+}
+
+func validateVolumeMount(mount string) error {
+	mount = strings.TrimSpace(mount)
+	if mount == "" {
+		return nil
+	}
+	parts := strings.Split(mount, ":")
+	hostPath := filepath.Clean(strings.TrimSpace(parts[0]))
+
+	// Deny mounting sensitive host directories or Docker daemon socket
+	forbiddenPrefixes := []string{
+		"/etc", "/root", "/bin", "/sbin", "/usr", "/lib", "/lib64",
+		"/var/run", "/run", "/proc", "/sys", "/dev", "/boot",
+	}
+
+	if hostPath == "/" {
+		return fmt.Errorf("%w: cannot mount root '/'", ErrDangerousVolumeMount)
+	}
+
+	for _, fp := range forbiddenPrefixes {
+		if hostPath == fp || strings.HasPrefix(hostPath, fp+"/") {
+			return fmt.Errorf("%w: path '%s' is a restricted system directory", ErrDangerousVolumeMount, hostPath)
+		}
+	}
+	return nil
 }
 
 // PruneSystem cleans unused images, containers, networks

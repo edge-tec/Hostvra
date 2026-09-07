@@ -20,8 +20,15 @@ var (
 	ErrAccessDenied      = errors.New("access denied: path traversal or symlink escape detected outside allowed sandboxes")
 	ErrFileAlreadyExists = errors.New("file or directory already exists")
 	ErrInvalidFileName   = errors.New("invalid file or directory name")
-	ErrRootDeletionBlocked = errors.New("operation blocked: cannot delete sandbox root directory")
-	ErrZipSlipDetected   = errors.New("security error: archive contains illegal relative path (Zip Slip attempt)")
+	ErrRootDeletionBlocked  = errors.New("operation blocked: cannot delete sandbox root directory")
+	ErrZipSlipDetected      = errors.New("security error: archive contains illegal relative path (Zip Slip attempt)")
+	ErrArchiveBombDetected  = errors.New("archive decompression blocked: size or file count exceeds safety limits (archive bomb defense)")
+	ErrSymlinkBlocked       = errors.New("security error: archive contains forbidden symlink or link entry")
+)
+
+const (
+	MaxArchiveDecompressedBytes int64 = 1024 * 1024 * 1024 // 1GB limit
+	MaxArchiveFileCount         int   = 20000              // 20,000 entries limit
 )
 
 type FileItem struct {
@@ -485,12 +492,24 @@ func extractZip(zipPath, destDir string) error {
 	}
 	defer r.Close()
 
+	if len(r.File) > MaxArchiveFileCount {
+		return fmt.Errorf("%w: archive contains %d files (limit %d)", ErrArchiveBombDetected, len(r.File), MaxArchiveFileCount)
+	}
+
+	var totalExtractedBytes int64
+
 	for _, f := range r.File {
+		// Prevent symlink extraction attacks
+		if f.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: entry %s is a symlink", ErrSymlinkBlocked, f.Name)
+		}
+
 		targetPath := filepath.Join(destDir, f.Name)
 
 		// Zip Slip vulnerability check
 		cleanTarget := filepath.Clean(targetPath)
-		if !strings.HasPrefix(cleanTarget, filepath.Clean(destDir)+string(filepath.Separator)) && cleanTarget != filepath.Clean(destDir) {
+		cleanDest := filepath.Clean(destDir)
+		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
 			return fmt.Errorf("%w: entry %s breaks out of destination", ErrZipSlipDetected, f.Name)
 		}
 
@@ -514,11 +533,24 @@ func extractZip(zipPath, destDir string) error {
 			return err
 		}
 
-		_, err = io.Copy(outFile, rc)
+		// Cap per-file read to avoid zip bomb
+		remainingAllowance := MaxArchiveDecompressedBytes - totalExtractedBytes
+		if remainingAllowance <= 0 {
+			rc.Close()
+			outFile.Close()
+			return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
+		}
+
+		written, err := io.Copy(outFile, io.LimitReader(rc, remainingAllowance+1))
 		rc.Close()
 		outFile.Close()
 		if err != nil {
 			return err
+		}
+
+		totalExtractedBytes += written
+		if totalExtractedBytes > MaxArchiveDecompressedBytes {
+			return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
 		}
 	}
 	return nil
@@ -538,6 +570,11 @@ func extractTarGz(tarPath, destDir string) error {
 	defer gzr.Close()
 
 	tr := tar.NewReader(gzr)
+	var totalExtractedBytes int64
+	var fileCount int
+
+	cleanDest := filepath.Clean(destDir)
+
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -547,9 +584,19 @@ func extractTarGz(tarPath, destDir string) error {
 			return err
 		}
 
+		fileCount++
+		if fileCount > MaxArchiveFileCount {
+			return fmt.Errorf("%w: archive contains too many entries (limit %d)", ErrArchiveBombDetected, MaxArchiveFileCount)
+		}
+
+		// Strictly reject symlinks and hardlinks
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			return fmt.Errorf("%w: tar entry %s is a link/symlink", ErrSymlinkBlocked, header.Name)
+		}
+
 		targetPath := filepath.Join(destDir, header.Name)
 		cleanTarget := filepath.Clean(targetPath)
-		if !strings.HasPrefix(cleanTarget, filepath.Clean(destDir)+string(filepath.Separator)) && cleanTarget != filepath.Clean(destDir) {
+		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
 			return fmt.Errorf("%w: entry %s breaks out of destination", ErrZipSlipDetected, header.Name)
 		}
 
@@ -564,11 +611,23 @@ func extractTarGz(tarPath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(outFile, tr); err != nil {
+
+			remainingAllowance := MaxArchiveDecompressedBytes - totalExtractedBytes
+			if remainingAllowance <= 0 {
 				outFile.Close()
+				return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
+			}
+
+			written, err := io.Copy(outFile, io.LimitReader(tr, remainingAllowance+1))
+			outFile.Close()
+			if err != nil {
 				return err
 			}
-			outFile.Close()
+
+			totalExtractedBytes += written
+			if totalExtractedBytes > MaxArchiveDecompressedBytes {
+				return fmt.Errorf("%w: total extracted bytes exceeds safety limit (%d bytes)", ErrArchiveBombDetected, MaxArchiveDecompressedBytes)
+			}
 		}
 	}
 	return nil

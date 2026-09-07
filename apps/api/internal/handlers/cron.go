@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"hostvra/agent/pkg/cron"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -87,10 +89,22 @@ func (h *CronHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	sysUser := strings.TrimSpace(req.SystemUser)
+	if sysUser == "" || sysUser == "root" {
+		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can schedule cron jobs as root", nil, "")
+			return
+		}
+		if sysUser == "" {
+			sysUser = "root"
+		}
+	}
+
 	job := cron.CronJob{
 		Schedule:    req.Schedule,
 		Command:     req.Command,
-		SystemUser:  req.SystemUser,
+		SystemUser:  sysUser,
 		Description: req.Description,
 	}
 
@@ -131,11 +145,23 @@ func (h *CronHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	sysUser := strings.TrimSpace(req.SystemUser)
+	if sysUser == "" || sysUser == "root" {
+		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can update cron jobs as root", nil, "")
+			return
+		}
+		if sysUser == "" {
+			sysUser = "root"
+		}
+	}
+
 	job := cron.CronJob{
 		ID:          jobID,
 		Schedule:    req.Schedule,
 		Command:     req.Command,
-		SystemUser:  req.SystemUser,
+		SystemUser:  sysUser,
 		Description: req.Description,
 		IsEnabled:   req.IsEnabled,
 	}
@@ -260,7 +286,19 @@ func (h *CronHandler) TestCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.cronMgr.ExecuteNow(req.Command, req.SystemUser)
+	claims, _ := auth.GetClaims(r.Context())
+	sysUser := strings.TrimSpace(req.SystemUser)
+	if sysUser == "" || sysUser == "root" {
+		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can test commands as root", nil, "")
+			return
+		}
+		if sysUser == "" {
+			sysUser = "root"
+		}
+	}
+
+	res, err := h.cronMgr.ExecuteNow(req.Command, sysUser)
 	if err != nil {
 		if errors.Is(err, cron.ErrDangerousCommand) {
 			response.Error(w, http.StatusBadRequest, "DANGEROUS_COMMAND", err.Error(), nil, "")

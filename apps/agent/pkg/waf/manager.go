@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -423,7 +424,12 @@ func (m *Manager) UpdateGlobalConfig(cfg WAFGlobalConfig) error {
 	cfg.UpdatedAt = time.Now().UTC()
 	m.globalConfig = cfg
 
-	return m.saveStateLocked()
+	if err := m.saveStateLocked(); err != nil {
+		return err
+	}
+
+	reloadNginxSafely()
+	return nil
 }
 
 // ListRuleCategories returns all OWASP CRS rule sets and their enabled status.
@@ -529,8 +535,23 @@ func (m *Manager) UpdateWebsiteWAF(domain string, cfg WebsiteWAFConfig) error {
 	if err := os.Rename(tmp, siteConfFile); err != nil {
 		return err
 	}
+	if err := m.saveStateLocked(); err != nil {
+		return err
+	}
 
-	return m.saveStateLocked()
+	reloadNginxSafely()
+	return nil
+}
+
+func reloadNginxSafely() {
+	if _, err := exec.LookPath("nginx"); err == nil {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			if err := exec.Command("nginx", "-t").Run(); err == nil {
+				_ = exec.Command("systemctl", "reload", "nginx").Run()
+			}
+		}()
+	}
 }
 
 // GetAttackEvents returns the audit events list, filtered by optional category.

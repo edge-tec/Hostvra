@@ -135,6 +135,17 @@ func (fm *FTPManager) ValidateUserParams(username, homeDir string) error {
 		return fmt.Errorf("%w: '%s'", ErrInvalidDirectory, homeDir)
 	}
 
+	// Strictly deny system directories
+	forbiddenSystemRoots := []string{
+		"/etc", "/root", "/bin", "/sbin", "/usr", "/lib", "/lib64",
+		"/var/run", "/run", "/proc", "/sys", "/dev", "/boot", "/var/log",
+	}
+	for _, fs := range forbiddenSystemRoots {
+		if homeDir == fs || strings.HasPrefix(homeDir, fs+"/") {
+			return fmt.Errorf("%w: home directory cannot be in system path '%s'", ErrInvalidDirectory, homeDir)
+		}
+	}
+
 	return nil
 }
 

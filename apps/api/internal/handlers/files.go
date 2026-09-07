@@ -219,7 +219,13 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	destPath := filepath.Join(targetDir, header.Filename)
+	safeFilename := filepath.Base(filepath.Clean(header.Filename))
+	if safeFilename == "." || safeFilename == "/" || safeFilename == "" || strings.Contains(safeFilename, "\x00") {
+		response.Error(w, http.StatusBadRequest, "INVALID_FILENAME", "Invalid upload filename", nil, "")
+		return
+	}
+
+	destPath := filepath.Join(targetDir, safeFilename)
 	validatedDest, err := h.fileMgr.ValidatePath(destPath)
 	if err != nil {
 		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")

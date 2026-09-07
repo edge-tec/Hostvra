@@ -162,3 +162,36 @@ func TestFileManager_ZipSlipProtection(t *testing.T) {
 		t.Errorf("expected Zip Slip attack to be detected and blocked, got: %v", err)
 	}
 }
+
+func TestFileManager_SymlinkInArchiveBlocked(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-symlinkarchive-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	fm := NewFileManager(tempDir)
+
+	// Construct a ZIP with symlink entry
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	h := &zip.FileHeader{
+		Name: "symlink_to_etc",
+	}
+	h.SetMode(os.ModeSymlink | 0777)
+	w, err := zw.CreateHeader(h)
+	if err != nil {
+		t.Fatalf("failed to create header: %v", err)
+	}
+	_, _ = w.Write([]byte("/etc/shadow"))
+	_ = zw.Close()
+
+	symlinkZip := filepath.Join(tempDir, "symlink.zip")
+	_ = os.WriteFile(symlinkZip, buf.Bytes(), 0644)
+
+	extractDir := filepath.Join(tempDir, "extracted")
+	err = fm.Extract(symlinkZip, extractDir)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected symlink in zip to be rejected, got: %v", err)
+	}
+}

@@ -10,8 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
+)
+
+var (
+	validDBIdentRegex = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
 )
 
 type InstallerManager struct {
@@ -52,6 +57,15 @@ func NewInstallerManager(opts ...Option) *InstallerManager {
 			return exec.CommandContext(ctx, name, args...).CombinedOutput()
 		},
 		DBProvisioner: func(ctx context.Context, dbName, dbUser, dbPass, dbType string) error {
+			if !validDBIdentRegex.MatchString(dbName) {
+				return fmt.Errorf("invalid database name: %s", dbName)
+			}
+			if !validDBIdentRegex.MatchString(dbUser) {
+				return fmt.Errorf("invalid database user: %s", dbUser)
+			}
+			safePass := strings.ReplaceAll(dbPass, "'", "\\'")
+			safePass = strings.ReplaceAll(safePass, "\\", "\\\\")
+
 			// Real MySQL / MariaDB provisioning when root access available
 			if _, err := exec.LookPath("mysql"); err == nil && os.Geteuid() == 0 {
 				query := fmt.Sprintf(
@@ -59,7 +73,7 @@ func NewInstallerManager(opts ...Option) *InstallerManager {
 						"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; "+
 						"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost'; "+
 						"FLUSH PRIVILEGES;",
-					dbName, dbUser, dbPass, dbName, dbUser,
+					dbName, dbUser, safePass, dbName, dbUser,
 				)
 				cmd := exec.CommandContext(ctx, "mysql", "-e", query)
 				_ = cmd.Run()
@@ -731,6 +745,11 @@ func (m *InstallerManager) DetectInstalledApp(docRoot string) (*InstalledAppInfo
 
 // UninstallApplication clears the application files in the website document root
 func (m *InstallerManager) UninstallApplication(ctx context.Context, docRoot string) error {
+	docRoot = filepath.Clean(strings.TrimSpace(docRoot))
+	if !filepath.IsAbs(docRoot) || docRoot == "/" || docRoot == "/var" || docRoot == "/var/www" || docRoot == "/etc" || docRoot == "/root" || docRoot == "/home" {
+		return fmt.Errorf("dangerous or invalid document root for application uninstall: %s", docRoot)
+	}
+
 	entries, err := os.ReadDir(docRoot)
 	if err != nil {
 		return err
