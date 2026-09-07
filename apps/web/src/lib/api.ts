@@ -433,3 +433,33 @@ export interface BannedIPItem {
   jail: string;
   banned_at: string;
 }
+
+export interface CronDaemonStatus {
+  is_active: boolean;
+  daemon: string;
+  jobs_count: number;
+}
+
+export interface CronJob {
+  id: string;
+  schedule: string;
+  command: string;
+  system_user: string;
+  description: string;
+  is_enabled: boolean;
+  last_run_at?: string;
+  last_status?: string;
+  last_output?: string;
+}
+
+export interface CronExecutionResult {
+  job_id?: string;
+  command: string;
+  system_user: string;
+  exit_code: number;
+  stdout: string;
+  stderr?: string;
+  duration_ms: number;
+  timestamp: string;
+  success: boolean;
+}

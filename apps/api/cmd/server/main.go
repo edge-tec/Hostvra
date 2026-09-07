@@ -95,6 +95,7 @@ func main() {
 	dashboardHandler := handlers.NewDashboardHandler(cfg, dataStore, auditLogger)
 	fileHandler := handlers.NewFileHandler(cfg, dataStore, auditLogger)
 	firewallHandler := handlers.NewFirewallHandler(cfg, dataStore, auditLogger)
+	cronHandler := handlers.NewCronHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -340,6 +341,18 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/banned", firewallHandler.ListBannedIPs)
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/ban", firewallHandler.BanIP)
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/unban", firewallHandler.UnbanIP)
+			})
+
+			// Scheduled Tasks (Linux Crontab) Subsystem
+			r.Route("/cron", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermCronView)).Get("/status", cronHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermCronView)).Get("/jobs", cronHandler.ListJobs)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs", cronHandler.CreateJob)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Put("/jobs/{id}", cronHandler.UpdateJob)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Delete("/jobs/{id}", cronHandler.DeleteJob)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/toggle", cronHandler.ToggleJob)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/run", cronHandler.RunJob)
+				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/test", cronHandler.TestCommand)
 			})
 
 			// 1-Click App Store & Extensions
