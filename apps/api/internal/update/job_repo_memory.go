@@ -25,7 +25,8 @@ func NewMemoryJobRepository() *MemoryJobRepository {
 func (m *MemoryJobRepository) CreateJob(ctx context.Context, job *UpdateJob) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.jobs[job.ID] = job
+	jobCopy := *job
+	m.jobs[job.ID] = &jobCopy
 	return nil
 }
 

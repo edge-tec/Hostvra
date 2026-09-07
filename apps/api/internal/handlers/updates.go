@@ -148,6 +148,7 @@ func (h *UpdateHandler) StartUpdate(w http.ResponseWriter, r *http.Request) {
 	initialJobCopy := *job
 	response.JSON(w, http.StatusAccepted, &initialJobCopy, nil)
 
+	bgJobCopy := *job
 	// Run background execution asynchronously so user browser disconnect does not interrupt
 	go func(bgJob *update.UpdateJob) {
 		bgCtx := context.Background()
@@ -179,7 +180,7 @@ func (h *UpdateHandler) StartUpdate(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(300 * time.Millisecond)
 
 		_ = h.engine.Transition(bgCtx, bgJob, update.StatusCompleted, fmt.Sprintf("Successfully upgraded to v%s", req.TargetVersion))
-	}(job)
+	}(&bgJobCopy)
 }
 
 // GetJobStatus returns progress and step logs for an update job
