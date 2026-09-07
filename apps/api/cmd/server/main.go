@@ -97,6 +97,7 @@ func main() {
 	firewallHandler := handlers.NewFirewallHandler(cfg, dataStore, auditLogger)
 	cronHandler := handlers.NewCronHandler(cfg, dataStore, auditLogger)
 	dockerHandler := handlers.NewDockerHandler(cfg, dataStore, auditLogger)
+	ftpHandler := handlers.NewFTPHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -372,6 +373,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/containers/run", dockerHandler.RunContainer)
 				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Delete("/images/{id}", dockerHandler.DeleteImage)
 				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/prune", dockerHandler.PruneSystem)
+			})
+
+			// FTP (Pure-FTPd) Subsystem
+			r.Route("/ftp", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/status", ftpHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/users", ftpHandler.ListUsers)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/users", ftpHandler.CreateUser)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Put("/users/{username}", ftpHandler.UpdateUser)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Put("/users/{username}/password", ftpHandler.ChangePassword)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Delete("/users/{username}", ftpHandler.DeleteUser)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/users/{username}/toggle", ftpHandler.ToggleUser)
 			})
 
 			// 1-Click App Store & Extensions

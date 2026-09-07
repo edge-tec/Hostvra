@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/ftp"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -33,6 +34,7 @@ type DashboardHandler struct {
 	prevNet   netSample
 	prevDisk  diskSample
 	startTime time.Time
+	ftpMgr    *ftp.FTPManager
 }
 
 type cpuSample struct {
@@ -59,6 +61,7 @@ func NewDashboardHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Da
 		store:     s,
 		audit:     a,
 		startTime: time.Now().UTC(),
+		ftpMgr:    ftp.NewFTPManager(),
 	}
 }
 
@@ -528,6 +531,11 @@ func (h *DashboardHandler) gatherCounts(ctx context.Context, orgID uuid.UUID) Co
 			}
 		}
 		counts.DatabasesTotal = totalDBs
+	}
+
+	// 3. Real FTP Accounts
+	if ftpUsers, err := h.ftpMgr.ListUsers(); err == nil {
+		counts.FTPAcountsTotal = len(ftpUsers)
 	}
 
 	return counts

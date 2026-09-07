@@ -506,3 +506,26 @@ export interface DockerStats {
   pids: string;
 }
 
+export interface FTPDaemonStatus {
+  is_installed: boolean;
+  is_active: boolean;
+  daemon_name: string;
+  port: number;
+  users_count: number;
+  server_ip?: string;
+}
+
+export interface FTPUser {
+  username: string;
+  home_dir: string;
+  uid: number;
+  gid: number;
+  quota_mb?: number;
+  upload_bandwidth_kbps?: number;
+  download_bandwidth_kbps?: number;
+  max_sessions?: number;
+  is_enabled: boolean;
+  created_at?: string;
+}
+
+
