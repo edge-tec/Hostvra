@@ -18,6 +18,7 @@ import {
   X,
   AlertTriangle,
   Server,
+  Menu,
 } from 'lucide-react';
 import { clearStoredAuth, apiFetch, User, Organization } from '@/lib/api';
 import { useTheme } from '@/components/ThemeProvider';
@@ -27,7 +28,6 @@ export function Header() {
   const { theme, toggleTheme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [org, setOrg] = useState<Organization | null>(null);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Modals for Header Actions
   const [restartModalOpen, setRestartModalOpen] = useState(false);
@@ -53,9 +53,8 @@ export function Header() {
     loadMe();
   }, []);
 
-  const handleLogout = () => {
-    clearStoredAuth();
-    router.push('/login');
+  const triggerMobileSidebar = () => {
+    window.dispatchEvent(new CustomEvent('hostvra_toggle_mobile_sidebar'));
   };
 
   const executeRestart = () => {
@@ -94,35 +93,45 @@ export function Header() {
 
   return (
     <>
-      <header className="h-14 border-b border-slate-200 dark:border-surface-800 bg-white/95 dark:bg-[#121824]/95 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20 transition-colors">
-        {/* Left: User Profile, Ubuntu OS & PRO Badge */}
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-surface-700 flex items-center justify-center text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-surface-600">
+      <header className="h-14 border-b border-slate-200 dark:border-surface-800 bg-white/95 dark:bg-[#121824]/95 backdrop-blur-md px-3 sm:px-6 flex items-center justify-between sticky top-0 z-20 transition-colors">
+        {/* Left: Mobile Toggle, User Profile, Ubuntu OS & PRO Badge */}
+        <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+          {/* Mobile Hamburger Button */}
+          <button
+            onClick={triggerMobileSidebar}
+            className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800 lg:hidden flex items-center justify-center flex-shrink-0"
+            title="Open Menu"
+            aria-label="Open mobile menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+
+          <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-surface-700 flex items-center justify-center text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-surface-600 flex-shrink-0">
             {(user?.full_name?.[0] || 'A').toUpperCase()}
           </div>
 
-          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 hidden sm:inline-block">
+          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[100px] sm:max-w-none">
             {user?.email ? `${user.email.slice(0, 3)}****.com` : 'admin****.com'}
           </span>
 
           {/* Ubuntu 24 Tag */}
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-[11px] text-slate-600 dark:text-slate-300 font-medium">
+          <div className="hidden md:flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-[11px] text-slate-600 dark:text-slate-300 font-medium flex-shrink-0">
             <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
             <span>Ubuntu 24</span>
           </div>
 
           {/* PRO Badge */}
-          <span className="px-2 py-0.5 rounded bg-[#1e232d] text-amber-400 font-bold text-[10px] tracking-wide shadow-sm flex items-center gap-1 border border-amber-400/20">
+          <span className="px-2 py-0.5 rounded bg-[#1e232d] text-amber-400 font-bold text-[10px] tracking-wide shadow-sm flex items-center gap-1 border border-amber-400/20 flex-shrink-0">
             PRO
           </span>
         </div>
 
         {/* Right Action Icons & Controls */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           {/* Security Scan Icon */}
           <button
             onClick={() => router.push('/firewall')}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition hidden sm:inline-flex"
             title="Security Center"
           >
             <Shield className="w-4 h-4" />
@@ -134,7 +143,7 @@ export function Header() {
               const memoEl = document.getElementById('dashboard-memo-card');
               memoEl?.scrollIntoView({ behavior: 'smooth' });
             }}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition hidden sm:inline-flex"
             title="Quick Memo"
           >
             <FileText className="w-4 h-4" />
@@ -165,32 +174,32 @@ export function Header() {
 
           {/* Language Selector */}
           <button
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition hidden sm:inline-flex"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition hidden lg:inline-flex"
             title="Language"
           >
             <Languages className="w-4 h-4" />
           </button>
 
           {/* Layout Dropdown */}
-          <div className="hidden md:flex items-center gap-1 text-xs text-slate-500 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-surface-800 cursor-pointer">
+          <div className="hidden xl:flex items-center gap-1 text-xs text-slate-500 px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-surface-800 cursor-pointer">
             <span>Classic</span>
             <ChevronDown className="w-3 h-3" />
           </div>
 
           {/* Version Badge */}
-          <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 px-1 hidden sm:inline">
+          <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 px-1 hidden md:inline">
             8.0.6
           </span>
 
-          <div className="h-4 w-px bg-slate-200 dark:bg-surface-800 mx-0.5" />
+          <div className="h-4 w-px bg-slate-200 dark:bg-surface-800 mx-0.5 hidden sm:block" />
 
           {/* Update Button */}
           <button
             onClick={() => setUpdateModalOpen(true)}
-            className="px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
+            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
           >
             <RotateCw className="w-3.5 h-3.5 text-slate-500" />
-            <span>Update</span>
+            <span className="hidden sm:inline">Update</span>
           </button>
 
           {/* Fix Button */}
@@ -199,19 +208,19 @@ export function Header() {
               setFixModalOpen(true);
               executeFix();
             }}
-            className="px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
+            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
           >
             <Wrench className="w-3.5 h-3.5 text-slate-500" />
-            <span>Fix</span>
+            <span className="hidden sm:inline">Fix</span>
           </button>
 
           {/* Restart Button */}
           <button
             onClick={() => setRestartModalOpen(true)}
-            className="px-2.5 py-1 rounded text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-1 transition"
+            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-1 transition"
           >
             <Power className="w-3.5 h-3.5 text-rose-500" />
-            <span>Restart</span>
+            <span className="hidden sm:inline">Restart</span>
           </button>
         </div>
       </header>

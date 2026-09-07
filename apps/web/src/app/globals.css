@@ -309,3 +309,13 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 .animate-fadeIn {
   animation: fadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Circular Gauge Track Styles */
+.gauge-track {
+  stroke: #e2e8f0 !important;
+}
+
+html.dark .gauge-track {
+  stroke: #1e293b !important;
+}
+

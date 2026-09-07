@@ -160,7 +160,7 @@ export default function DashboardPage() {
 
   // SVG Chart path calculation
   const chartSvgPaths = useMemo(() => {
-    if (chartHistory.length === 0) return { upPath: '', downPath: '', upArea: '', downArea: '' };
+    if (chartHistory.length === 0) return { line1: '', line2: '', area1: '', area2: '', pts1: [], pts2: [] };
 
     const width = 600;
     const height = 180;
@@ -212,31 +212,30 @@ export default function DashboardPage() {
     <DashboardShell>
       <div className="space-y-4">
         {/* ROW 1: 4 Circular System Gauge Cards (Load, CPU, RAM, Disk) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {/* Card 1: Load Status */}
-          <div className="p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
+            <div className="space-y-1 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">
                 {telemetry.load.text}
               </span>
               <div className="flex items-center gap-1">
-                <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+                <span className="text-xs sm:text-[13px] font-mono font-bold text-slate-800 dark:text-slate-200">
                   {telemetry.load.avg}
                 </span>
-                <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                <HelpCircle className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
               </div>
             </div>
 
-            {/* Circular Gauge */}
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 80 80">
+            {/* Circular Gauge with Beautiful Soft Track */}
+            <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center flex-shrink-0">
+              <svg className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90" viewBox="0 0 80 80">
                 <circle
                   cx="40"
                   cy="40"
                   r="34"
-                  stroke="currentColor"
                   strokeWidth="6"
-                  className="text-slate-100 dark:text-surface-800"
+                  className="gauge-track"
                   fill="transparent"
                 />
                 <circle
@@ -252,30 +251,29 @@ export default function DashboardPage() {
                   className="transition-all duration-500"
                 />
               </svg>
-              <span className="absolute text-sm font-extrabold text-slate-900 dark:text-white">
+              <span className="absolute text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
                 {telemetry.load.percent}%
               </span>
             </div>
           </div>
 
           {/* Card 2: CPU */}
-          <div className="p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">CPU</span>
-              <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
+            <div className="space-y-1 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">CPU</span>
+              <div className="text-xs sm:text-[13px] font-mono font-bold text-slate-800 dark:text-slate-200">
                 {telemetry.cpu.cores} Cores
               </div>
             </div>
 
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 80 80">
+            <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center flex-shrink-0">
+              <svg className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90" viewBox="0 0 80 80">
                 <circle
                   cx="40"
                   cy="40"
                   r="34"
-                  stroke="currentColor"
                   strokeWidth="6"
-                  className="text-slate-100 dark:text-surface-800"
+                  className="gauge-track"
                   fill="transparent"
                 />
                 <circle
@@ -291,31 +289,30 @@ export default function DashboardPage() {
                   className="transition-all duration-500"
                 />
               </svg>
-              <span className="absolute text-sm font-extrabold text-slate-900 dark:text-white">
+              <span className="absolute text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
                 {telemetry.cpu.percent}%
               </span>
             </div>
           </div>
 
           {/* Card 3: RAM */}
-          <div className="p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">RAM</span>
-              <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
+            <div className="space-y-1 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">RAM</span>
+              <div className="text-xs sm:text-[13px] font-mono font-bold text-slate-800 dark:text-slate-200 truncate">
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold">{telemetry.ram.used}</span> /{' '}
                 {telemetry.ram.total}
               </div>
             </div>
 
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 80 80">
+            <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center flex-shrink-0">
+              <svg className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90" viewBox="0 0 80 80">
                 <circle
                   cx="40"
                   cy="40"
                   r="34"
-                  stroke="currentColor"
                   strokeWidth="6"
-                  className="text-slate-100 dark:text-surface-800"
+                  className="gauge-track"
                   fill="transparent"
                 />
                 <circle
@@ -331,31 +328,30 @@ export default function DashboardPage() {
                   className="transition-all duration-500"
                 />
               </svg>
-              <span className="absolute text-sm font-extrabold text-slate-900 dark:text-white">
+              <span className="absolute text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
                 {telemetry.ram.percent}%
               </span>
             </div>
           </div>
 
           {/* Card 4: Disk */}
-          <div className="p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
-            <div className="space-y-1">
-              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">/</span>
-              <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
+          <div className="p-3.5 sm:p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex items-center justify-between">
+            <div className="space-y-1 min-w-0">
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 block">/</span>
+              <div className="text-xs sm:text-[13px] font-mono font-bold text-slate-800 dark:text-slate-200 truncate">
                 <span className="text-emerald-600 dark:text-emerald-400 font-bold">{telemetry.disk.used}</span> /{' '}
                 {telemetry.disk.total}
               </div>
             </div>
 
-            <div className="relative w-16 h-16 flex items-center justify-center">
-              <svg className="w-16 h-16 transform -rotate-90" viewBox="0 0 80 80">
+            <div className="relative w-14 h-14 sm:w-16 sm:h-16 flex items-center justify-center flex-shrink-0">
+              <svg className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90" viewBox="0 0 80 80">
                 <circle
                   cx="40"
                   cy="40"
                   r="34"
-                  stroke="currentColor"
                   strokeWidth="6"
-                  className="text-slate-100 dark:text-surface-800"
+                  className="gauge-track"
                   fill="transparent"
                 />
                 <circle
@@ -371,7 +367,7 @@ export default function DashboardPage() {
                   className="transition-all duration-500"
                 />
               </svg>
-              <span className="absolute text-sm font-extrabold text-slate-900 dark:text-white">
+              <span className="absolute text-xs sm:text-sm font-extrabold text-slate-900 dark:text-white">
                 {telemetry.disk.percent}%
               </span>
             </div>
@@ -387,29 +383,31 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
             {/* Site - ALL */}
             <Link
               href="/websites"
-              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group"
+              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group border border-slate-100 dark:border-surface-800/40"
             >
               <div>
                 <span className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
                   Site - ALL
                 </span>
-                <div className="mt-1 flex items-center gap-2">
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">Running: 16</span>
-                  <span className="text-slate-400">Stopped: 0</span>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold whitespace-nowrap">
+                    Running: 16
+                  </span>
+                  <span className="text-slate-400 whitespace-nowrap">Stopped: 0</span>
                 </div>
-                <span className="text-[11px] text-slate-400">ALL: 16</span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">ALL: 16</span>
               </div>
-              <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
             </Link>
 
             {/* FTP */}
             <Link
               href="/servers"
-              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group"
+              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group border border-slate-100 dark:border-surface-800/40"
             >
               <div>
                 <span className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
@@ -417,13 +415,13 @@ export default function DashboardPage() {
                 </span>
                 <div className="mt-1 text-emerald-600 dark:text-emerald-400 font-bold">Accounts: 0</div>
               </div>
-              <ArrowLeftRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <ArrowLeftRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
             </Link>
 
             {/* Database */}
             <Link
               href="/databases"
-              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group"
+              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group border border-slate-100 dark:border-surface-800/40"
             >
               <div>
                 <span className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
@@ -431,29 +429,31 @@ export default function DashboardPage() {
                 </span>
                 <div className="mt-1 text-emerald-600 dark:text-emerald-400 font-bold">ALL: 18</div>
               </div>
-              <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
             </Link>
 
             {/* Security */}
             <Link
               href="/firewall"
-              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group"
+              className="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-50 dark:hover:bg-surface-800/60 transition group border border-slate-100 dark:border-surface-800/40"
             >
-              <div>
+              <div className="min-w-0 pr-1">
                 <span className="font-semibold text-slate-700 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
                   Security
                 </span>
-                <div className="mt-1 text-slate-600 dark:text-slate-300">Security Risk: 0</div>
-                <span className="text-[10px] text-slate-400 block mt-0.5">Last Scan: 2026/09/07 05:01:35</span>
+                <div className="mt-1 text-slate-600 dark:text-slate-300 font-medium">Security Risk: 0</div>
+                <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
+                  Last Scan: 2026/09/07
+                </span>
               </div>
-              <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Shield className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
             </Link>
 
             {/* Memo (Editable) */}
             <div
               id="dashboard-memo-card"
               onClick={() => setIsEditingMemo(true)}
-              className="flex items-start justify-between p-2.5 rounded-lg bg-slate-50 dark:bg-surface-800/40 border border-dashed border-slate-200 dark:border-surface-700 hover:border-emerald-500 cursor-pointer transition"
+              className="flex items-start justify-between p-2.5 rounded-lg bg-slate-50 dark:bg-surface-800/40 border border-dashed border-slate-200 dark:border-surface-700 hover:border-emerald-500 cursor-pointer transition sm:col-span-2 lg:col-span-1"
             >
               <div className="flex-1 min-w-0 pr-2">
                 <span className="font-semibold text-slate-700 dark:text-slate-200 block">Memo</span>
@@ -464,7 +464,7 @@ export default function DashboardPage() {
                     onBlur={() => setIsEditingMemo(false)}
                     autoFocus
                     placeholder="Type server notes here..."
-                    className="w-full mt-1 p-1 text-xs bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 rounded text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none h-14"
+                    className="w-full mt-1 p-1 text-xs bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 rounded text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 resize-none h-12"
                   />
                 ) : (
                   <p className="mt-1 text-[11px] text-slate-400 line-clamp-2">
@@ -489,9 +489,9 @@ export default function DashboardPage() {
                 </button>
               </div>
 
-              {/* Grid of App Tiles (Matches Screenshot 1 & 2) */}
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 pt-3">
-                {/* Supervisor 3.1 Tile (Exact Match to Reference Screenshot) */}
+              {/* Grid of App Tiles */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-2.5 pt-3">
+                {/* Supervisor 3.1 Tile */}
                 <div
                   onClick={() => {
                     const supervisorApp = installedApps.find((a) => a.id.toLowerCase().includes('supervisor')) || {
@@ -507,12 +507,12 @@ export default function DashboardPage() {
                     };
                     handleOpenApp(supervisorApp as AppPackage);
                   }}
-                  className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group relative"
+                  className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group relative"
                 >
-                  <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/40 flex items-center justify-center text-sky-600 dark:text-sky-400 mb-1.5 shadow-sm group-hover:scale-105 transition">
-                    <span className="text-lg">🐧</span>
+                  <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/40 flex items-center justify-center text-sky-600 dark:text-sky-400 mb-1.5 shadow-xs group-hover:scale-105 transition">
+                    <span className="text-xl">🐧</span>
                   </div>
-                  <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 text-center flex items-center gap-1">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 text-center flex items-center gap-1">
                     Supervisor 3.1
                     <span className="text-emerald-500 text-[9px]">▶</span>
                   </span>
@@ -529,14 +529,14 @@ export default function DashboardPage() {
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mt-1">
                     <Shield className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
                     Website Firewall
                   </span>
                   <div className="flex items-center gap-1 mt-1">
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
                       Preview
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-600 text-white font-bold">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold">
                       Buy now
                     </span>
                   </div>
@@ -553,20 +553,20 @@ export default function DashboardPage() {
                   <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950/40 flex items-center justify-center text-blue-600 dark:text-blue-400 mt-1">
                     <Target className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                    Website statistics-v2
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
+                    Statistics v2
                   </span>
                   <div className="flex items-center gap-1 mt-1">
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
                       Preview
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-600 text-white font-bold">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold">
                       Buy now
                     </span>
                   </div>
                 </div>
 
-                {/* AD Tile 3: Website Tamper-proof for Enterprise */}
+                {/* AD Tile 3: Website Tamper-proof */}
                 <div
                   onClick={() => router.push('/ssl')}
                   className="flex flex-col items-center justify-between p-2 rounded-xl border border-emerald-500/30 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/20 hover:border-emerald-500 cursor-pointer transition relative"
@@ -577,14 +577,14 @@ export default function DashboardPage() {
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mt-1">
                     <Lock className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                    Website Tamper-proof
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
+                    Tamper-proof
                   </span>
                   <div className="flex items-center gap-1 mt-1">
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
                       Preview
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-600 text-white font-bold">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold">
                       Buy now
                     </span>
                   </div>
@@ -601,14 +601,14 @@ export default function DashboardPage() {
                   <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950/40 flex items-center justify-center text-purple-600 dark:text-purple-400 mt-1">
                     <ShieldAlert className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
+                  <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
                     Anti-intrusion
                   </span>
                   <div className="flex items-center gap-1 mt-1">
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300">
                       Preview
                     </span>
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-600 text-white font-bold">
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold">
                       Buy now
                     </span>
                   </div>
@@ -629,7 +629,7 @@ export default function DashboardPage() {
                       <button
                         key={app.id}
                         onClick={() => handleOpenApp(app)}
-                        className="p-2 rounded-lg border border-slate-200 dark:border-surface-800 hover:border-emerald-500 bg-white dark:bg-surface-900 flex items-center gap-2 text-left transition shadow-xs group"
+                        className="p-2 rounded-lg border border-slate-200 dark:border-surface-800 hover:border-emerald-500 bg-white dark:bg-surface-900 flex items-center gap-2 text-left transition shadow-xs group min-w-0"
                       >
                         <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
                         <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
@@ -688,31 +688,31 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Realtime Telemetry Stats Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs py-1">
+            {/* Realtime Telemetry Stats Strip (Wrapped for perfect responsiveness) */}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs py-1">
               {chartTab === 'traffic' ? (
                 <>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
                     <span className="text-slate-500 dark:text-slate-400">Upstream:</span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.upstreamMb}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
                     <span className="text-slate-500 dark:text-slate-400">Downstream:</span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.downstreamMb}
                     </span>
                   </div>
-                  <div>
+                  <div className="whitespace-nowrap">
                     <span className="text-slate-500 dark:text-slate-400">Total sent: </span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.totalSentGb}
                     </span>
                   </div>
-                  <div>
+                  <div className="whitespace-nowrap">
                     <span className="text-slate-500 dark:text-slate-400">Total received: </span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.totalReceivedGb}
@@ -721,27 +721,27 @@ export default function DashboardPage() {
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
                     <span className="text-slate-500 dark:text-slate-400">Read:</span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.readMb}/s
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  <div className="flex items-center gap-1.5 whitespace-nowrap">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
                     <span className="text-slate-500 dark:text-slate-400">Write:</span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.writeMb}/s
                     </span>
                   </div>
-                  <div>
+                  <div className="whitespace-nowrap">
                     <span className="text-slate-500 dark:text-slate-400">Total read: </span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.totalReadGb}
                     </span>
                   </div>
-                  <div>
+                  <div className="whitespace-nowrap">
                     <span className="text-slate-500 dark:text-slate-400">Total write: </span>
                     <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
                       {telemetry.totalWriteGb}
@@ -752,8 +752,8 @@ export default function DashboardPage() {
             </div>
 
             {/* Realtime Smooth SVG Area Chart */}
-            <div className="relative w-full h-48 pt-2">
-              <svg className="w-full h-40 overflow-visible" viewBox="0 0 600 180" preserveAspectRatio="none">
+            <div className="relative w-full h-44 sm:h-48 pt-2">
+              <svg className="w-full h-36 sm:h-40 overflow-visible" viewBox="0 0 600 180" preserveAspectRatio="none">
                 <defs>
                   <linearGradient id="trafficGreenGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#20a53a" stopOpacity="0.35" />
@@ -809,18 +809,20 @@ export default function DashboardPage() {
                 ))}
               </svg>
 
-              {/* X-axis Timestamps */}
-              <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-1 pt-1 border-t border-slate-100 dark:border-surface-800">
+              {/* X-axis Timestamps (Alternate timestamps on small screens) */}
+              <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-1 pt-1 border-t border-slate-100 dark:border-surface-800 overflow-hidden">
                 {chartHistory.map((pt, idx) => (
-                  <span key={idx}>{pt.time}</span>
+                  <span key={idx} className={idx % 2 !== 0 ? 'hidden sm:inline' : 'inline'}>
+                    {pt.time}
+                  </span>
                 ))}
               </div>
             </div>
           </div>
         </div>
 
-        {/* ROW 4: Bottom PRO Banner (Matches Screenshot 1 & 2) */}
-        <div className="p-3 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex flex-wrap items-center justify-between gap-3 text-xs">
+        {/* ROW 4: Bottom PRO Banner */}
+        <div className="p-3 sm:p-3.5 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <button className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-white font-bold text-xs shadow-xs transition">
               Buy now
@@ -830,7 +832,7 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4 text-slate-600 dark:text-slate-300 text-[11px]">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
             <span className="flex items-center gap-1">
               <Check className="w-3.5 h-3.5 text-amber-500" />
               All paid plugins
