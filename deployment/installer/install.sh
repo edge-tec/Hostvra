@@ -280,9 +280,34 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
+    # Systemd Web Unit (Next.js Dashboard)
+    cat > /etc/systemd/system/hostvra-web.service << EOF
+[Unit]
+Description=Hostvra Web UI (Next.js Control Panel)
+Documentation=https://docs.hostvra.com
+After=network.target network-online.target hostvra-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/Hostvra/apps/web
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=3s
+LimitNOFILE=65536
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
     systemctl daemon-reload
     systemctl enable --now hostvra-api.service 2>/dev/null || true
     systemctl enable --now hostvra-agent.service 2>/dev/null || true
+    systemctl enable --now hostvra-web.service 2>/dev/null || true
     log_success "Systemd services configured and registered."
 }
 
