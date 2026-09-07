@@ -42,6 +42,7 @@ import {
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
 import { OneClickAppModal } from '@/components/OneClickAppModal';
+import { SiteModificationModal, SiteModalTab } from '@/components/SiteModificationModal';
 
 type ProjectTab = 'php' | 'nodejs' | 'proxy' | 'go' | 'python';
 
@@ -415,6 +416,16 @@ export default function WebsitesPage() {
   const [selectedSite, setSelectedSite] = useState<Website | null>(null);
 
   // Site-specific modals
+  const [siteModalOpen, setSiteModalOpen] = useState(false);
+  const [siteModalTab, setSiteModalTab] = useState<SiteModalTab>('domain');
+  const [siteModalWebsite, setSiteModalWebsite] = useState<Website | null>(null);
+
+  const openSiteModal = (site: Website, tab: SiteModalTab = 'domain') => {
+    setSiteModalWebsite(site);
+    setSiteModalTab(tab);
+    setSiteModalOpen(true);
+  };
+
   const [confModalOpen, setConfModalOpen] = useState(false);
   const [vhostConfText, setVhostConfText] = useState('');
   const [confSaving, setConfSaving] = useState(false);
@@ -620,49 +631,9 @@ export default function WebsitesPage() {
   };
 
   // Open VHost Conf Modal
-  const openConfModal = async (site: Website) => {
-    setSelectedSite(site);
-    setConfModalOpen(true);
-    const defaultConf = `# Virtual Host Configuration for ${site.primary_domain}
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${site.primary_domain} www.${site.primary_domain};
-    root ${site.document_root};
-    index index.php index.html index.htm default.php default.htm default.html;
-
-    # SSL Configuration (Let's Encrypt)
-    # listen 443 ssl http2;
-    # ssl_certificate /etc/letsencrypt/live/${site.primary_domain}/fullchain.pem;
-    # ssl_certificate_key /etc/letsencrypt/live/${site.primary_domain}/privkey.pem;
-
-    # Security Headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header X-Content-Type-Options "nosniff" always;
-
-    # Access and Error Logs
-    access_log /var/log/nginx/${site.primary_domain}.access.log;
-    error_log /var/log/nginx/${site.primary_domain}.error.log;
-
-    # PHP-FPM FastCGI Handler
-    location ~ \\.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php${site.php_version || '8.2'}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-
-    # Deny access to hidden files
-    location ~ /\\. {
-        deny all;
-    }
-}`;
-    setVhostConfText(defaultConf);
-    const res = await apiFetch<{ config: string }>(`/api/v1/websites/${site.id}/conf`);
-    if (res.success && res.data?.config) {
-      setVhostConfText(res.data.config);
-    }
+  // Open VHost Conf Modal -> Routes to Site Modification Modal (Config Tab)
+  const openConfModal = (site: Website) => {
+    openSiteModal(site, 'config');
   };
 
   // Save VHost Conf
@@ -678,26 +649,9 @@ server {
     showToast(`Virtual host configuration for '${selectedSite.primary_domain}' saved and reloaded!`);
   };
 
-  // Open Logs Modal
-  const openLogsModal = async (site: Website) => {
-    setSelectedSite(site);
-    setLogsModalOpen(true);
-    const now = new Date().toUTCString();
-    setAccessLogs(
-      `127.0.0.1 - - [${now}] "GET / HTTP/1.1" 200 4521 "-" "Mozilla/5.0"\n` +
-      `192.168.1.102 - - [${now}] "GET /assets/style.css HTTP/1.1" 200 8920 "https://${site.primary_domain}/"\n` +
-      `66.249.66.1 - - [${now}] "GET /robots.txt HTTP/1.1" 200 120 "-" "Googlebot/2.1"`
-    );
-    setErrorLogs(
-      `[notice] 1042#1042: using inherited sockets from "1040;1041"\n` +
-      `[notice] 1042#1042: worker process 1043 started\n` +
-      `[notice] 1042#1042: vhost pool for ${site.primary_domain} running healthy`
-    );
-    const res = await apiFetch<{ access_log: string; error_log: string }>(`/api/v1/websites/${site.id}/logs`);
-    if (res.success && res.data) {
-      if (res.data.access_log) setAccessLogs(res.data.access_log);
-      if (res.data.error_log) setErrorLogs(res.data.error_log);
-    }
+  // Open Logs Modal -> Routes to Site Modification Modal (Response Log Tab)
+  const openLogsModal = (site: Website) => {
+    openSiteModal(site, 'logs');
   };
 
   // Open Backup Modal & Trigger Backup
@@ -1181,14 +1135,21 @@ server {
 
                               <div className="flex flex-col min-w-0">
                                 <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => openSiteModal(site, 'domain')}
+                                    className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 transition truncate text-left cursor-pointer"
+                                    title={`Click to open Site modification [${site.primary_domain}]`}
+                                  >
+                                    {site.primary_domain}
+                                  </button>
                                   <a
                                     href={`http://${site.primary_domain}`}
                                     target="_blank"
                                     rel="noreferrer"
-                                    className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 transition flex items-center gap-1 truncate"
+                                    title="Open website in new tab"
+                                    className="text-slate-400 hover:text-emerald-500 transition p-0.5"
                                   >
-                                    <span>{site.primary_domain}</span>
-                                    <ExternalLink className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
                                   </a>
                                 </div>
                                 <span className="text-[11px] text-slate-500 truncate">
@@ -1375,7 +1336,18 @@ server {
                                     <button
                                       onClick={() => {
                                         setOpenDropdownId(null);
-                                        openRewriteModal(site);
+                                        openSiteModal(site, 'domain');
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-bold"
+                                    >
+                                      <Settings className="w-3.5 h-3.5" />
+                                      <span>Site modification</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        openSiteModal(site, 'rewrite');
                                       }}
                                       className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
                                     >
@@ -1386,7 +1358,7 @@ server {
                                     <button
                                       onClick={() => {
                                         setOpenDropdownId(null);
-                                        openSslModal(site);
+                                        openSiteModal(site, 'ssl');
                                       }}
                                       className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
                                     >
@@ -1397,7 +1369,7 @@ server {
                                     <button
                                       onClick={() => {
                                         setOpenDropdownId(null);
-                                        openPhpSwitchModal(site);
+                                        openSiteModal(site, 'php');
                                       }}
                                       className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
                                     >
@@ -1408,13 +1380,12 @@ server {
                                     <button
                                       onClick={() => {
                                         setOpenDropdownId(null);
-                                        setSelectedSite(site);
-                                        setWafModalOpen(true);
+                                        openSiteModal(site, 'limit');
                                       }}
                                       className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
                                     >
                                       <Shield className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>WAF Protection</span>
+                                      <span>Limit access & WAF</span>
                                     </button>
 
                                     <button
@@ -2540,6 +2511,23 @@ server {
               showToast(`Application successfully installed on ${appModalSite.primary_domain}!`);
               fetchData();
             }}
+          />
+        )}
+
+        {/* 16. Enterprise Site Modification Modal (All 16 aaPanel/cPanel options) */}
+        {siteModalWebsite && (
+          <SiteModificationModal
+            website={siteModalWebsite}
+            isOpen={siteModalOpen}
+            onClose={() => setSiteModalOpen(false)}
+            initialTab={siteModalTab}
+            onUpdateWebsite={(updated) => {
+              setWebsites((prev) =>
+                prev.map((s) => (s.id === siteModalWebsite.id ? { ...s, ...updated } : s))
+              );
+              setSiteModalWebsite((prev) => (prev ? { ...prev, ...updated } : null));
+            }}
+            showToast={showToast}
           />
         )}
       </div>
