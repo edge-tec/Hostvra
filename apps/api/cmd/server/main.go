@@ -93,6 +93,7 @@ func main() {
 	terminalHandler := handlers.NewTerminalHandler(cfg, dataStore, auditLogger)
 	appStoreHandler := handlers.NewAppStoreHandler(cfg, dataStore, auditLogger)
 	dashboardHandler := handlers.NewDashboardHandler(cfg, dataStore, auditLogger)
+	fileHandler := handlers.NewFileHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -304,6 +305,23 @@ func main() {
 			r.Route("/terminal", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Get("/info", terminalHandler.GetInfo)
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
+			})
+
+			// File Manager Subsystem
+			r.Route("/files", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/list", fileHandler.List)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/stat", fileHandler.Stat)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/content", fileHandler.GetContent)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/download", fileHandler.Download)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Put("/content", fileHandler.SaveContent)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/mkdir", fileHandler.Mkdir)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/upload", fileHandler.Upload)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/rename", fileHandler.Rename)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/copy", fileHandler.Copy)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Delete("/delete", fileHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/permissions", fileHandler.Permissions)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/archive", fileHandler.Archive)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/extract", fileHandler.Extract)
 			})
 
 			// 1-Click App Store & Extensions

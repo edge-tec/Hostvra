@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Folder,
   FileText,
-  Plus,
   Trash2,
   Edit,
   Download,
@@ -13,132 +12,402 @@ import {
   ChevronRight,
   RefreshCw,
   Search,
-  Server as ServerIcon,
   X,
   Save,
   ShieldCheck,
+  UploadCloud,
+  Archive,
+  FolderArchive,
+  ArrowUp,
+  FileCode,
+  Lock,
+  Copy,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, Server } from '@/lib/api';
+import { apiFetch, getApiBaseUrl } from '@/lib/api';
 
-interface FileItem {
+export interface FileItem {
   name: string;
   path: string;
   size: number;
   mode: string;
+  perm_octal: string;
+  owner: string;
+  group: string;
+  uid: number;
+  gid: number;
   is_dir: boolean;
   modified_at: string;
+  extension: string;
+}
+
+interface FileListResponse {
+  current_path: string;
+  items: FileItem[];
+  count: number;
 }
 
 export default function FileManagerPage() {
-  const [servers, setServers] = useState<Server[]>([]);
-  const [selectedServer, setSelectedServer] = useState<string>('');
   const [currentPath, setCurrentPath] = useState('/var/www');
-  const [files, setFiles] = useState<FileItem[]>([
-    {
-      name: 'mycoolapp.com',
-      path: '/var/www/mycoolapp.com',
-      size: 4096,
-      mode: 'drwxr-xr-x',
-      is_dir: true,
-      modified_at: new Date().toISOString(),
-    },
-    {
-      name: 'default',
-      path: '/var/www/default',
-      size: 4096,
-      mode: 'drwxr-xr-x',
-      is_dir: true,
-      modified_at: new Date().toISOString(),
-    },
-    {
-      name: 'index.php',
-      path: '/var/www/index.php',
-      size: 245,
-      mode: '-rw-r--r--',
-      is_dir: false,
-      modified_at: new Date().toISOString(),
-    },
-    {
-      name: '.env',
-      path: '/var/www/.env',
-      size: 512,
-      mode: '-rw-------',
-      is_dir: false,
-      modified_at: new Date().toISOString(),
-    },
-  ]);
-  const [loading, setLoading] = useState(false);
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  // Editor Modal
+  // Editor Modal State
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingFile, setEditingFile] = useState<FileItem | null>(null);
   const [fileContent, setFileContent] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [savingFile, setSavingFile] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // New File/Folder Modal
-  const [newModalOpen, setNewModalOpen] = useState(false);
-  const [newType, setNewType] = useState<'file' | 'folder'>('file');
-  const [newItemName, setNewItemName] = useState('');
+  // New Folder / File Modal
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createType, setCreateType] = useState<'file' | 'folder'>('file');
+  const [createName, setCreateName] = useState('');
+  const [creating, setCreating] = useState(false);
+
+  // Upload Modal State
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Rename Modal State
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [itemToRename, setItemToRename] = useState<FileItem | null>(null);
+  const [newName, setNewName] = useState('');
+
+  // Permissions Modal State
+  const [permModalOpen, setPermModalOpen] = useState(false);
+  const [itemForPerm, setItemForPerm] = useState<FileItem | null>(null);
+  const [permMode, setPermMode] = useState('0755');
+
+  // Archive & Extract States
+  const [archiveModalOpen, setArchiveModalOpen] = useState(false);
+  const [itemToArchive, setItemToArchive] = useState<FileItem | null>(null);
+  const [archiveFormat, setArchiveFormat] = useState<'zip' | 'tar.gz'>('zip');
+  const [isProcessingArchive, setIsProcessingArchive] = useState(false);
+
+  // Fetch directory listing from real backend
+  const fetchDirectory = async (path: string) => {
+    try {
+      setLoading(true);
+      setErrorMsg(null);
+      const res = await apiFetch<FileListResponse>(`/api/v1/files/list?path=${encodeURIComponent(path)}`);
+      if (res.success && res.data) {
+        setFiles(res.data.items || []);
+        setCurrentPath(res.data.current_path || path);
+      } else {
+        setErrorMsg(res.error?.message || 'Failed to load directory');
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error communicating with host filesystem API');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadServers() {
-      const res = await apiFetch<Server[]>('/api/v1/servers');
-      if (res.success && res.data && res.data.length > 0) {
-        setServers(res.data);
-        setSelectedServer(res.data[0].id);
-      }
-    }
-    loadServers();
+    fetchDirectory(currentPath);
   }, []);
 
-  const handleOpenFile = (file: FileItem) => {
+  // Open file or directory
+  const handleItemClick = async (file: FileItem) => {
     if (file.is_dir) {
-      setCurrentPath(file.path);
+      fetchDirectory(file.path);
     } else {
-      setEditingFile(file);
-      if (file.name === 'index.php') {
-        setFileContent("<?php\n// Hostvra Web Application\necho '<h1>Hostvra Platform Online</h1>';\n");
-      } else if (file.name === '.env') {
-        setFileContent("APP_NAME=HostvraApp\nAPP_ENV=production\nAPP_DEBUG=false\nDB_CONNECTION=mysql\nDB_HOST=127.0.0.1\n");
-      } else {
-        setFileContent(`// Content of ${file.name}\n// Edited with Hostvra Cloud File Manager\n`);
+      // Open text editor for editable files
+      try {
+        setEditingFile(file);
+        setSaveSuccess(false);
+        const res = await apiFetch<{ content: string }>(`/api/v1/files/content?path=${encodeURIComponent(file.path)}`);
+        if (res.success && res.data) {
+          setFileContent(res.data.content);
+          setEditorOpen(true);
+        } else {
+          alert(res.error?.message || 'Failed to read file content');
+        }
+      } catch (err: any) {
+        alert(err.message || 'Cannot open file');
       }
-      setEditorOpen(true);
     }
   };
 
-  const handleSaveFile = () => {
-    setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
-      setEditorOpen(false);
-    }, 400);
+  // Save File Content with atomic write and .bak snapshot
+  const handleSaveContent = async () => {
+    if (!editingFile) return;
+    try {
+      setSavingFile(true);
+      const res = await apiFetch('/api/v1/files/content', {
+        method: 'PUT',
+        body: JSON.stringify({
+          path: editingFile.path,
+          content: fileContent,
+        }),
+      });
+
+      if (res.success) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Failed to save file');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to save file');
+    } finally {
+      setSavingFile(false);
+    }
   };
 
-  const handleCreateItem = (e: React.FormEvent) => {
+  // Keyboard shortcut Ctrl+S / Cmd+S in Editor
+  const handleEditorKeyDown = (e: React.KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      handleSaveContent();
+    }
+  };
+
+  // Create new folder or file
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newItemName) return;
+    if (!createName.trim()) return;
 
-    const newItem: FileItem = {
-      name: newItemName,
-      path: `${currentPath}/${newItemName}`,
-      size: newType === 'folder' ? 4096 : 0,
-      mode: newType === 'folder' ? 'drwxr-xr-x' : '-rw-r--r--',
-      is_dir: newType === 'folder',
-      modified_at: new Date().toISOString(),
-    };
+    try {
+      setCreating(true);
+      const targetPath = `${currentPath.replace(/\/$/, '')}/${createName.trim()}`;
 
-    setFiles([...files, newItem]);
-    setNewModalOpen(false);
-    setNewItemName('');
+      if (createType === 'folder') {
+        const res = await apiFetch('/api/v1/files/mkdir', {
+          method: 'POST',
+          body: JSON.stringify({ path: targetPath }),
+        });
+        if (!res.success) throw new Error(res.error?.message || 'Failed to create directory');
+      } else {
+        const res = await apiFetch('/api/v1/files/content', {
+          method: 'PUT',
+          body: JSON.stringify({ path: targetPath, content: '' }),
+        });
+        if (!res.success) throw new Error(res.error?.message || 'Failed to create file');
+      }
+
+      setCreateModalOpen(false);
+      setCreateName('');
+      fetchDirectory(currentPath);
+    } catch (err: any) {
+      alert(err.message || 'Creation failed');
+    } finally {
+      setCreating(false);
+    }
   };
 
-  const handleDeleteItem = (fileName: string) => {
-    if (confirm(`Are you sure you want to delete ${fileName}?`)) {
-      setFiles(files.filter((f) => f.name !== fileName));
+  // Upload file stream
+  const handleUploadSubmit = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFiles = e.target.files;
+    if (!uploadedFiles || uploadedFiles.length === 0) return;
+
+    setUploading(true);
+    setUploadProgress(10);
+
+    for (let i = 0; i < uploadedFiles.length; i++) {
+      const f = uploadedFiles[i];
+      const formData = new FormData();
+      formData.append('path', currentPath);
+      formData.append('file', f);
+
+      try {
+        const token = localStorage.getItem('hostvra_token');
+        const baseUrl = getApiBaseUrl();
+        const res = await fetch(`${baseUrl}/api/v1/files/upload`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}));
+          throw new Error(errJson.error?.message || 'Upload rejected by host server');
+        }
+
+        setUploadProgress(Math.round(((i + 1) / uploadedFiles.length) * 100));
+      } catch (err: any) {
+        alert(`Error uploading ${f.name}: ${err.message}`);
+      }
     }
+
+    setUploading(false);
+    setUploadModalOpen(false);
+    setUploadProgress(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    fetchDirectory(currentPath);
+  };
+
+  // Delete item
+  const handleDelete = async (file: FileItem) => {
+    if (!confirm(`Are you sure you want to permanently delete "${file.name}"?`)) return;
+
+    try {
+      const res = await apiFetch(`/api/v1/files/delete?path=${encodeURIComponent(file.path)}`, {
+        method: 'DELETE',
+      });
+      if (res.success) {
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Delete failed');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Delete failed');
+    }
+  };
+
+  // Rename item
+  const handleRenameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemToRename || !newName.trim()) return;
+
+    const parentDir = currentPath.replace(/\/$/, '');
+    const targetPath = `${parentDir}/${newName.trim()}`;
+
+    try {
+      const res = await apiFetch('/api/v1/files/rename', {
+        method: 'POST',
+        body: JSON.stringify({
+          old_path: itemToRename.path,
+          new_path: targetPath,
+        }),
+      });
+
+      if (res.success) {
+        setRenameModalOpen(false);
+        setItemToRename(null);
+        setNewName('');
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Rename failed');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Rename failed');
+    }
+  };
+
+  // Permissions submit
+  const handlePermSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemForPerm) return;
+
+    try {
+      const res = await apiFetch('/api/v1/files/permissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          path: itemForPerm.path,
+          mode: permMode,
+        }),
+      });
+
+      if (res.success) {
+        setPermModalOpen(false);
+        setItemForPerm(null);
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Permissions change failed');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Permissions change failed');
+    }
+  };
+
+  // Archive item
+  const handleArchiveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemToArchive) return;
+
+    setIsProcessingArchive(true);
+    const ext = archiveFormat === 'tar.gz' ? '.tar.gz' : '.zip';
+    const destPath = `${itemToArchive.path}${ext}`;
+
+    try {
+      const res = await apiFetch('/api/v1/files/archive', {
+        method: 'POST',
+        body: JSON.stringify({
+          paths: [itemToArchive.path],
+          dest_path: destPath,
+          format: archiveFormat,
+        }),
+      });
+
+      if (res.success) {
+        setArchiveModalOpen(false);
+        setItemToArchive(null);
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Compression failed');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Compression failed');
+    } finally {
+      setIsProcessingArchive(false);
+    }
+  };
+
+  // Extract archive
+  const handleExtract = async (file: FileItem) => {
+    if (!confirm(`Extract archive "${file.name}" into current directory?`)) return;
+
+    try {
+      const res = await apiFetch('/api/v1/files/extract', {
+        method: 'POST',
+        body: JSON.stringify({
+          archive_path: file.path,
+          dest_dir: currentPath,
+        }),
+      });
+
+      if (res.success) {
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || 'Extraction failed');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Extraction failed');
+    }
+  };
+
+  // Download file
+  const handleDownload = (file: FileItem) => {
+    const token = localStorage.getItem('hostvra_token');
+    const baseUrl = getApiBaseUrl();
+    const downloadUrl = `${baseUrl}/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
+    
+    // Create an authenticated temporary anchor or open in new tab
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  // Navigate up one level
+  const handleNavigateUp = () => {
+    const parts = currentPath.split('/').filter(Boolean);
+    if (parts.length <= 1) {
+      fetchDirectory('/');
+    } else {
+      const upPath = '/' + parts.slice(0, parts.length - 1).join('/');
+      fetchDirectory(upPath);
+    }
+  };
+
+  // Format file size
+  const formatSize = (bytes: number, isDir: boolean) => {
+    if (isDir) return '--';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   const filteredFiles = files.filter((f) =>
@@ -149,68 +418,113 @@ export default function FileManagerPage() {
 
   return (
     <DashboardShell>
-      <div className="space-y-8">
+      <div className="space-y-6">
+        {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">File Manager</h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Secure, sandboxed server filesystem browser with built-in code editor.
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+                File Manager
+              </h1>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-500/20">
+                Live Server Filesystem
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Sandboxed server filesystem browser with atomic save, .bak protection, chmod, and drag-and-drop upload.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {servers.length > 0 && (
-              <select
-                value={selectedServer}
-                onChange={(e) => setSelectedServer(e.target.value)}
-                className="px-3.5 py-2 rounded-xl bg-surface-900 border border-surface-800 text-slate-200 text-sm focus:outline-none"
-              >
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.ip_address})
-                  </option>
-                ))}
-              </select>
-            )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setUploadModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition shadow-xs"
+            >
+              <UploadCloud className="w-4 h-4 text-emerald-500" />
+              <span>Upload</span>
+            </button>
             <button
               onClick={() => {
-                setNewType('folder');
-                setNewModalOpen(true);
+                setCreateType('folder');
+                setCreateModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-surface-900 border border-surface-800 hover:bg-surface-800 text-slate-200 text-sm font-medium transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition shadow-xs"
             >
-              <FolderPlus className="w-4 h-4 text-indigo-400" />
+              <FolderPlus className="w-4 h-4 text-indigo-500" />
               <span>New Folder</span>
             </button>
             <button
               onClick={() => {
-                setNewType('file');
-                setNewModalOpen(true);
+                setCreateType('file');
+                setCreateModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm"
             >
               <FilePlus className="w-4 h-4" />
               <span>New File</span>
             </button>
+            <button
+              onClick={() => fetchDirectory(currentPath)}
+              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 transition"
+              title="Refresh Directory"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
           </div>
         </div>
 
+        {/* Quick Jump Shortcuts */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400 font-medium">Quick Jump:</span>
+          {[
+            { label: '/var/www (Websites)', path: '/var/www' },
+            { label: '/home', path: '/home' },
+            { label: '/etc/nginx', path: '/etc/nginx' },
+            { label: '/etc/php', path: '/etc/php' },
+            { label: '/var/log', path: '/var/log' },
+            { label: '/tmp', path: '/tmp' },
+          ].map((sc) => (
+            <button
+              key={sc.path}
+              onClick={() => fetchDirectory(sc.path)}
+              className={`px-2.5 py-1 rounded-lg font-mono text-[11px] transition ${
+                currentPath.startsWith(sc.path)
+                  ? 'bg-emerald-600 text-white font-bold'
+                  : 'bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              {sc.label}
+            </button>
+          ))}
+        </div>
+
         {/* Breadcrumb Path & Search Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 p-3 rounded-2xl shadow-xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 p-2.5 rounded-2xl shadow-xs">
           <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto py-1">
             <button
-              onClick={() => setCurrentPath('/var/www')}
-              className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-bold text-slate-900 dark:text-slate-200 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800"
+              onClick={handleNavigateUp}
+              disabled={currentPath === '/'}
+              className="p-1 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 disabled:opacity-40"
+              title="Up one level"
             >
-              root
+              <ArrowUp className="w-3.5 h-3.5" />
             </button>
+
+            <button
+              onClick={() => fetchDirectory('/')}
+              className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-bold text-slate-900 dark:text-slate-200 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800"
+            >
+              root /
+            </button>
+
             {pathParts.map((part, i) => {
               const partPath = '/' + pathParts.slice(0, i + 1).join('/');
               return (
                 <React.Fragment key={partPath}>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-600 flex-shrink-0" />
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   <button
-                    onClick={() => setCurrentPath(partPath)}
-                    className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-semibold text-slate-800 dark:text-slate-300 truncate max-w-[120px]"
+                    onClick={() => fetchDirectory(partPath)}
+                    className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-semibold text-slate-800 dark:text-slate-300 truncate max-w-[140px]"
                   >
                     {part}
                   </button>
@@ -219,181 +533,574 @@ export default function FileManagerPage() {
             })}
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-72 bg-slate-50 dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-3.5 py-2 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
-            <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
+          <div className="flex items-center gap-2 w-full sm:w-64 bg-slate-50 dark:bg-surface-900 border border-slate-300 dark:border-surface-700 rounded-xl px-3 py-1.5 shadow-xs focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
+            <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
             <input
               type="text"
-              placeholder="Search files..."
+              placeholder="Search current folder..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              className="w-full bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
             />
           </div>
         </div>
 
+        {/* Error Notification */}
+        {errorMsg && (
+          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
         {/* Files Table */}
-        <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+        <div className="bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm border-collapse">
+            <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
-                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Name</th>
-                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Size</th>
-                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Permissions</th>
-                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Last Modified</th>
-                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Name</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Size</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Permissions</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Owner/Group</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Last Modified</th>
+                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
-              {filteredFiles.map((file) => (
-                <tr
-                  key={file.path}
-                  onDoubleClick={() => handleOpenFile(file)}
-                  className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors cursor-pointer select-none"
-                >
-                  <td className="px-6 py-3.5 flex items-center gap-3">
-                    {file.is_dir ? (
-                      <Folder className="w-5 h-5 text-indigo-600 dark:text-indigo-400 flex-shrink-0" />
-                    ) : (
-                      <FileText className="w-5 h-5 text-slate-500 dark:text-slate-400 flex-shrink-0" />
-                    )}
-                    <span className={`font-semibold text-sm ${file.is_dir ? 'text-slate-950 dark:text-white' : 'text-slate-900 dark:text-slate-200'}`}>
-                      {file.name}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3.5 text-xs text-slate-700 dark:text-slate-400 font-mono font-medium">
-                    {file.is_dir ? '-' : `${file.size} B`}
-                  </td>
-                  <td className="px-6 py-3.5 text-xs font-mono text-slate-700 dark:text-slate-400 font-medium">{file.mode}</td>
-                  <td className="px-6 py-3.5 text-xs text-slate-700 dark:text-slate-400 font-medium">
-                    {new Date(file.modified_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
-                      {!file.is_dir && (
-                        <button
-                          onClick={() => handleOpenFile(file)}
-                          title="Edit File"
-                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteItem(file.name)}
-                        title="Delete"
-                        className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+              <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-500" />
+                      Loading directory contents from server...
+                    </td>
+                  </tr>
+                ) : filteredFiles.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                      <Folder className="w-6 h-6 mx-auto mb-1.5 opacity-40" />
+                      This directory is currently empty.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredFiles.map((file) => {
+                    const isArchive =
+                      file.name.endsWith('.zip') || file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz');
+
+                    return (
+                      <tr
+                        key={file.path}
+                        className="hover:bg-slate-50 dark:hover:bg-surface-800/50 transition cursor-pointer group"
+                        onDoubleClick={() => handleItemClick(file)}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {/* File Name & Icon */}
+                        <td className="px-5 py-2.5 font-medium text-slate-900 dark:text-slate-200">
+                          <div className="flex items-center gap-2.5">
+                            {file.is_dir ? (
+                              <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                            ) : isArchive ? (
+                              <FolderArchive className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                            ) : file.name.endsWith('.bak') ? (
+                              <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                            ) : (
+                              <FileCode className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                            )}
+                            <button
+                              onClick={() => handleItemClick(file)}
+                              className="text-left font-semibold text-slate-800 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-400 transition truncate max-w-xs sm:max-w-md"
+                            >
+                              {file.name}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* File Size */}
+                        <td className="px-5 py-2.5 font-mono text-slate-500 dark:text-slate-400">
+                          {formatSize(file.size, file.is_dir)}
+                        </td>
+
+                        {/* Permissions (Octal) */}
+                        <td className="px-5 py-2.5 font-mono text-slate-600 dark:text-slate-300">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setItemForPerm(file);
+                              setPermMode(file.perm_octal || '0755');
+                              setPermModalOpen(true);
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:border-emerald-500 border border-transparent transition text-[11px]"
+                            title="Click to change permissions"
+                          >
+                            {file.perm_octal}
+                          </button>
+                        </td>
+
+                        {/* Owner / Group */}
+                        <td className="px-5 py-2.5 text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                          {file.owner}:{file.group}
+                        </td>
+
+                        {/* Modified Time */}
+                        <td className="px-5 py-2.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                          {file.modified_at ? new Date(file.modified_at).toLocaleString() : '--'}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-5 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1 opacity-80 group-hover:opacity-100 transition">
+                            {!file.is_dir && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleItemClick(file);
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-emerald-600"
+                                title="Edit File"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {!file.is_dir && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(file);
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-indigo-600"
+                                title="Download File"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {isArchive && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleExtract(file);
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-purple-600"
+                                title="Extract Archive"
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setItemToArchive(file);
+                                setArchiveModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-purple-600"
+                              title="Compress / Archive"
+                            >
+                              <Archive className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setItemToRename(file);
+                                setNewName(file.name);
+                                setRenameModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-amber-600"
+                              title="Rename"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(file);
+                              }}
+                              className="p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
+                              title="Delete Permanently"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
-        {/* Code Editor Modal */}
-        {editorOpen && editingFile && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-4xl bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl flex flex-col h-[80vh] overflow-hidden">
-              <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between bg-surface-950/60">
-                <div className="flex items-center gap-3">
-                  <FileText className="w-5 h-5 text-indigo-400" />
-                  <div>
-                    <h3 className="font-bold text-white text-sm">{editingFile.name}</h3>
-                    <p className="text-xs text-slate-400 font-mono">{editingFile.path}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={handleSaveFile}
-                    disabled={saving}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{saving ? 'Saving...' : 'Save File'}</span>
-                  </button>
-                  <button
-                    onClick={() => setEditorOpen(false)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
+      {/* Real Code Editor Modal */}
+      {editorOpen && editingFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col h-[85vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between bg-slate-50 dark:bg-surface-800/60">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <FileCode className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                <span className="font-mono font-bold text-xs text-slate-800 dark:text-slate-200 truncate">
+                  {editingFile.path}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  ({formatSize(editingFile.size, false)})
+                </span>
+                {saveSuccess && (
+                  <span className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Saved & Backup (.bak) updated
+                  </span>
+                )}
               </div>
 
-              <div className="flex-1 p-4 bg-[#0d1117] overflow-hidden">
-                <textarea
-                  value={fileContent}
-                  onChange={(e) => setFileContent(e.target.value)}
-                  className="w-full h-full bg-transparent font-mono text-xs text-slate-100 placeholder-slate-600 focus:outline-none resize-none leading-relaxed"
-                  spellCheck={false}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={handleSaveContent}
+                  disabled={savingFile}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition shadow-xs disabled:opacity-50"
+                  title="Save (Cmd+S / Ctrl+S)"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{savingFile ? 'Saving...' : 'Save File'}</span>
+                </button>
+                <button
+                  onClick={() => setEditorOpen(false)}
+                  className="w-7 h-7 rounded-lg bg-slate-200 dark:bg-surface-700 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Editor Textarea */}
+            <div className="flex-1 p-0 relative bg-slate-950 text-slate-100 font-mono text-xs overflow-hidden flex">
+              <textarea
+                value={fileContent}
+                onChange={(e) => setFileContent(e.target.value)}
+                onKeyDown={handleEditorKeyDown}
+                spellCheck={false}
+                className="w-full h-full p-4 bg-transparent resize-none focus:outline-none font-mono text-xs leading-relaxed text-slate-200 selection:bg-emerald-500/30 overflow-auto"
+                placeholder="File content..."
+              />
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-2.5 border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-800/40 text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+              <span>Press <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-800 dark:text-slate-200 font-bold">Ctrl+S</kbd> or <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-800 dark:text-slate-200 font-bold">Cmd+S</kbd> to save. Automatic backup is created on disk.</span>
+              <span>Lines: {fileContent.split('\n').length} · Chars: {fileContent.length}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Folder / File Modal */}
+      {createModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <form onSubmit={handleCreate} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                {createType === 'folder' ? <FolderPlus className="w-4 h-4 text-indigo-500" /> : <FilePlus className="w-4 h-4 text-emerald-500" />}
+                Create New {createType === 'folder' ? 'Folder' : 'File'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Name:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                required
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder={createType === 'folder' ? 'e.g. public_html' : 'e.g. index.php or .env'}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">
+                Target path: {currentPath.replace(/\/$/, '')}/{createName || '...'}
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={creating || !createName.trim()}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+              >
+                {creating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {uploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <UploadCloud className="w-4 h-4 text-emerald-500" />
+                Upload to Server
+              </h3>
+              <button
+                onClick={() => setUploadModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 border-2 border-dashed border-slate-300 dark:border-surface-700 rounded-xl text-center space-y-3 bg-slate-50 dark:bg-surface-800/40">
+              <UploadCloud className="w-8 h-8 mx-auto text-emerald-500" />
+              <div>
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  Select files to upload
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Files will be uploaded directly to: <span className="font-mono text-emerald-500">{currentPath}</span>
+                </p>
+              </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleUploadSubmit}
+                className="hidden"
+                id="file-upload-input"
+              />
+              <label
+                htmlFor="file-upload-input"
+                className="inline-block px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer transition shadow-xs"
+              >
+                {uploading ? `Uploading (${uploadProgress}%)...` : 'Choose Files'}
+              </label>
+            </div>
+
+            {uploading && (
+              <div className="w-full bg-slate-200 dark:bg-surface-700 h-2 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
                 />
               </div>
+            )}
+          </div>
+        </div>
+      )}
 
-              <div className="px-6 py-2.5 border-t border-surface-800 bg-surface-950/60 flex items-center justify-between text-[11px] text-slate-400">
-                <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  Sandboxed Path Traversal Protection Active
-                </span>
-                <span>UTF-8 • {fileContent.length} characters</span>
+      {/* Rename Modal */}
+      {renameModalOpen && itemToRename && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <form onSubmit={handleRenameSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Copy className="w-4 h-4 text-amber-500" />
+                Rename Item
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRenameModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                New Name:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                required
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRenameModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!newName.trim() || newName === itemToRename.name}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+              >
+                Rename
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Permissions (chmod) Modal */}
+      {permModalOpen && itemForPerm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <form onSubmit={handlePermSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Lock className="w-4 h-4 text-emerald-500" />
+                File Permissions (chmod)
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPermModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 font-mono truncate">
+              {itemForPerm.path}
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Octal Permission Mode:
+              </label>
+              <input
+                type="text"
+                autoFocus
+                required
+                value={permMode}
+                onChange={(e) => setPermMode(e.target.value)}
+                placeholder="e.g. 0755 or 0644"
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
+              />
+              <div className="flex gap-2 pt-1 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setPermMode('0644')}
+                  className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300"
+                >
+                  0644 (Standard File)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPermMode('0755')}
+                  className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300"
+                >
+                  0755 (Standard Folder / Executable)
+                </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Create File/Folder Modal */}
-        {newModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-sm bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+            <div className="flex justify-end gap-2 pt-2">
               <button
-                onClick={() => setNewModalOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 transition-colors"
+                type="button"
+                onClick={() => setPermModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300"
               >
-                <X className="w-5 h-5" />
+                Cancel
               </button>
-
-              <h2 className="text-base font-bold text-white mb-1">
-                Create New {newType === 'folder' ? 'Folder' : 'File'}
-              </h2>
-              <p className="text-xs text-slate-400 mb-4 font-mono truncate">in {currentPath}</p>
-
-              <form onSubmit={handleCreateItem} className="space-y-4">
-                <div>
-                  <input
-                    type="text"
-                    required
-                    autoFocus
-                    placeholder={newType === 'folder' ? 'e.g. assets' : 'e.g. config.php'}
-                    value={newItemName}
-                    onChange={(e) => setNewItemName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
-                  >
-                    Create
-                  </button>
-                </div>
-              </form>
+              <button
+                type="submit"
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-xs"
+              >
+                Apply Permissions
+              </button>
             </div>
-          </div>
-        )}
-      </div>
+          </form>
+        </div>
+      )}
+
+      {/* Archive Modal */}
+      {archiveModalOpen && itemToArchive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <form onSubmit={handleArchiveSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Archive className="w-4 h-4 text-purple-500" />
+                Compress / Archive
+              </h3>
+              <button
+                type="button"
+                onClick={() => setArchiveModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 truncate">
+              Compress: <span className="font-mono text-slate-800 dark:text-slate-200">{itemToArchive.name}</span>
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Format:
+              </label>
+              <div className="flex gap-4 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-800 dark:text-slate-200">
+                  <input
+                    type="radio"
+                    name="archiveFormat"
+                    value="zip"
+                    checked={archiveFormat === 'zip'}
+                    onChange={() => setArchiveFormat('zip')}
+                  />
+                  <span>.ZIP (Universal Standard)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-slate-800 dark:text-slate-200">
+                  <input
+                    type="radio"
+                    name="archiveFormat"
+                    value="tar.gz"
+                    checked={archiveFormat === 'tar.gz'}
+                    onChange={() => setArchiveFormat('tar.gz')}
+                  />
+                  <span>.tar.gz (Linux Gzip)</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setArchiveModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessingArchive}
+                className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+              >
+                {isProcessingArchive ? 'Compressing...' : 'Start Compression'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </DashboardShell>
   );
 }
