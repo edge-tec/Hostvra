@@ -23,6 +23,7 @@ import {
   Globe,
   Sliders,
   Sparkles,
+  Layers,
 } from 'lucide-react';
 
 interface EmailDomain {
@@ -145,6 +146,7 @@ export default function EmailHostingPage() {
   const [showAddMailboxModal, setShowAddMailboxModal] = useState(false);
   const [showDNSModal, setShowDNSModal] = useState<EmailDomain | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState<EmailMailbox | null>(null);
+  const [webmailModalMailbox, setWebmailModalMailbox] = useState<EmailMailbox | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
   // Form states
@@ -300,15 +302,19 @@ export default function EmailHostingPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <a
-              href="http://localhost:8080/webmail"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-800 text-slate-200 hover:bg-surface-700 border border-surface-700 transition"
+            <button
+              onClick={() =>
+                setWebmailModalMailbox(
+                  mailboxes[0] ||
+                    ({ email: 'webmail@hostvra.com', name: 'Webmail User' } as EmailMailbox)
+                )
+              }
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-800 text-slate-200 hover:bg-surface-700 border border-surface-700 transition shadow-sm"
+              title="Open Webmail Portal & Client Access"
             >
               <ExternalLink className="w-4 h-4 text-indigo-400" />
               <span>Webmail</span>
-            </a>
+            </button>
             <button
               onClick={() => setShowAddDomainModal(true)}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-800 text-slate-200 hover:bg-surface-700 border border-surface-700 transition"
@@ -509,15 +515,13 @@ export default function EmailHostingPage() {
                           >
                             <Key className="w-4 h-4" />
                           </button>
-                          <a
-                            href="http://localhost:8080/webmail"
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            onClick={() => setWebmailModalMailbox(mb)}
                             className="inline-block p-1.5 rounded-lg hover:bg-surface-700 text-slate-400 hover:text-indigo-400 transition"
-                            title="Open Webmail"
+                            title="Open Webmail & Client Access"
                           >
                             <ExternalLink className="w-4 h-4" />
-                          </a>
+                          </button>
                           <button
                             onClick={() => handleDeleteMailbox(mb.id)}
                             className="p-1.5 rounded-lg hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition"
@@ -1008,6 +1012,144 @@ export default function EmailHostingPage() {
                     Save Password
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Webmail Access & Mail Client Configuration */}
+        {webmailModalMailbox && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+            <div className="bg-surface-900 border border-surface-750 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-4 border-b border-surface-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-inner">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white tracking-tight">Webmail & Mail Client Access</h3>
+                    <p className="text-xs text-slate-400 font-mono">{webmailModalMailbox.email}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setWebmailModalMailbox(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Direct Webmail Launch Card */}
+              <div className="p-4 rounded-xl bg-indigo-950/40 border border-indigo-500/30 space-y-3 shadow-inner">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Roundcube Webmail Portal
+                  </span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
+                    Online
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Open Roundcube webmail directly in your browser using your server IP or domain:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}/webmail` : '/webmail'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex-1 min-w-[180px] px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all active:scale-95"
+                  >
+                    <span>Open Webmail ({typeof window !== 'undefined' ? window.location.hostname : 'Server IP'})</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  {webmailModalMailbox.email.includes('@') && (
+                    <a
+                      href={`http://webmail.${webmailModalMailbox.email.split('@')[1]}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2.5 rounded-xl bg-surface-800 hover:bg-surface-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 border border-surface-700 transition-all"
+                    >
+                      <span>webmail.{webmailModalMailbox.email.split('@')[1]}</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Mail Client Configuration Settings (Outlook, Apple Mail, Thunderbird, Mobile) */}
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                  Mail Client Setup (Outlook / iPhone / Thunderbird)
+                </h4>
+
+                <div className="space-y-2 text-xs">
+                  {/* Username */}
+                  <div className="p-2.5 rounded-lg bg-surface-950/60 border border-surface-800 flex items-center justify-between">
+                    <span className="text-slate-400">Username / Email:</span>
+                    <div className="flex items-center gap-2">
+                      <code className="text-slate-200 font-mono font-semibold">{webmailModalMailbox.email}</code>
+                      <button
+                        onClick={() => copyToClipboard(webmailModalMailbox.email, 'email')}
+                        className="text-slate-400 hover:text-white"
+                        title="Copy email"
+                      >
+                        {copiedKey === 'email' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Incoming IMAP */}
+                  <div className="p-2.5 rounded-lg bg-surface-950/60 border border-surface-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-400 block">Incoming Server (IMAP):</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Port 993 (SSL/TLS)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="text-slate-200 font-mono font-semibold">
+                        {webmailModalMailbox.email.includes('@') ? `mail.${webmailModalMailbox.email.split('@')[1]}` : 'mail.yourdomain.com'}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(webmailModalMailbox.email.includes('@') ? `mail.${webmailModalMailbox.email.split('@')[1]}` : 'mail.yourdomain.com', 'imap')}
+                        className="text-slate-400 hover:text-white"
+                        title="Copy IMAP host"
+                      >
+                        {copiedKey === 'imap' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Outgoing SMTP */}
+                  <div className="p-2.5 rounded-lg bg-surface-950/60 border border-surface-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-400 block">Outgoing Server (SMTP):</span>
+                      <span className="text-[10px] text-slate-500 font-mono">Port 587 (STARTTLS) / 465 (SSL)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="text-slate-200 font-mono font-semibold">
+                        {webmailModalMailbox.email.includes('@') ? `mail.${webmailModalMailbox.email.split('@')[1]}` : 'mail.yourdomain.com'}
+                      </code>
+                      <button
+                        onClick={() => copyToClipboard(webmailModalMailbox.email.includes('@') ? `mail.${webmailModalMailbox.email.split('@')[1]}` : 'mail.yourdomain.com', 'smtp')}
+                        className="text-slate-400 hover:text-white"
+                        title="Copy SMTP host"
+                      >
+                        {copiedKey === 'smtp' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={() => setWebmailModalMailbox(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-surface-800 hover:bg-surface-700 text-slate-300 hover:text-white transition"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
