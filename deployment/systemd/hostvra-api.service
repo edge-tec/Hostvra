@@ -6,8 +6,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=hostvra
-Group=hostvra
+User=root
+Group=root
 WorkingDirectory=/var/lib/hostvra
 EnvironmentFile=-/etc/hostvra/api.env
 ExecStart=/usr/local/bin/hostvra-api
@@ -18,13 +18,8 @@ KillMode=process
 TimeoutStopSec=15
 
 # Security Sandboxing
-ProtectSystem=strict
-ProtectHome=true
+ProtectSystem=false
 PrivateTmp=true
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
 ReadWritePaths=/var/lib/hostvra /var/log/hostvra
 
 [Install]

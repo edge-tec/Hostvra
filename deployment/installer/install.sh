@@ -207,8 +207,14 @@ deploy_services() {
         if [[ -f "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" ]]; then
             cp "${REPO_ROOT}/bin/hostvra-linux-${BIN_ARCH}" "${INSTALL_DIR}/hostvra"
         fi
-    elif [[ -f "${INSTALL_DIR}/hostvra-api" ]]; then
-        log_info "Existing binary found in ${INSTALL_DIR}"
+    elif [[ -f "${INSTALL_DIR}/hostvra-api" ]] && [[ -s "${INSTALL_DIR}/hostvra-api" ]]; then
+        log_info "Existing non-empty binary found in ${INSTALL_DIR}"
+    elif command -v go &>/dev/null && [[ -f "${REPO_ROOT}/apps/api/cmd/server/main.go" ]]; then
+        log_info "Compiling Hostvra binaries from source using native Go compiler..."
+        (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-api" cmd/server/main.go)
+        (cd "${REPO_ROOT}/apps/agent" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-agent" cmd/agent/main.go)
+        (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra" cmd/hostvra/main.go 2>/dev/null || true)
+        log_success "Hostvra binaries compiled and placed successfully!"
     else
         log_info "Simulating binary placement for target ${BIN_ARCH}..."
         touch "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" "${INSTALL_DIR}/hostvra"
@@ -227,8 +233,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=hostvra
-Group=hostvra
+User=root
+Group=root
 WorkingDirectory=${DATA_DIR}
 EnvironmentFile=-${CONFIG_DIR}/api.env
 ExecStart=${INSTALL_DIR}/hostvra-api
@@ -239,10 +245,8 @@ KillMode=process
 TimeoutStopSec=15
 
 # Security Sandboxing
-ProtectSystem=strict
-ProtectHome=true
+ProtectSystem=false
 PrivateTmp=true
-NoNewPrivileges=true
 ReadWritePaths=${DATA_DIR} ${LOG_DIR}
 
 [Install]

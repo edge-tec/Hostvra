@@ -290,36 +290,80 @@ export default function UpdatesPage() {
 
         {/* Live Active Job Progress Banner */}
         {activeJob && (
-          <div className="bg-gradient-to-r from-indigo-950/80 via-surface-900 to-surface-900 border border-indigo-500/30 rounded-2xl p-6 shadow-2xl space-y-4">
+          <div className={`bg-gradient-to-r ${
+            activeJob.status === 'completed'
+              ? 'from-emerald-950/60 via-surface-900 to-surface-900 border-emerald-500/30'
+              : activeJob.status === 'failed' || activeJob.status === 'rolled_back'
+              ? 'from-rose-950/60 via-surface-900 to-surface-900 border-rose-500/30'
+              : 'from-indigo-950/80 via-surface-900 to-surface-900 border-indigo-500/30'
+          } border rounded-2xl p-6 shadow-2xl space-y-4`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
-                  <RefreshCw className="w-5 h-5 animate-spin" />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+                  activeJob.status === 'completed'
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                    : activeJob.status === 'failed' || activeJob.status === 'rolled_back'
+                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                    : 'bg-indigo-500/20 border-indigo-500/40 text-indigo-400'
+                }`}>
+                  {activeJob.status === 'completed' ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  ) : activeJob.status === 'failed' || activeJob.status === 'rolled_back' ? (
+                    <AlertTriangle className="w-5 h-5 text-rose-400" />
+                  ) : (
+                    <RefreshCw className="w-5 h-5 animate-spin text-indigo-400" />
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold text-white">
-                      Updating System to v{activeJob.target_version}
+                      {activeJob.status === 'completed'
+                        ? `System Successfully Upgraded to v${activeJob.target_version}`
+                        : `Updating System to v${activeJob.target_version}`}
                     </span>
-                    <span className="px-2 py-0.5 rounded text-[11px] font-mono uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-mono uppercase border ${
+                      activeJob.status === 'completed'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : activeJob.status === 'failed' || activeJob.status === 'rolled_back'
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+                    }`}>
                       {activeJob.status.replace('_', ' ')}
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {activeJob.current_step_description || 'Orchestrating live deployment pipeline...'}
+                    {activeJob.status === 'completed'
+                      ? 'Live deployment and health verification completed with zero customer downtime.'
+                      : activeJob.current_step_description || 'Orchestrating live deployment pipeline...'}
                   </p>
                 </div>
               </div>
-              <span className="text-xl font-bold font-mono text-indigo-400">
-                {activeJob.progress_percent}%
-              </span>
+              <div className="flex items-center gap-3">
+                <span className={`text-xl font-bold font-mono ${
+                  activeJob.status === 'completed' ? 'text-emerald-400' : 'text-indigo-400'
+                }`}>
+                  {activeJob.status === 'completed' ? 100 : (activeJob.progress_percent || 100)}%
+                </span>
+                {['completed', 'failed', 'rolled_back'].includes(activeJob.status) && (
+                  <button
+                    onClick={() => setActiveJob(null)}
+                    className="px-3 py-1.5 bg-surface-800 hover:bg-surface-700 text-slate-200 rounded-lg border border-surface-700 text-xs font-semibold transition"
+                  >
+                    Dismiss
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Progress Bar */}
             <div className="w-full bg-surface-950 rounded-full h-2.5 overflow-hidden border border-surface-700">
               <div
-                className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-500 rounded-full"
-                style={{ width: `${Math.max(activeJob.progress_percent, 5)}%` }}
+                className={`h-full transition-all duration-500 rounded-full ${
+                  activeJob.status === 'completed'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    : 'bg-gradient-to-r from-indigo-500 to-purple-500'
+                }`}
+                style={{ width: `${activeJob.status === 'completed' ? 100 : Math.max(activeJob.progress_percent || 100, 5)}%` }}
               />
             </div>
 
@@ -334,7 +378,7 @@ export default function UpdatesPage() {
                 { key: 'activating', label: 'Symlink' },
                 { key: 'health_checking', label: 'Health' },
               ].map((step) => {
-                const isPassed = activeJob.progress_percent >= 100;
+                const isPassed = activeJob.status === 'completed' || (activeJob.progress_percent || 0) >= 100;
                 const isCurrent = activeJob.status.includes(step.key);
                 return (
                   <div

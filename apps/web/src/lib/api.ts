@@ -1,6 +1,9 @@
-// Hostvra Core API Client
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `${window.location.protocol}//${window.location.hostname}:8080`;
+  }
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+}
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -236,7 +239,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   }
 
   try {
-    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       ...options,
       headers,
     });
