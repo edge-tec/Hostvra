@@ -284,7 +284,21 @@ func main() {
 			r.Route("/backups", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/", backupHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/", backupHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/create", backupHandler.Create)
 				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/restore", backupHandler.Restore)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/{id}", backupHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/download/{id}", backupHandler.Download)
+
+				// Cloud Destinations
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/destinations", backupHandler.ListDestinations)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/destinations", backupHandler.SaveDestination)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/destinations/{id}", backupHandler.DeleteDestination)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/destinations/test", backupHandler.TestDestination)
+
+				// Schedules
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/schedules", backupHandler.ListSchedules)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/schedules", backupHandler.SaveSchedule)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/schedules/{id}", backupHandler.DeleteSchedule)
 			})
 
 			// Commercial & Licensing

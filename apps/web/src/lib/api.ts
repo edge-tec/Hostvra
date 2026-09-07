@@ -528,4 +528,53 @@ export interface FTPUser {
   created_at?: string;
 }
 
+export interface BackupRecord {
+  id: string;
+  server_id: string;
+  type: 'website' | 'database' | 'full_config';
+  target_name: string;
+  storage: 'local' | 's3' | 'r2' | 'b2' | 'sftp';
+  storage_id?: string;
+  size_bytes: number;
+  sha256?: string;
+  item_count?: number;
+  status: 'completed' | 'failed' | 'in_progress';
+  file_name: string;
+  remote_key?: string;
+  created_at: string;
+  completed_at?: string;
+  error_message?: string;
+}
+
+export interface BackupDestination {
+  id: string;
+  name: string;
+  type: 's3' | 'r2' | 'b2' | 'sftp' | 'local';
+  endpoint: string;
+  region: string;
+  bucket: string;
+  access_key: string;
+  secret_key?: string;
+  prefix?: string;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupSchedule {
+  id: string;
+  name: string;
+  scope: 'website' | 'database' | 'full_config';
+  target_name: string;
+  destination_id: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'cron';
+  cron_expr?: string;
+  retention: number;
+  enabled: boolean;
+  last_run_at?: string;
+  next_run_at?: string;
+  created_at: string;
+}
+
+
 
