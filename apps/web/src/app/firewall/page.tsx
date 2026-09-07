@@ -376,14 +376,14 @@ export default function FirewallPage() {
             <button
               onClick={handleToggleFirewall}
               disabled={togglingFirewall}
-              className={`px-3.5 py-1.5 rounded-xl border transition-all text-xs font-semibold flex items-center gap-1.5 ${
+              className={`px-4 py-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer ${
                 status?.is_active
-                  ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
-                  : 'bg-emerald-600 hover:bg-emerald-500 text-white border-transparent shadow-xs'
+                  ? 'border border-rose-300 hover:border-rose-400 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white border border-emerald-600 shadow-sm'
               }`}
             >
-              <Power className="w-3.5 h-3.5" />
-              {togglingFirewall ? 'Updating...' : status?.is_active ? 'Disable' : 'Enable'}
+              <Power className={`w-4 h-4 ${status?.is_active ? 'text-rose-600 dark:text-rose-400' : 'text-white'}`} />
+              <span>{togglingFirewall ? 'Updating...' : status?.is_active ? 'Disable Firewall' : 'Enable Firewall'}</span>
             </button>
           </div>
 

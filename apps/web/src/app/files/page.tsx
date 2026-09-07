@@ -435,12 +435,12 @@ export default function FileManagerPage() {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
               onClick={() => setUploadModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition shadow-xs"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-100 text-xs font-bold border border-slate-300 dark:border-surface-700 transition shadow-xs cursor-pointer"
             >
-              <UploadCloud className="w-4 h-4 text-emerald-500" />
+              <UploadCloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <span>Upload</span>
             </button>
             <button
@@ -448,9 +448,9 @@ export default function FileManagerPage() {
                 setCreateType('folder');
                 setCreateModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition shadow-xs"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-100 text-xs font-bold border border-slate-300 dark:border-surface-700 transition shadow-xs cursor-pointer"
             >
-              <FolderPlus className="w-4 h-4 text-indigo-500" />
+              <FolderPlus className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
               <span>New Folder</span>
             </button>
             <button
@@ -458,14 +458,14 @@ export default function FileManagerPage() {
                 setCreateType('file');
                 setCreateModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-sm cursor-pointer"
             >
-              <FilePlus className="w-4 h-4" />
+              <FilePlus className="w-4 h-4 text-white" />
               <span>New File</span>
             </button>
             <button
               onClick={() => fetchDirectory(currentPath)}
-              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 transition"
+              className="p-2 rounded-xl bg-white hover:bg-slate-50 dark:bg-surface-800 dark:hover:bg-surface-700 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-300 transition shadow-xs cursor-pointer"
               title="Refresh Directory"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -647,14 +647,14 @@ export default function FileManagerPage() {
 
                         {/* Actions */}
                         <td className="px-5 py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-80 group-hover:opacity-100 transition">
+                          <div className="flex items-center justify-end gap-1.5">
                             {!file.is_dir && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleItemClick(file);
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-emerald-600"
+                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:border-emerald-200 transition shadow-2xs cursor-pointer"
                                 title="Edit File"
                               >
                                 <Edit className="w-3.5 h-3.5" />
@@ -667,7 +667,7 @@ export default function FileManagerPage() {
                                   e.stopPropagation();
                                   handleDownload(file);
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-indigo-600"
+                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
                                 title="Download File"
                               >
                                 <Download className="w-3.5 h-3.5" />
@@ -680,7 +680,7 @@ export default function FileManagerPage() {
                                   e.stopPropagation();
                                   handleExtract(file);
                                 }}
-                                className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-purple-600"
+                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:border-purple-200 transition shadow-2xs cursor-pointer"
                                 title="Extract Archive"
                               >
                                 <Archive className="w-3.5 h-3.5" />
@@ -693,7 +693,7 @@ export default function FileManagerPage() {
                                 setItemToArchive(file);
                                 setArchiveModalOpen(true);
                               }}
-                              className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-purple-600"
+                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:border-purple-200 transition shadow-2xs cursor-pointer"
                               title="Compress / Archive"
                             >
                               <Archive className="w-3.5 h-3.5" />
@@ -706,7 +706,7 @@ export default function FileManagerPage() {
                                 setNewName(file.name);
                                 setRenameModalOpen(true);
                               }}
-                              className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-500 hover:text-amber-600"
+                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-200 transition shadow-2xs cursor-pointer"
                               title="Rename"
                             >
                               <Copy className="w-3.5 h-3.5" />
@@ -717,7 +717,7 @@ export default function FileManagerPage() {
                                 e.stopPropagation();
                                 handleDelete(file);
                               }}
-                              className="p-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
+                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:border-rose-200 transition shadow-2xs cursor-pointer"
                               title="Delete Permanently"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

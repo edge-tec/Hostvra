@@ -299,17 +299,17 @@ Available shortcuts & capabilities:
 
           {/* Node Metadata Badges */}
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 text-xs text-slate-600 dark:text-slate-300">
-              <Server className="w-3.5 h-3.5 text-indigo-500" />
-              <span className="font-mono font-medium">{info?.hostname || 'localhost'}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs text-slate-800 dark:text-slate-200 shadow-2xs">
+              <Server className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="font-mono font-semibold">{info?.hostname || 'localhost'}</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 text-xs text-slate-600 dark:text-slate-300">
-              <User className="w-3.5 h-3.5 text-indigo-500" />
-              <span className="font-mono font-medium">{info?.user || 'root'}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs text-slate-800 dark:text-slate-200 shadow-2xs">
+              <User className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="font-mono font-semibold">{info?.user || 'root'}</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200 dark:border-surface-700 text-xs text-slate-600 dark:text-slate-300">
-              <Folder className="w-3.5 h-3.5 text-indigo-500" />
-              <span className="font-mono font-medium truncate max-w-[150px]">{cwd}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs text-slate-800 dark:text-slate-200 shadow-2xs">
+              <Folder className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+              <span className="font-mono font-semibold truncate max-w-[160px]">{cwd}</span>
             </div>
           </div>
         </div>

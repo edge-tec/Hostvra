@@ -128,17 +128,18 @@ export default function DatabasesPage() {
             )}
             <button
               onClick={() => fetchDatabases(selectedServer)}
-              className="p-2.5 rounded-xl bg-surface-900 border border-surface-800 text-slate-300 hover:text-white hover:bg-surface-800 transition-colors"
+              title="Refresh Databases"
+              className="p-2.5 rounded-xl bg-white hover:bg-slate-50 dark:bg-surface-800 dark:hover:bg-surface-700 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-300 transition-colors shadow-2xs cursor-pointer"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={() => setCreateDbOpen(true)}
               disabled={!selectedServer}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm font-bold shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
-              Create Database
+              <Plus className="w-4 h-4 text-white" />
+              <span>Create Database</span>
             </button>
           </div>
         </div>
@@ -237,9 +238,10 @@ export default function DatabasesPage() {
                       <button
                         onClick={() => handleDeleteDatabase(db.id, db.name)}
                         title="Drop Database"
-                        className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 hover:border-rose-300 dark:border-surface-700 dark:hover:border-rose-800 bg-white hover:bg-rose-50 dark:bg-surface-800 dark:hover:bg-rose-950/30 text-slate-700 hover:text-rose-600 dark:text-slate-300 dark:hover:text-rose-400 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                        <span>Delete</span>
                       </button>
                     </td>
                   </tr>

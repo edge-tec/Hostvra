@@ -237,10 +237,11 @@ export function Header() {
           {/* Update Button */}
           <button
             onClick={() => setUpdateModalOpen(true)}
-            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
+            title="System Updates"
+            className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white hover:bg-slate-100 dark:bg-surface-800 dark:hover:bg-surface-700 border border-slate-300 dark:border-surface-700 flex items-center gap-1 sm:gap-1.5 transition shadow-2xs cursor-pointer flex-shrink-0"
           >
-            <RotateCw className="w-3.5 h-3.5 text-slate-500" />
-            <span className="hidden sm:inline">Update</span>
+            <RotateCw className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 flex-shrink-0" />
+            <span>Update</span>
           </button>
 
           {/* Fix Button */}
@@ -249,19 +250,21 @@ export function Header() {
               setFixModalOpen(true);
               executeFix();
             }}
-            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 flex items-center gap-1 transition"
+            title="System Diagnostics & Auto-Fix"
+            className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white hover:bg-slate-100 dark:bg-surface-800 dark:hover:bg-surface-700 border border-slate-300 dark:border-surface-700 flex items-center gap-1 sm:gap-1.5 transition shadow-2xs cursor-pointer flex-shrink-0"
           >
-            <Wrench className="w-3.5 h-3.5 text-slate-500" />
-            <span className="hidden sm:inline">Fix</span>
+            <Wrench className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+            <span>Fix</span>
           </button>
 
           {/* Restart Button */}
           <button
             onClick={() => setRestartModalOpen(true)}
-            className="px-2 sm:px-2.5 py-1 rounded text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-1 transition"
+            title="Restart Services or Server"
+            className="px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg text-xs font-bold text-rose-700 dark:text-rose-400 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/40 flex items-center gap-1 sm:gap-1.5 transition shadow-2xs cursor-pointer flex-shrink-0"
           >
-            <Power className="w-3.5 h-3.5 text-rose-500" />
-            <span className="hidden sm:inline">Restart</span>
+            <Power className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+            <span>Restart</span>
           </button>
         </div>
       </header>

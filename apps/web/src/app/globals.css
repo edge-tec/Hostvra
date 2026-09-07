@@ -253,28 +253,24 @@ html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([
 }
 
 /* 4.2 Secondary / Neutral Action Buttons in Light Mode */
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-green"]):not([class*="bg-transparent"]) {
-  background-color: #FFFFFF !important;
-  color: #111827 !important;
-  border: 1px solid #E5E7EB !important;
-  font-weight: 600 !important;
-  border-radius: 10px !important;
+html:not(.dark) button:not([class*="bg-"]):not([class*="text-"]) {
+  background-color: #FFFFFF;
+  color: #111827;
+  border: 1px solid #E5E7EB;
+  font-weight: 600;
+  border-radius: 10px;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-green"]):not([class*="bg-transparent"]):hover:not(:disabled) {
-  background-color: #F8FAFC !important;
-  border-color: #D1D5DB !important;
-  color: #111827 !important;
+html:not(.dark) button:not([class*="bg-"]):not([class*="text-"]):hover:not(:disabled) {
+  background-color: #F8FAFC;
+  border-color: #D1D5DB;
+  color: #111827;
 }
 
 /* 4.3 Icon & Control Buttons */
-html:not(.dark) button svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg):not(button[class*="bg-green"] svg):not(button[class*="bg-blue"] svg) {
-  stroke: #4B5563 !important;
-}
-
-html:not(.dark) button:hover svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg):not(button[class*="bg-green"] svg):not(button[class*="bg-blue"] svg) {
-  stroke: #111827 !important;
+html:not(.dark) button:not([class*="text-"]) svg:not([class*="text-"]) {
+  stroke: currentColor;
 }
 
 /* ==========================================================================
