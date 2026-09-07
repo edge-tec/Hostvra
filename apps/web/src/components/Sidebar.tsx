@@ -145,17 +145,17 @@ export function Sidebar() {
   };
 
   const getBadgeClasses = (color?: string, isActive?: boolean) => {
-    if (isActive) return 'bg-white/25 text-white font-semibold';
+    if (isActive) return 'bg-white/30 text-white font-bold';
     switch (color) {
-      case 'blue':
-        return 'bg-blue-500/15 text-blue-300 border border-blue-400/20';
-      case 'purple':
-        return 'bg-purple-500/15 text-purple-300 border border-purple-400/20';
       case 'amber':
-        return 'bg-amber-500/15 text-amber-300 border border-amber-400/20';
+        return 'bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-400/20';
+      case 'purple':
+        return 'bg-purple-100 dark:bg-purple-500/15 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-400/20';
+      case 'blue':
+        return 'bg-blue-100 dark:bg-blue-500/15 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-400/20';
       case 'emerald':
       default:
-        return 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/20';
+        return 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-400/20';
     }
   };
 
@@ -165,12 +165,12 @@ export function Sidebar() {
         <div key={group.title} className="space-y-0.5">
           {/* Group Header */}
           {(isMobileView || !collapsed) && (
-            <div className="px-3 pt-3 pb-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+            <div className="px-3 pt-3 pb-1 text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400 uppercase">
               {group.title}
             </div>
           )}
           {(!isMobileView && collapsed) && (
-            <div className="h-px bg-slate-800 my-2 mx-2" />
+            <div className="h-px bg-slate-200 dark:bg-slate-800 my-2 mx-2" />
           )}
 
           {/* Group Items */}
@@ -190,16 +190,16 @@ export function Sidebar() {
                   title={!isMobileView && collapsed ? item.label : undefined}
                   className={`flex items-center ${
                     !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
-                  } rounded-lg text-xs font-medium transition-all group ${
+                  } rounded-lg text-xs font-semibold transition-all group ${
                     isActive
-                      ? 'bg-[#2563EB] text-white font-semibold shadow-sm shadow-blue-500/25'
-                      : 'text-slate-300 hover:text-white hover:bg-white/[0.07]'
+                      ? 'bg-[#16A34A] text-white font-bold shadow-sm shadow-emerald-600/25'
+                      : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.08]'
                   }`}
                 >
                   <div className={`flex items-center ${!isMobileView && collapsed ? '' : 'gap-2.5'} truncate min-w-0`}>
                     <Icon
                       className={`w-4 h-4 flex-shrink-0 transition-colors ${
-                        isActive ? 'text-white' : 'text-slate-400 group-hover:text-white'
+                        isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'
                       }`}
                     />
                     {(isMobileView || !collapsed) && <span className="truncate">{item.label}</span>}
@@ -223,15 +223,15 @@ export function Sidebar() {
       ))}
 
       {/* Log Out */}
-      <div className="pt-2 border-t border-slate-800">
+      <div className="pt-2 border-t border-slate-200 dark:border-slate-800">
         <button
           onClick={handleLogout}
           title={!isMobileView && collapsed ? 'Log out' : undefined}
           className={`w-full flex items-center ${
             !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2 gap-2.5'
-          } rounded-lg text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-all text-left`}
+          } rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-all text-left`}
         >
-          <LogOut className="w-4 h-4 flex-shrink-0 text-slate-400 group-hover:text-rose-400" />
+          <LogOut className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400 group-hover:text-rose-600" />
           {(isMobileView || !collapsed) && <span>Log out</span>}
         </button>
       </div>
@@ -245,23 +245,23 @@ export function Sidebar() {
         data-component="sidebar"
         className={`hidden lg:flex ${
           collapsed ? 'w-16' : 'w-60'
-        } bg-[#0F172A] border-r border-slate-800 flex-col h-screen select-none sticky top-0 transition-all duration-200 ease-in-out z-30 flex-shrink-0 shadow-sm`}
+        } bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex-col h-screen select-none sticky top-0 transition-all duration-200 ease-in-out z-30 flex-shrink-0 shadow-xs`}
       >
         {/* Brand Header */}
-        <div className="h-16 flex items-center px-3.5 border-b border-slate-800 justify-between flex-shrink-0 overflow-hidden bg-[#0F172A]">
+        <div className="h-16 flex items-center px-3.5 border-b border-slate-200 dark:border-slate-800 justify-between flex-shrink-0 overflow-hidden bg-white dark:bg-[#0F172A]">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-blue-500/20">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm shadow-emerald-600/20">
               <Flame className="w-5 h-5 text-amber-300 fill-amber-300" />
             </div>
             {!collapsed && (
               <div className="min-w-0 truncate">
                 <div className="flex items-center gap-1.5 leading-tight">
-                  <span className="text-sm font-bold text-white tracking-tight">Hostvra</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-400/30">
-                    Enterprise
+                  <span className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">Hostvra</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                    Control
                   </span>
                 </div>
-                <div className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
                   Hosting Control Panel
                 </div>
               </div>
@@ -270,19 +270,19 @@ export function Sidebar() {
         </div>
 
         {/* Navigation Scroll */}
-        <div className="flex-1 overflow-y-auto px-2.5 py-3 custom-scrollbar bg-[#0F172A]">
+        <div className="flex-1 overflow-y-auto px-2.5 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]">
           {renderNavList(false)}
         </div>
 
         {/* Bottom Core API Status & Collapse Footer */}
-        <div className="p-2.5 border-t border-slate-800 bg-[#0B1120] flex-shrink-0 space-y-2">
+        <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] flex-shrink-0 space-y-2">
           {!collapsed && (
-            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#162033] border border-slate-700/50 text-[11px]">
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#162033] border border-slate-200 dark:border-slate-700/50 text-[11px]">
               <div className="flex items-center gap-1.5 min-w-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                <span className="text-slate-300 font-medium truncate">Control Plane</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                <span className="text-slate-700 dark:text-slate-300 font-semibold truncate">Control Plane</span>
               </div>
-              <span className="text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
+              <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
                 ONLINE
               </span>
             </div>
@@ -290,13 +290,13 @@ export function Sidebar() {
 
           <button
             onClick={toggleCollapse}
-            className="w-full py-1.5 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/[0.08] transition"
+            className="w-full py-1.5 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.08] transition"
             title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {collapsed ? (
               <ChevronRight className="w-4 h-4" />
             ) : (
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-400">
                 <ChevronLeft className="w-3.5 h-3.5" />
                 <span>Collapse</span>
               </div>
@@ -315,20 +315,20 @@ export function Sidebar() {
           />
 
           {/* Drawer Content */}
-          <div className="relative w-64 bg-[#0F172A] border-r border-slate-800 flex flex-col h-full shadow-2xl z-10 animate-fadeIn">
-            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800 flex-shrink-0">
+          <div className="relative w-64 bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-10 animate-fadeIn">
+            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-blue-500/20">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm shadow-emerald-600/20">
                   <Flame className="w-5 h-5 text-amber-300 fill-amber-300" />
                 </div>
                 <div>
                   <div className="flex items-center gap-1.5 leading-tight">
-                    <span className="text-sm font-bold text-white tracking-tight">Hostvra</span>
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
-                      Enterprise
+                    <span className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">Hostvra</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300">
+                      Control
                     </span>
                   </div>
-                  <div className="text-[10px] text-slate-400 font-medium">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
                     Hosting Control Panel
                   </div>
                 </div>
@@ -336,23 +336,23 @@ export function Sidebar() {
 
               <button
                 onClick={() => setMobileOpen(false)}
-                className="w-7 h-7 rounded-lg bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center"
+                className="w-7 h-7 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]">
               {renderNavList(true)}
             </div>
 
-            <div className="p-3 border-t border-slate-800 bg-[#0B1120] flex-shrink-0">
-              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[#162033] border border-slate-700/50 text-[11px]">
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] flex-shrink-0">
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#162033] border border-slate-200 dark:border-slate-700/50 text-[11px]">
                 <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                  <span className="text-slate-300 font-medium truncate">Control Plane</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold truncate">Control Plane</span>
                 </div>
-                <span className="text-[9px] font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/20 px-1.5 py-0.5 rounded uppercase tracking-wider">
                   ONLINE
                 </span>
               </div>

@@ -536,19 +536,19 @@ export default function DomainsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             {/* Breadcrumb */}
-            <nav className="flex items-center gap-1.5 text-xs text-[#64748B] mb-1.5 font-medium">
-              <Link href="/dashboard" className="hover:text-[#172033] transition">
+            <nav className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mb-1.5 font-medium">
+              <Link href="/dashboard" className="hover:text-slate-900 dark:hover:text-white transition">
                 Hostvra
               </Link>
               <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-              <span className="text-[#172033] font-semibold">Domains</span>
+              <span className="text-slate-900 dark:text-white font-semibold">Domains</span>
             </nav>
 
             {/* Title & Subtitle */}
-            <h1 className="text-2xl font-bold text-[#172033] tracking-tight">
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
               Domain Manager
             </h1>
-            <p className="text-xs sm:text-sm text-[#64748B] mt-0.5">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
               Manage your domains, subdomains and hosting configuration.
             </p>
           </div>
@@ -557,7 +557,7 @@ export default function DomainsPage() {
           <div className="flex items-center gap-2.5 flex-shrink-0">
             <button
               onClick={openAddModal}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold shadow-xs transition-all active:scale-98 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs sm:text-sm font-bold shadow-xs transition-all active:scale-98 cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[2.5]" />
               <span>Add Domain</span>
@@ -567,14 +567,14 @@ export default function DomainsPage() {
 
         {/* Global Success / Error Alerts */}
         {successMessage && (
-          <div className="p-3.5 rounded-lg bg-[#F0FDF4] border border-[#DCFCE7] text-xs font-medium text-[#16A34A] flex items-center justify-between animate-fadeIn">
+          <div className="p-3.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-xs font-medium text-emerald-700 dark:text-emerald-400 flex items-center justify-between animate-fadeIn">
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
               <span>{successMessage}</span>
             </div>
             <button
               onClick={() => setSuccessMessage(null)}
-              className="text-[#16A34A] hover:text-emerald-800"
+              className="text-emerald-700 dark:text-emerald-400 hover:text-emerald-900"
             >
               <X className="w-4 h-4" />
             </button>
@@ -582,12 +582,12 @@ export default function DomainsPage() {
         )}
 
         {error && (
-          <div className="p-3.5 rounded-lg bg-[#FEF2F2] border border-[#FEE2E2] text-xs font-medium text-[#DC2626] flex items-center justify-between animate-fadeIn">
+          <div className="p-3.5 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-xs font-medium text-rose-700 dark:text-rose-400 flex items-center justify-between animate-fadeIn">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
-            <button onClick={() => setError(null)} className="text-[#DC2626] hover:text-red-800">
+            <button onClick={() => setError(null)} className="text-rose-700 dark:text-rose-400 hover:text-rose-900">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -596,16 +596,16 @@ export default function DomainsPage() {
         {/* ==================================================== */}
         {/* B. INFORMATION / GUIDANCE CARD */}
         {/* ==================================================== */}
-        <div className="p-4 sm:p-5 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
+        <div className="p-4 sm:p-5 rounded-xl bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs">
           <div className="flex items-start gap-3.5">
-            <div className="w-9 h-9 rounded-lg bg-blue-500/10 border border-blue-400/20 flex items-center justify-center text-[#2563EB] flex-shrink-0 mt-0.5">
-              <Info className="w-5 h-5 text-[#2563EB]" />
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5">
+              <Info className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-sm font-bold text-[#172033]">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                 Domain & DNS Configuration
               </h3>
-              <p className="text-xs text-[#64748B] leading-relaxed max-w-2xl">
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-2xl">
                 Point your domain&apos;s A record to this server&apos;s IP address before requesting an SSL certificate. Once the DNS propagates, Let&apos;s Encrypt will automatically provision your TLS certificate.
               </p>
             </div>
@@ -613,32 +613,32 @@ export default function DomainsPage() {
 
           {/* Quick DNS Data Badges */}
           <div className="flex flex-wrap items-center gap-2 self-start md:self-center flex-shrink-0">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-[#BFDBFE] text-xs shadow-2xs">
-              <span className="text-[#64748B] font-medium">Server IP:</span>
-              <span className="font-mono font-bold text-[#172033]">{serverIP}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 text-xs shadow-2xs">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">Server IP:</span>
+              <span className="font-mono font-bold text-slate-900 dark:text-white">{serverIP}</span>
               <button
                 onClick={() => copyToClipboard(serverIP, 'server-ip')}
-                className="text-slate-400 hover:text-[#2563EB] transition"
+                className="text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
                 title="Copy Server IP"
               >
                 {copiedKey === 'server-ip' ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 ) : (
                   <Copy className="w-3.5 h-3.5" />
                 )}
               </button>
             </div>
 
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white border border-[#BFDBFE] text-xs shadow-2xs">
-              <span className="text-[#64748B] font-medium">NS1:</span>
-              <span className="font-mono font-medium text-[#172033]">{nameservers[0]}</span>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 text-xs shadow-2xs">
+              <span className="text-slate-500 dark:text-slate-400 font-medium">NS1:</span>
+              <span className="font-mono font-medium text-slate-900 dark:text-white">{nameservers[0]}</span>
               <button
                 onClick={() => copyToClipboard(nameservers[0], 'ns1')}
-                className="text-slate-400 hover:text-[#2563EB] transition"
+                className="text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition"
                 title="Copy Nameserver 1"
               >
                 {copiedKey === 'ns1' ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 ) : (
                   <Copy className="w-3.5 h-3.5" />
                 )}
@@ -648,18 +648,18 @@ export default function DomainsPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b border-[#E2E8F0] pb-px overflow-x-auto">
+        <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-px overflow-x-auto">
           <button
             onClick={() => setActiveTab('hosted')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold transition border-b-2 whitespace-nowrap ${
               activeTab === 'hosted'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+                ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Globe className="w-4 h-4" />
             <span>Hosted Domains</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
               {domains.length}
             </span>
           </button>
@@ -668,8 +668,8 @@ export default function DomainsPage() {
             onClick={() => setActiveTab('search')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold transition border-b-2 whitespace-nowrap ${
               activeTab === 'search'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+                ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Search className="w-4 h-4" />
@@ -680,8 +680,8 @@ export default function DomainsPage() {
             onClick={() => setActiveTab('whois')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold transition border-b-2 whitespace-nowrap ${
               activeTab === 'whois'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+                ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
@@ -692,8 +692,8 @@ export default function DomainsPage() {
             onClick={() => setActiveTab('registrars')}
             className={`flex items-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold transition border-b-2 whitespace-nowrap ${
               activeTab === 'registrars'
-                ? 'border-[#2563EB] text-[#2563EB]'
-                : 'border-transparent text-[#64748B] hover:text-[#172033]'
+                ? 'border-emerald-600 text-emerald-600 dark:border-emerald-400 dark:text-emerald-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Key className="w-4 h-4" />
@@ -705,15 +705,15 @@ export default function DomainsPage() {
         {/* TAB 1: HOSTED DOMAINS (SECTIONS 8C & 8D) */}
         {/* ==================================================== */}
         {activeTab === 'hosted' && (
-          <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-xs overflow-hidden">
+          <div className="bg-white dark:bg-[#131B2E] rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
             {/* C. DOMAIN LIST TOOLBAR */}
-            <div className="p-4 sm:p-5 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white">
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-[#131B2E]">
               {/* Left: Your Domains + Count Badge */}
               <div className="flex items-center gap-2.5">
-                <h2 className="text-base font-bold text-[#172033]">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   Your Domains
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-[#F1F5F9] text-[#64748B] border border-[#E2E8F0]">
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                   {filteredDomains.length} {filteredDomains.length === 1 ? 'Domain' : 'Domains'}
                 </span>
               </div>
@@ -728,7 +728,7 @@ export default function DomainsPage() {
                     value={domainSearchQuery}
                     onChange={(e) => setDomainSearchQuery(e.target.value)}
                     placeholder="Search domain..."
-                    className="pl-8 pr-3 py-1.5 text-xs text-[#172033] bg-[#F8FAFC] placeholder-slate-400 border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15 transition w-44 sm:w-56"
+                    className="pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] placeholder-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 transition w-44 sm:w-56"
                   />
                 </div>
 
@@ -736,7 +736,7 @@ export default function DomainsPage() {
                 <select
                   value={domainStatusFilter}
                   onChange={(e) => setDomainStatusFilter(e.target.value as any)}
-                  className="px-2.5 py-1.5 text-xs text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:border-[#2563EB] transition font-medium"
+                  className="px-2.5 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 transition font-medium"
                 >
                   <option value="all">All Status</option>
                   <option value="active">Active</option>
@@ -747,10 +747,10 @@ export default function DomainsPage() {
                 <button
                   onClick={fetchDomainData}
                   disabled={loading}
-                  className="p-1.5 rounded-lg text-slate-500 hover:text-[#172033] hover:bg-[#F1F5F9] border border-[#E2E8F0] transition disabled:opacity-50"
+                  className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition disabled:opacity-50"
                   title="Refresh Domain List"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#2563EB]' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-emerald-600 dark:text-emerald-400' : ''}`} />
                 </button>
               </div>
             </div>
@@ -759,7 +759,7 @@ export default function DomainsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC] text-[11px] font-bold text-[#64748B] uppercase tracking-wider">
+                  <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                     <th className="w-10 px-4 py-3 text-center">
                       <input
                         type="checkbox"
@@ -768,7 +768,7 @@ export default function DomainsPage() {
                           selectedDomainIds.length === filteredDomains.length
                         }
                         onChange={(e) => handleSelectAll(e.target.checked)}
-                        className="rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]"
+                        className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500"
                       />
                     </th>
                     <th className="px-4 py-3">Domain Name</th>
@@ -777,12 +777,12 @@ export default function DomainsPage() {
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#E2E8F0]">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                   {filteredDomains.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-12 text-center text-slate-400">
-                        <Globe className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                        <p className="font-medium text-slate-600">No domains found</p>
+                        <Globe className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                        <p className="font-medium text-slate-600 dark:text-slate-400">No domains found</p>
                         <p className="text-xs text-slate-400 mt-0.5">
                           Click &quot;+ Add Domain&quot; above to connect your first domain.
                         </p>
@@ -794,8 +794,8 @@ export default function DomainsPage() {
                       return (
                         <tr
                           key={domain.id}
-                          className={`hover:bg-[#F8FAFC] transition-colors ${
-                            isSelected ? 'bg-blue-50/40' : ''
+                          className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors ${
+                            isSelected ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''
                           }`}
                         >
                           {/* 1. Checkbox Column */}
@@ -804,7 +804,7 @@ export default function DomainsPage() {
                               type="checkbox"
                               checked={isSelected}
                               onChange={(e) => handleSelectOne(domain.id, e.target.checked)}
-                              className="rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]"
+                              className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500"
                             />
                           </td>
 
@@ -816,20 +816,20 @@ export default function DomainsPage() {
                                   href={`http://${domain.primary_domain}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="font-bold text-[#172033] hover:text-[#2563EB] transition flex items-center gap-1 text-sm"
+                                  className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition flex items-center gap-1 text-sm"
                                 >
                                   <span>{domain.primary_domain}</span>
-                                  <ExternalLink className="w-3 h-3 text-slate-400 hover:text-[#2563EB]" />
+                                  <ExternalLink className="w-3 h-3 text-slate-400 hover:text-emerald-600" />
                                 </a>
 
                                 {domain.ssl_enabled && (
-                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                                  <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.2 rounded">
                                     <Lock className="w-2.5 h-2.5" />
                                     <span>SSL</span>
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] font-mono text-[#64748B]">
+                              <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
                                 {domain.document_root}
                               </div>
                             </div>
@@ -837,21 +837,21 @@ export default function DomainsPage() {
 
                           {/* 3. PORT */}
                           <td className="px-4 py-3.5">
-                            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-[#F1F5F9] text-[#172033] border border-[#E2E8F0]">
+                            <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
                               {domain.proxy_port || '80 / 443'}
                             </span>
                           </td>
 
-                          {/* 4. STATUS (Exact Badge: Soft green #F0FDF4, text #16A34A, dot, thin border #DCFCE7) */}
+                          {/* 4. STATUS (Active / Suspended) */}
                           <td className="px-4 py-3.5">
                             {domain.status === 'active' ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#F0FDF4] text-[#16A34A] border border-[#DCFCE7]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
                                 <span>Active</span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#FFFBEB] text-[#D97706] border border-[#FEF3C7]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#D97706]" />
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
+                                <span className="w-1.5 h-1.5 rounded-full bg-orange-600" />
                                 <span>Suspended</span>
                               </span>
                             )}
@@ -863,7 +863,7 @@ export default function DomainsPage() {
                               {/* Edit Button */}
                               <button
                                 onClick={() => openEditModal(domain)}
-                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-[#2563EB] bg-white hover:bg-[#EFF6FF] border border-[#BFDBFE] transition"
+                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700 border border-emerald-200 dark:border-emerald-800 transition"
                               >
                                 Edit
                               </button>
@@ -871,15 +871,15 @@ export default function DomainsPage() {
                               {/* DNS Button */}
                               <button
                                 onClick={() => openDnsModal(domain)}
-                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-[#172033] bg-white hover:bg-[#F8FAFC] border border-[#E2E8F0] transition"
+                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition"
                               >
                                 DNS
                               </button>
 
-                              {/* Delete Button */}
+                              {/* Delete Button (Orange) */}
                               <button
                                 onClick={() => openDeleteModal(domain)}
-                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-[#DC2626] bg-[#FEF2F2] hover:bg-[#FEE2E2] border border-[#FEE2E2] transition"
+                                className="px-2.5 py-1 rounded-md text-xs font-semibold text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-100 dark:hover:bg-orange-900/50 border border-orange-200 dark:border-orange-800 transition"
                               >
                                 Delete
                               </button>
@@ -894,12 +894,12 @@ export default function DomainsPage() {
             </div>
 
             {/* Table Footer */}
-            <div className="p-3 sm:px-5 border-t border-[#E2E8F0] bg-[#F8FAFC] text-xs text-[#64748B] flex items-center justify-between">
+            <div className="p-3 sm:px-5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
               <span>
                 Showing {filteredDomains.length} of {domains.length} total domains
               </span>
               {selectedDomainIds.length > 0 && (
-                <span className="font-semibold text-[#2563EB]">
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                   {selectedDomainIds.length} selected
                 </span>
               )}
@@ -913,12 +913,12 @@ export default function DomainsPage() {
         {activeTab === 'search' && (
           <div className="space-y-6">
             {/* Search Box Card */}
-            <div className="p-6 sm:p-8 rounded-xl bg-white border border-[#E2E8F0] shadow-xs text-center space-y-4">
+            <div className="p-6 sm:p-8 rounded-xl bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 shadow-xs text-center space-y-4">
               <div className="max-w-xl mx-auto space-y-2">
-                <h2 className="text-xl font-bold text-[#172033]">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">
                   Find and Register Your Perfect Domain
                 </h2>
-                <p className="text-xs text-[#64748B]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Search across 500+ TLDs with automated DNS setup and instant SSL configuration.
                 </p>
               </div>
@@ -931,13 +931,13 @@ export default function DomainsPage() {
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Enter desired domain name (e.g. mystore.com)"
-                    className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15 transition"
+                    className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 transition"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={isSearching}
-                  className="px-5 py-2.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs sm:text-sm font-semibold transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs sm:text-sm font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   {isSearching ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                   <span>Search</span>
@@ -946,11 +946,11 @@ export default function DomainsPage() {
 
               {/* Currency Toggle */}
               <div className="flex justify-center items-center gap-1 text-xs pt-1">
-                <span className="text-[#64748B]">Currency:</span>
+                <span className="text-slate-500 dark:text-slate-400">Currency:</span>
                 <button
                   onClick={() => setCurrency('USD')}
                   className={`px-2 py-0.5 rounded font-semibold ${
-                    currency === 'USD' ? 'bg-[#2563EB] text-white' : 'text-[#64748B] hover:text-[#172033]'
+                    currency === 'USD' ? 'bg-emerald-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   USD ($)
@@ -958,7 +958,7 @@ export default function DomainsPage() {
                 <button
                   onClick={() => setCurrency('BDT')}
                   className={`px-2 py-0.5 rounded font-semibold ${
-                    currency === 'BDT' ? 'bg-[#2563EB] text-white' : 'text-[#64748B] hover:text-[#172033]'
+                    currency === 'BDT' ? 'bg-emerald-600 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   BDT (৳)
@@ -968,40 +968,40 @@ export default function DomainsPage() {
 
             {/* Search Results */}
             {searchResults.length > 0 && (
-              <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-xs overflow-hidden">
-                <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                  <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider">
+              <div className="bg-white dark:bg-[#131B2E] rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120]">
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                     Search Results
                   </h3>
                 </div>
-                <div className="divide-y divide-[#E2E8F0]">
+                <div className="divide-y divide-slate-200 dark:divide-slate-800">
                   {searchResults.map((item) => (
                     <div
                       key={item.domain}
-                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[#F8FAFC] transition"
+                      className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition"
                     >
                       <div className="flex items-center gap-3">
                         <div
                           className={`w-8 h-8 rounded-lg flex items-center justify-center ${
                             item.available
-                              ? 'bg-[#F0FDF4] text-[#16A34A] border border-[#DCFCE7]'
-                              : 'bg-slate-100 text-slate-400 border border-slate-200'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-400 border border-slate-200 dark:border-slate-700'
                           }`}
                         >
                           {item.available ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-[#172033]">{item.domain}</span>
+                            <span className="text-sm font-bold text-slate-900 dark:text-white">{item.domain}</span>
                             {item.is_popular && (
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                                 Popular
                               </span>
                             )}
                           </div>
                           <span
                             className={`text-xs font-medium ${
-                              item.available ? 'text-[#16A34A]' : 'text-slate-500'
+                              item.available ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'
                             }`}
                           >
                             {item.available ? 'Available for registration' : 'Taken / Unavailable'}
@@ -1011,10 +1011,10 @@ export default function DomainsPage() {
 
                       <div className="flex items-center gap-3 self-end sm:self-center">
                         <div className="text-right">
-                          <span className="text-sm font-bold text-[#172033]">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">
                             {formatPrice(item.register_price)}
                           </span>
-                          <div className="text-[11px] text-[#64748B]">
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
                             renews at {formatPrice(item.renew_price || item.register_price)}/yr
                           </div>
                         </div>
@@ -1025,7 +1025,7 @@ export default function DomainsPage() {
                               setSelectedDomainItem(item);
                               setOrderModalOpen(true);
                             }}
-                            className="px-3.5 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold shadow-xs transition"
+                            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold shadow-xs transition cursor-pointer"
                           >
                             Register
                           </button>
@@ -1044,12 +1044,12 @@ export default function DomainsPage() {
         {/* ==================================================== */}
         {activeTab === 'whois' && (
           <div className="space-y-6">
-            <div className="p-6 rounded-xl bg-white border border-[#E2E8F0] shadow-xs space-y-4">
+            <div className="p-6 rounded-xl bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
               <div>
-                <h2 className="text-base font-bold text-[#172033]">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
                   WHOIS Domain Lookup
                 </h2>
-                <p className="text-xs text-[#64748B]">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Query registration data, expiry dates, registrar info, and active nameservers.
                 </p>
               </div>
@@ -1060,12 +1060,12 @@ export default function DomainsPage() {
                   value={whoisQuery}
                   onChange={(e) => setWhoisQuery(e.target.value)}
                   placeholder="e.g. google.com or hostvra.com"
-                  className="flex-1 px-3 py-2 text-xs text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15"
+                  className="flex-1 px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20"
                 />
                 <button
                   type="submit"
                   disabled={isWhoisLoading}
-                  className="px-4 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition disabled:opacity-50"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer"
                 >
                   {isWhoisLoading ? 'Looking up...' : 'Lookup'}
                 </button>
@@ -1073,40 +1073,40 @@ export default function DomainsPage() {
             </div>
 
             {whoisData && (
-              <div className="p-6 rounded-xl bg-white border border-[#E2E8F0] shadow-xs space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0]">
+              <div className="p-6 rounded-xl bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
                   <div>
-                    <h3 className="text-sm font-bold text-[#172033]">{whoisData.domain}</h3>
-                    <p className="text-xs text-[#64748B]">Registrar: {whoisData.registrar}</p>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{whoisData.domain}</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Registrar: {whoisData.registrar}</p>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-[#F0FDF4] text-[#16A34A] border border-[#DCFCE7]">
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
                     Active
                   </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
-                    <span className="text-[#64748B]">Registered Date</span>
-                    <p className="font-bold text-[#172033] mt-0.5">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-500 dark:text-slate-400">Registered Date</span>
+                    <p className="font-bold text-slate-900 dark:text-white mt-0.5">
                       {whoisData.created_date ? new Date(whoisData.created_date).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
-                    <span className="text-[#64748B]">Expires Date</span>
-                    <p className="font-bold text-[#172033] mt-0.5">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-500 dark:text-slate-400">Expires Date</span>
+                    <p className="font-bold text-slate-900 dark:text-white mt-0.5">
                       {whoisData.expiry_date ? new Date(whoisData.expiry_date).toLocaleDateString() : 'N/A'}
                     </p>
                   </div>
-                  <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0]">
-                    <span className="text-[#64748B]">Nameservers</span>
-                    <p className="font-mono text-[11px] text-[#172033] mt-0.5 truncate">
+                  <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800">
+                    <span className="text-slate-500 dark:text-slate-400">Nameservers</span>
+                    <p className="font-mono text-[11px] text-slate-900 dark:text-white mt-0.5 truncate">
                       {whoisData.nameservers?.join(', ') || 'N/A'}
                     </p>
                   </div>
                 </div>
 
                 {whoisData.raw_whois && (
-                  <div className="p-4 rounded-lg bg-[#0F172A] text-slate-300 font-mono text-[11px] max-h-60 overflow-y-auto whitespace-pre-wrap">
+                  <div className="p-4 rounded-lg bg-slate-950 text-emerald-400 font-mono text-[11px] max-h-60 overflow-y-auto whitespace-pre-wrap border border-slate-800">
                     {whoisData.raw_whois}
                   </div>
                 )}
@@ -1121,35 +1121,35 @@ export default function DomainsPage() {
         {activeTab === 'registrars' && (
           <div className="space-y-6">
             {/* Registrars Card */}
-            <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-xs overflow-hidden">
-              <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between">
+            <div className="bg-white dark:bg-[#131B2E] rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] flex items-center justify-between">
                 <div>
-                  <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider">
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                     Registrar Integrations
                   </h3>
-                  <p className="text-xs text-[#64748B] mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Connect registrar APIs for automatic provisioning and domain purchases.
                   </p>
                 </div>
               </div>
 
-              <div className="divide-y divide-[#E2E8F0]">
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
                 {registrarList.map((reg) => (
                   <div key={reg.id} className="p-4 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#2563EB] border border-blue-200 flex items-center justify-center font-bold text-xs">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center font-bold text-xs">
                         {reg.registrar[0].toUpperCase()}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-[#172033]">{reg.display_name}</span>
+                          <span className="text-xs font-bold text-slate-900 dark:text-white">{reg.display_name}</span>
                           {reg.is_default && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#EFF6FF] text-[#2563EB] border border-[#BFDBFE]">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
                               Default
                             </span>
                           )}
                         </div>
-                        <span className="text-[11px] text-[#64748B]">API User: {reg.api_user}</span>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">API User: {reg.api_user}</span>
                       </div>
                     </div>
 
@@ -1157,8 +1157,8 @@ export default function DomainsPage() {
                       <span
                         className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
                           reg.enabled
-                            ? 'bg-[#F0FDF4] text-[#16A34A] border border-[#DCFCE7]'
-                            : 'bg-slate-100 text-slate-500 border border-slate-200'
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                         }`}
                       >
                         {reg.enabled ? 'Enabled' : 'Disabled'}
@@ -1170,9 +1170,9 @@ export default function DomainsPage() {
             </div>
 
             {/* TLD Pricing Matrix */}
-            <div className="bg-white rounded-xl border border-[#E2E8F0] shadow-xs overflow-hidden">
-              <div className="p-4 border-b border-[#E2E8F0] bg-[#F8FAFC]">
-                <h3 className="text-xs font-bold text-[#172033] uppercase tracking-wider">
+            <div className="bg-white dark:bg-[#131B2E] rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120]">
+                <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                   Supported TLD Pricing
                 </h3>
               </div>
@@ -1180,7 +1180,7 @@ export default function DomainsPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-[#E2E8F0] bg-[#F8FAFC] text-[11px] font-bold text-[#64748B] uppercase">
+                    <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase">
                       <th className="px-4 py-2.5">Extension</th>
                       <th className="px-4 py-2.5">Register</th>
                       <th className="px-4 py-2.5">Renew</th>
@@ -1188,16 +1188,16 @@ export default function DomainsPage() {
                       <th className="px-4 py-2.5">Min Years</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#E2E8F0]">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {tldList.map((tld) => (
-                      <tr key={tld.id} className="hover:bg-[#F8FAFC]">
-                        <td className="px-4 py-2.5 font-bold text-[#172033]">{tld.tld}</td>
-                        <td className="px-4 py-2.5 text-[#16A34A] font-semibold">
+                      <tr key={tld.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50">
+                        <td className="px-4 py-2.5 font-bold text-slate-900 dark:text-white">{tld.tld}</td>
+                        <td className="px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-semibold">
                           {formatPrice(tld.register_price)}
                         </td>
-                        <td className="px-4 py-2.5 text-[#64748B]">{formatPrice(tld.renew_price)}</td>
-                        <td className="px-4 py-2.5 text-[#64748B]">{formatPrice(tld.transfer_price)}</td>
-                        <td className="px-4 py-2.5 text-[#64748B]">{tld.min_years} yr</td>
+                        <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400">{formatPrice(tld.renew_price)}</td>
+                        <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400">{formatPrice(tld.transfer_price)}</td>
+                        <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400">{tld.min_years} yr</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1211,16 +1211,16 @@ export default function DomainsPage() {
         {/* MODAL 1: ADD NEW DOMAIN (SECTION 9) */}
         {/* ==================================================== */}
         {addModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white border border-[#E2E8F0] rounded-xl w-full max-w-lg shadow-xl overflow-hidden p-6 space-y-5">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
-                <h3 className="text-base font-bold text-[#172033] flex items-center gap-2">
-                  <Globe className="w-4 h-4 text-[#2563EB]" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-lg shadow-xl overflow-hidden p-6 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>Add New Domain</span>
                 </h3>
                 <button
                   onClick={() => setAddModalOpen(false)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1229,51 +1229,51 @@ export default function DomainsPage() {
               <form onSubmit={handleAddDomainSubmit} className="space-y-4 text-xs">
                 {/* Domain Name */}
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Domain Name *</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Domain Name *</label>
                   <input
                     type="text"
                     required
                     placeholder="example.com"
                     value={formData.domain}
                     onChange={(e) => handleDomainInputChange(e.target.value)}
-                    className="w-full px-3 py-2 text-xs text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15"
+                    className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20"
                   />
-                  <p className="text-[11px] text-[#64748B]">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Enter the domain or subdomain without http:// or www.
                   </p>
                 </div>
 
                 {/* Document Root */}
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Document Root</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Document Root</label>
                   <input
                     type="text"
                     required
                     value={formData.documentRoot}
                     onChange={(e) => setFormData({ ...formData, documentRoot: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15"
+                    className="w-full px-3 py-2 text-xs font-mono text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20"
                   />
                 </div>
 
                 {/* Port & PHP Version */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="font-semibold text-[#172033]">Port</label>
+                    <label className="font-semibold text-slate-900 dark:text-white">Port</label>
                     <input
                       type="number"
                       value={formData.port}
                       onChange={(e) => setFormData({ ...formData, port: e.target.value })}
                       placeholder="80"
-                      className="w-full px-3 py-2 text-xs font-mono text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                      className="w-full px-3 py-2 text-xs font-mono text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-semibold text-[#172033]">PHP Version</label>
+                    <label className="font-semibold text-slate-900 dark:text-white">PHP Version</label>
                     <select
                       value={formData.phpVersion}
                       onChange={(e) => setFormData({ ...formData, phpVersion: e.target.value })}
-                      className="w-full px-3 py-2 text-xs text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                      className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600"
                     >
                       <option value="8.3">PHP 8.3 (Latest Stable)</option>
                       <option value="8.2">PHP 8.2</option>
@@ -1284,36 +1284,36 @@ export default function DomainsPage() {
                 </div>
 
                 {/* SSL Toggle */}
-                <label className="flex items-center gap-2.5 p-3 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] cursor-pointer">
+                <label className="flex items-center gap-2.5 p-3 rounded-lg bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formData.enableSSL}
                     onChange={(e) => setFormData({ ...formData, enableSSL: e.target.checked })}
-                    className="rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]"
+                    className="rounded border-slate-300 dark:border-slate-700 text-emerald-600 focus:ring-emerald-500"
                   />
                   <div>
-                    <span className="font-bold text-[#172033]">
+                    <span className="font-bold text-slate-900 dark:text-white">
                       Enable Let&apos;s Encrypt SSL
                     </span>
-                    <p className="text-[11px] text-[#64748B]">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
                       Automatically request and install an SSL certificate when domain resolves.
                     </p>
                   </div>
                 </label>
 
                 {/* Action Buttons */}
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => setAddModalOpen(false)}
-                    className="px-4 py-2 rounded-lg bg-white border border-[#E2E8F0] text-[#172033] text-xs font-semibold hover:bg-[#F8FAFC] transition"
+                    className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={formSubmitting}
-                    className="px-5 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+                    className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                   >
                     {formSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
                     <span>Create Domain</span>
@@ -1328,16 +1328,16 @@ export default function DomainsPage() {
         {/* MODAL 2: EDIT DOMAIN CONFIGURATION */}
         {/* ==================================================== */}
         {editModalOpen && activeDomain && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white border border-[#E2E8F0] rounded-xl w-full max-w-lg shadow-xl overflow-hidden p-6 space-y-5">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
-                <h3 className="text-base font-bold text-[#172033] flex items-center gap-2">
-                  <Edit2 className="w-4 h-4 text-[#2563EB]" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-lg shadow-xl overflow-hidden p-6 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Edit2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   <span>Edit Domain: {activeDomain.primary_domain}</span>
                 </h3>
                 <button
                   onClick={() => setEditModalOpen(false)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1345,33 +1345,33 @@ export default function DomainsPage() {
 
               <form onSubmit={handleEditDomainSubmit} className="space-y-4 text-xs">
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Document Root</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Document Root</label>
                   <input
                     type="text"
                     required
                     value={formData.documentRoot}
                     onChange={(e) => setFormData({ ...formData, documentRoot: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                    className="w-full px-3 py-2 text-xs font-mono text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="font-semibold text-[#172033]">Port</label>
+                    <label className="font-semibold text-slate-900 dark:text-white">Port</label>
                     <input
                       type="number"
                       value={formData.port}
                       onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                      className="w-full px-3 py-2 text-xs font-mono text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                      className="w-full px-3 py-2 text-xs font-mono text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600"
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-semibold text-[#172033]">PHP Version</label>
+                    <label className="font-semibold text-slate-900 dark:text-white">PHP Version</label>
                     <select
                       value={formData.phpVersion}
                       onChange={(e) => setFormData({ ...formData, phpVersion: e.target.value })}
-                      className="w-full px-3 py-2 text-xs text-[#172033] bg-[#F8FAFC] border border-[#E2E8F0] rounded-lg focus:outline-none focus:bg-white focus:border-[#2563EB]"
+                      className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0B1120] focus:border-emerald-600"
                     >
                       <option value="8.3">PHP 8.3</option>
                       <option value="8.2">PHP 8.2</option>
@@ -1380,18 +1380,18 @@ export default function DomainsPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E2E8F0]">
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => setEditModalOpen(false)}
-                    className="px-4 py-2 rounded-lg bg-white border border-[#E2E8F0] text-[#172033] text-xs font-semibold hover:bg-[#F8FAFC] transition"
+                    className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={formSubmitting}
-                    className="px-5 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+                    className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
                   >
                     Save Changes
                   </button>
@@ -1405,19 +1405,19 @@ export default function DomainsPage() {
         {/* MODAL 3: DNS RECORDS MANAGER */}
         {/* ==================================================== */}
         {dnsModalOpen && activeDomain && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white border border-[#E2E8F0] rounded-xl w-full max-w-2xl shadow-xl overflow-hidden p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-2xl shadow-xl overflow-hidden p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
                 <div>
-                  <h3 className="text-base font-bold text-[#172033] flex items-center gap-2">
-                    <Globe className="w-4 h-4 text-[#2563EB]" />
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     <span>DNS Records: {activeDomain.primary_domain}</span>
                   </h3>
-                  <p className="text-xs text-[#64748B]">Manage zone records for this virtual host.</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Manage zone records for this virtual host.</p>
                 </div>
                 <button
                   onClick={() => setDnsModalOpen(false)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1426,14 +1426,14 @@ export default function DomainsPage() {
               {/* Add New Record Form */}
               <form
                 onSubmit={handleAddDnsRecord}
-                className="p-3.5 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs items-end"
+                className="p-3.5 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-5 gap-2 text-xs items-end"
               >
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#64748B] mb-1">Type</label>
+                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Type</label>
                   <select
                     value={newDnsRecord.type}
                     onChange={(e) => setNewDnsRecord({ ...newDnsRecord, type: e.target.value })}
-                    className="w-full px-2 py-1.5 text-xs text-[#172033] bg-white border border-[#E2E8F0] rounded-md font-semibold"
+                    className="w-full px-2 py-1.5 text-xs text-slate-900 dark:text-white bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-700 rounded-md font-semibold"
                   >
                     <option value="A">A</option>
                     <option value="AAAA">AAAA</option>
@@ -1444,40 +1444,40 @@ export default function DomainsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#64748B] mb-1">Name</label>
+                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Name</label>
                   <input
                     type="text"
                     placeholder="@"
                     value={newDnsRecord.name}
                     onChange={(e) => setNewDnsRecord({ ...newDnsRecord, name: e.target.value })}
-                    className="w-full px-2 py-1.5 text-xs font-mono text-[#172033] bg-white border border-[#E2E8F0] rounded-md"
+                    className="w-full px-2 py-1.5 text-xs font-mono text-slate-900 dark:text-white bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-700 rounded-md"
                   />
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-[11px] font-semibold text-[#64748B] mb-1">Value / Content</label>
+                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Value / Content</label>
                   <input
                     type="text"
                     placeholder="185.193.17.42"
                     value={newDnsRecord.content}
                     onChange={(e) => setNewDnsRecord({ ...newDnsRecord, content: e.target.value })}
-                    className="w-full px-2 py-1.5 text-xs font-mono text-[#172033] bg-white border border-[#E2E8F0] rounded-md"
+                    className="w-full px-2 py-1.5 text-xs font-mono text-slate-900 dark:text-white bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-700 rounded-md"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="px-3 py-1.5 rounded-md bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-semibold text-xs transition"
+                  className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs transition cursor-pointer"
                 >
                   Add Record
                 </button>
               </form>
 
               {/* Records List Table */}
-              <div className="border border-[#E2E8F0] rounded-lg overflow-hidden max-h-64 overflow-y-auto">
+              <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden max-h-64 overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-[10px] font-bold text-[#64748B] uppercase">
+                    <tr className="bg-slate-50 dark:bg-[#0B1120] border-b border-slate-200 dark:border-slate-800 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase">
                       <th className="px-3 py-2">Type</th>
                       <th className="px-3 py-2">Name</th>
                       <th className="px-3 py-2">Value</th>
@@ -1485,19 +1485,19 @@ export default function DomainsPage() {
                       <th className="px-3 py-2 text-right">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#E2E8F0]">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {dnsRecords.map((r) => (
-                      <tr key={r.id} className="hover:bg-[#F8FAFC]">
-                        <td className="px-3 py-2 font-bold text-[#2563EB]">{r.type}</td>
-                        <td className="px-3 py-2 font-mono text-[#172033]">{r.name}</td>
-                        <td className="px-3 py-2 font-mono text-[#64748B] truncate max-w-xs">
+                      <tr key={r.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50">
+                        <td className="px-3 py-2 font-bold text-emerald-600 dark:text-emerald-400">{r.type}</td>
+                        <td className="px-3 py-2 font-mono text-slate-900 dark:text-white">{r.name}</td>
+                        <td className="px-3 py-2 font-mono text-slate-500 dark:text-slate-400 truncate max-w-xs">
                           {r.content}
                         </td>
                         <td className="px-3 py-2 text-slate-400">{r.ttl}s</td>
                         <td className="px-3 py-2 text-right">
                           <button
                             onClick={() => handleDeleteDnsRecord(r.id)}
-                            className="text-rose-500 hover:text-rose-700 font-semibold"
+                            className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-semibold cursor-pointer"
                           >
                             Delete
                           </button>
@@ -1511,7 +1511,7 @@ export default function DomainsPage() {
               <div className="flex justify-end pt-2">
                 <button
                   onClick={() => setDnsModalOpen(false)}
-                  className="px-4 py-1.5 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-semibold transition"
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition cursor-pointer"
                 >
                   Done
                 </button>
@@ -1524,39 +1524,39 @@ export default function DomainsPage() {
         {/* MODAL 4: DELETE DOMAIN CONFIRMATION */}
         {/* ==================================================== */}
         {deleteModalOpen && activeDomain && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white border border-[#E2E8F0] rounded-xl w-full max-w-md shadow-xl overflow-hidden p-6 space-y-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-xl overflow-hidden p-6 space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-bold text-[#DC2626] flex items-center gap-2">
-                  <AlertTriangle className="w-5 h-5 text-[#DC2626]" />
+                <h3 className="text-base font-bold text-orange-600 dark:text-orange-400 flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                   <span>Delete Domain</span>
                 </h3>
                 <button
                   onClick={() => setDeleteModalOpen(false)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <p className="text-xs text-[#64748B] leading-relaxed">
-                Are you sure you want to delete <strong className="text-[#172033]">{activeDomain.primary_domain}</strong>? This will remove the virtual host configuration from the web server.
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Are you sure you want to delete <strong className="text-slate-900 dark:text-white">{activeDomain.primary_domain}</strong>? This will remove the virtual host configuration from the web server.
               </p>
 
-              <div className="p-3 rounded-lg bg-[#FEF2F2] border border-[#FEE2E2] text-xs text-[#DC2626]">
+              <div className="p-3 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 text-xs text-orange-700 dark:text-orange-400">
                 Warning: Any attached SSL certificates will be deactivated.
               </div>
 
               <div className="flex items-center justify-end gap-2.5 pt-2">
                 <button
                   onClick={() => setDeleteModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-white border border-[#E2E8F0] text-[#172033] text-xs font-semibold hover:bg-[#F8FAFC] transition"
+                  className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleConfirmDelete}
-                  className="px-5 py-2 rounded-lg bg-[#DC2626] hover:bg-red-700 text-white text-xs font-bold transition shadow-xs"
+                  className="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white text-xs font-bold transition shadow-xs cursor-pointer"
                 >
                   Confirm Delete
                 </button>
@@ -1569,34 +1569,34 @@ export default function DomainsPage() {
         {/* MODAL 5: ORDER DOMAIN CHECKOUT */}
         {/* ==================================================== */}
         {orderModalOpen && selectedDomainItem && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white border border-[#E2E8F0] rounded-xl w-full max-w-md shadow-xl overflow-hidden p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-[#E2E8F0] pb-3">
-                <h3 className="text-base font-bold text-[#172033]">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fadeIn">
+            <div className="bg-white dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-xl overflow-hidden p-6 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Register Domain: {selectedDomainItem.domain}
                 </h3>
                 <button
                   onClick={() => setOrderModalOpen(false)}
-                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition"
+                  className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               <div className="space-y-3 text-xs">
-                <div className="p-3 rounded-lg bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between">
-                  <span className="text-[#64748B]">Registration Fee:</span>
-                  <span className="font-bold text-sm text-[#16A34A]">
+                <div className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-slate-500 dark:text-slate-400">Registration Fee:</span>
+                  <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400">
                     {formatPrice(selectedDomainItem.register_price * orderYears)}
                   </span>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Duration</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Duration</label>
                   <select
                     value={orderYears}
                     onChange={(e) => setOrderYears(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs text-[#172033] bg-white border border-[#E2E8F0] rounded-lg"
+                    className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg"
                   >
                     <option value={1}>1 Year</option>
                     <option value={2}>2 Years</option>
@@ -1606,30 +1606,30 @@ export default function DomainsPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Registrant Name</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Registrant Name</label>
                   <input
                     type="text"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs text-[#172033] bg-white border border-[#E2E8F0] rounded-lg"
+                    className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-semibold text-[#172033]">Email Address</label>
+                  <label className="font-semibold text-slate-900 dark:text-white">Email Address</label>
                   <input
                     type="email"
                     value={clientEmail}
                     onChange={(e) => setClientEmail(e.target.value)}
-                    className="w-full px-3 py-2 text-xs text-[#172033] bg-white border border-[#E2E8F0] rounded-lg"
+                    className="w-full px-3 py-2 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg"
                   />
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E2E8F0]">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
                 <button
                   onClick={() => setOrderModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-white border border-[#E2E8F0] text-[#172033] text-xs font-semibold hover:bg-[#F8FAFC] transition"
+                  className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1660,7 +1660,7 @@ export default function DomainsPage() {
                     }
                   }}
                   disabled={isPlacingOrder}
-                  className="px-5 py-2 rounded-lg bg-[#2563EB] hover:bg-[#1D4ED8] text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   {isPlacingOrder ? 'Processing...' : 'Complete Order'}
                 </button>

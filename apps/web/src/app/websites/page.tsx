@@ -554,7 +554,7 @@ export default function WebsitesPage() {
             <span className="text-slate-500 dark:text-slate-400 font-mono">FREE 8.0.6</span>
             <button
               onClick={() => showToast('Hostvra Enterprise License is Active')}
-              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition cursor-pointer text-xs shadow-2xs"
+              className="px-2.5 py-1 rounded-lg bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white font-bold transition cursor-pointer text-xs shadow-xs"
             >
               Upgrade now
             </button>

@@ -17,17 +17,18 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark');
+  const [theme, setThemeState] = useState<Theme>('light');
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    // Read stored preference or system preference
+    // Read stored preference or default to clean light mode
     const stored = localStorage.getItem('hostvra_theme') as Theme | null;
     if (stored === 'light' || stored === 'dark') {
       setThemeState(stored);
       applyTheme(stored);
     } else {
-      applyTheme('dark');
+      setThemeState('light');
+      applyTheme('light');
     }
     setMounted(true);
   }, []);

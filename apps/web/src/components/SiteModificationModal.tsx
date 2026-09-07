@@ -567,20 +567,19 @@ server {
   if (!isOpen || !website) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn">
-      {/* Modal Container */}
-      <div className="w-full max-w-5xl h-[88vh] max-h-[760px] bg-[#161a23] text-slate-100 border border-slate-700/80 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header matching screenshot exactly:
-            Site modification [antiprofiles.com] -- Time added [2026-08-17 14:27:38] */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-[#1b202c] border-b border-slate-700/70 select-none">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn">
+      {/* Modal Container: 100% White in Light Mode, Dark Slate in Dark Mode */}
+      <div className="w-full max-w-5xl h-[88vh] max-h-[760px] bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        {/* Header: Site modification [domain] */}
+        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 dark:bg-[#0F172A] border-b border-slate-200 dark:border-slate-800 select-none">
           <div className="flex items-center gap-2 truncate">
-            <span className="font-semibold text-sm text-slate-200 truncate">
+            <span className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">
               Site modification [{website.primary_domain}] -- Time added [{website.created_at ? website.created_at.replace('T', ' ').slice(0, 19) : '2026-08-17 14:27:38'}]
             </span>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700/50 transition cursor-pointer"
+            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700/50 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -589,7 +588,7 @@ server {
         {/* Modal Body: Left Sidebar + Right Tab Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Sidebar (16 options) */}
-          <div className="w-48 sm:w-52 bg-[#1b202c] border-r border-slate-700/70 overflow-y-auto py-2 select-none flex-shrink-0">
+          <div className="w-48 sm:w-52 bg-slate-50/80 dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 overflow-y-auto py-2 select-none flex-shrink-0">
             {SIDEBAR_TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -599,20 +598,20 @@ server {
                   onClick={() => setActiveTab(tab.id as SiteModalTab)}
                   className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-left transition font-medium cursor-pointer ${
                     isActive
-                      ? 'bg-[#293244] text-white font-semibold border-l-3 border-emerald-500'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                      ? 'bg-white dark:bg-[#1E293B] text-emerald-700 dark:text-emerald-400 font-bold border-l-3 border-emerald-600 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/40'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                   <span className="truncate">{tab.label}</span>
                 </button>
               );
             })}
           </div>
 
-          {/* Right Content Area */}
-          <div className="flex-1 overflow-y-auto p-5 bg-[#161a23]">
-            {/* 1. DOMAIN MANAGER (matches screenshot exactly) */}
+          {/* Right Content Area: Pure White in Light Mode, Dark in Dark Mode */}
+          <div className="flex-1 overflow-y-auto p-5 bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100">
+            {/* 1. DOMAIN MANAGER */}
             {activeTab === 'domain' && (
               <div className="space-y-4">
                 {/* Domain Input Textarea + Add Button */}
@@ -622,21 +621,21 @@ server {
                     value={domainInput}
                     onChange={(e) => setDomainInput(e.target.value)}
                     placeholder={`A domain per line, the default port is 80\nWildcard domain format: *.domain.com\nTo add another port, the format is www.domain.com:88`}
-                    className="flex-1 p-3 text-xs font-mono rounded-lg bg-[#11141c] border border-slate-700 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none leading-relaxed"
+                    className="flex-1 p-3 text-xs font-mono rounded-lg bg-slate-50 dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-500 resize-none leading-relaxed"
                   />
                   <button
                     onClick={handleAddDomains}
-                    className="px-5 py-2.5 rounded bg-[#22c55e] hover:bg-[#16a34a] text-white text-xs font-bold transition shadow cursor-pointer flex-shrink-0"
+                    className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs cursor-pointer flex-shrink-0"
                   >
                     Add
                   </button>
                 </div>
 
                 {/* Domain List Table */}
-                <div className="border border-slate-700/80 rounded-lg overflow-hidden bg-[#11141c]">
+                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-[#0F172A]">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="bg-[#1e2432] text-slate-300 border-b border-slate-700">
+                      <tr className="bg-slate-100 dark:bg-[#1E2432] text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                         <th className="w-10 px-3 py-2.5">
                           <input
                             type="checkbox"
@@ -645,7 +644,7 @@ server {
                               selectedDomains.length === domainList.filter((d) => !d.isPrimary).length
                             }
                             onChange={toggleSelectAllDomains}
-                            className="rounded border-slate-600 accent-emerald-500 cursor-pointer"
+                            className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600 cursor-pointer"
                           />
                         </th>
                         <th className="px-3 py-2.5 font-semibold">Domain name</th>
@@ -653,18 +652,18 @@ server {
                         <th className="px-3 py-2.5 font-semibold text-right w-28">Operate</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {domainList.map((item) => {
                         const isChecked = selectedDomains.includes(item.domain);
                         return (
-                          <tr key={`${item.domain}-${item.port}`} className="hover:bg-slate-800/40 transition">
+                          <tr key={`${item.domain}-${item.port}`} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200 transition">
                             <td className="px-3 py-2.5">
                               {!item.isPrimary && (
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
                                   onChange={() => toggleSelectDomain(item.domain)}
-                                  className="rounded border-slate-600 accent-emerald-500 cursor-pointer"
+                                  className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600 cursor-pointer"
                                 />
                               )}
                             </td>
@@ -700,7 +699,7 @@ server {
                   <button
                     onClick={handleDeleteSelectedDomains}
                     disabled={selectedDomains.length === 0}
-                    className="px-3 py-1.5 rounded bg-[#242b3b] hover:bg-[#2e374a] text-slate-300 hover:text-white text-xs font-medium border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    className="px-3.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white text-xs font-bold transition shadow-xs disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
                     Delete Selected
                   </button>
@@ -711,20 +710,20 @@ server {
             {/* 2. DIRECTORY */}
             {activeTab === 'directory' && (
               <div className="space-y-5 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-4">
-                  <h3 className="text-sm font-semibold text-white">Website Directories</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Website Directories</h3>
                   <div>
-                    <label className="block text-slate-400 mb-1">Site Directory (Document Root)</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Site Directory (Document Root)</label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={docRoot}
                         onChange={(e) => setDocRoot(e.target.value)}
-                        className="flex-1 p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono focus:outline-none focus:border-emerald-500"
+                        className="flex-1 p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-500"
                       />
                       <a
                         href={`/files?path=${encodeURIComponent(docRoot)}`}
-                        className="px-3 py-2 rounded bg-[#242b3b] hover:bg-slate-700 text-slate-200 font-medium flex items-center gap-1.5"
+                        className="px-3 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-semibold flex items-center gap-1.5 transition"
                       >
                         <Folder className="w-3.5 h-3.5" />
                         <span>File Manager</span>
@@ -733,47 +732,47 @@ server {
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Run Directory (Sub-Directory)</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Run Directory (Sub-Directory)</label>
                     <select
                       value={runDir}
                       onChange={(e) => setRunDir(e.target.value)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono w-64 focus:outline-none focus:border-emerald-500"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono w-64 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-500"
                     >
                       <option value="/">/ (Root)</option>
                       <option value="/public">/public (Laravel, ThinkPHP, Symfony)</option>
                       <option value="/dist">/dist (Vue, React, Vite)</option>
                       <option value="/web">/web (Yii2, Drupal)</option>
                     </select>
-                    <p className="text-[11px] text-slate-500 mt-1">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                       Frameworks like Laravel or ThinkPHP must point to `/public` to ensure security.
                     </p>
                   </div>
                 </div>
 
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
-                  <h3 className="text-sm font-semibold text-white">Security & Permissions</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Security & Permissions</h3>
                   <label className="flex items-center gap-2.5 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={antiXss}
                       onChange={(e) => setAntiXss(e.target.checked)}
-                      className="rounded border-slate-600 accent-emerald-500"
+                      className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                     />
-                    <span className="font-medium text-slate-300">Anti-XSS attack (open_basedir protection)</span>
+                    <span className="font-medium text-slate-800 dark:text-slate-200">Anti-XSS attack (open_basedir protection)</span>
                   </label>
-                  <p className="text-[11px] text-slate-500 pl-6">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 pl-6">
                     Restricts PHP scripts to only read/write files within the website directory.
                   </p>
 
-                  <div className="pt-3 border-t border-slate-700/60">
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
                     <label className="flex items-center gap-2.5 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={authEnabled}
                         onChange={(e) => setAuthEnabled(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="font-medium text-slate-300">Password Protection (HTTP Basic Auth)</span>
+                      <span className="font-medium text-slate-800 dark:text-slate-200">Password Protection (HTTP Basic Auth)</span>
                     </label>
                     {authEnabled && (
                       <div className="mt-3 grid grid-cols-2 gap-3 pl-6">
@@ -782,14 +781,14 @@ server {
                           placeholder="Username"
                           value={authUser}
                           onChange={(e) => setAuthUser(e.target.value)}
-                          className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                          className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                         />
                         <input
                           type="password"
                           placeholder="Password"
                           value={authPass}
                           onChange={(e) => setAuthPass(e.target.value)}
-                          className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                          className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                         />
                       </div>
                     )}
@@ -798,7 +797,7 @@ server {
 
                 <button
                   onClick={() => showToast('Directory and permission settings saved!')}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs transition shadow-xs cursor-pointer"
                 >
                   Save Directory Settings
                 </button>
@@ -808,13 +807,13 @@ server {
             {/* 3. LIMIT ACCESS */}
             {activeTab === 'limit' && (
               <div className="space-y-5 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
-                  <h3 className="text-sm font-semibold text-white">IP Blacklist & Whitelist</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">IP Blacklist & Whitelist</h3>
                   <div className="flex gap-2">
                     <select
                       value={ipLimitType}
                       onChange={(e) => setIpLimitType(e.target.value as any)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-medium"
                     >
                       <option value="block">Block (Blacklist)</option>
                       <option value="allow">Allow (Whitelist)</option>
@@ -824,44 +823,44 @@ server {
                       placeholder="IP or Subnet CIDR (e.g. 192.168.1.5 or 10.0.0.0/24)"
                       value={newIpRule}
                       onChange={(e) => setNewIpRule(e.target.value)}
-                      className="flex-1 p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="flex-1 p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                     <button
                       onClick={handleAddIpRule}
-                      className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                     >
                       Add IP
                     </button>
                   </div>
 
-                  <div className="border border-slate-700 rounded overflow-hidden mt-3">
+                  <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden mt-3 bg-white dark:bg-[#0F172A]">
                     <table className="w-full text-left">
-                      <thead className="bg-[#11141c] text-slate-400">
+                      <thead className="bg-slate-100 dark:bg-[#1E2432] text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                         <tr>
-                          <th className="p-2">IP / CIDR</th>
-                          <th className="p-2">Action</th>
-                          <th className="p-2">Date Added</th>
-                          <th className="p-2 text-right">Remove</th>
+                          <th className="p-2.5">IP / CIDR</th>
+                          <th className="p-2.5">Action</th>
+                          <th className="p-2.5">Date Added</th>
+                          <th className="p-2.5 text-right">Remove</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800">
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                         {ipRules.map((rule, idx) => (
-                          <tr key={idx} className="hover:bg-slate-800/50">
-                            <td className="p-2 font-mono text-slate-200">{rule.ip}</td>
-                            <td className="p-2">
+                          <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200 transition">
+                            <td className="p-2.5 font-mono text-slate-900 dark:text-slate-100">{rule.ip}</td>
+                            <td className="p-2.5">
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  rule.type === 'block' ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'
+                                  rule.type === 'block' ? 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-400' : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400'
                                 }`}
                               >
                                 {rule.type.toUpperCase()}
                               </span>
                             </td>
-                            <td className="p-2 text-slate-400">{rule.date}</td>
-                            <td className="p-2 text-right">
+                            <td className="p-2.5 text-slate-500 dark:text-slate-400">{rule.date}</td>
+                            <td className="p-2.5 text-right">
                               <button
                                 onClick={() => setIpRules(ipRules.filter((_, i) => i !== idx))}
-                                className="text-rose-400 hover:underline"
+                                className="text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline font-medium"
                               >
                                 Delete
                               </button>
@@ -873,11 +872,11 @@ server {
                   </div>
                 </div>
 
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-white">CC Defense & Rate Limiting</h3>
-                      <p className="text-[11px] text-slate-400">Anti-DDoS frequency limits implemented directly in Nginx</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">CC Defense & Rate Limiting</h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Anti-DDoS frequency limits implemented directly in Nginx</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
@@ -886,37 +885,37 @@ server {
                         onChange={(e) => setCcDefense(e.target.checked)}
                         className="sr-only peer"
                       />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                      <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
                     </label>
                   </div>
 
                   {ccDefense && (
-                    <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-700">
+                    <div className="grid grid-cols-3 gap-4 pt-3 border-t border-slate-200 dark:border-slate-700">
                       <div>
-                        <label className="block text-slate-400 mb-1">Max Requests (req/s)</label>
+                        <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Max Requests (req/s)</label>
                         <input
                           type="number"
                           value={rateLimitRps}
                           onChange={(e) => setRateLimitRps(parseInt(e.target.value, 10))}
-                          className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                          className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">Burst Tolerance</label>
+                        <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Burst Tolerance</label>
                         <input
                           type="number"
                           value={burstLimit}
                           onChange={(e) => setBurstLimit(parseInt(e.target.value, 10))}
-                          className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                          className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-400 mb-1">Max Concurrency / IP</label>
+                        <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Max Concurrency / IP</label>
                         <input
                           type="number"
                           value={connLimit}
                           onChange={(e) => setConnLimit(parseInt(e.target.value, 10))}
-                          className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                          className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                         />
                       </div>
                     </div>
@@ -925,7 +924,7 @@ server {
 
                 <button
                   onClick={() => showToast('Access limit & CC defense rules updated.')}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs transition shadow-xs cursor-pointer"
                 >
                   Save Access Rules
                 </button>
@@ -937,11 +936,11 @@ server {
               <div className="space-y-4 text-xs h-full flex flex-col">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400">Template Presets:</span>
+                    <span className="text-slate-700 dark:text-slate-300 font-medium">Template Presets:</span>
                     <select
                       value={selectedPreset}
                       onChange={(e) => handleSelectPreset(e.target.value)}
-                      className="p-1.5 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-medium"
+                      className="p-1.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-medium"
                     >
                       {Object.keys(REWRITE_PRESETS).map((k) => (
                         <option key={k} value={k}>
@@ -950,23 +949,23 @@ server {
                       ))}
                     </select>
                   </div>
-                  <span className="text-slate-500">File: /www/server/panel/vhost/rewrite/{website.primary_domain}.conf</span>
+                  <span className="text-slate-500 dark:text-slate-400">File: /www/server/panel/vhost/rewrite/{website.primary_domain}.conf</span>
                 </div>
 
-                <div className="flex-1 min-h-[360px] border border-slate-700 rounded-lg overflow-hidden flex flex-col bg-[#11141c]">
+                <div className="flex-1 min-h-[360px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden flex flex-col bg-slate-50 dark:bg-[#090D16]">
                   <textarea
                     value={rewriteRules}
                     onChange={(e) => setRewriteRules(e.target.value)}
-                    className="w-full h-full p-4 font-mono text-emerald-400 bg-transparent focus:outline-none resize-none leading-relaxed"
+                    className="w-full h-full p-4 font-mono text-slate-900 dark:text-emerald-400 bg-transparent focus:outline-none resize-none leading-relaxed"
                     spellCheck={false}
                   />
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Changes will be validated with `nginx -t` before reload.</span>
+                  <span className="text-slate-600 dark:text-slate-400 text-[11px]">Changes will be validated with `nginx -t` before reload.</span>
                   <button
                     onClick={() => showToast('URL rewrite rules saved and active.')}
-                    className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                   >
                     Save & Test
                   </button>
@@ -977,7 +976,7 @@ server {
             {/* 5. DEFAULT DOCUMENT */}
             {activeTab === 'defaultDoc' && (
               <div className="space-y-4 text-xs">
-                <p className="text-slate-400">
+                <p className="text-slate-600 dark:text-slate-400">
                   Index documents are prioritized from top to bottom. The first file that exists in the directory will be served.
                 </p>
 
@@ -987,35 +986,35 @@ server {
                     placeholder="e.g. index.htm or main.html"
                     value={newDocName}
                     onChange={(e) => setNewDocName(e.target.value)}
-                    className="w-72 p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                    className="w-72 p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                   />
                   <button
                     onClick={handleAddDoc}
-                    className="px-4 py-2 rounded bg-[#22c55e] hover:bg-[#16a34a] text-white font-bold"
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                   >
                     Add Document
                   </button>
                 </div>
 
-                <div className="border border-slate-700 rounded-lg overflow-hidden bg-[#11141c] w-full max-w-lg">
+                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-[#0F172A] w-full max-w-lg">
                   <table className="w-full text-left">
-                    <thead className="bg-[#1e2432] text-slate-300">
+                    <thead className="bg-slate-100 dark:bg-[#1E2432] text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-2.5">Priority</th>
                         <th className="p-2.5">Filename</th>
                         <th className="p-2.5 text-right">Order / Delete</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {defaultDocs.map((doc, idx) => (
-                        <tr key={doc} className="hover:bg-slate-800/40">
-                          <td className="p-2.5 font-mono text-slate-400">#{idx + 1}</td>
-                          <td className="p-2.5 font-mono text-emerald-400 font-semibold">{doc}</td>
+                        <tr key={doc} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200 transition">
+                          <td className="p-2.5 font-mono text-slate-500 dark:text-slate-400">#{idx + 1}</td>
+                          <td className="p-2.5 font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{doc}</td>
                           <td className="p-2.5 text-right space-x-2">
                             <button
                               onClick={() => moveDoc(idx, 'up')}
                               disabled={idx === 0}
-                              className="p-1 hover:text-white disabled:opacity-30"
+                              className="p-1 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
                               title="Move Up"
                             >
                               <ChevronUp className="w-3.5 h-3.5 inline" />
@@ -1023,14 +1022,14 @@ server {
                             <button
                               onClick={() => moveDoc(idx, 'down')}
                               disabled={idx === defaultDocs.length - 1}
-                              className="p-1 hover:text-white disabled:opacity-30"
+                              className="p-1 hover:text-slate-900 dark:hover:text-white disabled:opacity-30 cursor-pointer"
                               title="Move Down"
                             >
                               <ChevronDown className="w-3.5 h-3.5 inline" />
                             </button>
                             <button
                               onClick={() => handleDeleteDoc(doc)}
-                              className="p-1 text-rose-400 hover:text-rose-300"
+                              className="p-1 text-rose-600 hover:text-rose-700 dark:text-rose-400 cursor-pointer"
                               title="Delete"
                             >
                               <Trash2 className="w-3.5 h-3.5 inline" />
@@ -1044,7 +1043,7 @@ server {
 
                 <button
                   onClick={() => showToast('Default documents saved to virtual host.')}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                 >
                   Save Default Documents
                 </button>
@@ -1055,29 +1054,29 @@ server {
             {activeTab === 'config' && (
               <div className="space-y-4 text-xs h-full flex flex-col">
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400">
-                    Configuration File: <span className="text-emerald-400 font-mono">/etc/nginx/sites-available/{website.primary_domain}</span>
+                  <span className="text-slate-700 dark:text-slate-300">
+                    Configuration File: <span className="text-emerald-600 dark:text-emerald-400 font-mono font-medium">/etc/nginx/sites-available/{website.primary_domain}</span>
                   </span>
-                  <span className="text-[11px] text-slate-500">Live Nginx vHost Block</span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">Live Nginx vHost Block</span>
                 </div>
 
-                <div className="flex-1 min-h-[380px] border border-slate-700 rounded-lg overflow-hidden bg-[#11141c]">
+                <div className="flex-1 min-h-[380px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-50 dark:bg-[#090D16]">
                   <textarea
                     value={vhostCode}
                     onChange={(e) => setVhostCode(e.target.value)}
-                    className="w-full h-full p-4 font-mono text-emerald-400 bg-transparent focus:outline-none resize-none leading-relaxed text-xs"
+                    className="w-full h-full p-4 font-mono text-slate-900 dark:text-emerald-400 bg-transparent focus:outline-none resize-none leading-relaxed text-xs"
                     spellCheck={false}
                   />
                 </div>
 
                 <div className="flex items-center justify-between">
-                  <span className="text-slate-400 text-[11px]">
+                  <span className="text-slate-600 dark:text-slate-400 text-[11px]">
                     Automatic validation with `nginx -t` ensures zero-downtime reloads.
                   </span>
                   <button
                     onClick={handleSaveVhost}
                     disabled={isSavingConfig}
-                    className="px-5 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {isSavingConfig ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                     <span>{isSavingConfig ? 'Testing & Reloading...' : 'Save & Reload'}</span>
@@ -1090,52 +1089,52 @@ server {
             {activeTab === 'ssl' && (
               <div className="space-y-5 text-xs">
                 {/* Toggles */}
-                <div className="grid grid-cols-2 gap-4 bg-[#1b202c] p-4 rounded-lg border border-slate-700/80">
+                <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-semibold text-white">Force HTTPS (301 Redirect)</div>
-                      <div className="text-[11px] text-slate-400">Automatically redirect all HTTP traffic to HTTPS</div>
+                      <div className="font-semibold text-slate-900 dark:text-white">Force HTTPS (301 Redirect)</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">Automatically redirect all HTTP traffic to HTTPS</div>
                     </div>
                     <input
                       type="checkbox"
                       checked={forceHttps}
                       onChange={(e) => setForceHttps(e.target.checked)}
-                      className="rounded border-slate-600 accent-emerald-500 cursor-pointer"
+                      className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600 cursor-pointer"
                     />
                   </div>
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-semibold text-white">HTTP/2 Protocol</div>
-                      <div className="text-[11px] text-slate-400">Enable multiplexing and server push</div>
+                      <div className="font-semibold text-slate-900 dark:text-white">HTTP/2 Protocol</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">Enable multiplexing and server push</div>
                     </div>
                     <input
                       type="checkbox"
                       checked={http2Enabled}
                       onChange={(e) => setHttp2Enabled(e.target.checked)}
-                      className="rounded border-slate-600 accent-emerald-500 cursor-pointer"
+                      className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600 cursor-pointer"
                     />
                   </div>
                 </div>
 
                 {/* Sub-tabs: Let's Encrypt vs Custom */}
-                <div className="flex border-b border-slate-700">
+                <div className="flex border-b border-slate-200 dark:border-slate-700">
                   <button
                     onClick={() => setSslTab('letsencrypt')}
-                    className={`px-4 py-2 font-medium border-b-2 transition ${
+                    className={`px-4 py-2 font-semibold border-b-2 transition cursor-pointer ${
                       sslTab === 'letsencrypt'
-                        ? 'border-emerald-500 text-emerald-400'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                        ? 'border-emerald-600 text-emerald-700 dark:text-emerald-400 dark:border-emerald-500'
+                        : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                     }`}
                   >
                     Let's Encrypt (1-Click Free)
                   </button>
                   <button
                     onClick={() => setSslTab('custom')}
-                    className={`px-4 py-2 font-medium border-b-2 transition ${
+                    className={`px-4 py-2 font-semibold border-b-2 transition cursor-pointer ${
                       sslTab === 'custom'
-                        ? 'border-emerald-500 text-emerald-400'
-                        : 'border-transparent text-slate-400 hover:text-slate-200'
+                        ? 'border-emerald-600 text-emerald-700 dark:text-emerald-400 dark:border-emerald-500'
+                        : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                     }`}
                   >
                     Custom Certificate (CRT/KEY)
@@ -1143,16 +1142,16 @@ server {
                 </div>
 
                 {sslTab === 'letsencrypt' ? (
-                  <div className="space-y-4 bg-[#1b202c] p-4 rounded-lg border border-slate-700/80">
-                    <p className="text-slate-300">
+                  <div className="space-y-4 bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+                    <p className="text-slate-700 dark:text-slate-300">
                       Issue free automated 90-day certificates via ACME HTTP-01 or DNS verification.
                     </p>
                     <div className="space-y-2">
-                      <span className="block text-slate-400">Included Domains:</span>
+                      <span className="block text-slate-700 dark:text-slate-400 font-medium">Included Domains:</span>
                       {domainList.map((d) => (
                         <label key={d.domain} className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" defaultChecked className="rounded border-slate-600 accent-emerald-500" />
-                          <span className="font-mono text-slate-200">{d.domain}</span>
+                          <input type="checkbox" defaultChecked className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600" />
+                          <span className="font-mono text-slate-900 dark:text-slate-100">{d.domain}</span>
                         </label>
                       ))}
                     </div>
@@ -1162,45 +1161,45 @@ server {
                         type="checkbox"
                         checked={autoRenew}
                         onChange={(e) => setAutoRenew(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="text-slate-300 font-medium">Automatic renewal 30 days before expiration</span>
+                      <span className="text-slate-800 dark:text-slate-300 font-medium">Automatic renewal 30 days before expiration</span>
                     </label>
 
                     <button
                       onClick={handleApplyLetsEncrypt}
                       disabled={isIssuingSsl}
-                      className="px-5 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition flex items-center gap-2 shadow"
+                      className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
                     >
                       {isIssuingSsl ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
                       <span>{isIssuingSsl ? 'Verifying DNS & Issuing Certificate...' : 'Apply & Install Certificate'}</span>
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4 bg-[#1b202c] p-4 rounded-lg border border-slate-700/80">
+                  <div className="space-y-4 bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
                     <div>
-                      <label className="block text-slate-400 mb-1">Certificate (CRT / PEM / Fullchain)</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Certificate (CRT / PEM / Fullchain)</label>
                       <textarea
                         rows={5}
                         placeholder="-----BEGIN CERTIFICATE-----..."
                         value={customCert}
                         onChange={(e) => setCustomCert(e.target.value)}
-                        className="w-full p-2.5 rounded bg-[#11141c] border border-slate-700 font-mono text-slate-200 text-xs"
+                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs"
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 mb-1">Private Key (KEY)</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Private Key (KEY)</label>
                       <textarea
                         rows={4}
                         placeholder="-----BEGIN RSA PRIVATE KEY-----..."
                         value={customKey}
                         onChange={(e) => setCustomKey(e.target.value)}
-                        className="w-full p-2.5 rounded bg-[#11141c] border border-slate-700 font-mono text-slate-200 text-xs"
+                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs"
                       />
                     </div>
                     <button
                       onClick={() => showToast('Custom certificate deployed.')}
-                      className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                     >
                       Save & Deploy Certificate
                     </button>
@@ -1212,15 +1211,15 @@ server {
             {/* 8. PHP VERSION */}
             {activeTab === 'php' && (
               <div className="space-y-5 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-4">
-                  <h3 className="text-sm font-semibold text-white">PHP Engine Selection</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">PHP Engine Selection</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-400 mb-1">PHP Version</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">PHP Version</label>
                       <select
                         value={selectedPhp}
                         onChange={(e) => setSelectedPhp(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-bold"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-bold"
                       >
                         <option value="8.4">PHP-8.4 (Latest)</option>
                         <option value="8.3">PHP-8.3 (Stable)</option>
@@ -1234,11 +1233,11 @@ server {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">Memory Limit</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Memory Limit</label>
                       <select
                         value={phpMemoryLimit}
                         onChange={(e) => setPhpMemoryLimit(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                       >
                         <option value="128M">128 MB</option>
                         <option value="256M">256 MB (Standard)</option>
@@ -1250,21 +1249,21 @@ server {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-400 mb-1">Max Execution Time (seconds)</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Max Execution Time (seconds)</label>
                       <input
                         type="number"
                         value={phpMaxExecution}
                         onChange={(e) => setPhpMaxExecution(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 mb-1">Max Upload Filesize</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Max Upload Filesize</label>
                       <input
                         type="text"
                         value={phpMaxUpload}
                         onChange={(e) => setPhpMaxUpload(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                       />
                     </div>
                   </div>
@@ -1274,15 +1273,15 @@ server {
                       type="checkbox"
                       checked={opcacheEnabled}
                       onChange={(e) => setOpcacheEnabled(e.target.checked)}
-                      className="rounded border-slate-600 accent-emerald-500"
+                      className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                     />
-                    <span className="text-slate-300 font-medium">Enable Zend OPcache byte-code acceleration</span>
+                    <span className="text-slate-800 dark:text-slate-300 font-medium">Enable Zend OPcache byte-code acceleration</span>
                   </label>
                 </div>
 
                 <button
                   onClick={handleSwitchPhp}
-                  className="px-5 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                 >
                   Apply & Switch PHP Version
                 </button>
@@ -1292,15 +1291,15 @@ server {
             {/* 9. WEB SERVER */}
             {activeTab === 'webserver' && (
               <div className="space-y-5 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-4">
-                  <h3 className="text-sm font-semibold text-white">Web Server Engine & Optimization</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-4">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Web Server Engine & Optimization</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-slate-400 mb-1">Active Web Server</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Active Web Server</label>
                       <select
                         value={webServerEngine}
                         onChange={(e) => setWebServerEngine(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-bold"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-bold"
                       >
                         <option value="nginx">Nginx (High-concurrency Event Engine)</option>
                         <option value="apache">Apache 2.4 (Prefork / Event MPM)</option>
@@ -1309,12 +1308,12 @@ server {
                     </div>
 
                     <div>
-                      <label className="block text-slate-400 mb-1">Client Max Body Size</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Client Max Body Size</label>
                       <input
                         type="text"
                         value={clientMaxBody}
                         onChange={(e) => setClientMaxBody(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                       />
                     </div>
                   </div>
@@ -1325,9 +1324,9 @@ server {
                         type="checkbox"
                         checked={gzipEnabled}
                         onChange={(e) => setGzipEnabled(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="text-slate-300 font-medium">Gzip dynamic compression (level {gzipLevel})</span>
+                      <span className="text-slate-800 dark:text-slate-300 font-medium">Gzip dynamic compression (level {gzipLevel})</span>
                     </label>
 
                     <label className="flex items-center gap-2.5 cursor-pointer">
@@ -1335,16 +1334,16 @@ server {
                         type="checkbox"
                         checked={brotliEnabled}
                         onChange={(e) => setBrotliEnabled(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="text-slate-300 font-medium">Brotli next-gen compression (br)</span>
+                      <span className="text-slate-800 dark:text-slate-300 font-medium">Brotli next-gen compression (br)</span>
                     </label>
                   </div>
                 </div>
 
                 <button
                   onClick={() => showToast('Web server optimization settings saved.')}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                 >
                   Save Server Configuration
                 </button>
@@ -1354,43 +1353,43 @@ server {
             {/* 10. GIT MANAGER */}
             {activeTab === 'git' && (
               <div className="space-y-4 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
-                  <h3 className="text-sm font-semibold text-white">Git Repository & Auto-Deploy</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Git Repository & Auto-Deploy</h3>
                   <div>
-                    <label className="block text-slate-400 mb-1">Repository URL</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Repository URL</label>
                     <input
                       type="text"
                       value={gitRepoUrl}
                       onChange={(e) => setGitRepoUrl(e.target.value)}
-                      className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-slate-400 mb-1">Branch</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Branch</label>
                       <input
                         type="text"
                         value={gitBranch}
                         onChange={(e) => setGitBranch(e.target.value)}
-                        className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 mb-1">Webhook URL</label>
+                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Webhook URL</label>
                       <div className="flex gap-1">
                         <input
                           type="text"
                           readOnly
                           value={`https://${website.primary_domain}/api/v1/webhook?secret=hv_${website.id}`}
-                          className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-400 font-mono text-[11px]"
+                          className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-mono text-[11px]"
                         />
                         <button
                           onClick={() => {
                             navigator.clipboard.writeText(`https://${website.primary_domain}/api/v1/webhook?secret=hv_${website.id}`);
                             showToast('Webhook URL copied to clipboard!');
                           }}
-                          className="px-2.5 rounded bg-slate-700 hover:bg-slate-600 text-white"
+                          className="px-2.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-white transition cursor-pointer"
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </button>
@@ -1399,12 +1398,12 @@ server {
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Post-deployment Script</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Post-deployment Script</label>
                     <textarea
                       rows={3}
                       value={gitScript}
                       onChange={(e) => setGitScript(e.target.value)}
-                      className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-emerald-400 font-mono text-[11px]"
+                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-emerald-400 font-mono text-[11px]"
                     />
                   </div>
                 </div>
@@ -1413,7 +1412,7 @@ server {
                   <button
                     onClick={handlePullGit}
                     disabled={isPullingGit}
-                    className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-2 shadow"
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold flex items-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
                   >
                     {isPullingGit ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                     <span>{isPullingGit ? 'Pulling from origin...' : 'Pull & Deploy Now'}</span>
@@ -1427,11 +1426,11 @@ server {
               <div className="space-y-4 text-xs h-full flex flex-col">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-slate-400">Composer Mirror:</span>
+                    <span className="text-slate-700 dark:text-slate-300 font-medium">Composer Mirror:</span>
                     <select
                       value={composerMirror}
                       onChange={(e) => setComposerMirror(e.target.value)}
-                      className="p-1.5 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="p-1.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     >
                       <option value="Packagist Official">Packagist Official (Global)</option>
                       <option value="Aliyun">Aliyun (Fast Asian Mirror)</option>
@@ -1441,26 +1440,26 @@ server {
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleRunComposer('install')}
-                      className="px-3 py-1 rounded bg-[#242b3b] hover:bg-slate-700 text-emerald-400 font-bold"
+                      className="px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-400 font-bold cursor-pointer"
                     >
                       install
                     </button>
                     <button
                       onClick={() => handleRunComposer('update')}
-                      className="px-3 py-1 rounded bg-[#242b3b] hover:bg-slate-700 text-blue-400 font-bold"
+                      className="px-3 py-1 rounded-lg bg-orange-50 dark:bg-orange-950/40 border border-orange-300 dark:border-orange-800 hover:bg-orange-100 text-orange-700 dark:text-orange-400 font-bold cursor-pointer"
                     >
                       update
                     </button>
                     <button
                       onClick={() => handleRunComposer('dump-autoload -o')}
-                      className="px-3 py-1 rounded bg-[#242b3b] hover:bg-slate-700 text-amber-400 font-bold"
+                      className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-200 text-slate-800 dark:text-slate-300 font-bold cursor-pointer"
                     >
                       dump-autoload
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[350px] border border-slate-700 rounded-lg overflow-hidden bg-[#0c0e14] p-3 font-mono text-emerald-400 text-xs overflow-y-auto whitespace-pre-wrap">
+                <div className="flex-1 min-h-[350px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-900 dark:bg-[#0C0E14] p-3 font-mono text-emerald-400 text-xs overflow-y-auto whitespace-pre-wrap">
                   {composerConsole}
                 </div>
               </div>
@@ -1469,13 +1468,13 @@ server {
             {/* 12. REDIRECT */}
             {activeTab === 'redirect' && (
               <div className="space-y-4 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
-                  <h3 className="text-sm font-semibold text-white">Add URL Redirect Rule</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Add URL Redirect Rule</h3>
                   <div className="grid grid-cols-4 gap-2">
                     <select
                       value={newRedirType}
                       onChange={(e) => setNewRedirType(e.target.value as any)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     >
                       <option value="301">301 (Permanent)</option>
                       <option value="302">302 (Temporary)</option>
@@ -1485,27 +1484,27 @@ server {
                       placeholder="Source Path (e.g. /old-page)"
                       value={newRedirSource}
                       onChange={(e) => setNewRedirSource(e.target.value)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                     <input
                       type="text"
                       placeholder="Target URL (e.g. https://domain.com/new)"
                       value={newRedirTarget}
                       onChange={(e) => setNewRedirTarget(e.target.value)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                     <button
                       onClick={handleAddRedirect}
-                      className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                     >
                       Add Redirect
                     </button>
                   </div>
                 </div>
 
-                <div className="border border-slate-700 rounded-lg overflow-hidden bg-[#11141c]">
+                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-[#0F172A]">
                   <table className="w-full text-left">
-                    <thead className="bg-[#1e2432] text-slate-300">
+                    <thead className="bg-slate-100 dark:bg-[#1E2432] text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-2.5">Type</th>
                         <th className="p-2.5">Source Path</th>
@@ -1513,16 +1512,16 @@ server {
                         <th className="p-2.5 text-right">Action</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {redirectList.map((r) => (
-                        <tr key={r.id} className="hover:bg-slate-800/40">
-                          <td className="p-2.5 font-bold text-amber-400">{r.type}</td>
-                          <td className="p-2.5 font-mono text-slate-300">{r.sourcePath}</td>
-                          <td className="p-2.5 font-mono text-emerald-400 truncate max-w-xs">{r.targetUrl}</td>
+                        <tr key={r.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200 transition">
+                          <td className="p-2.5 font-bold text-orange-600 dark:text-orange-400">{r.type}</td>
+                          <td className="p-2.5 font-mono text-slate-900 dark:text-slate-200">{r.sourcePath}</td>
+                          <td className="p-2.5 font-mono text-emerald-700 dark:text-emerald-400 truncate max-w-xs">{r.targetUrl}</td>
                           <td className="p-2.5 text-right">
                             <button
                               onClick={() => setRedirectList(redirectList.filter((item) => item.id !== r.id))}
-                              className="text-rose-400 hover:underline"
+                              className="text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline font-medium cursor-pointer"
                             >
                               Delete
                             </button>
@@ -1538,26 +1537,26 @@ server {
             {/* 13. REVERSE PROXY */}
             {activeTab === 'proxy' && (
               <div className="space-y-4 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-3">
-                  <h3 className="text-sm font-semibold text-white">Add Reverse Proxy Pass</h3>
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Add Reverse Proxy Pass</h3>
                   <div className="grid grid-cols-3 gap-3">
                     <input
                       type="text"
                       placeholder="Proxy Name (e.g. NextApp)"
                       value={newProxyName}
                       onChange={(e) => setNewProxyName(e.target.value)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
                     <input
                       type="text"
                       placeholder="Target URL (e.g. http://127.0.0.1:3000)"
                       value={newProxyTarget}
                       onChange={(e) => setNewProxyTarget(e.target.value)}
-                      className="p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                     <button
                       onClick={handleAddProxy}
-                      className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                     >
                       Add Reverse Proxy
                     </button>
@@ -1568,25 +1567,25 @@ server {
                         type="checkbox"
                         checked={newProxyWs}
                         onChange={(e) => setNewProxyWs(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="text-slate-300">WebSocket Support (Upgrade / Connection)</span>
+                      <span className="text-slate-700 dark:text-slate-300 font-medium">WebSocket Support (Upgrade / Connection)</span>
                     </label>
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={newProxyCache}
                         onChange={(e) => setNewProxyCache(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
-                      <span className="text-slate-300">Edge Micro-Cache (5 mins)</span>
+                      <span className="text-slate-700 dark:text-slate-300 font-medium">Edge Micro-Cache (5 mins)</span>
                     </label>
                   </div>
                 </div>
 
-                <div className="border border-slate-700 rounded-lg overflow-hidden bg-[#11141c]">
+                <div className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-[#0F172A]">
                   <table className="w-full text-left">
-                    <thead className="bg-[#1e2432] text-slate-300">
+                    <thead className="bg-slate-100 dark:bg-[#1E2432] text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
                       <tr>
                         <th className="p-2.5">Name</th>
                         <th className="p-2.5">Target Destination</th>
@@ -1594,16 +1593,16 @@ server {
                         <th className="p-2.5 text-right">Action</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                       {proxyList.map((p) => (
-                        <tr key={p.id} className="hover:bg-slate-800/40">
-                          <td className="p-2.5 font-bold text-white">{p.name}</td>
-                          <td className="p-2.5 font-mono text-emerald-400">{p.targetUrl}</td>
-                          <td className="p-2.5 text-slate-300">{p.websocket ? 'Enabled' : 'Disabled'}</td>
+                        <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 text-slate-800 dark:text-slate-200 transition">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{p.name}</td>
+                          <td className="p-2.5 font-mono text-emerald-700 dark:text-emerald-400">{p.targetUrl}</td>
+                          <td className="p-2.5 text-slate-700 dark:text-slate-300">{p.websocket ? 'Enabled' : 'Disabled'}</td>
                           <td className="p-2.5 text-right">
                             <button
                               onClick={() => setProxyList(proxyList.filter((item) => item.id !== p.id))}
-                              className="text-rose-400 hover:underline"
+                              className="text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline font-medium cursor-pointer"
                             >
                               Delete
                             </button>
@@ -1619,11 +1618,11 @@ server {
             {/* 14. HOTLINK PROTECTION */}
             {activeTab === 'hotlink' && (
               <div className="space-y-4 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-4">
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-white">Anti-Leech / Hotlink Defense</h3>
-                      <p className="text-[11px] text-slate-400">Prevent other websites from embedding your images and media assets</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Anti-Leech / Hotlink Defense</h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Prevent other websites from embedding your images and media assets</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
@@ -1632,34 +1631,34 @@ server {
                         onChange={(e) => setHotlinkEnabled(e.target.checked)}
                         className="sr-only peer"
                       />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                      <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
                     </label>
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Allowed Referrers (1 per line)</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Allowed Referrers (1 per line)</label>
                     <textarea
                       rows={3}
                       value={hotlinkDomains}
                       onChange={(e) => setHotlinkDomains(e.target.value)}
-                      className="w-full p-2.5 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Protected File Extensions</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Protected File Extensions</label>
                     <input
                       type="text"
                       value={hotlinkExts}
                       onChange={(e) => setHotlinkExts(e.target.value)}
-                      className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono"
+                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
                     />
                   </div>
                 </div>
 
                 <button
                   onClick={() => showToast('Hotlink protection configuration applied.')}
-                  className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
                 >
                   Save Hotlink Protection
                 </button>
@@ -1669,11 +1668,11 @@ server {
             {/* 15. MAINTENANCE MODE */}
             {activeTab === 'maintenance' && (
               <div className="space-y-4 text-xs">
-                <div className="bg-[#1b202c] p-4 rounded-lg border border-slate-700/80 space-y-4">
+                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-semibold text-white">Website Maintenance Mode (503 Service Unavailable)</h3>
-                      <p className="text-[11px] text-slate-400">Temporarily show a maintenance notice while performing migrations or updates</p>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Website Maintenance Mode (503 Service Unavailable)</h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Temporarily show a maintenance notice while performing migrations or updates</p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
                       <input
@@ -1682,37 +1681,37 @@ server {
                         onChange={(e) => setMaintenanceEnabled(e.target.checked)}
                         className="sr-only peer"
                       />
-                      <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                      <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-600"></div>
                     </label>
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Notice Page Title</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Notice Page Title</label>
                     <input
                       type="text"
                       value={maintenanceTitle}
                       onChange={(e) => setMaintenanceTitle(e.target.value)}
-                      className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Maintenance Description / Notice</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Maintenance Description / Notice</label>
                     <textarea
                       rows={3}
                       value={maintenanceNotice}
                       onChange={(e) => setMaintenanceNotice(e.target.value)}
-                      className="w-full p-2.5 rounded bg-[#11141c] border border-slate-700 text-slate-200"
+                      className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 mb-1">Bypass Whitelist IPs (Allow admin access)</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Bypass Whitelist IPs (Allow admin access)</label>
                     <textarea
                       rows={2}
                       value={maintenanceIps}
                       onChange={(e) => setMaintenanceIps(e.target.value)}
-                      className="w-full p-2 rounded bg-[#11141c] border border-slate-700 text-slate-200 font-mono text-[11px]"
+                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono text-[11px]"
                     />
                   </div>
                 </div>
@@ -1720,8 +1719,8 @@ server {
                 <div className="flex gap-3">
                   <button
                     onClick={() => showToast(`Maintenance mode is now ${maintenanceEnabled ? 'ACTIVE' : 'DISABLED'}.`)}
-                    className={`px-4 py-2 rounded font-bold text-white shadow ${
-                      maintenanceEnabled ? 'bg-amber-600 hover:bg-amber-500' : 'bg-emerald-600 hover:bg-emerald-500'
+                    className={`px-4 py-2 rounded-lg font-bold text-white shadow-xs transition cursor-pointer ${
+                      maintenanceEnabled ? 'bg-orange-600 hover:bg-orange-700 active:bg-orange-800' : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
                     }`}
                   >
                     Save Maintenance Settings
@@ -1737,16 +1736,16 @@ server {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => setLogType('access')}
-                      className={`px-3 py-1.5 rounded font-medium ${
-                        logType === 'access' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                      className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                        logType === 'access' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
                       access.log
                     </button>
                     <button
                       onClick={() => setLogType('error')}
-                      className={`px-3 py-1.5 rounded font-medium ${
-                        logType === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400'
+                      className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                        logType === 'error' ? 'bg-rose-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
                       error.log
@@ -1754,26 +1753,26 @@ server {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-400">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-400">
                       <input
                         type="checkbox"
                         checked={autoRefreshLogs}
                         onChange={(e) => setAutoRefreshLogs(e.target.checked)}
-                        className="rounded border-slate-600 accent-emerald-500"
+                        className="rounded border-slate-300 dark:border-slate-600 accent-emerald-600"
                       />
                       <span>Auto-refresh (3s)</span>
                     </label>
 
                     <button
                       onClick={() => showToast('Logs cleared.')}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-medium transition cursor-pointer"
                     >
                       Clear Log
                     </button>
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[380px] border border-slate-700 rounded-lg overflow-hidden bg-[#0c0e14] p-3 font-mono text-xs overflow-y-auto space-y-1">
+                <div className="flex-1 min-h-[380px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-900 dark:bg-[#0C0E14] p-3 font-mono text-xs overflow-y-auto space-y-1">
                   {mockLogs.map((line, idx) => {
                     let color = 'text-slate-300';
                     if (line.includes(' 200 ')) color = 'text-emerald-400';
@@ -1781,7 +1780,7 @@ server {
                     else if (line.includes(' 500 ') || line.includes(' 502 ')) color = 'text-rose-400';
 
                     return (
-                      <div key={idx} className={`${color} leading-relaxed hover:bg-slate-900/60 px-1 rounded`}>
+                      <div key={idx} className={`${color} leading-relaxed hover:bg-slate-800/60 px-1 rounded`}>
                         {line}
                       </div>
                     );

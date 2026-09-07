@@ -4,26 +4,32 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
-  --foreground-rgb: 23, 32, 51;
-  --bg-app: #F5F7FA;
+  --foreground-rgb: 15, 23, 42;
+  --bg-app: #F8FAFC;
   --bg-card: #FFFFFF;
-  --bg-sidebar: #0F172A;
-  --bg-sidebar-secondary: #162033;
-  --sidebar-text: #CBD5E1;
+  --bg-sidebar: #FFFFFF;
+  --sidebar-text: #1E293B;
   --bg-header: #FFFFFF;
-  --primary-blue: #2563EB;
-  --primary-blue-hover: #1D4ED8;
-  --primary-blue-soft: #EFF6FF;
-  --text-primary: #172033;
-  --text-secondary: #64748B;
-  --text-muted: #94A3B8;
+  --primary-green: #16A34A;
+  --primary-green-hover: #15803D;
+  --primary-orange: #EA580C;
+  --primary-orange-hover: #C2410C;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #64748B;
   --border-default: #E2E8F0;
   --border-hover: #CBD5E1;
   --color-success: #16A34A;
   --color-success-bg: #F0FDF4;
-  --color-warning: #D97706;
-  --color-warning-bg: #FFFBEB;
+  --color-warning: #EA580C;
+  --color-warning-bg: #FFF7ED;
   --color-danger: #DC2626;
   --color-danger-bg: #FEF2F2;
   --color-info: #0284C7;
@@ -31,20 +37,28 @@
 }
 
 html.dark {
-  --foreground-rgb: 241, 245, 249;
-  --bg-app: #0F172A;
+  --foreground-rgb: 248, 250, 252;
+  --bg-app: #0B1120;
+  --bg-card: #131B2E;
+  --bg-sidebar: #0F172A;
+  --sidebar-text: #F8FAFC;
+  --bg-header: #0F172A;
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+  --border-default: #1E293B;
   color-scheme: dark;
 }
 
 html:not(.dark) {
-  --foreground-rgb: 23, 32, 51;
-  --bg-app: #F5F7FA;
+  --foreground-rgb: 15, 23, 42;
+  --bg-app: #F8FAFC;
   color-scheme: light;
 }
 
 body {
-  color: #172033;
-  background: #F5F7FA;
+  color: #0F172A;
+  background: #F8FAFC;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -56,49 +70,70 @@ code, pre, kbd, samp {
 }
 
 /* ==========================================================================
-   HOSTVRA SOFT PREMIUM ENTERPRISE SAAS DESIGN SYSTEM
-   - Clean white workspace cards (#FFFFFF)
-   - Subtle workspace background (#F5F7FA)
-   - Deep navy navigation (#0F172A)
-   - Subtle blue accents (#2563EB)
-   - Thin borders (#E2E8F0)
-   - WCAG AAA high-contrast text (#172033, #64748B, #94A3B8)
+   HOSTVRA CLEAN ENTERPRISE DESIGN SYSTEM
+   - Light Mode: 100% White Backgrounds, Black Text (#0F172A), Green & Orange Buttons
+   - Dark Mode: 100% Deep Surfaces (#0B1120 / #131B2E), Zero White Backgrounds
    ========================================================================== */
 
-/* 1. Deep Navy Sidebar Invariant (#0F172A) */
-aside,
-.hostvra-sidebar,
-aside[data-component="sidebar"] {
+/* 1. SIDEBAR (Light Mode: Clean White; Dark Mode: Deep Slate) */
+html:not(.dark) aside,
+html:not(.dark) .hostvra-sidebar,
+html:not(.dark) aside[data-component="sidebar"] {
+  background-color: #FFFFFF !important;
+  border-right: 1px solid #E2E8F0 !important;
+  color: #0F172A !important;
+}
+
+html:not(.dark) aside .sidebar-nav-item,
+html:not(.dark) aside a {
+  color: #334155 !important;
+}
+
+html:not(.dark) aside a:hover {
+  background-color: #F1F5F9 !important;
+  color: #0F172A !important;
+}
+
+html:not(.dark) aside a.active,
+html:not(.dark) aside a[data-active="true"] {
+  background-color: #16A34A !important;
+  color: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(22, 163, 74, 0.25) !important;
+}
+
+html.dark aside,
+html.dark .hostvra-sidebar,
+html.dark aside[data-component="sidebar"] {
   background-color: #0F172A !important;
-  border-right: 1px solid #162033 !important;
+  border-right: 1px solid #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+html.dark aside a {
   color: #CBD5E1 !important;
 }
 
-aside .sidebar-nav-item,
-aside a {
-  color: #CBD5E1 !important;
-}
-
-aside a:hover {
-  background-color: rgba(255, 255, 255, 0.06) !important;
+html.dark aside a:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
   color: #FFFFFF !important;
 }
 
-aside a.active,
-aside a[data-active="true"] {
-  background-color: #2563EB !important;
+html.dark aside a.active,
+html.dark aside a[data-active="true"] {
+  background-color: #16A34A !important;
   color: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(22, 163, 74, 0.3) !important;
 }
 
-/* 2. Light Mode Content Workspace: Clean White & Eye-Friendly Slate Surfaces */
+/* 2. Light Mode: Clean White Workspace & Cards */
 html:not(.dark) body {
-  background-color: #F5F7FA !important;
-  color: #172033 !important;
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
 }
 
 html:not(.dark) main,
 html:not(.dark) .workspace-container {
-  background-color: #F5F7FA !important;
+  background-color: #F8FAFC !important;
 }
 
 /* Card surfaces inside main workspace */
@@ -113,10 +148,13 @@ html:not(.dark) main .bg-\[\#090d16\],
 html:not(.dark) main .bg-\[\#0b0f19\],
 html:not(.dark) main .bg-\[\#121824\],
 html:not(.dark) main .bg-\[\#0e1420\],
-html:not(.dark) main .bg-\[\#10141d\] {
+html:not(.dark) main .bg-\[\#10141d\],
+html:not(.dark) main .bg-\[\#161a23\],
+html:not(.dark) main .bg-\[\#1b202c\] {
   background-color: #FFFFFF !important;
   background-image: none !important;
   border-color: #E2E8F0 !important;
+  color: #0F172A !important;
 }
 
 html:not(.dark) main .bg-surface-800,
@@ -130,55 +168,98 @@ html:not(.dark) main .bg-slate-800\/40 {
   background-color: #F8FAFC !important;
 }
 
-/* 3. Reusable Enterprise Component Classes */
-.card-enterprise {
-  background-color: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-  padding: 24px;
+/* 3. Dark Mode Overrides: Zero White Backgrounds */
+html.dark body {
+  background-color: #0B1120 !important;
+  color: #F8FAFC !important;
 }
 
-.btn-primary {
+html.dark main,
+html.dark .workspace-container {
+  background-color: #0B1120 !important;
+}
+
+html.dark .card-enterprise,
+html.dark .bg-white {
+  background-color: #131B2E !important;
+  border-color: #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-[#F8FAFC] {
+  background-color: #0F172A !important;
+  border-color: #1E293B !important;
+  color: #F8FAFC !important;
+}
+
+html.dark .border-slate-200,
+html.dark .border-[#E2E8F0] {
+  border-color: #1E293B !important;
+}
+
+html.dark .text-slate-900,
+html.dark .text-[#172033],
+html.dark .text-[#0F172A] {
+  color: #F8FAFC !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-slate-600,
+html.dark .text-[#64748B] {
+  color: #94A3B8 !important;
+}
+
+/* 4. Button Utilities: Green & Orange Focus */
+.btn-primary,
+.btn-green {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background-color: #2563EB;
+  background-color: #16A34A !important;
   color: #FFFFFF !important;
-  font-weight: 500;
-  font-size: 14px;
-  height: 38px;
+  font-weight: 600;
+  font-size: 13px;
+  height: 36px;
   padding: 0 1rem;
   border-radius: 8px;
   transition: all 150ms ease-in-out;
-  box-shadow: 0 1px 2px 0 rgba(37, 99, 235, 0.15);
+  box-shadow: 0 1px 2px 0 rgba(22, 163, 74, 0.2);
+  border: none;
+  cursor: pointer;
 }
-.btn-primary:hover {
-  background-color: #1D4ED8;
+.btn-primary:hover,
+.btn-green:hover {
+  background-color: #15803D !important;
 }
-.btn-primary:disabled {
+.btn-primary:disabled,
+.btn-green:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.btn-secondary {
+.btn-orange,
+.btn-accent {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background-color: #FFFFFF;
-  color: #2563EB !important;
-  border: 1px solid #2563EB;
-  font-weight: 500;
+  background-color: #EA580C !important;
+  color: #FFFFFF !important;
+  font-weight: 600;
   font-size: 13px;
-  height: 34px;
-  padding: 0 0.875rem;
+  height: 36px;
+  padding: 0 1rem;
   border-radius: 8px;
   transition: all 150ms ease-in-out;
+  box-shadow: 0 1px 2px 0 rgba(234, 88, 12, 0.2);
+  border: none;
+  cursor: pointer;
 }
-.btn-secondary:hover {
-  background-color: #EFF6FF;
+.btn-orange:hover,
+.btn-accent:hover {
+  background-color: #C2410C !important;
 }
 
 .btn-neutral {
@@ -187,11 +268,11 @@ html:not(.dark) main .bg-slate-800\/40 {
   justify-content: center;
   gap: 0.5rem;
   background-color: #FFFFFF;
-  color: #172033 !important;
+  color: #0F172A !important;
   border: 1px solid #E2E8F0;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 13px;
-  height: 34px;
+  height: 36px;
   padding: 0 0.875rem;
   border-radius: 8px;
   transition: all 150ms ease-in-out;
@@ -201,23 +282,13 @@ html:not(.dark) main .bg-slate-800\/40 {
   border-color: #CBD5E1;
 }
 
-.btn-danger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  background-color: #FEF2F2;
-  color: #DC2626 !important;
-  border: 1px solid #FECACA;
-  font-weight: 500;
-  font-size: 13px;
-  height: 34px;
-  padding: 0 0.875rem;
-  border-radius: 8px;
-  transition: all 150ms ease-in-out;
+html.dark .btn-neutral {
+  background-color: #1E293B;
+  color: #F8FAFC !important;
+  border-color: #334155;
 }
-.btn-danger:hover {
-  background-color: #FEE2E2;
+html.dark .btn-neutral:hover {
+  background-color: #293548;
 }
 
 /* Status Badges with Soft Backgrounds and High Contrast */
