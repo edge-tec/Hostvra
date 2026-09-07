@@ -103,6 +103,7 @@ func main() {
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
+	domainRegistrarHandler := handlers.NewDomainRegistrarHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -175,6 +176,11 @@ func main() {
 		// Public Hosting Plans Catalog
 		r.Get("/billing/plans", billingHandler.ListPlans)
 		r.Get("/billing/plans/{id}", billingHandler.GetPlan)
+
+		// Public Domain Search, Whois & TLD Pricing
+		r.Get("/domains/search", domainRegistrarHandler.SearchDomains)
+		r.Get("/domains/whois", domainRegistrarHandler.WhoisLookup)
+		r.Get("/domains/tlds", domainRegistrarHandler.ListTLDs)
 
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
@@ -558,6 +564,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/change-plan", accountHandler.ChangePlan)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/login-token", accountHandler.GenerateLoginToken)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Delete("/{id}", accountHandler.DeleteAccount)
+			})
+
+			// Enterprise Domain Registrar, TLD Pricing & Orders
+			r.Route("/domains", func(r chi.Router) {
+				r.Get("/search", domainRegistrarHandler.SearchDomains)
+				r.Get("/whois", domainRegistrarHandler.WhoisLookup)
+				r.Get("/tlds", domainRegistrarHandler.ListTLDs)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/tlds/{tld}", domainRegistrarHandler.UpdateTLD)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/registrars", domainRegistrarHandler.ListRegistrars)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/registrars/{registrar}", domainRegistrarHandler.UpdateRegistrar)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/order", domainRegistrarHandler.OrderDomain)
 			})
 		})
 	})

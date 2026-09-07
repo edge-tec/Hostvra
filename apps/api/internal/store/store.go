@@ -193,6 +193,14 @@ type Store interface {
 	UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error
 	DeleteHostingAccount(ctx context.Context, id uuid.UUID) error
 
+	// Domain Registrar & TLD Pricing
+	ListTLDPricings(ctx context.Context) ([]*TLDPricing, error)
+	GetTLDPricing(ctx context.Context, tld string) (*TLDPricing, error)
+	SaveTLDPricing(ctx context.Context, pricing *TLDPricing) error
+	ListRegistrarConfigs(ctx context.Context) ([]*DomainRegistrarConfig, error)
+	GetRegistrarConfig(ctx context.Context, registrar string) (*DomainRegistrarConfig, error)
+	SaveRegistrarConfig(ctx context.Context, config *DomainRegistrarConfig) error
+
 	// Close
 	Close() error
 }
@@ -234,30 +242,34 @@ type MemoryStore struct {
 	invoices            map[uuid.UUID]*Invoice
 	gatewayConfigs      map[string]*PaymentGatewayConfig
 	hostingAccounts     map[uuid.UUID]*HostingAccount
+	tldPricings         map[string]*TLDPricing
+	registrarConfigs    map[string]*DomainRegistrarConfig
 	filePath            string
 }
 
 type memoryDumpData struct {
-	Orgs               map[uuid.UUID]*Organization       `json:"orgs"`
-	OrgsBySlug         map[string]uuid.UUID              `json:"orgs_by_slug"`
-	Users              map[uuid.UUID]*User               `json:"users"`
-	UsersByEmail       map[string]uuid.UUID              `json:"users_by_email"`
-	Servers            map[uuid.UUID]*Server             `json:"servers"`
-	Tokens             map[string]*ServerEnrollmentToken `json:"tokens"`
-	Websites           map[uuid.UUID]*Website            `json:"websites"`
-	Databases          map[uuid.UUID]*Database           `json:"databases"`
-	DatabaseUsers      map[uuid.UUID]*DatabaseUser       `json:"database_users"`
-	SSLCerts           map[uuid.UUID]*SSLCertificate     `json:"ssl_certs"`
-	EmailDomains       map[uuid.UUID]*EmailDomain        `json:"email_domains"`
-	EmailMailboxes     map[uuid.UUID]*EmailMailbox       `json:"email_mailboxes"`
-	EmailAliases       map[uuid.UUID]*EmailAlias         `json:"email_aliases"`
-	WebServerInstances map[string]*WebServerInstance     `json:"web_server_instances"`
-	WebServerVHosts    map[string]*WebServerVHost        `json:"web_server_vhosts"`
-	HostingPlans       map[uuid.UUID]*HostingPlan        `json:"hosting_plans,omitempty"`
-	Subscriptions      map[uuid.UUID]*Subscription       `json:"subscriptions,omitempty"`
-	Invoices           map[uuid.UUID]*Invoice            `json:"invoices,omitempty"`
-	GatewayConfigs     map[string]*PaymentGatewayConfig  `json:"gateway_configs,omitempty"`
-	HostingAccounts    map[uuid.UUID]*HostingAccount     `json:"hosting_accounts,omitempty"`
+	Orgs               map[uuid.UUID]*Organization            `json:"orgs"`
+	OrgsBySlug         map[string]uuid.UUID                   `json:"orgs_by_slug"`
+	Users              map[uuid.UUID]*User                    `json:"users"`
+	UsersByEmail       map[string]uuid.UUID                   `json:"users_by_email"`
+	Servers            map[uuid.UUID]*Server                  `json:"servers"`
+	Tokens             map[string]*ServerEnrollmentToken      `json:"tokens"`
+	Websites           map[uuid.UUID]*Website                 `json:"websites"`
+	Databases          map[uuid.UUID]*Database                `json:"databases"`
+	DatabaseUsers      map[uuid.UUID]*DatabaseUser            `json:"database_users"`
+	SSLCerts           map[uuid.UUID]*SSLCertificate          `json:"ssl_certs"`
+	EmailDomains       map[uuid.UUID]*EmailDomain             `json:"email_domains"`
+	EmailMailboxes     map[uuid.UUID]*EmailMailbox            `json:"email_mailboxes"`
+	EmailAliases       map[uuid.UUID]*EmailAlias              `json:"email_aliases"`
+	WebServerInstances map[string]*WebServerInstance          `json:"web_server_instances"`
+	WebServerVHosts    map[string]*WebServerVHost             `json:"web_server_vhosts"`
+	HostingPlans       map[uuid.UUID]*HostingPlan             `json:"hosting_plans,omitempty"`
+	Subscriptions      map[uuid.UUID]*Subscription            `json:"subscriptions,omitempty"`
+	Invoices           map[uuid.UUID]*Invoice                 `json:"invoices,omitempty"`
+	GatewayConfigs     map[string]*PaymentGatewayConfig       `json:"gateway_configs,omitempty"`
+	HostingAccounts    map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
+	TLDPricings        map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
+	RegistrarConfigs   map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -304,6 +316,8 @@ func (m *MemoryStore) saveToDiskLocked() {
 		Invoices:           m.invoices,
 		GatewayConfigs:     m.gatewayConfigs,
 		HostingAccounts:    m.hostingAccounts,
+		TLDPricings:        m.tldPricings,
+		RegistrarConfigs:   m.registrarConfigs,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -385,6 +399,12 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.HostingAccounts != nil {
 		m.hostingAccounts = data.HostingAccounts
 	}
+	if data.TLDPricings != nil {
+		m.tldPricings = data.TLDPricings
+	}
+	if data.RegistrarConfigs != nil {
+		m.registrarConfigs = data.RegistrarConfigs
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -423,10 +443,13 @@ func NewMemoryStore() *MemoryStore {
 		invoices:            make(map[uuid.UUID]*Invoice),
 		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
 		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
+		tldPricings:         make(map[string]*TLDPricing),
+		registrarConfigs:    make(map[string]*DomainRegistrarConfig),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
 	m.seedAccountData()
+	m.seedTLDData()
 	return m
 }
 

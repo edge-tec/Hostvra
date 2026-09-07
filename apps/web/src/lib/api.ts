@@ -825,4 +825,71 @@ export interface HostingAccount {
   updated_at: string;
 }
 
+export interface TLDPricing {
+  id: string;
+  tld: string;
+  register_price: number;
+  renew_price: number;
+  transfer_price: number;
+  currency: string;
+  min_years: number;
+  max_years: number;
+  enabled: boolean;
+  is_popular: boolean;
+  category: string;
+  updated_at: string;
+}
 
+export interface WhoisRecord {
+  domain: string;
+  registrar: string;
+  whois_server?: string;
+  created_date?: string;
+  expiry_date?: string;
+  updated_date?: string;
+  status?: string[];
+  nameservers?: string[];
+  dnssec?: string;
+  registrant?: string;
+  admin_email?: string;
+  raw_whois?: string;
+  queried_at: string;
+}
+
+export interface DomainRegistrarConfig {
+  id: string;
+  organization_id?: string;
+  registrar: 'namecheap' | 'resellerclub' | 'cloudflare' | 'enom' | string;
+  display_name: string;
+  api_user?: string;
+  api_key?: string;
+  sandbox: boolean;
+  enabled: boolean;
+  is_default: boolean;
+  webhook_secret?: string;
+  updated_at: string;
+}
+
+export interface DomainSearchResultItem {
+  domain: string;
+  tld: string;
+  available: boolean;
+  register_price: number;
+  renew_price: number;
+  transfer_price: number;
+  currency: string;
+  is_popular: boolean;
+}
+
+export interface DomainOrderPayload {
+  domain: string;
+  action: 'register' | 'transfer' | 'renew';
+  years: number;
+  whois_privacy: boolean;
+  auto_renew: boolean;
+  client_name?: string;
+  client_email?: string;
+  client_phone?: string;
+  client_address?: string;
+  payment_method?: string;
+}
