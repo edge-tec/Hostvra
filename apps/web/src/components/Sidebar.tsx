@@ -70,7 +70,7 @@ const navGroups: NavGroup[] = [
       { label: 'Terminal', href: '/terminal', icon: Terminal, badge: 'CLI', badgeColor: 'blue' },
       { label: 'Cron Jobs', href: '/cron', icon: Clock },
       { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
-      { label: 'DNS Zones', href: '/dns', icon: Network },
+      { label: 'Domains & DNS', href: '/domains', icon: Network },
       { label: 'Firewall', href: '/firewall', icon: Shield },
       { label: 'WAF / ModSecurity', href: '/waf', icon: ShieldAlert, badge: 'OWASP', badgeColor: 'purple' },
       { label: 'Backups', href: '/backups', icon: DownloadCloud },
