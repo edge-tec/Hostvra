@@ -235,19 +235,91 @@ func (s *MemoryStore) SaveKnowledgeArticle(ctx context.Context, article *Knowled
 }
 
 // ----------------------------------------------------------------------------
+// Canned Responses & Support Stats
+// ----------------------------------------------------------------------------
+
+func (s *MemoryStore) ListCannedResponses(ctx context.Context) ([]CannedResponse, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []CannedResponse
+	result = append(result, s.cannedResponses...)
+	return result, nil
+}
+
+func (s *MemoryStore) SaveCannedResponse(ctx context.Context, c *CannedResponse) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if c.ID == uuid.Nil {
+		c.ID = uuid.New()
+	}
+	c.CreatedAt = time.Now().UTC()
+
+	for i, existing := range s.cannedResponses {
+		if existing.ID == c.ID {
+			s.cannedResponses[i] = *c
+			return nil
+		}
+	}
+	s.cannedResponses = append(s.cannedResponses, *c)
+	return nil
+}
+
+func (s *MemoryStore) GetSupportStats(ctx context.Context, orgID uuid.UUID) (*SupportStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stats := &SupportStats{
+		TotalTickets:    len(s.tickets),
+		AvgResponseMins: 12,
+		ResolutionRate:  99.2,
+		TotalArticles:   len(s.articles),
+	}
+
+	for _, t := range s.tickets {
+		if t.Status == TicketStatusOpen || t.Status == TicketStatusInProgress || t.Status == TicketStatusCustomerReply {
+			stats.OpenTickets++
+		} else if t.Status == TicketStatusAnswered {
+			stats.AnsweredTickets++
+		} else if t.Status == TicketStatusClosed {
+			stats.ClosedTickets++
+		}
+	}
+
+	var helpful, unhelpful int
+	for _, a := range s.articles {
+		helpful += a.HelpfulVotes
+		unhelpful += a.UnhelpfulVotes
+	}
+	if helpful+unhelpful > 0 {
+		stats.ArticleHelpfulPct = float64(helpful) / float64(helpful+unhelpful) * 100
+	} else {
+		stats.ArticleHelpfulPct = 100
+	}
+
+	return stats, nil
+}
+
+// ----------------------------------------------------------------------------
 // Seed Tickets & Knowledgebase Data
 // ----------------------------------------------------------------------------
 
 func (m *MemoryStore) seedSupportData() {
-	if len(m.tickets) == 0 && len(m.articles) == 0 {
-		tkts, rpls, arts := seedSupportDataInternal()
+	tkts, rpls, arts, cans := seedSupportDataInternal()
+	if len(m.tickets) == 0 {
 		m.tickets = tkts
 		m.ticketReplies = rpls
+	}
+	if len(m.articles) == 0 {
 		m.articles = arts
+	}
+	if len(m.cannedResponses) == 0 {
+		m.cannedResponses = cans
 	}
 }
 
-func seedSupportDataInternal() ([]Ticket, []TicketReply, []KnowledgeArticle) {
+func seedSupportDataInternal() ([]Ticket, []TicketReply, []KnowledgeArticle, []CannedResponse) {
 	now := time.Now().UTC()
 
 	t1ID := uuid.MustParse("50000000-0000-0000-0000-000000000001")
@@ -396,7 +468,42 @@ func seedSupportDataInternal() ([]Ticket, []TicketReply, []KnowledgeArticle) {
 		},
 	}
 
-	return tickets, replies, articles
+	canned := []CannedResponse{
+		{
+			ID:         uuid.New(),
+			Title:      "DNS Propagation Notice",
+			Shortcut:   "dns_prop",
+			Department: DeptTechnical,
+			Content:    "Hello,\n\nWe have checked your DNS configuration. Your records have been properly provisioned on Hostvra Anycast nameservers. Due to ISP caching, global propagation may take 15 to 60 minutes. You can clear your local resolver cache by running `ipconfig /flushdns` (Windows) or `sudo dscacheutil -flushcache` (Mac).\n\nBest regards,\nHostvra Support Team",
+			CreatedAt:  now,
+		},
+		{
+			ID:         uuid.New(),
+			Title:      "PHP Memory & Upload Limits",
+			Shortcut:   "php_limit",
+			Department: DeptTechnical,
+			Content:    "Hello,\n\nWe have updated your PHP runtime limits. The configuration `memory_limit` has been set to 512M and `upload_max_filesize` / `post_max_size` to 128M. PHP-FPM pools have been reloaded. Please test your application now.\n\nBest regards,\nHostvra Support Team",
+			CreatedAt:  now,
+		},
+		{
+			ID:         uuid.New(),
+			Title:      "SSL Certificate Verification",
+			Shortcut:   "ssl_verify",
+			Department: DeptTechnical,
+			Content:    "Hello,\n\nTo complete automated Let's Encrypt SSL issuance, port 80 and 443 must be reachable and your A record must point directly to your server IP. We verified your DNS record and re-issued the 90-day SSL certificate. HTTPS is now active.\n\nBest regards,\nHostvra Support Team",
+			CreatedAt:  now,
+		},
+		{
+			ID:         uuid.New(),
+			Title:      "Invoice Payment Confirmation",
+			Shortcut:   "invoice_paid",
+			Department: DeptBilling,
+			Content:    "Hello,\n\nThank you for your payment. Your invoice has been marked PAID and automated renewal for your hosting subscription is confirmed. You can download your PDF tax receipt directly from the Billing tab.\n\nBest regards,\nHostvra Billing Department",
+			CreatedAt:  now,
+		},
+	}
+
+	return tickets, replies, articles, canned
 }
 
 // ============================================================================
@@ -451,4 +558,19 @@ func (p *PostgresStore) VoteKnowledgeArticle(ctx context.Context, id uuid.UUID, 
 func (p *PostgresStore) SaveKnowledgeArticle(ctx context.Context, article *KnowledgeArticle) error {
 	m := NewMemoryStore()
 	return m.SaveKnowledgeArticle(ctx, article)
+}
+
+func (p *PostgresStore) ListCannedResponses(ctx context.Context) ([]CannedResponse, error) {
+	m := NewMemoryStore()
+	return m.ListCannedResponses(ctx)
+}
+
+func (p *PostgresStore) SaveCannedResponse(ctx context.Context, c *CannedResponse) error {
+	m := NewMemoryStore()
+	return m.SaveCannedResponse(ctx, c)
+}
+
+func (p *PostgresStore) GetSupportStats(ctx context.Context, orgID uuid.UUID) (*SupportStats, error) {
+	m := NewMemoryStore()
+	return m.GetSupportStats(ctx, orgID)
 }

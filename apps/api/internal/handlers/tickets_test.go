@@ -43,11 +43,15 @@ func TestSupportHandler_Flow(t *testing.T) {
 		})
 	})
 
+	r.Get("/support/stats", h.GetStats)
 	r.Get("/support/tickets", h.ListTickets)
 	r.Post("/support/tickets", h.CreateTicket)
 	r.Get("/support/tickets/{id}", h.GetTicket)
 	r.Post("/support/tickets/{id}/reply", h.ReplyTicket)
 	r.Post("/support/tickets/{id}/close", h.CloseTicket)
+	r.Get("/support/canned", h.ListCannedResponses)
+	r.Post("/support/canned", h.SaveCannedResponse)
+	r.Post("/support/ai-assistant", h.AskAIAssistant)
 	r.Get("/support/articles", h.ListArticles)
 	r.Get("/support/articles/{idOrSlug}", h.GetArticle)
 	r.Post("/support/articles/{id}/vote", h.VoteArticle)
@@ -159,6 +163,77 @@ func TestSupportHandler_Flow(t *testing.T) {
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+	})
+
+	// 6. Get Stats
+	t.Run("GetStats", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/support/stats", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+
+		var resp struct {
+			Success bool               `json:"success"`
+			Data    store.SupportStats `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode stats: %v", err)
+		}
+		if resp.Data.TotalTickets == 0 {
+			t.Fatalf("expected > 0 total tickets")
+		}
+	})
+
+	// 7. Canned Responses
+	t.Run("CannedResponses", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/support/canned", nil)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+
+		var resp struct {
+			Success bool                   `json:"success"`
+			Data    []store.CannedResponse `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode canned responses: %v", err)
+		}
+		if len(resp.Data) == 0 {
+			t.Fatalf("expected seeded canned responses")
+		}
+	})
+
+	// 8. AI Assistant
+	t.Run("AskAIAssistant", func(t *testing.T) {
+		payload := map[string]string{
+			"query": "How do I fix 502 Bad Gateway?",
+		}
+		buf, _ := json.Marshal(payload)
+		req := httptest.NewRequest("POST", "/support/ai-assistant", bytes.NewReader(buf))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		var resp struct {
+			Success bool                `json:"success"`
+			Data    AIAssistantResponse `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to decode AI response: %v", err)
+		}
+		if resp.Data.Answer == "" {
+			t.Fatalf("expected AI answer")
 		}
 	})
 }

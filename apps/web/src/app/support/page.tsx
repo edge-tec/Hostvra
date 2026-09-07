@@ -8,7 +8,6 @@ import {
   BookOpen,
   Plus,
   Search,
-  Filter,
   CheckCircle2,
   Clock,
   AlertCircle,
@@ -17,23 +16,26 @@ import {
   Send,
   User,
   Shield,
-  HelpCircle,
   ThumbsUp,
   ThumbsDown,
   Eye,
-  Tag,
   ArrowRight,
   RefreshCw,
-  ExternalLink,
   Lock,
-  FileText,
-  Check
+  Sparkles,
+  Bot,
+  Zap,
+  Check,
+  CheckCheck
 } from 'lucide-react';
 import {
   apiFetch,
   Ticket,
   TicketReply,
   KnowledgeArticle,
+  CannedResponse,
+  SupportStats,
+  AIAssistantResponse,
   TicketDepartment,
   TicketPriority,
   TicketStatus
@@ -149,14 +151,61 @@ const INITIAL_ARTICLES: KnowledgeArticle[] = [
   },
 ];
 
+const INITIAL_CANNED: CannedResponse[] = [
+  {
+    id: 'can-1',
+    title: 'DNS Propagation Notice',
+    shortcut: 'dns_prop',
+    department: 'technical',
+    content: 'Hello,\n\nWe have verified your DNS records. They are fully provisioned across our global Anycast nameservers. Due to ISP DNS caching, global propagation may take 15 to 60 minutes. You can test directly using our Whois Inspector or clear local cache via `ipconfig /flushdns`.\n\nBest regards,\nHostvra Support Team',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'can-2',
+    title: 'PHP Memory & Upload Limits',
+    shortcut: 'php_limit',
+    department: 'technical',
+    content: 'Hello,\n\nWe have updated your PHP runtime limits. The configuration `memory_limit` has been set to 512M and `upload_max_filesize` / `post_max_size` to 128M. PHP-FPM pools have been reloaded. Please test your application now.\n\nBest regards,\nHostvra Support Team',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'can-3',
+    title: 'SSL Certificate Verification',
+    shortcut: 'ssl_verify',
+    department: 'technical',
+    content: 'Hello,\n\nTo complete automated Let\'s Encrypt SSL issuance, port 80 and 443 must be reachable and your A record must point directly to your server IP. We verified your DNS record and re-issued the 90-day SSL certificate. HTTPS is now active.\n\nBest regards,\nHostvra Support Team',
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'can-4',
+    title: 'Invoice Payment Confirmation',
+    shortcut: 'invoice_paid',
+    department: 'billing',
+    content: 'Hello,\n\nThank you for your payment. Your invoice has been marked PAID and automated renewal for your hosting subscription is confirmed. You can download your PDF tax receipt directly from the Billing tab.\n\nBest regards,\nHostvra Billing Department',
+    created_at: new Date().toISOString()
+  }
+];
+
 export default function SupportPage() {
-  const [activeTab, setActiveTab] = useState<'tickets' | 'knowledgebase'>('tickets');
+  const [activeTab, setActiveTab] = useState<'tickets' | 'ai-assistant' | 'knowledgebase'>('tickets');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Tickets State
   const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+  const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>(INITIAL_CANNED);
+  const [stats, setStats] = useState<SupportStats | null>({
+    total_tickets: 2,
+    open_tickets: 1,
+    answered_tickets: 1,
+    closed_tickets: 0,
+    avg_response_mins: 12,
+    resolution_rate: 99.2,
+    total_articles: 5,
+    article_helpful_pct: 98.4
+  });
+
   const [statusFilter, setStatusFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
   const [searchFilter, setSearchFilter] = useState('');
@@ -166,6 +215,7 @@ export default function SupportPage() {
   const [ticketReplies, setTicketReplies] = useState<TicketReply[]>([]);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [replyMessage, setReplyMessage] = useState('');
+  const [replyIsPrivate, setReplyIsPrivate] = useState(false);
   const [isSendingReply, setIsSendingReply] = useState(false);
 
   // Create Ticket Modal
@@ -184,13 +234,20 @@ export default function SupportPage() {
   const [readingArticle, setReadingArticle] = useState<KnowledgeArticle | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
 
-  // Fetch Tickets & Articles
+  // AI Diagnostic Assistant State
+  const [aiQuery, setAiQuery] = useState('');
+  const [aiResponse, setAiResponse] = useState<AIAssistantResponse | null>(null);
+  const [isAskingAI, setIsAskingAI] = useState(false);
+
+  // Fetch Tickets & Articles & Stats
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [ticketsRes, articlesRes] = await Promise.all([
+      const [ticketsRes, articlesRes, statsRes, cannedRes] = await Promise.all([
         apiFetch<Ticket[]>('/api/v1/support/tickets'),
-        apiFetch<KnowledgeArticle[]>('/api/v1/support/articles')
+        apiFetch<KnowledgeArticle[]>('/api/v1/support/articles'),
+        apiFetch<SupportStats>('/api/v1/support/stats'),
+        apiFetch<CannedResponse[]>('/api/v1/support/canned')
       ]);
 
       if (ticketsRes.success && ticketsRes.data && ticketsRes.data.length > 0) {
@@ -198,6 +255,12 @@ export default function SupportPage() {
       }
       if (articlesRes.success && articlesRes.data && articlesRes.data.length > 0) {
         setArticles(articlesRes.data);
+      }
+      if (statsRes.success && statsRes.data) {
+        setStats(statsRes.data);
+      }
+      if (cannedRes.success && cannedRes.data && cannedRes.data.length > 0) {
+        setCannedResponses(cannedRes.data);
       }
     } catch (err: any) {
       console.warn('Using seeded support data:', err);
@@ -215,6 +278,7 @@ export default function SupportPage() {
     setSelectedTicket(ticket);
     setDetailModalOpen(true);
     setReplyMessage('');
+    setReplyIsPrivate(false);
 
     try {
       const res = await apiFetch<{ ticket: Ticket; replies: TicketReply[] }>(
@@ -252,7 +316,7 @@ export default function SupportPage() {
               user_email: 'support@hostvra.com',
               user_name: 'Hostvra Support Specialist',
               is_staff: true,
-              message: 'Hello ' + ticket.user_name + ', our senior engineering team has looked into your query. The configuration has been updated and the service is performing normally.',
+              message: 'Hello ' + ticket.user_name + ', our engineering team has looked into your query. The configuration has been updated and the service is performing normally.',
               created_at: ticket.last_reply_at
             }
           ]
@@ -274,7 +338,10 @@ export default function SupportPage() {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: replyMessage.trim() })
+          body: JSON.stringify({
+            message: replyMessage.trim(),
+            is_private_note: replyIsPrivate
+          })
         }
       );
 
@@ -283,25 +350,28 @@ export default function SupportPage() {
         ticket_id: selectedTicket.id,
         user_id: 'current-user',
         user_email: 'you@hostvra.com',
-        user_name: 'Customer Reply',
-        is_staff: false,
+        user_name: replyIsPrivate ? 'Internal Staff Note' : 'Customer Reply',
+        is_staff: replyIsPrivate,
+        is_private_note: replyIsPrivate,
         message: replyMessage.trim(),
         created_at: new Date().toISOString()
       };
 
       setTicketReplies((prev) => [...prev, newReply]);
       setReplyMessage('');
-      setSuccessMessage('Reply sent successfully.');
+      setReplyIsPrivate(false);
+      setSuccessMessage(replyIsPrivate ? 'Internal note added.' : 'Reply sent successfully.');
 
-      // Update ticket status
-      setTickets((prev) =>
-        prev.map((t) =>
-          t.id === selectedTicket.id
-            ? { ...t, status: 'customer_reply', last_reply_at: new Date().toISOString(), replies_count: t.replies_count + 1 }
-            : t
-        )
-      );
-      setSelectedTicket((prev) => prev ? { ...prev, status: 'customer_reply', replies_count: prev.replies_count + 1 } : null);
+      if (!replyIsPrivate) {
+        setTickets((prev) =>
+          prev.map((t) =>
+            t.id === selectedTicket.id
+              ? { ...t, status: 'customer_reply', last_reply_at: new Date().toISOString(), replies_count: t.replies_count + 1 }
+              : t
+          )
+        );
+        setSelectedTicket((prev) => prev ? { ...prev, status: 'customer_reply', replies_count: prev.replies_count + 1 } : null);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to submit reply.');
     } finally {
@@ -380,6 +450,63 @@ export default function SupportPage() {
     } finally {
       setIsCreatingTicket(false);
     }
+  };
+
+  // Ask AI Diagnostic Assistant
+  const handleAskAI = async (e?: React.FormEvent, customQuery?: string) => {
+    if (e) e.preventDefault();
+    const queryToUse = customQuery || aiQuery;
+    if (!queryToUse.trim()) return;
+
+    try {
+      setIsAskingAI(true);
+      setError(null);
+      const res = await apiFetch<AIAssistantResponse>('/api/v1/support/ai-assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: queryToUse.trim() })
+      });
+
+      if (res.success && res.data) {
+        setAiResponse(res.data);
+      } else {
+        generateFallbackAIResponse(queryToUse.trim());
+      }
+    } catch {
+      generateFallbackAIResponse(queryToUse.trim());
+    } finally {
+      setIsAskingAI(false);
+    }
+  };
+
+  const generateFallbackAIResponse = (q: string) => {
+    const lower = q.toLowerCase();
+    let answer = "Our automated diagnostic engine analyzed your inquiry. Review the recommended actions below or escalate directly to our engineering team.";
+    let action = "Open a priority support ticket.";
+
+    if (lower.includes('502') || lower.includes('bad gateway') || lower.includes('php')) {
+      answer = "A 502 Bad Gateway usually indicates that your PHP-FPM pool or backend Node.js process stopped or ran out of execution timeout. Check Websites -> PHP Configuration and verify memory_limit is at least 512M.";
+      action = "Restart PHP-FPM service from Dashboard -> Services or review error.log.";
+    } else if (lower.includes('ssl') || lower.includes('https')) {
+      answer = "For SSL issues: ensure your domain's A record points directly to your Hostvra server IP, then go to SSL Certificates -> Select Domain -> Apply Let's Encrypt Certificate.";
+      action = "Verify A record in DNS and click Apply SSL.";
+    }
+
+    setAiResponse({
+      answer,
+      confidence: "high",
+      recommended_action: action,
+      related_articles: articles.slice(0, 2),
+      suggested_ticket: true
+    });
+  };
+
+  // Convert AI Query into Ticket
+  const convertAIToTicket = () => {
+    if (!aiQuery) return;
+    setNewSubject(`Assistance Needed: ${aiQuery.slice(0, 60)}`);
+    setNewInitialMessage(`Automated Diagnosis Context:\nUser Query: ${aiQuery}\n\nDiagnosis: ${aiResponse?.answer || 'N/A'}\n\nPlease escalate to a support engineer.`);
+    setCreateModalOpen(true);
   };
 
   // Vote on Article
@@ -527,7 +654,7 @@ export default function SupportPage() {
               24/7 Priority Support & Helpdesk
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Live ticket replies, technical assistance, billing resolution & comprehensive knowledgebase
+              Live ticket replies, AI diagnostic assistant, billing resolution & comprehensive knowledgebase
             </p>
           </div>
 
@@ -575,19 +702,19 @@ export default function SupportPage() {
               <MessageSquare className="w-5 h-5 text-primary" />
             </div>
             <div className="text-2xl font-black mt-2">
-              {tickets.filter((t) => t.status !== 'closed').length}
+              {stats?.open_tickets ?? tickets.filter((t) => t.status !== 'closed').length}
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              {tickets.filter((t) => t.status === 'answered').length} waiting customer review
+              {stats?.answered_tickets ?? tickets.filter((t) => t.status === 'answered').length} awaiting customer review
             </div>
           </div>
 
           <div className="p-5 rounded-2xl bg-card border border-border/60 shadow-sm">
             <div className="flex items-center justify-between text-muted-foreground">
-              <span className="text-xs font-semibold uppercase tracking-wider">Average Response Time</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">Avg Response Time</span>
               <Clock className="w-5 h-5 text-emerald-500" />
             </div>
-            <div className="text-2xl font-black mt-2">12 mins</div>
+            <div className="text-2xl font-black mt-2">{stats?.avg_response_mins ?? 12} mins</div>
             <div className="text-xs text-muted-foreground mt-1">24/7 technical shift active</div>
           </div>
 
@@ -596,25 +723,27 @@ export default function SupportPage() {
               <span className="text-xs font-semibold uppercase tracking-wider">Knowledge Base</span>
               <BookOpen className="w-5 h-5 text-purple-500" />
             </div>
-            <div className="text-2xl font-black mt-2">{articles.length} Articles</div>
-            <div className="text-xs text-muted-foreground mt-1">Guides, tutorials & troubleshooting</div>
+            <div className="text-2xl font-black mt-2">{articles.length} Guides</div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {stats?.article_helpful_pct ?? 98}% helpful rating
+            </div>
           </div>
 
           <div className="p-5 rounded-2xl bg-card border border-border/60 shadow-sm">
             <div className="flex items-center justify-between text-muted-foreground">
-              <span className="text-xs font-semibold uppercase tracking-wider">Support SLA</span>
+              <span className="text-xs font-semibold uppercase tracking-wider">Resolution SLA</span>
               <Shield className="w-5 h-5 text-amber-500" />
             </div>
-            <div className="text-2xl font-black mt-2">99.9%</div>
-            <div className="text-xs text-muted-foreground mt-1">First-contact resolution guarantee</div>
+            <div className="text-2xl font-black mt-2">{stats?.resolution_rate ?? 99.2}%</div>
+            <div className="text-xs text-muted-foreground mt-1">Priority resolution guarantee</div>
           </div>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-2 border-b border-border/60 pb-1">
+        <div className="flex items-center gap-2 border-b border-border/60 pb-1 overflow-x-auto">
           <button
             onClick={() => setActiveTab('tickets')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
               activeTab === 'tickets'
                 ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
@@ -625,8 +754,20 @@ export default function SupportPage() {
           </button>
 
           <button
+            onClick={() => setActiveTab('ai-assistant')}
+            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+              activeTab === 'ai-assistant'
+                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            AI Diagnostic Assistant
+          </button>
+
+          <button
             onClick={() => setActiveTab('knowledgebase')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all ${
+            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
               activeTab === 'knowledgebase'
                 ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
@@ -762,7 +903,143 @@ export default function SupportPage() {
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: KNOWLEDGEBASE ARTICLES                                             */}
+        {/* TAB 2: AI DIAGNOSTIC ASSISTANT                                            */}
+        {/* ========================================================================= */}
+        {activeTab === 'ai-assistant' && (
+          <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="p-8 rounded-3xl bg-gradient-to-br from-card via-card to-primary/10 border border-border/70 shadow-sm text-center space-y-4">
+              <div className="w-14 h-14 rounded-2xl bg-primary/15 text-primary mx-auto flex items-center justify-center">
+                <Sparkles className="w-7 h-7" />
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-black">AI Server & Hosting Diagnostic Assistant</h2>
+              <p className="text-sm text-muted-foreground max-w-xl mx-auto">
+                Ask any technical question or describe an issue (e.g. 502 Bad Gateway, SSL failure, DNS propagation). Get instant guided diagnosis before opening a ticket.
+              </p>
+
+              <form onSubmit={handleAskAI} className="mt-4 flex flex-col sm:flex-row gap-2 max-w-2xl mx-auto">
+                <div className="relative flex-1">
+                  <Bot className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={aiQuery}
+                    onChange={(e) => setAiQuery(e.target.value)}
+                    placeholder="Describe your issue or ask a question..."
+                    className="w-full pl-12 pr-4 py-3.5 rounded-2xl bg-background border border-border focus:ring-2 focus:ring-primary focus:outline-none text-sm text-foreground shadow-sm"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isAskingAI || !aiQuery.trim()}
+                  className="px-6 py-3.5 rounded-2xl bg-primary text-primary-foreground font-bold text-sm shadow-md hover:opacity-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isAskingAI ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4" />
+                      Diagnose Issue
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Sample Quick Questions */}
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                <span className="text-xs text-muted-foreground">Try asking:</span>
+                {[
+                  'My site shows 502 Bad Gateway',
+                  'Why is SSL certificate not renewing?',
+                  'How to point custom domain nameservers?',
+                  'How to pay hosting invoice with bKash?'
+                ].map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => {
+                      setAiQuery(q);
+                      handleAskAI(undefined, q);
+                    }}
+                    className="px-3 py-1 rounded-xl text-xs bg-muted/60 hover:bg-primary/10 hover:text-primary border border-border transition-colors text-muted-foreground"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* AI Diagnosis Result Dossier */}
+            {aiResponse && (
+              <div className="p-6 sm:p-8 rounded-3xl bg-card border border-border/80 shadow-lg space-y-6 animate-in fade-in zoom-in-95">
+                <div className="flex items-center justify-between border-b border-border/50 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                      <CheckCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-base text-foreground">Diagnostic Analysis</h3>
+                      <div className="text-xs text-muted-foreground">
+                        Confidence: <span className="font-bold text-emerald-500 uppercase">{aiResponse.confidence}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={convertAIToTicket}
+                    className="px-4 py-2 rounded-xl bg-primary/15 hover:bg-primary/25 text-primary text-xs font-bold transition-colors border border-primary/20 flex items-center gap-1.5"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    Escalate to Priority Ticket
+                  </button>
+                </div>
+
+                <div className="space-y-4 text-sm text-foreground leading-relaxed">
+                  <p className="p-4 rounded-2xl bg-muted/30 border border-border/50">
+                    {aiResponse.answer}
+                  </p>
+
+                  <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20">
+                    <span className="text-xs font-bold uppercase tracking-wider text-primary block mb-1">
+                      Recommended Action:
+                    </span>
+                    <p className="text-xs text-muted-foreground font-medium">
+                      {aiResponse.recommended_action}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Relevant Articles */}
+                {aiResponse.related_articles && aiResponse.related_articles.length > 0 && (
+                  <div className="border-t border-border/50 pt-4 space-y-3">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">
+                      Recommended Knowledgebase Guides:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {aiResponse.related_articles.map((art) => (
+                        <div
+                          key={art.id}
+                          onClick={() => {
+                            setReadingArticle(art);
+                            setHasVoted(false);
+                          }}
+                          className="p-4 rounded-xl bg-muted/40 border border-border hover:border-primary/50 cursor-pointer transition-all"
+                        >
+                          <h4 className="text-xs font-bold text-foreground mb-1">{art.title}</h4>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2">{art.summary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: KNOWLEDGEBASE ARTICLES                                             */}
         {/* ========================================================================= */}
         {activeTab === 'knowledgebase' && (
           <div className="space-y-6">
@@ -896,7 +1173,9 @@ export default function SupportPage() {
                   <div
                     key={r.id}
                     className={`p-4 rounded-2xl border text-sm space-y-2 ${
-                      r.is_staff
+                      r.is_private_note
+                        ? 'bg-amber-500/10 border-amber-500/30'
+                        : r.is_staff
                         ? 'bg-primary/5 border-primary/20 ml-6'
                         : 'bg-muted/30 border-border/60 mr-6'
                     }`}
@@ -905,16 +1184,29 @@ export default function SupportPage() {
                       <div className="flex items-center gap-2">
                         <div
                           className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold ${
-                            r.is_staff
+                            r.is_private_note
+                              ? 'bg-amber-500 text-amber-950'
+                              : r.is_staff
                               ? 'bg-primary text-primary-foreground'
                               : 'bg-muted text-foreground'
                           }`}
                         >
-                          {r.is_staff ? <Shield className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                          {r.is_private_note ? (
+                            <Lock className="w-3.5 h-3.5" />
+                          ) : r.is_staff ? (
+                            <Shield className="w-3.5 h-3.5" />
+                          ) : (
+                            <User className="w-3.5 h-3.5" />
+                          )}
                         </div>
                         <div>
                           <span className="font-bold text-foreground text-xs">{r.user_name}</span>
-                          {r.is_staff && (
+                          {r.is_private_note && (
+                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-amber-500/20 text-amber-600 dark:text-amber-400">
+                              Internal Staff Note
+                            </span>
+                          )}
+                          {r.is_staff && !r.is_private_note && (
                             <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-primary/20 text-primary">
                               Staff
                             </span>
@@ -936,28 +1228,73 @@ export default function SupportPage() {
               {/* Reply Composer Form */}
               {selectedTicket.status !== 'closed' ? (
                 <form onSubmit={handleSendReply} className="p-4 border-t border-border/60 bg-muted/10 space-y-3">
+                  {/* Macro Selector */}
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Canned Macro:</span>
+                      <select
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const found = cannedResponses.find((c) => c.shortcut === val);
+                          if (found) {
+                            setReplyMessage((prev) => (prev ? prev + '\n\n' + found.content : found.content));
+                          }
+                        }}
+                        className="px-2 py-1 rounded-lg bg-background border border-border text-xs focus:outline-none"
+                      >
+                        <option value="">Insert Predefined Reply...</option>
+                        {cannedResponses.map((c) => (
+                          <option key={c.id} value={c.shortcut}>
+                            {c.title}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={replyIsPrivate}
+                        onChange={(e) => setReplyIsPrivate(e.target.checked)}
+                        className="rounded text-amber-500 focus:ring-amber-500"
+                      />
+                      <span className={replyIsPrivate ? 'text-amber-500 font-bold' : ''}>
+                        Private Staff Note
+                      </span>
+                    </label>
+                  </div>
+
                   <textarea
                     rows={3}
                     value={replyMessage}
                     onChange={(e) => setReplyMessage(e.target.value)}
-                    placeholder="Type your response to support staff..."
+                    placeholder={
+                      replyIsPrivate
+                        ? 'Type an internal staff note (will NOT be visible to client)...'
+                        : 'Type your response to support staff...'
+                    }
                     className="w-full px-4 py-2.5 rounded-2xl bg-background border border-border text-xs focus:ring-2 focus:ring-primary focus:outline-none text-foreground placeholder:text-muted-foreground resize-none"
                   />
+
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground">
-                      Replies are sent directly to the assigned engineering queue.
+                      {replyIsPrivate ? 'Note saved internally.' : 'Reply notified via email and portal.'}
                     </span>
                     <button
                       type="submit"
                       disabled={isSendingReply || !replyMessage.trim()}
-                      className="px-5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-md hover:opacity-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                      className={`px-5 py-2 rounded-xl font-bold text-xs shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 ${
+                        replyIsPrivate
+                          ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/20'
+                          : 'bg-primary hover:opacity-95 text-primary-foreground shadow-primary/25'
+                      }`}
                     >
                       {isSendingReply ? (
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <Send className="w-3.5 h-3.5" />
                       )}
-                      Send Reply
+                      {replyIsPrivate ? 'Save Internal Note' : 'Send Reply'}
                     </button>
                   </div>
                 </form>

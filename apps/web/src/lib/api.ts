@@ -924,6 +924,7 @@ export interface TicketReply {
   user_email: string;
   user_name: string;
   is_staff: boolean;
+  is_private_note?: boolean;
   message: string;
   attachments?: string[];
   created_at: string;
@@ -943,3 +944,32 @@ export interface KnowledgeArticle {
   created_at: string;
   updated_at: string;
 }
+
+export interface CannedResponse {
+  id: string;
+  title: string;
+  shortcut: string;
+  department: TicketDepartment;
+  content: string;
+  created_at: string;
+}
+
+export interface SupportStats {
+  total_tickets: number;
+  open_tickets: number;
+  answered_tickets: number;
+  closed_tickets: number;
+  avg_response_mins: number;
+  resolution_rate: number;
+  total_articles: number;
+  article_helpful_pct: number;
+}
+
+export interface AIAssistantResponse {
+  answer: string;
+  confidence: string;
+  recommended_action: string;
+  related_articles: KnowledgeArticle[];
+  suggested_ticket: boolean;
+}
+

@@ -54,15 +54,45 @@ type Ticket struct {
 }
 
 type TicketReply struct {
-	ID          uuid.UUID `json:"id"`
-	TicketID    uuid.UUID `json:"ticket_id"`
-	UserID      uuid.UUID `json:"user_id"`
-	UserEmail   string    `json:"user_email"`
-	UserName    string    `json:"user_name"`
-	IsStaff     bool      `json:"is_staff"`
-	Message     string    `json:"message"`
-	Attachments []string  `json:"attachments,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            uuid.UUID `json:"id"`
+	TicketID      uuid.UUID `json:"ticket_id"`
+	UserID        uuid.UUID `json:"user_id"`
+	UserEmail     string    `json:"user_email"`
+	UserName      string    `json:"user_name"`
+	IsStaff       bool      `json:"is_staff"`
+	IsPrivateNote bool      `json:"is_private_note"`
+	Message       string    `json:"message"`
+	Attachments   []string  `json:"attachments,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type CannedResponse struct {
+	ID         uuid.UUID        `json:"id"`
+	Title      string           `json:"title"`
+	Shortcut   string           `json:"shortcut"`
+	Department TicketDepartment `json:"department"`
+	Content    string           `json:"content"`
+	CreatedAt  time.Time        `json:"created_at"`
+}
+
+type SupportDepartmentConfig struct {
+	Department  TicketDepartment `json:"department"`
+	DisplayName string           `json:"display_name"`
+	Email       string           `json:"email"`
+	SLAHours    int              `json:"sla_hours"`
+	AutoReply   bool             `json:"auto_reply"`
+	Enabled     bool             `json:"enabled"`
+}
+
+type SupportStats struct {
+	TotalTickets     int     `json:"total_tickets"`
+	OpenTickets      int     `json:"open_tickets"`
+	AnsweredTickets  int     `json:"answered_tickets"`
+	ClosedTickets    int     `json:"closed_tickets"`
+	AvgResponseMins  int     `json:"avg_response_mins"`
+	ResolutionRate   float64 `json:"resolution_rate"`
+	TotalArticles    int     `json:"total_articles"`
+	ArticleHelpfulPct float64 `json:"article_helpful_pct"`
 }
 
 type KnowledgeArticle struct {
@@ -79,3 +109,4 @@ type KnowledgeArticle struct {
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
+

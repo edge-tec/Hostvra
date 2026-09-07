@@ -212,6 +212,9 @@ type Store interface {
 	GetKnowledgeArticle(ctx context.Context, idOrSlug string) (*KnowledgeArticle, error)
 	VoteKnowledgeArticle(ctx context.Context, id uuid.UUID, helpful bool) error
 	SaveKnowledgeArticle(ctx context.Context, article *KnowledgeArticle) error
+	ListCannedResponses(ctx context.Context) ([]CannedResponse, error)
+	SaveCannedResponse(ctx context.Context, c *CannedResponse) error
+	GetSupportStats(ctx context.Context, orgID uuid.UUID) (*SupportStats, error)
 
 	// Close
 	Close() error
@@ -259,6 +262,7 @@ type MemoryStore struct {
 	tickets             []Ticket
 	ticketReplies       []TicketReply
 	articles            []KnowledgeArticle
+	cannedResponses     []CannedResponse
 	filePath            string
 }
 
@@ -288,6 +292,7 @@ type memoryDumpData struct {
 	Tickets            []Ticket                               `json:"tickets,omitempty"`
 	TicketReplies      []TicketReply                          `json:"ticket_replies,omitempty"`
 	Articles           []KnowledgeArticle                     `json:"articles,omitempty"`
+	CannedResponses    []CannedResponse                       `json:"canned_responses,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -339,6 +344,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		Tickets:            m.tickets,
 		TicketReplies:      m.ticketReplies,
 		Articles:           m.articles,
+		CannedResponses:    m.cannedResponses,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -435,6 +441,9 @@ func (m *MemoryStore) loadFromDisk() {
 	if len(data.Articles) > 0 {
 		m.articles = data.Articles
 	}
+	if len(data.CannedResponses) > 0 {
+		m.cannedResponses = data.CannedResponses
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -478,6 +487,7 @@ func NewMemoryStore() *MemoryStore {
 		tickets:             make([]Ticket, 0),
 		ticketReplies:       make([]TicketReply, 0),
 		articles:            make([]KnowledgeArticle, 0),
+		cannedResponses:     make([]CannedResponse, 0),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

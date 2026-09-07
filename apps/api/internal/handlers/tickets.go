@@ -59,7 +59,7 @@ func (h *SupportHandler) ListTickets(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SupportHandler) GetTicket(w http.ResponseWriter, r *http.Request) {
-	_, ok := auth.GetClaims(r.Context())
+	claims, ok := auth.GetClaims(r.Context())
 	if !ok {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
 		return
@@ -78,14 +78,24 @@ func (h *SupportHandler) GetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isStaff := claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
+
 	replies, err := h.store.ListTicketReplies(r.Context(), id)
 	if err != nil {
 		replies = []store.TicketReply{}
 	}
 
+	var visibleReplies []store.TicketReply
+	for _, rep := range replies {
+		if rep.IsPrivateNote && !isStaff {
+			continue
+		}
+		visibleReplies = append(visibleReplies, rep)
+	}
+
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"ticket":  ticket,
-		"replies": replies,
+		"replies": visibleReplies,
 	}, nil)
 }
 
@@ -155,8 +165,9 @@ func (h *SupportHandler) CreateTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 type ReplyTicketRequest struct {
-	Message     string   `json:"message"`
-	Attachments []string `json:"attachments,omitempty"`
+	Message       string   `json:"message"`
+	Attachments   []string `json:"attachments,omitempty"`
+	IsPrivateNote bool     `json:"is_private_note,omitempty"`
 }
 
 func (h *SupportHandler) ReplyTicket(w http.ResponseWriter, r *http.Request) {
@@ -199,14 +210,15 @@ func (h *SupportHandler) ReplyTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := &store.TicketReply{
-		ID:          uuid.New(),
-		TicketID:    ticketID,
-		UserID:      claims.UserID,
-		UserEmail:   claims.Email,
-		UserName:    userName,
-		IsStaff:     isStaff,
-		Message:     strings.TrimSpace(req.Message),
-		Attachments: req.Attachments,
+		ID:            uuid.New(),
+		TicketID:      ticketID,
+		UserID:        claims.UserID,
+		UserEmail:     claims.Email,
+		UserName:      userName,
+		IsStaff:       isStaff,
+		IsPrivateNote: req.IsPrivateNote && isStaff,
+		Message:       strings.TrimSpace(req.Message),
+		Attachments:   req.Attachments,
 	}
 
 	if err := h.store.AddTicketReply(r.Context(), reply); err != nil {
@@ -340,3 +352,141 @@ func (h *SupportHandler) SaveArticle(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, req, nil)
 }
+
+// ----------------------------------------------------------------------------
+// Support Statistics
+// ----------------------------------------------------------------------------
+
+func (h *SupportHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	stats, err := h.store.GetSupportStats(r.Context(), claims.OrganizationID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to fetch stats", err.Error(), "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, stats, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Predefined Canned Responses (Staff Macros)
+// ----------------------------------------------------------------------------
+
+func (h *SupportHandler) ListCannedResponses(w http.ResponseWriter, r *http.Request) {
+	_, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	responses, err := h.store.ListCannedResponses(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to list canned responses", err.Error(), "")
+		return
+	}
+
+	if responses == nil {
+		responses = []store.CannedResponse{}
+	}
+
+	response.JSON(w, http.StatusOK, responses, nil)
+}
+
+func (h *SupportHandler) SaveCannedResponse(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || (claims.Role != "owner" && claims.Role != "superadmin" && claims.Role != "admin") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Staff permission required", nil, "")
+		return
+	}
+
+	var req store.CannedResponse
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid payload", err.Error(), "")
+		return
+	}
+
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Title and content required", nil, "")
+		return
+	}
+
+	if err := h.store.SaveCannedResponse(r.Context(), &req); err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to save canned response", err.Error(), "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, req, nil)
+}
+
+// ----------------------------------------------------------------------------
+// AI Support Assistant & Instant Guided Diagnosis
+// ----------------------------------------------------------------------------
+
+type AIAssistantQueryRequest struct {
+	Query          string `json:"query"`
+	RelatedService string `json:"related_service,omitempty"`
+}
+
+type AIAssistantResponse struct {
+	Answer            string                   `json:"answer"`
+	Confidence        string                   `json:"confidence"`
+	RecommendedAction string                   `json:"recommended_action"`
+	RelatedArticles   []store.KnowledgeArticle `json:"related_articles"`
+	SuggestedTicket   bool                     `json:"suggested_ticket"`
+}
+
+func (h *SupportHandler) AskAIAssistant(w http.ResponseWriter, r *http.Request) {
+	var req AIAssistantQueryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "BAD_REQUEST", "Invalid JSON payload", err.Error(), "")
+		return
+	}
+
+	q := strings.ToLower(strings.TrimSpace(req.Query))
+	if q == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Query is required", nil, "")
+		return
+	}
+
+	// Search knowledgebase for matching content
+	articles, _ := h.store.ListKnowledgeArticles(r.Context(), "", q)
+
+	var answer, action string
+	confidence := "high"
+	suggestedTicket := false
+
+	if strings.Contains(q, "ssl") || strings.Contains(q, "certificate") || strings.Contains(q, "https") {
+		answer = "For SSL issues: Hostvra provides automated free Let's Encrypt certificates. Ensure your domain's DNS A record points directly to your server IP address (without Cloudflare proxy during HTTP-01 verification), then open SSL Certificates -> Select Domain -> Click 'Apply SSL'."
+		action = "Check DNS A record and navigate to SSL Certificates to re-issue."
+	} else if strings.Contains(q, "502") || strings.Contains(q, "bad gateway") || strings.Contains(q, "php") {
+		answer = "A 502 Bad Gateway usually indicates that the PHP-FPM pool or backend application (Node.js/Python) is stopped or overloaded. Check your website's PHP-FPM service status in the Websites tab, or restart PHP-FPM from Dashboard -> Services."
+		action = "Restart PHP-FPM pool or check error.log in File Manager."
+	} else if strings.Contains(q, "dns") || strings.Contains(q, "nameserver") || strings.Contains(q, "point") {
+		answer = "To point your domain to Hostvra, set your registrar's nameservers to `ns1.hostvra.net` and `ns2.hostvra.net`. Propagation takes 15 to 60 minutes."
+		action = "Verify NS records using Whois Inspector in Domains & DNS."
+	} else if strings.Contains(q, "bkash") || strings.Contains(q, "nagad") || strings.Contains(q, "pay") || strings.Contains(q, "invoice") {
+		answer = "We support instant automated payment via bKash, Nagad, Stripe, SSLCommerz, and PayPal. Once payment is sent, invoices are updated to PAID in real-time."
+		action = "View unpaid invoices in Billing & Invoices."
+	} else {
+		answer = "Our automated diagnostic engine analyzed your inquiry. Please review the relevant documentation articles below or escalate directly to our 24/7 engineering team by opening a priority ticket."
+		confidence = "medium"
+		suggestedTicket = true
+		action = "Open a priority support ticket for technician review."
+	}
+
+	resp := AIAssistantResponse{
+		Answer:            answer,
+		Confidence:        confidence,
+		RecommendedAction: action,
+		RelatedArticles:   articles,
+		SuggestedTicket:   suggestedTicket,
+	}
+
+	response.JSON(w, http.StatusOK, resp, nil)
+}
+

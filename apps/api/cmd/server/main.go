@@ -183,9 +183,10 @@ func main() {
 		r.Get("/domains/whois", domainRegistrarHandler.WhoisLookup)
 		r.Get("/domains/tlds", domainRegistrarHandler.ListTLDs)
 
-		// Public Knowledgebase Articles
+		// Public Knowledgebase Articles & AI Assistant
 		r.Get("/support/articles", supportHandler.ListArticles)
 		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
+		r.Post("/support/ai-assistant", supportHandler.AskAIAssistant)
 
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
@@ -582,13 +583,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/order", domainRegistrarHandler.OrderDomain)
 			})
 
-			// Support Tickets & Helpdesk
+			// Support Tickets, Stats & Canned Macros
 			r.Route("/support", func(r chi.Router) {
+				r.Get("/stats", supportHandler.GetStats)
 				r.Get("/tickets", supportHandler.ListTickets)
 				r.Post("/tickets", supportHandler.CreateTicket)
 				r.Get("/tickets/{id}", supportHandler.GetTicket)
 				r.Post("/tickets/{id}/reply", supportHandler.ReplyTicket)
 				r.Post("/tickets/{id}/close", supportHandler.CloseTicket)
+				r.Get("/canned", supportHandler.ListCannedResponses)
+				r.Post("/canned", supportHandler.SaveCannedResponse)
+				r.Post("/ai-assistant", supportHandler.AskAIAssistant)
 				r.Post("/articles/{id}/vote", supportHandler.VoteArticle)
 				r.Post("/articles", supportHandler.SaveArticle)
 			})
