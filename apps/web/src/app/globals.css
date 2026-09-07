@@ -5,8 +5,8 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 241, 245, 249;
-  --bg-app: #090d16;
+  --foreground-rgb: 0, 0, 0;
+  --bg-app: #ffffff;
 }
 
 html.dark {
@@ -16,8 +16,8 @@ html.dark {
 }
 
 html:not(.dark) {
-  --foreground-rgb: 15, 23, 42;
-  --bg-app: #f8fafc;
+  --foreground-rgb: 0, 0, 0;
+  --bg-app: #ffffff;
   color-scheme: light;
 }
 
@@ -35,49 +35,30 @@ code, pre, kbd, samp {
 }
 
 /* ==========================================================================
-   HOSTVRA ADAPTIVE DESIGN SYSTEM (LIGHT & DARK DUAL ENGINE)
-   Guarantees elegant, high-contrast, crystal-clear UI across all screens
+   HOSTVRA ADAPTIVE DESIGN SYSTEM (PURE WHITE & DEEP BLACK LIGHT ENGINE)
+   Guarantees pure white backgrounds, crisp pitch-black text, and 100% visible buttons
    ========================================================================== */
 
-/* Light Mode Core Surfaces & Elevation */
+/* Light Mode Core Backgrounds */
 html:not(.dark) body {
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: #f8fafc !important;
+  color: #000000 !important;
 }
 
-html:not(.dark) .bg-\[\#090d16\] {
-  background-color: #f8fafc !important;
+html:not(.dark) .bg-\[\#090d16\],
+html:not(.dark) .bg-\[\#0b0f19\],
+html:not(.dark) .bg-\[\#121824\],
+html:not(.dark) .bg-\[\#0e1420\],
+html:not(.dark) .bg-\[\#080b10\] {
+  background-color: #ffffff !important;
 }
 
 html:not(.dark) .bg-surface-950,
-html:not(.dark) .bg-surface-950\/10,
-html:not(.dark) .bg-surface-950\/20,
-html:not(.dark) .bg-surface-950\/30,
-html:not(.dark) .bg-surface-950\/40,
-html:not(.dark) .bg-surface-950\/50,
-html:not(.dark) .bg-surface-950\/60,
-html:not(.dark) .bg-surface-950\/70,
-html:not(.dark) .bg-surface-950\/80,
-html:not(.dark) .bg-surface-950\/90 {
-  background-color: #f8fafc !important;
-}
-
 html:not(.dark) .bg-surface-900,
-html:not(.dark) .bg-surface-900\/10,
-html:not(.dark) .bg-surface-900\/20,
-html:not(.dark) .bg-surface-900\/30,
-html:not(.dark) .bg-surface-900\/40,
-html:not(.dark) .bg-surface-900\/50,
-html:not(.dark) .bg-surface-900\/60,
-html:not(.dark) .bg-surface-900\/70,
-html:not(.dark) .bg-surface-900\/80,
-html:not(.dark) .bg-surface-900\/90 {
+html:not(.dark) .bg-surface-850,
+html:not(.dark) [class*="bg-surface-950"],
+html:not(.dark) [class*="bg-surface-900"] {
   background-color: #ffffff !important;
-}
-
-html:not(.dark) .bg-surface-850 {
-  background-color: #ffffff !important;
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
 }
 
 html:not(.dark) .bg-surface-800,
@@ -97,83 +78,236 @@ html:not(.dark) .hover\:bg-surface-700:hover {
   background-color: #e2e8f0 !important;
 }
 
-/* Light Mode Borders */
+/* Light Mode Borders - Clearly visible slate delineation */
 html:not(.dark) .border-surface-800,
-html:not(.dark) .border-surface-800\/50,
-html:not(.dark) .border-surface-800\/60,
-html:not(.dark) .border-surface-800\/80,
 html:not(.dark) .border-surface-750,
 html:not(.dark) .border-surface-700,
-html:not(.dark) .border-surface-700\/50,
-html:not(.dark) .border-surface-700\/60 {
-  border-color: #e2e8f0 !important;
+html:not(.dark) .border-slate-800,
+html:not(.dark) .border-slate-700,
+html:not(.dark) [class*="border-surface-800"],
+html:not(.dark) [class*="border-surface-700"] {
+  border-color: #cbd5e1 !important;
 }
 
-/* Light Mode Typography Hierarchy */
-html:not(.dark) .text-white:not([class*="bg-indigo"]):not([class*="bg-purple"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="from-"]):not([class*="bg-gradient"]):not([class*="text-white\ "]) {
+/* ==========================================================================
+   LIGHT MODE TYPOGRAPHY: 100% VISIBLE, CRISP, BLACK CONTRAST
+   ========================================================================== */
+
+html:not(.dark) h1,
+html:not(.dark) h2,
+html:not(.dark) h3,
+html:not(.dark) h4,
+html:not(.dark) h5,
+html:not(.dark) h6,
+html:not(.dark) label,
+html:not(.dark) th {
+  color: #000000 !important;
+  font-weight: 700;
+}
+
+/* Base text elements in light mode */
+html:not(.dark) p,
+html:not(.dark) td,
+html:not(.dark) li,
+html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*="text-emerald"]):not([class*="text-indigo"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-purple"]):not([class*="text-blue"]) {
+  color: #000000;
+}
+
+/* High contrast dark text for slate & surface color classes in Light Mode */
+html:not(.dark) .text-slate-100,
+html:not(.dark) .text-slate-200,
+html:not(.dark) .text-slate-300,
+html:not(.dark) .text-surface-100,
+html:not(.dark) .text-surface-200,
+html:not(.dark) .text-surface-300 {
+  color: #000000 !important;
+}
+
+/* Secondary text: solid dark charcoal (never faint or unreadable) */
+html:not(.dark) .text-slate-400,
+html:not(.dark) .text-slate-500,
+html:not(.dark) .text-slate-600,
+html:not(.dark) .text-surface-400,
+html:not(.dark) .text-surface-500 {
   color: #0f172a !important;
 }
 
-html:not(.dark) .text-slate-100,
-html:not(.dark) .text-slate-200,
-html:not(.dark) .text-surface-200,
-html:not(.dark) .text-surface-300 {
-  color: #1e293b !important;
+/* Overriding white text ONLY when not inside solid colored badges or buttons */
+html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="from-"]):not([class*="bg-gradient"]) {
+  color: #000000 !important;
 }
 
-html:not(.dark) .text-slate-300 {
-  color: #334155 !important;
+/* ==========================================================================
+   BUTTON VISIBILITY GUARANTEE: HIGH CONTRAST, BOLD, NEVER FAINT OR INVISIBLE
+   ========================================================================== */
+
+/* 1. Primary Solid Buttons (Always vibrant, high contrast, pure white text) */
+html:not(.dark) button[class*="bg-indigo"],
+html:not(.dark) button[class*="bg-emerald"],
+html:not(.dark) button[class*="bg-[#20a53a]"],
+html:not(.dark) button[class*="bg-purple"],
+html:not(.dark) button[class*="bg-blue"],
+html:not(.dark) button[class*="bg-amber"],
+html:not(.dark) button[class*="bg-rose"],
+html:not(.dark) a[class*="bg-indigo"],
+html:not(.dark) a[class*="bg-emerald"],
+html:not(.dark) a[class*="bg-[#20a53a]"],
+html:not(.dark) a[class*="bg-purple"],
+html:not(.dark) a[class*="bg-blue"],
+html:not(.dark) a[class*="bg-amber"],
+html:not(.dark) a[class*="bg-rose"] {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  opacity: 1 !important;
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.18) !important;
 }
 
-html:not(.dark) .text-slate-400,
-html:not(.dark) .text-surface-400 {
+/* Ensure text & SVG icons inside colored primary buttons remain 100% white */
+html:not(.dark) button[class*="bg-indigo"] *,
+html:not(.dark) button[class*="bg-emerald"] *,
+html:not(.dark) button[class*="bg-[#20a53a]"] *,
+html:not(.dark) button[class*="bg-purple"] *,
+html:not(.dark) button[class*="bg-blue"] *,
+html:not(.dark) button[class*="bg-amber"] *,
+html:not(.dark) button[class*="bg-rose"] *,
+html:not(.dark) a[class*="bg-indigo"] *,
+html:not(.dark) a[class*="bg-emerald"] *,
+html:not(.dark) a[class*="bg-[#20a53a]"] *,
+html:not(.dark) a[class*="bg-purple"] *,
+html:not(.dark) a[class*="bg-blue"] *,
+html:not(.dark) a[class*="bg-amber"] *,
+html:not(.dark) a[class*="bg-rose"] * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* 2. Secondary / Outline / Action Buttons in Light Mode */
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-transparent"]) {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 1px solid #cbd5e1 !important;
+  font-weight: 600 !important;
+}
+
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-[#20a53a]"]):not([class*="bg-purple"]):not([class*="bg-blue"]):not([class*="bg-amber"]):not([class*="bg-rose"]):not([class*="bg-transparent"]):hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+}
+
+/* 3. Icon & Control Buttons */
+html:not(.dark) button svg:not(button[class*="bg-indigo"] svg):not(button[class*="bg-emerald"] svg):not(button[class*="bg-[#20a53a]"] svg):not(button[class*="bg-purple"] svg):not(button[class*="bg-rose"] svg) {
+  stroke: #0f172a !important;
+}
+
+/* ==========================================================================
+   FORM INPUTS, TEXTAREAS & SELECTS (WHITE BG & CRISP BLACK TEXT)
+   ========================================================================== */
+
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
+html:not(.dark) textarea,
+html:not(.dark) select {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 500 !important;
+}
+
+html:not(.dark) input:focus,
+html:not(.dark) textarea:focus,
+html:not(.dark) select:focus {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15) !important;
+  outline: none !important;
+}
+
+html:not(.dark) input::placeholder,
+html:not(.dark) textarea::placeholder {
   color: #64748b !important;
+  opacity: 1 !important;
 }
 
-html:not(.dark) .text-slate-500,
-html:not(.dark) .text-surface-500 {
-  color: #94a3b8 !important;
+html:not(.dark) select option {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* ==========================================================================
+   SIDEBAR & HEADER IN LIGHT MODE (WHITE SURFACES & SHARP CONTRAST)
+   ========================================================================== */
+
+html:not(.dark) aside {
+  background-color: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.03);
+}
+
+html:not(.dark) header {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+}
+
+/* Sidebar active item */
+html:not(.dark) aside a.bg-\[\#20a53a\] {
+  background-color: #20a53a !important;
+  color: #ffffff !important;
+}
+
+html:not(.dark) aside a.bg-\[\#20a53a\] * {
+  color: #ffffff !important;
+  stroke: #ffffff !important;
+}
+
+/* Sidebar inactive items */
+html:not(.dark) aside a:not(.bg-\[\#20a53a\]) {
+  color: #0f172a !important;
+}
+
+html:not(.dark) aside a:not(.bg-\[\#20a53a\]):hover {
+  background-color: #f1f5f9 !important;
+  color: #000000 !important;
+}
+
+/* ==========================================================================
+   CARDS & PANELS: WHITE BACKGROUNDS & ELEGANT SUBTLE ELEVATION
+   ========================================================================== */
+
+html:not(.dark) .rounded-2xl.border,
+html:not(.dark) .rounded-xl.border {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
 }
 
 /* High Contrast Accent Badges & Status Indicators in Light Mode */
 html:not(.dark) .text-indigo-400,
 html:not(.dark) .text-indigo-300 {
-  color: #4f46e5 !important;
+  color: #4338ca !important;
 }
 
 html:not(.dark) .text-emerald-400,
 html:not(.dark) .text-emerald-300 {
-  color: #059669 !important;
+  color: #047857 !important;
 }
 
 html:not(.dark) .text-amber-400,
 html:not(.dark) .text-amber-300 {
-  color: #d97706 !important;
+  color: #b45309 !important;
 }
 
 html:not(.dark) .text-purple-400,
 html:not(.dark) .text-purple-300 {
-  color: #7c3aed !important;
+  color: #6d28d9 !important;
 }
 
 html:not(.dark) .text-blue-400,
 html:not(.dark) .text-blue-300 {
-  color: #2563eb !important;
+  color: #1d4ed8 !important;
 }
 
 html:not(.dark) .text-rose-400,
 html:not(.dark) .text-rose-300 {
-  color: #e11d48 !important;
-}
-
-html:not(.dark) .text-sky-400,
-html:not(.dark) .text-sky-300 {
-  color: #0284c7 !important;
-}
-
-html:not(.dark) .text-teal-400,
-html:not(.dark) .text-teal-300 {
-  color: #0d9488 !important;
+  color: #be123c !important;
 }
 
 /* Vibrant Light Mode Badge Backgrounds */
@@ -211,55 +345,6 @@ html:not(.dark) [class*="bg-rose-500\/"],
 html:not(.dark) [class*="bg-rose-600\/"] {
   background-color: #fff1f2 !important;
   border-color: #fecdd3 !important;
-}
-
-/* Button Typography Protection (Ensures buttons are always readable) */
-html:not(.dark) button[class*="bg-indigo"] .text-white,
-html:not(.dark) button[class*="bg-emerald"] .text-white,
-html:not(.dark) button[class*="bg-purple"] .text-white,
-html:not(.dark) button[class*="from-indigo"],
-html:not(.dark) button[class*="bg-indigo"],
-html:not(.dark) button[class*="bg-emerald"],
-html:not(.dark) button[class*="bg-purple"],
-html:not(.dark) button[class*="bg-amber"],
-html:not(.dark) button[class*="bg-rose"],
-html:not(.dark) a[class*="bg-indigo"],
-html:not(.dark) a[class*="bg-emerald"],
-html:not(.dark) a[class*="bg-purple"] {
-  color: #ffffff !important;
-}
-
-/* Form Controls & Inputs */
-html:not(.dark) select,
-html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),
-html:not(.dark) textarea:not([class*="bg-slate-950"]):not([class*="bg-[#"]) {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #cbd5e1 !important;
-}
-
-html:not(.dark) select option {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-}
-
-/* Sidebar & Header in Light Mode */
-html:not(.dark) aside {
-  background-color: #ffffff !important;
-  border-right-color: #e2e8f0 !important;
-  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.03);
-}
-
-html:not(.dark) header {
-  background-color: rgba(255, 255, 255, 0.9) !important;
-  border-bottom-color: #e2e8f0 !important;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
-}
-
-/* Card Subtle Elevation */
-html:not(.dark) .rounded-2xl.border,
-html:not(.dark) .rounded-xl.border {
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.02);
 }
 
 /* Smooth Scrollbars */
@@ -318,4 +403,3 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 html.dark .gauge-track {
   stroke: #1e293b !important;
 }
-
