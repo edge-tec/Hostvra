@@ -102,6 +102,7 @@ func main() {
 	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
+	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -545,6 +546,18 @@ func main() {
 				// Payment Gateways
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/gateways", billingHandler.ListGateways)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/gateways/{gateway}", billingHandler.UpdateGateway)
+			})
+
+			// Client Hosting Accounts (WHM Multi-Tenancy & Provisioning)
+			r.Route("/accounts", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermAccountsView)).Get("/", accountHandler.ListAccounts)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/", accountHandler.CreateAccount)
+				r.With(rbac.RequirePermission(rbac.PermAccountsView)).Get("/{id}", accountHandler.GetAccount)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/suspend", accountHandler.SuspendAccount)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/unsuspend", accountHandler.UnsuspendAccount)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/change-plan", accountHandler.ChangePlan)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/login-token", accountHandler.GenerateLoginToken)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Delete("/{id}", accountHandler.DeleteAccount)
 			})
 		})
 	})

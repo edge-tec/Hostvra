@@ -796,3 +796,33 @@ export interface PaymentGatewayConfig {
   updated_at?: string;
 }
 
+export interface HostingAccount {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  subscription_id?: string;
+  server_id?: string;
+  server_name?: string;
+  domain: string;
+  username: string;
+  document_root: string;
+  plan_id: string;
+  plan_name: string;
+  status: 'active' | 'suspended' | 'pending' | 'terminated';
+  suspend_reason?: string;
+  disk_limit_mb: number;
+  disk_used_mb: number;
+  bandwidth_limit_mb: number;
+  bandwidth_used_mb: number;
+  websites_limit: number;
+  databases_limit: number;
+  mailboxes_limit: number;
+  ip_address?: string;
+  php_version?: string;
+  ssl_active: boolean;
+  suspended_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+

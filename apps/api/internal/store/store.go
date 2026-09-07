@@ -184,6 +184,15 @@ type Store interface {
 	GetGatewayConfig(ctx context.Context, gateway string) (*PaymentGatewayConfig, error)
 	SaveGatewayConfig(ctx context.Context, config *PaymentGatewayConfig) error
 
+	// Hosting Accounts (WHM-Style Client Tenancy)
+	ListHostingAccounts(ctx context.Context, orgID uuid.UUID, serverID *uuid.UUID) ([]*HostingAccount, error)
+	GetHostingAccountByID(ctx context.Context, id uuid.UUID) (*HostingAccount, error)
+	GetHostingAccountByUsername(ctx context.Context, username string) (*HostingAccount, error)
+	GetHostingAccountByDomain(ctx context.Context, domain string) (*HostingAccount, error)
+	CreateHostingAccount(ctx context.Context, acc *HostingAccount) error
+	UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error
+	DeleteHostingAccount(ctx context.Context, id uuid.UUID) error
+
 	// Close
 	Close() error
 }
@@ -224,6 +233,7 @@ type MemoryStore struct {
 	subscriptions       map[uuid.UUID]*Subscription
 	invoices            map[uuid.UUID]*Invoice
 	gatewayConfigs      map[string]*PaymentGatewayConfig
+	hostingAccounts     map[uuid.UUID]*HostingAccount
 	filePath            string
 }
 
@@ -247,6 +257,7 @@ type memoryDumpData struct {
 	Subscriptions      map[uuid.UUID]*Subscription       `json:"subscriptions,omitempty"`
 	Invoices           map[uuid.UUID]*Invoice            `json:"invoices,omitempty"`
 	GatewayConfigs     map[string]*PaymentGatewayConfig  `json:"gateway_configs,omitempty"`
+	HostingAccounts    map[uuid.UUID]*HostingAccount     `json:"hosting_accounts,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -292,6 +303,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		Subscriptions:      m.subscriptions,
 		Invoices:           m.invoices,
 		GatewayConfigs:     m.gatewayConfigs,
+		HostingAccounts:    m.hostingAccounts,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -370,6 +382,9 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.GatewayConfigs != nil {
 		m.gatewayConfigs = data.GatewayConfigs
 	}
+	if data.HostingAccounts != nil {
+		m.hostingAccounts = data.HostingAccounts
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -407,9 +422,11 @@ func NewMemoryStore() *MemoryStore {
 		subscriptions:       make(map[uuid.UUID]*Subscription),
 		invoices:            make(map[uuid.UUID]*Invoice),
 		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
+		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
+	m.seedAccountData()
 	return m
 }
 

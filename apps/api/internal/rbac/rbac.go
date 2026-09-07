@@ -86,6 +86,10 @@ const (
 	// Billing & Subscription Permissions
 	PermBillingView   = "billing.view"
 	PermBillingManage = "billing.manage"
+
+	// Client Hosting Accounts (WHM Multi-Tenancy)
+	PermAccountsView   = "accounts.view"
+	PermAccountsManage = "accounts.manage"
 )
 
 // RolePermissionMatrix defines default entitlements per role
@@ -102,6 +106,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
 		PermBillingView, PermBillingManage,
+		PermAccountsView, PermAccountsManage,
 	},
 	RoleAdmin: {
 		PermServersView, PermServersManage,
@@ -115,6 +120,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,
 		PermBillingView, PermBillingManage,
+		PermAccountsView, PermAccountsManage,
 	},
 	RoleManager: {
 		PermServersView,

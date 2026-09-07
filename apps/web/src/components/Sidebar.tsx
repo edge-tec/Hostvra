@@ -59,6 +59,7 @@ const navGroups: NavGroup[] = [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Servers', href: '/servers', icon: Server },
       { label: 'Websites', href: '/websites', icon: Globe },
+      { label: 'Client Accounts', href: '/accounts', icon: Users, badge: 'WHM', badgeColor: 'purple' },
       { label: 'App Store', href: '/app-store', icon: Boxes, badge: '1-Click', badgeColor: 'blue' },
       { label: 'Web Servers', href: '/webservers', icon: Layers, badge: 'Multi', badgeColor: 'purple' },
       { label: 'PHP Management', href: '/php', icon: Code2 },
