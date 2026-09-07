@@ -4,29 +4,35 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  Home,
+  LayoutDashboard,
+  Server,
   Globe,
+  Boxes,
   Layers,
-  ArrowLeftRight,
-  Database,
-  Container,
-  Activity,
-  Shield,
-  ShieldCheck,
+  Code2,
   Mail,
   Inbox,
+  Database,
+  Container,
   FolderTree,
-  ScrollText,
-  Code2,
-  Network,
   Terminal,
   Clock,
-  Boxes,
+  ShieldCheck,
+  Network,
+  Shield,
+  DownloadCloud,
+  Bell,
+  ScrollText,
+  RefreshCw,
+  Users,
+  Key,
+  Award,
   Settings,
   LogOut,
   ChevronLeft,
   ChevronRight,
   X,
+  Flame,
 } from 'lucide-react';
 import { clearStoredAuth } from '@/lib/api';
 
@@ -35,28 +41,49 @@ interface NavItem {
   href: string;
   icon: React.ElementType;
   badge?: string;
+  badgeColor?: 'emerald' | 'blue' | 'purple' | 'amber';
 }
 
-const navItems: NavItem[] = [
-  { label: 'Home', href: '/dashboard', icon: Home },
-  { label: 'Website', href: '/websites', icon: Globe },
-  { label: 'WP Toolkit', href: '/websites', icon: Layers },
-  { label: 'FTP', href: '/servers', icon: ArrowLeftRight },
-  { label: 'Databases', href: '/databases', icon: Database },
-  { label: 'Docker', href: '/docker', icon: Container },
-  { label: 'Monitor', href: '/servers', icon: Activity },
-  { label: 'Security', href: '/firewall', icon: Shield },
-  { label: 'WAF', href: '/ssl', icon: ShieldCheck },
-  { label: 'Mail Server', href: '/email', icon: Mail },
-  { label: 'Webmail', href: '/webmail', icon: Inbox },
-  { label: 'Files', href: '/files', icon: FolderTree },
-  { label: 'Logs', href: '/audit-logs', icon: ScrollText },
-  { label: 'Node', href: '/app-store', icon: Code2 },
-  { label: 'Domains', href: '/dns', icon: Network },
-  { label: 'Terminal', href: '/terminal', icon: Terminal },
-  { label: 'Cron', href: '/cron', icon: Clock },
-  { label: 'App Store', href: '/app-store', icon: Boxes },
-  { label: 'Settings', href: '/settings', icon: Settings },
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  {
+    title: 'MANAGEMENT',
+    items: [
+      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Servers', href: '/servers', icon: Server },
+      { label: 'Websites', href: '/websites', icon: Globe },
+      { label: 'App Store', href: '/app-store', icon: Boxes, badge: '1-Click', badgeColor: 'blue' },
+      { label: 'Web Servers', href: '/webservers', icon: Layers, badge: 'Multi', badgeColor: 'purple' },
+      { label: 'PHP Management', href: '/php', icon: Code2 },
+      { label: 'Email Hosting', href: '/email', icon: Mail },
+      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald' },
+      { label: 'Databases', href: '/databases', icon: Database },
+      { label: 'Docker', href: '/docker', icon: Container },
+      { label: 'File Manager', href: '/files', icon: FolderTree },
+      { label: 'Terminal', href: '/terminal', icon: Terminal, badge: 'CLI', badgeColor: 'blue' },
+      { label: 'Cron Jobs', href: '/cron', icon: Clock },
+      { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
+      { label: 'DNS Zones', href: '/dns', icon: Network },
+      { label: 'Firewall', href: '/firewall', icon: Shield },
+      { label: 'Backups', href: '/backups', icon: DownloadCloud },
+      { label: 'Alerts & Incidents', href: '/alerts', icon: Bell },
+      { label: 'Audit Logs', href: '/audit-logs', icon: ScrollText },
+    ],
+  },
+  {
+    title: 'SYSTEM & BILLING',
+    items: [
+      { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },
+      { label: 'Team', href: '/team', icon: Users },
+      { label: 'API Keys', href: '/api-keys', icon: Key },
+      { label: 'Licensing', href: '/license', icon: Award, badge: 'Free', badgeColor: 'emerald' },
+      { label: 'Settings', href: '/settings', icon: Settings },
+    ],
+  },
 ];
 
 export function Sidebar() {
@@ -100,68 +127,99 @@ export function Sidebar() {
     router.push('/login');
   };
 
+  const getBadgeClasses = (color?: string, isActive?: boolean) => {
+    if (isActive) return 'bg-white/20 text-white';
+    switch (color) {
+      case 'blue':
+        return 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-900/50';
+      case 'purple':
+        return 'bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 border border-purple-200/50 dark:border-purple-900/50';
+      case 'amber':
+        return 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-900/50';
+      case 'emerald':
+      default:
+        return 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-900/50';
+    }
+  };
+
   const renderNavList = (isMobileView = false) => (
-    <nav className="space-y-0.5">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        // Strictly avoid double-highlighting: Home is only active when exact /dashboard
-        const isActive =
-          item.label === 'Home'
-            ? pathname === '/dashboard'
-            : item.label !== 'Home' &&
-              item.href !== '/dashboard' &&
-              (pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href)));
-
-        return (
-          <Link
-            key={item.label}
-            href={item.href}
-            onClick={() => isMobileView && setMobileOpen(false)}
-            title={!isMobileView && collapsed ? item.label : undefined}
-            className={`flex items-center ${
-              !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
-            } rounded-lg text-xs font-medium transition-all ${
-              isActive
-                ? 'bg-[#20a53a] text-white font-semibold shadow-sm'
-                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800'
-            }`}
-          >
-            <div className={`flex items-center ${!isMobileView && collapsed ? '' : 'gap-2.5'} truncate min-w-0`}>
-              <Icon
-                className={`w-4 h-4 flex-shrink-0 ${
-                  isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400'
-                }`}
-              />
-              {(isMobileView || !collapsed) && <span className="truncate">{item.label}</span>}
+    <div className="space-y-4">
+      {navGroups.map((group) => (
+        <div key={group.title} className="space-y-0.5">
+          {/* Group Header */}
+          {(isMobileView || !collapsed) && (
+            <div className="px-3 pt-2 pb-1 text-[10px] font-bold tracking-wider text-slate-400 dark:text-slate-500 uppercase">
+              {group.title}
             </div>
+          )}
+          {(!isMobileView && collapsed) && (
+            <div className="h-px bg-slate-200 dark:bg-surface-800 my-2 mx-2" />
+          )}
 
-            {(isMobileView || !collapsed) && item.badge && (
-              <span
-                className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                  isActive
-                    ? 'bg-white/20 text-white'
-                    : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400'
-                }`}
-              >
-                {item.badge}
-              </span>
-            )}
-          </Link>
-        );
-      })}
+          {/* Group Items */}
+          <nav className="space-y-0.5">
+            {group.items.map((item) => {
+              const Icon = item.icon;
+              // Strict active checking: Dashboard is ONLY active on exact /dashboard
+              const isActive =
+                item.href === '/dashboard'
+                  ? pathname === '/dashboard'
+                  : pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href));
+
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={() => isMobileView && setMobileOpen(false)}
+                  title={!isMobileView && collapsed ? item.label : undefined}
+                  className={`flex items-center ${
+                    !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
+                  } rounded-lg text-xs font-medium transition-all group ${
+                    isActive
+                      ? 'bg-[#20a53a] text-white font-semibold shadow-sm'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800'
+                  }`}
+                >
+                  <div className={`flex items-center ${!isMobileView && collapsed ? '' : 'gap-2.5'} truncate min-w-0`}>
+                    <Icon
+                      className={`w-4 h-4 flex-shrink-0 transition-colors ${
+                        isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-800 dark:group-hover:text-white'
+                      }`}
+                    />
+                    {(isMobileView || !collapsed) && <span className="truncate">{item.label}</span>}
+                  </div>
+
+                  {(isMobileView || !collapsed) && item.badge && (
+                    <span
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none ${getBadgeClasses(
+                        item.badgeColor,
+                        isActive
+                      )}`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+      ))}
 
       {/* Log Out */}
-      <button
-        onClick={handleLogout}
-        title={!isMobileView && collapsed ? 'Log out' : undefined}
-        className={`w-full flex items-center ${
-          !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2 gap-2.5'
-        } rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all text-left`}
-      >
-        <LogOut className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400" />
-        {(isMobileView || !collapsed) && <span>Log out</span>}
-      </button>
-    </nav>
+      <div className="pt-2 border-t border-slate-200 dark:border-surface-800">
+        <button
+          onClick={handleLogout}
+          title={!isMobileView && collapsed ? 'Log out' : undefined}
+          className={`w-full flex items-center ${
+            !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2 gap-2.5'
+          } rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all text-left`}
+        >
+          <LogOut className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-slate-400" />
+          {(isMobileView || !collapsed) && <span>Log out</span>}
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -169,44 +227,50 @@ export function Sidebar() {
       {/* 1. DESKTOP SIDEBAR (Visible on lg: screens and up) */}
       <aside
         className={`hidden lg:flex ${
-          collapsed ? 'w-16' : 'w-52'
+          collapsed ? 'w-16' : 'w-60'
         } bg-white dark:bg-[#121824] border-r border-slate-200 dark:border-surface-800 flex-col h-screen select-none sticky top-0 transition-all duration-200 ease-in-out z-30 flex-shrink-0 shadow-sm`}
       >
-        {/* Brand & Server IP Header */}
-        <div className="h-14 flex items-center px-3 border-b border-slate-200 dark:border-surface-800 justify-between flex-shrink-0 overflow-hidden">
+        {/* Brand Header */}
+        <div className="h-16 flex items-center px-3.5 border-b border-slate-200 dark:border-surface-800 justify-between flex-shrink-0 overflow-hidden">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white flex-shrink-0 shadow-xs">
-              <span className="text-sm font-black tracking-tighter">H</span>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-indigo-500/20">
+              <Flame className="w-5 h-5 text-amber-300 fill-amber-300" />
             </div>
             {!collapsed && (
               <div className="min-w-0 truncate">
-                <div className="text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200 truncate leading-tight">
-                  13.140.157.238
-                </div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium truncate">
-                    Hostvra Panel
+                <div className="flex items-center gap-1.5 leading-tight">
+                  <span className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">Hostvra</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50">
+                    v1.0
                   </span>
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5">
+                  Server Fleet Control
                 </div>
               </div>
             )}
           </div>
-
-          {!collapsed && (
-            <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
-              0
-            </span>
-          )}
         </div>
 
         {/* Navigation Scroll */}
-        <div className="flex-1 overflow-y-auto px-2 py-3 space-y-1 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto px-2.5 py-3 custom-scrollbar">
           {renderNavList(false)}
         </div>
 
-        {/* Collapse / Expand Toggle Button Footer */}
-        <div className="p-2 border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#0e1420] flex items-center justify-center flex-shrink-0">
+        {/* Bottom Core API Status & Collapse Footer */}
+        <div className="p-2.5 border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#0e1420] flex-shrink-0 space-y-2">
+          {!collapsed && (
+            <div className="flex items-center justify-between px-2 py-1.5 rounded-md bg-white dark:bg-[#121824] border border-slate-200/80 dark:border-surface-800 text-[11px]">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                <span className="text-slate-600 dark:text-slate-400 font-medium truncate">Hostvra Core API</span>
+              </div>
+              <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                ONLINE
+              </span>
+            </div>
+          )}
+
           <button
             onClick={toggleCollapse}
             className="w-full py-1.5 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-surface-800 transition"
@@ -235,18 +299,21 @@ export function Sidebar() {
 
           {/* Drawer Content */}
           <div className="relative w-64 bg-white dark:bg-[#121824] border-r border-slate-200 dark:border-surface-800 flex flex-col h-full shadow-2xl z-10 animate-fadeIn">
-            <div className="h-14 flex items-center justify-between px-4 border-b border-slate-200 dark:border-surface-800">
+            <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-surface-800 flex-shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-600 flex items-center justify-center text-white flex-shrink-0 shadow-xs">
-                  <span className="text-sm font-black tracking-tighter">H</span>
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center text-white flex-shrink-0 shadow-md shadow-indigo-500/20">
+                  <Flame className="w-5 h-5 text-amber-300 fill-amber-300" />
                 </div>
                 <div>
-                  <div className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200 leading-tight">
-                    13.140.157.238
+                  <div className="flex items-center gap-1.5 leading-tight">
+                    <span className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">Hostvra</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400">
+                      v1.0
+                    </span>
                   </div>
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                    Hostvra Panel
-                  </span>
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                    Server Fleet Control
+                  </div>
                 </div>
               </div>
 
@@ -260,6 +327,18 @@ export function Sidebar() {
 
             <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar">
               {renderNavList(true)}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#0e1420] flex-shrink-0">
+              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-md bg-white dark:bg-[#121824] border border-slate-200/80 dark:border-surface-800 text-[11px]">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                  <span className="text-slate-600 dark:text-slate-400 font-medium truncate">Hostvra Core API</span>
+                </div>
+                <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                  ONLINE
+                </span>
+              </div>
             </div>
           </div>
         </div>
