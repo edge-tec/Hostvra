@@ -159,6 +159,31 @@ type Store interface {
 	CreateWebServerConfigBackup(ctx context.Context, backup *WebServerConfigBackup) error
 	ListWebServerConfigBackups(ctx context.Context, serverID uuid.UUID, serverType string, limit int) ([]*WebServerConfigBackup, error)
 
+	// Billing & Hosting Plans
+	ListPlans(ctx context.Context) ([]*HostingPlan, error)
+	GetPlanByID(ctx context.Context, id uuid.UUID) (*HostingPlan, error)
+	GetPlanBySlug(ctx context.Context, slug string) (*HostingPlan, error)
+	CreatePlan(ctx context.Context, plan *HostingPlan) error
+	UpdatePlan(ctx context.Context, plan *HostingPlan) error
+	DeletePlan(ctx context.Context, id uuid.UUID) error
+
+	// Subscriptions
+	ListSubscriptions(ctx context.Context, orgID uuid.UUID) ([]*Subscription, error)
+	GetSubscriptionByID(ctx context.Context, id uuid.UUID) (*Subscription, error)
+	CreateSubscription(ctx context.Context, sub *Subscription) error
+	UpdateSubscription(ctx context.Context, sub *Subscription) error
+
+	// Invoices
+	ListInvoices(ctx context.Context, orgID uuid.UUID) ([]*Invoice, error)
+	GetInvoiceByID(ctx context.Context, id uuid.UUID) (*Invoice, error)
+	CreateInvoice(ctx context.Context, inv *Invoice) error
+	UpdateInvoice(ctx context.Context, inv *Invoice) error
+
+	// Payment Gateways
+	ListGateways(ctx context.Context) ([]*PaymentGatewayConfig, error)
+	GetGatewayConfig(ctx context.Context, gateway string) (*PaymentGatewayConfig, error)
+	SaveGatewayConfig(ctx context.Context, config *PaymentGatewayConfig) error
+
 	// Close
 	Close() error
 }
@@ -195,6 +220,10 @@ type MemoryStore struct {
 	webServerInstances  map[string]*WebServerInstance // key: serverID:type
 	webServerVHosts     map[string]*WebServerVHost    // key: serverID:type:domain
 	webServerBackups    []*WebServerConfigBackup
+	hostingPlans        map[uuid.UUID]*HostingPlan
+	subscriptions       map[uuid.UUID]*Subscription
+	invoices            map[uuid.UUID]*Invoice
+	gatewayConfigs      map[string]*PaymentGatewayConfig
 	filePath            string
 }
 
@@ -214,6 +243,10 @@ type memoryDumpData struct {
 	EmailAliases       map[uuid.UUID]*EmailAlias         `json:"email_aliases"`
 	WebServerInstances map[string]*WebServerInstance     `json:"web_server_instances"`
 	WebServerVHosts    map[string]*WebServerVHost        `json:"web_server_vhosts"`
+	HostingPlans       map[uuid.UUID]*HostingPlan        `json:"hosting_plans,omitempty"`
+	Subscriptions      map[uuid.UUID]*Subscription       `json:"subscriptions,omitempty"`
+	Invoices           map[uuid.UUID]*Invoice            `json:"invoices,omitempty"`
+	GatewayConfigs     map[string]*PaymentGatewayConfig  `json:"gateway_configs,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -255,6 +288,10 @@ func (m *MemoryStore) saveToDiskLocked() {
 		EmailAliases:       m.emailAliases,
 		WebServerInstances: m.webServerInstances,
 		WebServerVHosts:    m.webServerVHosts,
+		HostingPlans:       m.hostingPlans,
+		Subscriptions:      m.subscriptions,
+		Invoices:           m.invoices,
+		GatewayConfigs:     m.gatewayConfigs,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -321,6 +358,18 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.WebServerVHosts != nil {
 		m.webServerVHosts = data.WebServerVHosts
 	}
+	if data.HostingPlans != nil {
+		m.hostingPlans = data.HostingPlans
+	}
+	if data.Subscriptions != nil {
+		m.subscriptions = data.Subscriptions
+	}
+	if data.Invoices != nil {
+		m.invoices = data.Invoices
+	}
+	if data.GatewayConfigs != nil {
+		m.gatewayConfigs = data.GatewayConfigs
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -354,8 +403,13 @@ func NewMemoryStore() *MemoryStore {
 		webServerInstances:  make(map[string]*WebServerInstance),
 		webServerVHosts:     make(map[string]*WebServerVHost),
 		webServerBackups:    make([]*WebServerConfigBackup, 0),
+		hostingPlans:        make(map[uuid.UUID]*HostingPlan),
+		subscriptions:       make(map[uuid.UUID]*Subscription),
+		invoices:            make(map[uuid.UUID]*Invoice),
+		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
 	}
 	m.loadFromDisk()
+	m.seedBillingData()
 	return m
 }
 

@@ -720,3 +720,79 @@ export interface WebsiteAppStatus {
   has_app: boolean;
   app?: InstalledAppInfo;
 }
+
+export interface HostingPlan {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  tier: 'starter' | 'business' | 'enterprise' | 'reseller';
+  price_monthly: number;
+  price_yearly: number;
+  currency: string;
+  disk_space_mb: number;
+  bandwidth_mb: number;
+  max_websites: number;
+  max_databases: number;
+  max_mailboxes: number;
+  max_ftp: number;
+  dedicated_ip: boolean;
+  free_ssl: boolean;
+  features: string[];
+  is_active: boolean;
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Subscription {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  plan_id: string;
+  plan_name: string;
+  server_id?: string;
+  status: 'active' | 'pending' | 'suspended' | 'cancelled' | 'expired';
+  billing_cycle: 'monthly' | 'yearly';
+  amount: number;
+  currency: string;
+  disk_used_mb: number;
+  bandwidth_used_mb: number;
+  websites_count: number;
+  next_billing_date: string;
+  auto_renew: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  user_id: string;
+  subscription_id?: string;
+  plan_id: string;
+  description: string;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  currency: string;
+  status: 'paid' | 'unpaid' | 'overdue' | 'cancelled';
+  payment_method?: string;
+  transaction_id?: string;
+  due_date: string;
+  paid_at?: string;
+  created_at: string;
+}
+
+export interface PaymentGatewayConfig {
+  gateway: string;
+  display_name: string;
+  enabled: boolean;
+  test_mode: boolean;
+  api_key?: string;
+  secret_key?: string;
+  merchant_id?: string;
+  updated_at?: string;
+}
+

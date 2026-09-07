@@ -82,6 +82,10 @@ const (
 	PermSystemUpdateSchedule = "system.update.schedule"
 	PermSystemUpdateRollback = "system.update.rollback"
 	PermSystemUpdateManage   = "system.update.manage"
+
+	// Billing & Subscription Permissions
+	PermBillingView   = "billing.view"
+	PermBillingManage = "billing.manage"
 )
 
 // RolePermissionMatrix defines default entitlements per role
@@ -97,6 +101,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
+		PermBillingView, PermBillingManage,
 	},
 	RoleAdmin: {
 		PermServersView, PermServersManage,
@@ -109,6 +114,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,
+		PermBillingView, PermBillingManage,
 	},
 	RoleManager: {
 		PermServersView,

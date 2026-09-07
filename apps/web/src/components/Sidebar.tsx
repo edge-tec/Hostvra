@@ -35,6 +35,7 @@ import {
   ChevronRight,
   X,
   Flame,
+  CreditCard,
 } from 'lucide-react';
 import { clearStoredAuth } from '@/lib/api';
 
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
   {
     title: 'SYSTEM & BILLING',
     items: [
+      { label: 'Billing & Plans', href: '/billing', icon: CreditCard, badge: 'Hosting', badgeColor: 'amber' },
       { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },
       { label: 'Team', href: '/team', icon: Users },
       { label: 'API Keys', href: '/api-keys', icon: Key },

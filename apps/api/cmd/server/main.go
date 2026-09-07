@@ -101,6 +101,7 @@ func main() {
 	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
 	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
+	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -169,6 +170,10 @@ func main() {
 			r.Post("/enroll", agentHandler.Enroll)
 			r.Post("/heartbeat", agentHandler.Heartbeat)
 		})
+
+		// Public Hosting Plans Catalog
+		r.Get("/billing/plans", billingHandler.ListPlans)
+		r.Get("/billing/plans/{id}", billingHandler.GetPlan)
 
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
@@ -514,6 +519,32 @@ func main() {
 				// Delivery Logs & Health
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
+			})
+
+			// Enterprise Hosting Billing, Subscriptions, Invoices & Payment Gateways
+			r.Route("/billing", func(r chi.Router) {
+				// Plans Catalog & Admin Management
+				r.Get("/plans", billingHandler.ListPlans)
+				r.Get("/plans/{id}", billingHandler.GetPlan)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/plans", billingHandler.CreatePlan)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/plans/{id}", billingHandler.UpdatePlan)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Delete("/plans/{id}", billingHandler.DeletePlan)
+
+				// Subscriptions
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/subscriptions", billingHandler.ListSubscriptions)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/subscriptions", billingHandler.CreateSubscription)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/subscriptions/{id}", billingHandler.GetSubscription)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/subscriptions/{id}/cancel", billingHandler.CancelSubscription)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/subscriptions/{id}/renew", billingHandler.RenewSubscription)
+
+				// Invoices
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/invoices", billingHandler.ListInvoices)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/invoices/{id}", billingHandler.GetInvoice)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/invoices/{id}/pay", billingHandler.PayInvoice)
+
+				// Payment Gateways
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/gateways", billingHandler.ListGateways)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/gateways/{gateway}", billingHandler.UpdateGateway)
 			})
 		})
 	})
