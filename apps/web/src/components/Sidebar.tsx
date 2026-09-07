@@ -47,6 +47,7 @@ const mainNavItems: NavItem[] = [
   { label: 'Databases', href: '/databases', icon: Database },
   { label: 'Docker', href: '/docker', icon: Container },
   { label: 'File Manager', href: '/files', icon: FolderTree },
+  { label: 'Terminal', href: '/terminal', icon: Terminal, badge: 'CLI' },
   { label: 'Cron Jobs', href: '/cron', icon: Clock },
   { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
   { label: 'DNS Zones', href: '/dns', icon: Network },

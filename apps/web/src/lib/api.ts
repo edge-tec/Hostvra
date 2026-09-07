@@ -209,6 +209,26 @@ export interface UpdateJob {
   steps?: UpdateStep[];
 }
 
+export interface TerminalInfo {
+  hostname: string;
+  os: string;
+  arch: string;
+  user: string;
+  default_cwd: string;
+  shell: string;
+  quick_cmds: string[];
+}
+
+export interface TerminalExecutionResult {
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exit_code: number;
+  duration_ms: number;
+  timestamp: string;
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('hostvra_access_token');

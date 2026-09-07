@@ -88,6 +88,7 @@ func main() {
 	phpHandler := handlers.NewPHPHandler(cfg, dataStore, auditLogger)
 	webServerHandler := handlers.NewWebServerHandler(cfg, dataStore, auditLogger)
 	updateHandler := handlers.NewUpdateHandler(cfg, dataStore, auditLogger, AppVersion)
+	terminalHandler := handlers.NewTerminalHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -287,6 +288,12 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermSystemUpdateRollback)).Post("/rollback", updateHandler.TriggerRollback)
 				r.With(rbac.RequirePermission(rbac.PermSystemUpdateManage)).Put("/channel", updateHandler.SetChannel)
 				r.With(rbac.RequirePermission(rbac.PermSystemUpdateSchedule)).Post("/schedule", updateHandler.ScheduleUpdate)
+			})
+
+			// Integrated Web Terminal
+			r.Route("/terminal", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Get("/info", terminalHandler.GetInfo)
+				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
 			})
 
 			// Team & Collaborators
