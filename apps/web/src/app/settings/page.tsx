@@ -431,8 +431,11 @@ export default function SettingsPage() {
                           className="flex-1 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none"
                         />
                         <button
-                          onClick={() => showToast(`Panel domain ${panelDomain ? `set to ${panelDomain}` : 'cleared'}`)}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                          onClick={async () => {
+                            await persistSettings({ panel_domain: panelDomain });
+                            showToast(`Panel domain ${panelDomain ? `set to ${panelDomain}` : 'cleared'}`);
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                         >
                           Save
                         </button>
@@ -460,7 +463,7 @@ export default function SettingsPage() {
                             setModalInput(panelPort);
                             setModalType('port');
                           }}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                         >
                           Modify
                         </button>
@@ -488,7 +491,7 @@ export default function SettingsPage() {
                             setModalInput(securityEntrance);
                             setModalType('entrance');
                           }}
-                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                         >
                           Modify
                         </button>
@@ -516,9 +519,11 @@ export default function SettingsPage() {
                   <div className="flex items-center justify-between pt-1">
                     <div className="flex items-center gap-3">
                       <button
-                        onClick={() => {
-                          setSslEnabled(!sslEnabled);
-                          showToast(`Panel SSL ${!sslEnabled ? 'Enabled' : 'Disabled'}`);
+                        onClick={async () => {
+                          const next = !sslEnabled;
+                          setSslEnabled(next);
+                          await persistSettings({ ssl_enabled: next });
+                          showToast(`Panel SSL ${next ? 'Enabled' : 'Disabled'}`);
                         }}
                         className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                           sslEnabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -539,8 +544,8 @@ export default function SettingsPage() {
                     </div>
 
                     <button
-                      onClick={() => showToast('Certificate management options opened')}
-                      className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                      onClick={() => showToast('Panel certificate is managed by Let\'s Encrypt / Hostvra Daemon')}
+                      className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                     >
                       Modify
                     </button>
@@ -606,9 +611,11 @@ export default function SettingsPage() {
                       <span className="text-[11px] text-slate-400">For third-party developers only during redevelopment</span>
                     </div>
                     <button
-                      onClick={() => {
-                        setDevMode(!devMode);
-                        showToast(`Developer mode ${!devMode ? 'Enabled' : 'Disabled'}`);
+                      onClick={async () => {
+                        const next = !devMode;
+                        setDevMode(next);
+                        await persistSettings({ dev_mode: next });
+                        showToast(`Developer mode ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         devMode ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -631,9 +638,11 @@ export default function SettingsPage() {
                       </span>
                     </div>
                     <button
-                      onClick={() => {
-                        setApiEnabled(!apiEnabled);
-                        showToast(`API Interface access ${!apiEnabled ? 'Enabled' : 'Disabled'}`);
+                      onClick={async () => {
+                        const next = !apiEnabled;
+                        setApiEnabled(next);
+                        await persistSettings({ api_enabled: next });
+                        showToast(`API Interface access ${next ? 'Enabled' : 'Disabled'}`);
                       }}
                       className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
                         apiEnabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
@@ -654,19 +663,20 @@ export default function SettingsPage() {
                       <div className="flex gap-2">
                         <button
                           onClick={() => setModalType('whitelist')}
-                          className="px-2.5 py-1 rounded bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-2xs"
+                          className="px-2.5 py-1 rounded bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-slate-700 dark:text-slate-200 text-xs font-semibold shadow-2xs cursor-pointer"
                         >
                           IP whitelist
                         </button>
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             const newK = Array.from(crypto.getRandomValues(new Uint8Array(16)))
                               .map((b) => b.toString(16).padStart(2, '0'))
                               .join('');
                             setApiKey(newK);
+                            await persistSettings({ api_key: newK });
                             showToast('API Key reset successfully');
                           }}
-                          className="px-2.5 py-1 rounded bg-emerald-600 text-white text-xs font-bold shadow-xs"
+                          className="px-2.5 py-1 rounded bg-emerald-600 text-white text-xs font-bold shadow-xs cursor-pointer"
                         >
                           Reset key
                         </button>
