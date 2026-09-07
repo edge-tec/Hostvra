@@ -97,6 +97,8 @@ fi
 
 echo "=== [4/6] Building Next.js Web UI Production Bundle ==="
 (cd apps/web && npm run build)
+# Ensure root .next symlink exists for universal CWD static asset resolution
+ln -sfn apps/web/.next .next 2>/dev/null || true
 
 echo "=== [5/6] Restarting Services & Performing Health Verification ==="
 if command -v systemctl &>/dev/null; then
@@ -134,6 +136,11 @@ if command -v systemctl &>/dev/null; then
 
     echo "Restarting hostvra-web..."
     systemctl restart hostvra-web 2>/dev/null || true
+fi
+
+if command -v pm2 &>/dev/null; then
+    echo "Restarting any PM2 managed processes..."
+    pm2 restart all 2>/dev/null || true
 fi
 
 # Cancel error trap since all steps succeeded

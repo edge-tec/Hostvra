@@ -4,7 +4,9 @@ node_modules/
 .pnp.js
 
 # Production builds
+.next
 .next/
+apps/web/.next
 apps/web/.next/
 out/
 build/
