@@ -25,17 +25,23 @@ import {
   X,
   ChevronRight,
   Filter,
+  Activity,
+  Mail,
+  Wrench,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, AppPackage, AppInstallJob } from '@/lib/api';
 
 const CATEGORIES = [
   { id: 'all', label: 'All Software', icon: Boxes },
-  { id: 'process_manager', label: 'Process Managers', icon: Cpu },
   { id: 'web_server', label: 'Web Servers', icon: Server },
+  { id: 'runtime', label: 'PHP & Runtimes', icon: Code2 },
   { id: 'database', label: 'Databases & Cache', icon: Database },
-  { id: 'runtime', label: 'Runtimes', icon: Code2 },
-  { id: 'security', label: 'Security & Tools', icon: Shield },
+  { id: 'process_manager', label: 'Process & Containers', icon: Cpu },
+  { id: 'security', label: 'Security & Firewall', icon: Shield },
+  { id: 'monitoring', label: 'Monitoring & Health', icon: Activity },
+  { id: 'mail', label: 'Mail Servers', icon: Mail },
+  { id: 'tools', label: 'DevOps & Tools', icon: Wrench },
 ];
 
 export default function AppStorePage() {
@@ -171,9 +177,14 @@ export default function AppStorePage() {
       case 'runtime':
         return <Code2 className="w-4 h-4 text-blue-500" />;
       case 'security':
+        return <Shield className="w-4 h-4 text-purple-500" />;
+      case 'monitoring':
+        return <Activity className="w-4 h-4 text-rose-500" />;
+      case 'mail':
+        return <Mail className="w-4 h-4 text-sky-500" />;
       case 'tools':
       default:
-        return <Shield className="w-4 h-4 text-purple-500" />;
+        return <Wrench className="w-4 h-4 text-teal-500" />;
     }
   };
 

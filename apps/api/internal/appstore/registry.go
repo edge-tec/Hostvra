@@ -21,6 +21,8 @@ const (
 	CategoryDatabase       AppCategory = "database"
 	CategoryRuntime        AppCategory = "runtime"
 	CategorySecurity       AppCategory = "security"
+	CategoryMonitoring     AppCategory = "monitoring"
+	CategoryMail           AppCategory = "mail"
 	CategoryTools          AppCategory = "tools"
 )
 
@@ -339,6 +341,278 @@ func (r *Registry) registerDefaults() {
 			InstallScript:  "curl -fsSL https://get.docker.com | sh && systemctl enable docker && systemctl start docker",
 			UninstallScript: "systemctl stop docker && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
 		},
+
+		// Additional Web Servers
+		{
+			ID:             "caddy",
+			Name:           "Caddy 2.8.4",
+			DisplayName:    "Caddy HTTPS Web Server",
+			Version:        "2.8.4",
+			Category:       CategoryWebServer,
+			Description:    "Modern enterprise web server with automatic Let's Encrypt HTTPS certificates and HTTP/3 support by default.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "shield-check",
+			ServiceName:    "caddy",
+			BinaryPath:     "/usr/bin/caddy",
+			ConfigPath:     "/etc/caddy/Caddyfile",
+			DefaultPort:    80,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg && curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y caddy && systemctl enable caddy && systemctl start caddy",
+			UninstallScript: "systemctl stop caddy && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y caddy",
+		},
+
+		// PHP Runtimes & Tooling (WordPress, Laravel, CMS)
+		{
+			ID:             "php83",
+			Name:           "PHP 8.3 & FPM",
+			DisplayName:    "PHP 8.3 FastCGI Process Manager",
+			Version:        "8.3.x",
+			Category:       CategoryRuntime,
+			Description:    "High-performance PHP 8.3 FastCGI runtime with popular extensions for WordPress, Laravel, and Drupal.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.3-fpm",
+			BinaryPath:     "/usr/bin/php8.3",
+			ConfigPath:     "/etc/php/8.3/fpm/php.ini",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common && add-apt-repository -y ppa:ondrej/php && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.3-fpm php8.3-cli php8.3-common php8.3-mysql php8.3-pgsql php8.3-sqlite3 php8.3-redis php8.3-mbstring php8.3-xml php8.3-curl php8.3-zip php8.3-gd php8.3-bcmath php8.3-intl && systemctl enable php8.3-fpm && systemctl start php8.3-fpm",
+			UninstallScript: "systemctl stop php8.3-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.3* || apt-get remove --purge -y php8.3-fpm php8.3-cli",
+		},
+		{
+			ID:             "php82",
+			Name:           "PHP 8.2 & FPM",
+			DisplayName:    "PHP 8.2 FastCGI Process Manager",
+			Version:        "8.2.x",
+			Category:       CategoryRuntime,
+			Description:    "Stable PHP 8.2 FastCGI runtime with extensions for production legacy and modern CMS platforms.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.2-fpm",
+			BinaryPath:     "/usr/bin/php8.2",
+			ConfigPath:     "/etc/php/8.2/fpm/php.ini",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common && add-apt-repository -y ppa:ondrej/php && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.2-fpm php8.2-cli php8.2-common php8.2-mysql php8.2-pgsql php8.2-sqlite3 php8.2-redis php8.2-mbstring php8.2-xml php8.2-curl php8.2-zip php8.2-gd php8.2-bcmath php8.2-intl && systemctl enable php8.2-fpm && systemctl start php8.2-fpm",
+			UninstallScript: "systemctl stop php8.2-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.2* || apt-get remove --purge -y php8.2-fpm php8.2-cli",
+		},
+		{
+			ID:             "php81",
+			Name:           "PHP 8.1 & FPM",
+			DisplayName:    "PHP 8.1 FastCGI Process Manager",
+			Version:        "8.1.x",
+			Category:       CategoryRuntime,
+			Description:    "Long-term stability PHP 8.1 FastCGI runtime for legacy web applications.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.1-fpm",
+			BinaryPath:     "/usr/bin/php8.1",
+			ConfigPath:     "/etc/php/8.1/fpm/php.ini",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common && add-apt-repository -y ppa:ondrej/php && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.1-fpm php8.1-cli php8.1-common php8.1-mysql php8.1-pgsql php8.1-sqlite3 php8.1-redis php8.1-mbstring php8.1-xml php8.1-curl php8.1-zip php8.1-gd php8.1-bcmath php8.1-intl && systemctl enable php8.1-fpm && systemctl start php8.1-fpm",
+			UninstallScript: "systemctl stop php8.1-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.1* || apt-get remove --purge -y php8.1-fpm php8.1-cli",
+		},
+		{
+			ID:             "composer",
+			Name:           "Composer 2.x",
+			DisplayName:    "Composer PHP Package Manager",
+			Version:        "2.7.x",
+			Category:       CategoryRuntime,
+			Description:    "Industry standard dependency manager for PHP software and modern frameworks like Laravel and Symfony.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "boxes",
+			BinaryPath:     "/usr/local/bin/composer",
+			InstallScript:  "which php >/dev/null 2>&1 || (DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y php-cli) && curl -sS https://getcomposer.org/installer -o /tmp/composer-setup.php && php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer && rm -f /tmp/composer-setup.php && chmod +x /usr/local/bin/composer",
+			UninstallScript: "rm -f /usr/local/bin/composer",
+		},
+
+		// Additional Databases & Queues
+		{
+			ID:             "sqlite3",
+			Name:           "SQLite 3",
+			DisplayName:    "SQLite 3 Engine & Dev Tools",
+			Version:        "3.45.x",
+			Category:       CategoryDatabase,
+			Description:    "Self-contained, serverless, zero-configuration, transactional SQL database engine.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "database",
+			BinaryPath:     "/usr/bin/sqlite3",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y sqlite3 libsqlite3-dev",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove -y sqlite3 libsqlite3-dev",
+		},
+		{
+			ID:             "rabbitmq",
+			Name:           "RabbitMQ 3.12",
+			DisplayName:    "RabbitMQ Message Broker & Management",
+			Version:        "3.12.x",
+			Category:       CategoryDatabase,
+			Description:    "Robust enterprise message broker supporting AMQP, MQTT, and STOMP with web management dashboard.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "layers",
+			ServiceName:    "rabbitmq-server",
+			BinaryPath:     "/usr/sbin/rabbitmq-server",
+			DefaultPort:    5672,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y rabbitmq-server && rabbitmq-plugins enable rabbitmq_management && systemctl enable rabbitmq-server && systemctl start rabbitmq-server",
+			UninstallScript: "systemctl stop rabbitmq-server && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y rabbitmq-server",
+		},
+
+		// Additional Modern Runtimes
+		{
+			ID:             "golang",
+			Name:           "Golang 1.22",
+			DisplayName:    "Go Programming Language & Toolchain",
+			Version:        "1.22.x",
+			Category:       CategoryRuntime,
+			Description:    "Fast, statically typed, compiled programming language designed at Google for scalable backend systems.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			BinaryPath:     "/usr/bin/go",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y golang-go",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y golang-go",
+		},
+		{
+			ID:             "rust",
+			Name:           "Rust & Cargo",
+			DisplayName:    "Rust Language & Cargo Package Manager",
+			Version:        "1.80.x",
+			Category:       CategoryRuntime,
+			Description:    "Blazingly fast and memory-efficient systems programming language with zero-cost abstractions.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "terminal",
+			BinaryPath:     "/usr/local/bin/cargo",
+			InstallScript:  "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && ln -sf /root/.cargo/bin/cargo /usr/local/bin/cargo && ln -sf /root/.cargo/bin/rustc /usr/local/bin/rustc",
+			UninstallScript: "rm -f /usr/local/bin/cargo /usr/local/bin/rustc && rm -rf /root/.cargo /root/.rustup",
+		},
+		{
+			ID:             "java",
+			Name:           "Java OpenJDK 21 LTS",
+			DisplayName:    "OpenJDK 21 LTS Runtime & JVM",
+			Version:        "21.x LTS",
+			Category:       CategoryRuntime,
+			Description:    "High-performance open-source implementation of the Java Platform Standard Edition.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			BinaryPath:     "/usr/bin/java",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openjdk-21-jdk-headless",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y openjdk-21-jdk-headless",
+		},
+
+		// Security & Network
+		{
+			ID:             "ufw",
+			Name:           "UFW Firewall",
+			DisplayName:    "UFW Uncomplicated Host Firewall",
+			Version:        "0.36.x",
+			Category:       CategorySecurity,
+			Description:    "Program for managing a netfilter firewall aimed at an easy-to-use interface for opening/blocking ports.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "shield",
+			ServiceName:    "ufw",
+			BinaryPath:     "/usr/sbin/ufw",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ufw && ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 3000/tcp && ufw allow 8080/tcp && ufw --force enable && systemctl enable ufw && systemctl start ufw",
+			UninstallScript: "ufw --force disable && systemctl stop ufw && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y ufw",
+		},
+		{
+			ID:             "wireguard",
+			Name:           "WireGuard VPN",
+			DisplayName:    "WireGuard Fast Secure Kernel VPN",
+			Version:        "1.0.x",
+			Category:       CategorySecurity,
+			Description:    "Extremely simple yet fast and modern VPN that utilizes state-of-the-art cryptography.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "shield-check",
+			BinaryPath:     "/usr/bin/wg",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y wireguard wireguard-tools",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y wireguard wireguard-tools",
+		},
+
+		// Monitoring & System Health
+		{
+			ID:             "netdata",
+			Name:           "Netdata 1.46",
+			DisplayName:    "Netdata Real-Time Infrastructure Monitor",
+			Version:        "1.46.x",
+			Category:       CategoryMonitoring,
+			Description:    "High-fidelity real-time server health and performance metrics monitoring with rich web charts.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "activity",
+			ServiceName:    "netdata",
+			BinaryPath:     "/usr/sbin/netdata",
+			DefaultPort:    19999,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y netdata && systemctl enable netdata && systemctl start netdata",
+			UninstallScript: "systemctl stop netdata && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y netdata",
+		},
+		{
+			ID:             "node-exporter",
+			Name:           "Prometheus Node Exporter",
+			DisplayName:    "Node Exporter System Metrics Daemon",
+			Version:        "1.7.x",
+			Category:       CategoryMonitoring,
+			Description:    "Hardware and OS metrics exporter for Prometheus metrics scrapers and Grafana dashboards.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "activity",
+			ServiceName:    "prometheus-node-exporter",
+			BinaryPath:     "/usr/bin/prometheus-node-exporter",
+			DefaultPort:    9100,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y prometheus-node-exporter && systemctl enable prometheus-node-exporter && systemctl start prometheus-node-exporter",
+			UninstallScript: "systemctl stop prometheus-node-exporter && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y prometheus-node-exporter",
+		},
+
+		// SSL & Web Hosting Tools
+		{
+			ID:             "certbot",
+			Name:           "Certbot Let's Encrypt",
+			DisplayName:    "Certbot Automatic SSL/TLS Certificate Manager",
+			Version:        "2.9.x",
+			Category:       CategoryTools,
+			Description:    "Automatically obtain and renew free Let's Encrypt SSL/TLS certificates for web servers.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "shield-check",
+			BinaryPath:     "/usr/bin/certbot",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y certbot python3-certbot-nginx python3-certbot-apache",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y certbot",
+		},
+		{
+			ID:             "git",
+			Name:           "Git 2.43",
+			DisplayName:    "Git Distributed Version Control & LFS",
+			Version:        "2.43.x",
+			Category:       CategoryTools,
+			Description:    "Fast, scalable distributed revision control system with Git Large File Storage (LFS).",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			BinaryPath:     "/usr/bin/git",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y git git-lfs",
+			UninstallScript: "DEBIAN_FRONTEND=noninteractive apt-get remove -y git git-lfs",
+		},
+
+		// Mail Server
+		{
+			ID:             "postfix",
+			Name:           "Postfix 3.8",
+			DisplayName:    "Postfix High-Performance SMTP Mail Server",
+			Version:        "3.8.x",
+			Category:       CategoryMail,
+			Description:    "Fast, easy to administer, and secure Mail Transfer Agent (MTA) for outbound and inbound email.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "mail",
+			ServiceName:    "postfix",
+			BinaryPath:     "/usr/sbin/postfix",
+			DefaultPort:    25,
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && echo 'postfix postfix/main_mailer_type select Internet Site' | debconf-set-selections && echo 'postfix postfix/mailname string localhost' | debconf-set-selections && DEBIAN_FRONTEND=noninteractive apt-get install -y postfix mailutils && systemctl enable postfix && systemctl start postfix",
+			UninstallScript: "systemctl stop postfix && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y postfix mailutils",
+		},
 	}
 
 	for _, p := range defaults {
@@ -384,15 +658,38 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 		}
 	}
 
-	// Fallback check with `which <name>`
+	// Fallback check with LookPath
 	if !isInstalled {
 		cmdName := pkg.ID
-		if pkg.ID == "supervisor" {
+		switch pkg.ID {
+		case "supervisor":
 			cmdName = "supervisord"
-		} else if pkg.ID == "mariadb" {
-			cmdName = "mariadb"
-		} else if pkg.ID == "nodejs" {
+		case "nodejs":
 			cmdName = "node"
+		case "python-tools":
+			cmdName = "python3"
+		case "php83":
+			cmdName = "php8.3"
+		case "php82":
+			cmdName = "php8.2"
+		case "php81":
+			cmdName = "php8.1"
+		case "golang":
+			cmdName = "go"
+		case "java":
+			cmdName = "java"
+		case "wireguard":
+			cmdName = "wg"
+		case "pureftpd":
+			cmdName = "pure-ftpd"
+		case "clamav":
+			cmdName = "clamscan"
+		case "memcached":
+			cmdName = "memcached"
+		case "apache":
+			cmdName = "apache2"
+		case "node-exporter":
+			cmdName = "prometheus-node-exporter"
 		}
 		if path, err := exec.LookPath(cmdName); err == nil && path != "" {
 			isInstalled = true
