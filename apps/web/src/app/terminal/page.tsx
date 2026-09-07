@@ -403,7 +403,13 @@ Available shortcuts & capabilities:
                 )}
 
                 {entry.stderr && (
-                  <pre className="text-rose-400 whitespace-pre-wrap break-all pl-2 leading-relaxed bg-rose-950/20 p-2.5 rounded-lg border border-rose-900/30">
+                  <pre
+                    className={`whitespace-pre-wrap break-all pl-2 leading-relaxed p-2.5 rounded-lg border ${
+                      entry.exitCode === 0
+                        ? 'text-slate-400 bg-slate-900/40 border-slate-800/80'
+                        : 'text-rose-400 bg-rose-950/20 border-rose-900/30'
+                    }`}
+                  >
                     {entry.stderr}
                   </pre>
                 )}
