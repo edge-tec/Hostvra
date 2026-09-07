@@ -506,7 +506,7 @@ func (h *DashboardHandler) gatherCounts(ctx context.Context, orgID uuid.UUID) Co
 
 	// 1. Websites
 	websites, err := h.store.ListWebsitesByOrg(ctx, orgID)
-	if err == nil && len(websites) > 0 {
+	if err == nil {
 		counts.WebsitesTotal = len(websites)
 		for _, w := range websites {
 			if w.Status == "active" || w.Status == "running" {
@@ -515,11 +515,6 @@ func (h *DashboardHandler) gatherCounts(ctx context.Context, orgID uuid.UUID) Co
 				counts.WebsitesStopped++
 			}
 		}
-	} else {
-		// Default baseline for dashboard
-		counts.WebsitesRunning = 16
-		counts.WebsitesStopped = 0
-		counts.WebsitesTotal = 16
 	}
 
 	// 2. Servers & Databases
@@ -532,13 +527,7 @@ func (h *DashboardHandler) gatherCounts(ctx context.Context, orgID uuid.UUID) Co
 				totalDBs += len(dbs)
 			}
 		}
-		if totalDBs > 0 {
-			counts.DatabasesTotal = totalDBs
-		} else {
-			counts.DatabasesTotal = 18
-		}
-	} else {
-		counts.DatabasesTotal = 18
+		counts.DatabasesTotal = totalDBs
 	}
 
 	return counts

@@ -165,11 +165,6 @@ export function Header() {
             <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
             <span>{osName}</span>
           </div>
-
-          {/* PRO Badge */}
-          <span className="px-2 py-0.5 rounded bg-[#1e232d] text-amber-400 font-bold text-[10px] tracking-wide shadow-sm flex items-center gap-1 border border-amber-400/20 flex-shrink-0">
-            PRO
-          </span>
         </div>
 
         {/* Right Action Icons & Controls */}

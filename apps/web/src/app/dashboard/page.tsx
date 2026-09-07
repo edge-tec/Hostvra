@@ -22,13 +22,16 @@ import {
   Lock,
   Target,
   ShieldAlert,
+  Layers,
+  Code2,
+  Terminal,
+  Clock,
   Play,
   Check,
   CheckCircle2,
   Bookmark,
   BookmarkCheck,
   X,
-  Crown,
   Zap,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
@@ -44,7 +47,6 @@ export default function DashboardPage() {
   const [selectedControlApp, setSelectedControlApp] = useState<AppPackage | null>(null);
   const [controlModalOpen, setControlModalOpen] = useState(false);
   const [pinnedAppIds, setPinnedAppIds] = useState<string[]>([]);
-  const [proModalOpen, setProModalOpen] = useState(false);
   const [chartExpanded, setChartExpanded] = useState(false);
 
   // Memo Note State
@@ -225,31 +227,6 @@ export default function DashboardPage() {
     if (pct >= 70) return '#f59e0b';
     return '#20a53a';
   };
-
-  const installedServicesList = useMemo(() => {
-    const defaultList: AppPackage[] = [
-      { id: 'git', name: 'Git 2.43', display_name: 'Git VCS', version: '2.43', category: 'tools', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'git', description: 'Distributed version control system.' },
-      { id: 'apache', name: 'Apache 2.4.62', display_name: 'Apache Web Server', version: '2.4.62', category: 'web_server', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'server', description: 'High-performance HTTP server daemon.' },
-      { id: 'openlitespeed', name: 'OpenLiteSpeed 1.8.5', display_name: 'OpenLiteSpeed Server', version: '1.8.5', category: 'web_server', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'zap', description: 'Event-driven high-speed HTTP server engine.' },
-      { id: 'pureftpd', name: 'Pure-FTPd 1.0.49', display_name: 'Pure-FTPd Server', version: '1.0.49', category: 'tools', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'folder', description: 'Secure, standards-compliant FTP server daemon.' },
-      { id: 'phpmyadmin', name: 'phpMyAdmin 5.2', display_name: 'phpMyAdmin', version: '5.2.1', category: 'database', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'database', description: 'Web-based MySQL and MariaDB administration tool.' },
-      { id: 'mysql', name: 'MySQL 8.0', display_name: 'MySQL Server', version: '8.0.36', category: 'database', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'database', description: 'World leading relational database management system.' },
-      { id: 'php82', name: 'PHP-8.2', display_name: 'PHP 8.2 FastCGI', version: '8.2.18', category: 'runtime', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'code', description: 'Modern PHP scripting language runtime.' },
-      { id: 'php81', name: 'PHP-8.1', display_name: 'PHP 8.1 FastCGI', version: '8.1.27', category: 'runtime', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'code', description: 'Enterprise stable PHP 8.1 runtime.' },
-      { id: 'redis', name: 'Redis 7.2', display_name: 'Redis In-Memory Store', version: '7.2.4', category: 'database', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'database', description: 'In-memory data structure store used as a cache.' },
-      { id: 'nodejs', name: 'Node.js 20', display_name: 'Node.js LTS Runtime', version: '20.12.0', category: 'runtime', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'code', description: 'JavaScript runtime built on Chrome V8 engine.' },
-      { id: 'fail2ban', name: 'Fail2ban 1.0', display_name: 'Fail2ban Intrusion Prevention', version: '1.0.2', category: 'security', is_installed: true, status: 'running', developer: 'official', price: 'Free', icon: 'shield', description: 'Daemon to ban hosts that cause multiple authentication errors.' },
-    ];
-
-    if (installedApps.length >= 8) {
-      return installedApps;
-    }
-
-    const map = new Map<string, AppPackage>();
-    defaultList.forEach((item) => map.set(item.id, item));
-    installedApps.forEach((item) => map.set(item.id, item));
-    return Array.from(map.values());
-  }, [installedApps]);
 
   // SVG Chart path calculation
   const chartSvgPaths = useMemo(() => {
@@ -578,193 +555,198 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ROW 3: Software Quick Launch */}
+        {/* ROW 3: Core Management Tools */}
         <div className="p-4 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-2.5">
-            <h2 className="text-xs font-bold text-slate-800 dark:text-slate-100">Software</h2>
-            <button className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-              <MoreVertical className="w-3.5 h-3.5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-bold text-slate-800 dark:text-slate-100">Core Management Tools</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-semibold">
+                100% Functional
+              </span>
+            </div>
+            <Link
+              href="/app-store"
+              className="text-emerald-600 dark:text-emerald-400 hover:underline text-xs font-semibold flex items-center gap-1"
+            >
+              + App Store
+            </Link>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3 pt-1">
-            {/* Supervisor 3.1 Tile */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-4 gap-3 pt-1">
+            {/* Tool 1: Web Servers */}
             <div
-              onClick={() => {
-                const supervisorApp = installedApps.find((a) => a.id.toLowerCase().includes('supervisor')) || {
-                  id: 'supervisor',
-                  name: 'Supervisor',
-                  display_name: 'Supervisor Manager',
-                  version: '3.1',
-                  category: 'process_manager',
-                  is_installed: true,
-                  status: 'running',
-                  description: 'Daemon process manager for background workers.',
-                  config_path: '/etc/supervisor/supervisord.conf',
-                };
-                handleOpenApp(supervisorApp as AppPackage);
-              }}
-              className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group relative"
+              onClick={() => router.push('/webservers')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
             >
-              <div className="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950/40 flex items-center justify-center text-sky-600 dark:text-sky-400 mb-1.5 shadow-xs group-hover:scale-105 transition">
-                <span className="text-xl">🐧</span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  Active
+                </span>
               </div>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 text-center flex items-center gap-1">
-                Supervisor 3.1
-                <span className="text-emerald-500 text-[9px]">▶</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                Web Servers
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Nginx, Apache, OpenLiteSpeed
               </span>
             </div>
 
-            {/* AD Tile 1: Website Firewall */}
+            {/* Tool 2: PHP Management */}
+            <div
+              onClick={() => router.push('/php')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition">
+                  <Code2 className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                  Ready
+                </span>
+              </div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                PHP Management
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                PHP-FPM, Extensions, Pools
+              </span>
+            </div>
+
+            {/* Tool 3: Databases */}
+            <div
+              onClick={() => router.push('/databases')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 dark:bg-amber-950/50 flex items-center justify-center text-amber-600 dark:text-amber-400 group-hover:scale-105 transition">
+                  <Database className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20">
+                  Online
+                </span>
+              </div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                Databases
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                MySQL, MariaDB, phpMyAdmin
+              </span>
+            </div>
+
+            {/* Tool 4: File Manager */}
+            <div
+              onClick={() => router.push('/files')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950/50 flex items-center justify-center text-sky-600 dark:text-sky-400 group-hover:scale-105 transition">
+                  <FolderOpen className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-500/20">
+                  Ready
+                </span>
+              </div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                File Manager
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Directory Browser & Code Editor
+              </span>
+            </div>
+
+            {/* Tool 5: Terminal */}
+            <div
+              onClick={() => router.push('/terminal')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-slate-200 dark:bg-surface-700 flex items-center justify-center text-slate-700 dark:text-slate-300 group-hover:scale-105 transition">
+                  <Terminal className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-surface-700/50 px-1.5 py-0.5 rounded border border-slate-300/30">
+                  CLI Shell
+                </span>
+              </div>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                Terminal
+              </span>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Root Web SSH Console
+              </span>
+            </div>
+
+            {/* Tool 6: Firewall */}
             <div
               onClick={() => router.push('/firewall')}
-              className="flex flex-col items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 relative group"
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
             >
-              <span className="absolute top-1 left-1 text-[8px] font-bold px-1 rounded bg-slate-200 dark:bg-surface-700 text-slate-500">
-                AD
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mt-1">
-                <Shield className="w-4 h-4" />
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                  Protected
+                </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                Website Firewall
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                Firewall
               </span>
-              <div className="flex items-center gap-1 mt-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push('/firewall');
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
-                >
-                  Preview
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setProModalOpen(true);
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition"
-                >
-                  Buy now
-                </button>
-              </div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                UFW Ports, Rules & IP Defense
+              </span>
             </div>
 
-            {/* AD Tile 2: Statistics v2 */}
+            {/* Tool 7: Cron Jobs */}
             <div
-              onClick={() => router.push('/audit-logs')}
-              className="flex flex-col items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 relative group"
+              onClick={() => router.push('/cron')}
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
             >
-              <span className="absolute top-1 left-1 text-[8px] font-bold px-1 rounded bg-slate-200 dark:bg-surface-700 text-slate-500">
-                AD
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-950/40 flex items-center justify-center text-blue-600 dark:text-blue-400 mt-1">
-                <Target className="w-4 h-4" />
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-950/50 flex items-center justify-center text-purple-600 dark:text-purple-400 group-hover:scale-105 transition">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-500/20">
+                  Schedule
+                </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                Statistics v2
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                Cron Jobs
               </span>
-              <div className="flex items-center gap-1 mt-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push('/audit-logs');
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
-                >
-                  Preview
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setProModalOpen(true);
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition"
-                >
-                  Buy now
-                </button>
-              </div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Scheduled Tasks & Automation
+              </span>
             </div>
 
-            {/* AD Tile 3: Tamper-proof */}
+            {/* Tool 8: SSL Certificates */}
             <div
               onClick={() => router.push('/ssl')}
-              className="flex flex-col items-center justify-between p-2.5 rounded-xl border border-emerald-500/30 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/20 hover:border-emerald-500 cursor-pointer transition relative group"
+              className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
             >
-              <span className="absolute top-1 left-1 text-[8px] font-bold px-1 rounded bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300">
-                AD
-              </span>
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mt-1">
-                <Lock className="w-4 h-4" />
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-950/50 flex items-center justify-center text-rose-600 dark:text-rose-400 group-hover:scale-105 transition">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-500/20">
+                  Secured
+                </span>
               </div>
-              <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                Tamper-proof
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                SSL Certificates
               </span>
-              <div className="flex items-center gap-1 mt-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push('/ssl');
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
-                >
-                  Preview
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setProModalOpen(true);
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition"
-                >
-                  Buy now
-                </button>
-              </div>
-            </div>
-
-            {/* AD Tile 4: Anti-intrusion */}
-            <div
-              onClick={() => router.push('/firewall')}
-              className="flex flex-col items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 relative group"
-            >
-              <span className="absolute top-1 left-1 text-[8px] font-bold px-1 rounded bg-slate-200 dark:bg-surface-700 text-slate-500">
-                AD
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                Let&apos;s Encrypt & Custom SSL
               </span>
-              <div className="w-9 h-9 rounded-xl bg-purple-100 dark:bg-purple-950/40 flex items-center justify-center text-purple-600 dark:text-purple-400 mt-1">
-                <ShieldAlert className="w-4 h-4" />
-              </div>
-              <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 text-center truncate w-full mt-1">
-                Anti-intrusion
-              </span>
-              <div className="flex items-center gap-1 mt-1">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    router.push('/firewall');
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 transition"
-                >
-                  Preview
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setProModalOpen(true);
-                  }}
-                  className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition"
-                >
-                  Buy now
-                </button>
-              </div>
             </div>
           </div>
         </div>
 
-        {/* ROW 4: Installed Services (11) */}
+        {/* ROW 4: Installed Services */}
         <div className="space-y-2.5">
           <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200 px-0.5">
-            <span>Installed Services ({installedServicesList.length})</span>
+            <span>Installed Services ({installedApps.length})</span>
             <Link
               href="/app-store"
               className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center gap-1"
@@ -773,20 +755,54 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-            {installedServicesList.map((app) => (
-              <button
-                key={app.id}
-                onClick={() => handleOpenApp(app)}
-                className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 bg-white dark:bg-[#121824] flex items-center gap-2.5 text-left transition shadow-xs group min-w-0"
+          {installedApps.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+              {installedApps.map((app) => (
+                <button
+                  key={app.id}
+                  onClick={() => handleOpenApp(app)}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 bg-white dark:bg-[#121824] flex items-center justify-between text-left transition shadow-xs group min-w-0"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span
+                      className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
+                        app.status === 'running' ? 'bg-emerald-500' : 'bg-amber-500'
+                      }`}
+                    />
+                    <div className="min-w-0">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate block group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                        {app.name}
+                      </span>
+                      <span className="text-[10px] text-slate-400 block truncate">
+                        {app.version ? `v${app.version}` : 'Active'} · {app.category || 'Package'}
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/20 opacity-0 group-hover:opacity-100 transition">
+                    Manage
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="p-6 rounded-xl border border-dashed border-slate-300 dark:border-surface-700 bg-white dark:bg-[#121824] text-center space-y-2">
+              <Boxes className="w-8 h-8 text-slate-400 dark:text-slate-500 mx-auto" />
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-slate-700 dark:text-slate-200">
+                  No Software Installed
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
+                  Install Nginx, Apache, MySQL, PHP, Redis, or Node.js with 1-click from the App Store.
+                </p>
+              </div>
+              <Link
+                href="/app-store"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition mt-1 shadow-xs"
               >
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
-                  {app.name}
-                </span>
-              </button>
-            ))}
-          </div>
+                + Browse App Store
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* ROW 5: Traffic & Disk IO Realtime Monitor */}
@@ -961,52 +977,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ROW 6: Bottom PRO Banner */}
-        <div className="p-3 sm:p-3.5 rounded-xl bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setProModalOpen(true)}
-              className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-white font-bold text-xs shadow-xs transition"
-            >
-              Buy now
-            </button>
-            <span
-              onClick={() => setProModalOpen(true)}
-              className="px-2 py-0.5 rounded bg-slate-900 text-amber-400 font-bold text-[10px] border border-amber-400/20 cursor-pointer"
-            >
-              PRO
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              All paid plugins
-            </span>
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              15 days no reason to refund
-            </span>
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              Replaceable authorized IP
-            </span>
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              2 free 1-year DV SSL (for year)
-            </span>
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              Priority response service
-            </span>
-            <span className="flex items-center gap-1">
-              <Check className="w-3.5 h-3.5 text-amber-500" />
-              Paid service group (for year)
-            </span>
-          </div>
-        </div>
-
-        {/* ROW 7: Footer */}
+        {/* Clean Footer */}
         <div className="py-3 text-center text-[11px] text-slate-400 dark:text-slate-500 space-y-1">
           <p>
             Hostvra Linux panel ©2024-2026 Hostvra{' '}
@@ -1024,91 +995,6 @@ export default function DashboardPage() {
           onClose={() => setControlModalOpen(false)}
         />
       )}
-
-      {/* Hostvra PRO Licensing Modal */}
-      {proModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Crown className="w-5 h-5 text-amber-500" />
-                Hostvra PRO Commercial Features
-              </h3>
-              <button
-                onClick={() => setProModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600 dark:text-slate-300">
-              Unlock enterprise-grade security extensions, WAF rules, real-time intrusion monitoring, and VIP support for your infrastructure fleet.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 space-y-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                  <Shield className="w-3.5 h-3.5" />
-                  Website Firewall (WAF)
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  CC defense, SQL injection shielding & zero-day layer 7 filtering.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 space-y-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400">
-                  <Target className="w-3.5 h-3.5" />
-                  Deep Traffic Analytics
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Real-time bandwidth analysis, URI heatmaps & crawler tracking.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 space-y-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400">
-                  <Lock className="w-3.5 h-3.5" />
-                  Tamper-proof Defense
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Kernel-level directory locking to prevent ransomware or unauthorized defacement.
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 space-y-1">
-                <div className="flex items-center gap-1 text-xs font-bold text-purple-600 dark:text-purple-400">
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  Anti-intrusion System
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Automated IP reputation checks and SSH brute-force ban rules.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-surface-800">
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                15-day 100% money back guarantee
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    setProModalOpen(false);
-                    router.push('/license');
-                  }}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-sm"
-                >
-                  Activate License Key
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Expanded Chart Modal */}
       {chartExpanded && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden p-6 space-y-4">
