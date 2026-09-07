@@ -393,3 +393,43 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     };
   }
 }
+
+export interface FirewallStatus {
+  backend: string;
+  is_active: boolean;
+  default_incoming: string;
+  default_outgoing: string;
+  rules_count: number;
+  ssh_port_protected: boolean;
+  fail2ban_installed: boolean;
+  fail2ban_active: boolean;
+  jails_count: number;
+  total_banned_ips: number;
+}
+
+export interface FirewallRule {
+  id: string;
+  number: number;
+  to: string;
+  action: string;
+  from: string;
+  protocol: string;
+  comment: string;
+}
+
+export interface Fail2banJail {
+  name: string;
+  service: string;
+  is_active: boolean;
+  currently_failed: number;
+  total_failed: number;
+  currently_banned: number;
+  total_banned: number;
+  banned_ips: string[];
+}
+
+export interface BannedIPItem {
+  ip: string;
+  jail: string;
+  banned_at: string;
+}

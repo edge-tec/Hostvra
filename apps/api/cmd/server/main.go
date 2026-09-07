@@ -94,6 +94,7 @@ func main() {
 	appStoreHandler := handlers.NewAppStoreHandler(cfg, dataStore, auditLogger)
 	dashboardHandler := handlers.NewDashboardHandler(cfg, dataStore, auditLogger)
 	fileHandler := handlers.NewFileHandler(cfg, dataStore, auditLogger)
+	firewallHandler := handlers.NewFirewallHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -322,6 +323,23 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/permissions", fileHandler.Permissions)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/archive", fileHandler.Archive)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/extract", fileHandler.Extract)
+			})
+
+			// Linux Firewall (UFW) & Fail2ban Subsystem
+			r.Route("/firewall", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/status", firewallHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/rules", firewallHandler.ListRules)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/rules", firewallHandler.AddRule)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Delete("/rules", firewallHandler.DeleteRule)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Delete("/rules/{id}", firewallHandler.DeleteRule)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/enable", firewallHandler.Enable)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/disable", firewallHandler.Disable)
+
+				// Fail2ban intrusion defense
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/jails", firewallHandler.ListJails)
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/banned", firewallHandler.ListBannedIPs)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/ban", firewallHandler.BanIP)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/fail2ban/unban", firewallHandler.UnbanIP)
 			})
 
 			// 1-Click App Store & Extensions
