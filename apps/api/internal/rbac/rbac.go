@@ -28,6 +28,7 @@ const (
 	PermDatabasesView   = "databases.view"
 	PermDatabasesCreate = "databases.create"
 	PermDatabasesDelete = "databases.delete"
+	PermSSLView         = "ssl.view"
 	PermSSLManage       = "ssl.manage"
 	PermFirewallView    = "firewall.view"
 	PermFirewallManage  = "firewall.manage"
@@ -89,7 +90,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView, PermServersManage, PermServersDelete,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
-		PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
+		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
@@ -101,7 +102,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView, PermServersManage,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
-		PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
+		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
@@ -113,7 +114,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage,
 		PermDatabasesView, PermDatabasesCreate,
-		PermSSLManage, PermFirewallView,
+		PermSSLView, PermSSLManage, PermFirewallView,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit,
 		PermBackupsCreate, PermAuditView,
 		PermEmailView, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView,
@@ -124,6 +125,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView,
 		PermWebsitesView, PermWebsitesManage,
 		PermDatabasesView,
+		PermSSLView,
 		PermFilesBrowse, PermFilesEdit,
 		PermCronView,
 		PermDockerManage,
@@ -136,6 +138,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView,
 		PermWebsitesView,
 		PermDatabasesView,
+		PermSSLView,
 		PermFirewallView,
 		PermCronView,
 		PermAuditView,

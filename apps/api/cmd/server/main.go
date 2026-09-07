@@ -99,6 +99,7 @@ func main() {
 	dockerHandler := handlers.NewDockerHandler(cfg, dataStore, auditLogger)
 	ftpHandler := handlers.NewFTPHandler(cfg, dataStore, auditLogger)
 	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
+	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -374,6 +375,18 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/websites/{domain}", wafHandler.GetWebsiteWAF)
 				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/websites/{domain}", wafHandler.UpdateWebsiteWAF)
 				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/probe", wafHandler.SimulateProbe)
+			})
+
+			// SSL Certificates & Wildcard DNS-01
+			r.Route("/ssl", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermSSLView)).Get("/certificates", sslHandler.ListCertificates)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/issue", sslHandler.Issue)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/challenge", sslHandler.PrepareChallenge)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/verify-challenge", sslHandler.VerifyChallenge)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/custom", sslHandler.ImportCustom)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/renew/{id}", sslHandler.Renew)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/auto-renew", sslHandler.AutoRenew)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Delete("/{id}", sslHandler.Delete)
 			})
 
 			// Scheduled Tasks (Linux Crontab) Subsystem

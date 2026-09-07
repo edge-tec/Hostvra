@@ -49,16 +49,20 @@ type DatabaseUser struct {
 }
 
 type SSLCertificate struct {
-	ID          uuid.UUID `json:"id"`
-	WebsiteID   uuid.UUID `json:"website_id"`
-	DomainList  []string  `json:"domain_list"`
-	Issuer      string    `json:"issuer"`
-	CertPath    string    `json:"cert_path"`
-	KeyPath     string    `json:"key_path"`
-	IssuedAt    time.Time `json:"issued_at"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	AutoRenew   bool      `json:"auto_renew"`
-	Status      string    `json:"status"` // valid, expired, renewing, failed
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	WebsiteID     uuid.UUID `json:"website_id"`
+	DomainList    []string  `json:"domain_list"`
+	Issuer        string    `json:"issuer"`
+	CertPath      string    `json:"cert_path"`
+	KeyPath       string    `json:"key_path"`
+	IssuedAt      time.Time `json:"issued_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	AutoRenew     bool      `json:"auto_renew"`
+	Status        string    `json:"status"` // valid, expired, renewing, failed
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	IsWildcard    bool      `json:"is_wildcard"`
+	DaysRemaining int       `json:"days_remaining"`
+	DNSProvider   string    `json:"dns_provider,omitempty"`
 }
+

@@ -107,7 +107,7 @@ export interface DatabaseUser {
 
 export interface SSLCertificate {
   id: string;
-  website_id: string;
+  website_id?: string;
   domain_list: string[];
   issuer: string;
   cert_path: string;
@@ -115,9 +115,25 @@ export interface SSLCertificate {
   issued_at: string;
   expires_at: string;
   auto_renew: boolean;
-  status: 'valid' | 'expired' | 'renewing' | 'failed';
+  status: 'valid' | 'expired' | 'renewing' | 'failed' | 'expiring_soon';
   created_at: string;
+  is_wildcard?: boolean;
+  days_remaining?: number;
+  dns_provider?: string;
 }
+
+export interface SSLChallengeInfo {
+  challenge_id: string;
+  domain: string;
+  txt_host: string;
+  txt_value: string;
+  token: string;
+  provider: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+}
+
 
 export interface AuditLog {
   id: string;

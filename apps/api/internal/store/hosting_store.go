@@ -196,10 +196,12 @@ func (m *MemoryStore) CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificat
 		cert.ID = uuid.New()
 	}
 	now := time.Now().UTC()
-	cert.CreatedAt = now
+	if cert.CreatedAt.IsZero() {
+		cert.CreatedAt = now
+	}
 	cert.UpdatedAt = now
 
-	m.sslCerts[cert.WebsiteID] = cert
+	m.sslCerts[cert.ID] = cert
 	return nil
 }
 
@@ -207,12 +209,56 @@ func (m *MemoryStore) GetSSLByWebsiteID(ctx context.Context, websiteID uuid.UUID
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	cert, exists := m.sslCerts[websiteID]
+	for _, cert := range m.sslCerts {
+		if cert.WebsiteID == websiteID {
+			return cert, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *MemoryStore) GetSSLByID(ctx context.Context, id uuid.UUID) (*SSLCertificate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cert, exists := m.sslCerts[id]
 	if !exists {
 		return nil, ErrNotFound
 	}
 	return cert, nil
 }
+
+func (m *MemoryStore) ListSSLCertificates(ctx context.Context, orgID uuid.UUID) ([]*SSLCertificate, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	siteIDs := make(map[uuid.UUID]bool)
+	for _, site := range m.websites {
+		if orgID == uuid.Nil || site.OrganizationID == orgID {
+			siteIDs[site.ID] = true
+		}
+	}
+
+	var results []*SSLCertificate
+	for _, cert := range m.sslCerts {
+		if cert.WebsiteID == uuid.Nil || siteIDs[cert.WebsiteID] || orgID == uuid.Nil {
+			results = append(results, cert)
+		}
+	}
+	return results, nil
+}
+
+func (m *MemoryStore) DeleteSSL(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.sslCerts[id]; !exists {
+		return ErrNotFound
+	}
+	delete(m.sslCerts, id)
+	return nil
+}
+
 
 // ============================================================================
 // POSTGRESQL STORE HOSTING IMPLEMENTATION
@@ -436,3 +482,64 @@ func (p *PostgresStore) GetSSLByWebsiteID(ctx context.Context, websiteID uuid.UU
 	}
 	return cert, err
 }
+
+func (p *PostgresStore) GetSSLByID(ctx context.Context, id uuid.UUID) (*SSLCertificate, error) {
+	query := `
+		SELECT id, website_id, domain_list, issuer, cert_path, key_path, issued_at, expires_at, auto_renew, status, created_at, updated_at
+		FROM ssl_certificates
+		WHERE id = $1
+	`
+	cert := &SSLCertificate{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&cert.ID, &cert.WebsiteID, pq.Array(&cert.DomainList), &cert.Issuer,
+		&cert.CertPath, &cert.KeyPath, &cert.IssuedAt, &cert.ExpiresAt, &cert.AutoRenew,
+		&cert.Status, &cert.CreatedAt, &cert.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return cert, err
+}
+
+func (p *PostgresStore) ListSSLCertificates(ctx context.Context, orgID uuid.UUID) ([]*SSLCertificate, error) {
+	query := `
+		SELECT c.id, c.website_id, c.domain_list, c.issuer, c.cert_path, c.key_path, c.issued_at, c.expires_at, c.auto_renew, c.status, c.created_at, c.updated_at
+		FROM ssl_certificates c
+		LEFT JOIN websites w ON c.website_id = w.id
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR w.organization_id = $1)
+		ORDER BY c.created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var certs []*SSLCertificate
+	for rows.Next() {
+		cert := &SSLCertificate{}
+		if err := rows.Scan(
+			&cert.ID, &cert.WebsiteID, pq.Array(&cert.DomainList), &cert.Issuer,
+			&cert.CertPath, &cert.KeyPath, &cert.IssuedAt, &cert.ExpiresAt, &cert.AutoRenew,
+			&cert.Status, &cert.CreatedAt, &cert.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+	return certs, nil
+}
+
+func (p *PostgresStore) DeleteSSL(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM ssl_certificates WHERE id = $1`
+	res, err := p.db.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+

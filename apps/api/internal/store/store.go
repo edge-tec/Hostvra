@@ -72,6 +72,9 @@ type Store interface {
 	// SSL
 	CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error
 	GetSSLByWebsiteID(ctx context.Context, websiteID uuid.UUID) (*SSLCertificate, error)
+	GetSSLByID(ctx context.Context, id uuid.UUID) (*SSLCertificate, error)
+	ListSSLCertificates(ctx context.Context, orgID uuid.UUID) ([]*SSLCertificate, error)
+	DeleteSSL(ctx context.Context, id uuid.UUID) error
 
 	// Email Domains
 	CreateEmailDomain(ctx context.Context, domain *EmailDomain) error
