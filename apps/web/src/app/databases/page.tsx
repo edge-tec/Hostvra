@@ -72,6 +72,9 @@ export default function DatabasesPage() {
 
   const [remoteDbOpen, setRemoteDbOpen] = useState(false);
   const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
+  const [advMaxConn, setAdvMaxConn] = useState(200);
+  const [advBufferPool, setAdvBufferPool] = useState(512);
+  const [advQueryCache, setAdvQueryCache] = useState(32);
   const [recycleBinOpen, setRecycleBinOpen] = useState(false);
   const [recycleDbs, setRecycleDbs] = useState<Database[]>([]);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -152,10 +155,30 @@ export default function DatabasesPage() {
     }
   };
 
+  // Fetch Recycle Bin items
+  const fetchRecycleBin = async () => {
+    const res = await apiFetch<Database[]>('/api/v1/databases/recycle-bin');
+    if (res.success && res.data) {
+      setRecycleDbs(res.data);
+    }
+  };
+
+  // Fetch Advanced Setup Config
+  const fetchAdvancedSetup = async () => {
+    const res = await apiFetch<any>('/api/v1/databases/advanced-setup');
+    if (res.success && res.data) {
+      if (res.data.max_connections) setAdvMaxConn(res.data.max_connections);
+      if (res.data.innodb_buffer_pool_mb) setAdvBufferPool(res.data.innodb_buffer_pool_mb);
+      if (res.data.query_cache_mb) setAdvQueryCache(res.data.query_cache_mb);
+    }
+  };
+
   useEffect(() => {
     fetchServers();
     fetchDatabases();
     fetchEngineStatus(activeEngine);
+    fetchRecycleBin();
+    fetchAdvancedSetup();
   }, [fetchDatabases, activeEngine]);
 
   // Handle engine tab switch
@@ -392,14 +415,17 @@ export default function DatabasesPage() {
   };
 
   // Restore DB from Recycle Bin
-  const handleRestoreDb = (db: Database) => {
+  const handleRestoreDb = async (db: Database) => {
+    await apiFetch(`/api/v1/databases/recycle-bin/${db.id}/restore`, { method: 'POST' });
     setRecycleDbs((prev) => prev.filter((d) => d.id !== db.id));
     setDatabases((prev) => [{ ...db, in_recycle_bin: false }, ...prev]);
     showToast(`Database '${db.name}' restored successfully!`);
   };
 
   // Permanent Delete DB from Recycle Bin
-  const handlePermanentDelete = (db: Database) => {
+  const handlePermanentDelete = async (db: Database) => {
+    if (!confirm(`Permanently delete database '${db.name}' from disk and host? This cannot be undone.`)) return;
+    await apiFetch(`/api/v1/databases/${db.id}`, { method: 'DELETE' });
     setRecycleDbs((prev) => prev.filter((d) => d.id !== db.id));
     showToast(`Database '${db.name}' permanently deleted.`);
   };
@@ -1513,7 +1539,8 @@ export default function DatabasesPage() {
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Max Connections</label>
                   <input
                     type="number"
-                    defaultValue={200}
+                    value={advMaxConn}
+                    onChange={(e) => setAdvMaxConn(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1521,7 +1548,8 @@ export default function DatabasesPage() {
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">InnoDB Buffer Pool (MB)</label>
                   <input
                     type="number"
-                    defaultValue={512}
+                    value={advBufferPool}
+                    onChange={(e) => setAdvBufferPool(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1529,7 +1557,8 @@ export default function DatabasesPage() {
                   <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Query Cache (MB)</label>
                   <input
                     type="number"
-                    defaultValue={32}
+                    value={advQueryCache}
+                    onChange={(e) => setAdvQueryCache(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1543,7 +1572,15 @@ export default function DatabasesPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
+                    await apiFetch('/api/v1/databases/advanced-setup', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        max_connections: Number(advMaxConn),
+                        innodb_buffer_pool_mb: Number(advBufferPool),
+                        query_cache_mb: Number(advQueryCache),
+                      }),
+                    });
                     setAdvancedSetupOpen(false);
                     showToast('MySQL performance parameters saved and applied!');
                   }}
