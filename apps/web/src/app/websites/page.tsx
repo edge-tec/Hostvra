@@ -151,53 +151,72 @@ export default function WebsitesPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="flex items-center gap-3 bg-surface-900 border border-surface-800 rounded-xl px-4 py-2.5">
-          <Search className="w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search domains (e.g. example.com)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
-          />
+        {/* Search & Stats Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <div className="flex items-center gap-3 bg-white dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-4 py-2.5 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
+              <input
+                type="text"
+                placeholder="Search domains (e.g. example.com)..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-transparent text-sm font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-black dark:hover:text-white"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+              Total: <strong className="text-slate-900 dark:text-white">{filteredWebsites.length}</strong>
+            </span>
+          </div>
         </div>
 
         {/* Websites List */}
         {loading ? (
-          <div className="py-20 text-center text-slate-400">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <div className="py-20 text-center text-slate-500">
+            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             Loading websites...
           </div>
         ) : filteredWebsites.length === 0 ? (
-          <div className="py-16 text-center border border-dashed border-surface-800 rounded-2xl bg-surface-900/50">
-            <Globe className="w-12 h-12 mx-auto text-slate-600 mb-3" />
-            <h3 className="text-base font-semibold text-white">No websites deployed yet</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          <div className="py-16 text-center border border-dashed border-slate-300 dark:border-surface-800 rounded-2xl bg-white dark:bg-surface-900/50 p-6 shadow-xs">
+            <Globe className="w-12 h-12 mx-auto text-slate-400 dark:text-slate-600 mb-3" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">No websites deployed yet</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto font-medium">
               Create your first virtual host to serve PHP, static HTML, or reverse proxy applications.
             </p>
             <button
               onClick={() => setModalOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#20a53a] hover:bg-[#1b8c31] text-white text-xs font-bold shadow-md transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               Create Website
             </button>
           </div>
         ) : (
-          <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-xl">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-surface-800 bg-surface-950/40 text-slate-400 text-xs uppercase tracking-wider">
-                  <th className="px-6 py-3.5 font-semibold">Primary Domain</th>
-                  <th className="px-6 py-3.5 font-semibold">Type & Runtime</th>
-                  <th className="px-6 py-3.5 font-semibold">Document Root</th>
-                  <th className="px-6 py-3.5 font-semibold">Status</th>
-                  <th className="px-6 py-3.5 font-semibold">SSL / HTTPS</th>
-                  <th className="px-6 py-3.5 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800/60">
+          <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Primary Domain</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Type & Runtime</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Document Root</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Status</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">SSL / HTTPS</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
                 {filteredWebsites.map((site) => (
                   <tr key={site.id} className="hover:bg-surface-800/30 transition-colors">
                     <td className="px-6 py-4">
@@ -302,6 +321,7 @@ export default function WebsitesPage() {
               </tbody>
             </table>
           </div>
+        </div>
         )}
 
         {/* Create Website Modal */}

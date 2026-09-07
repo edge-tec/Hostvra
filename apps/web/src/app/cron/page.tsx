@@ -46,12 +46,21 @@ export default function CronPage() {
       last_run_at: '2026-09-01T04:00:00Z',
     },
   ]);
+  const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [schedule, setSchedule] = useState('0 2 * * *');
   const [command, setCommand] = useState('');
   const [description, setDescription] = useState('');
   const [systemUser, setSystemUser] = useState('www-data');
   const [runOutput, setRunOutput] = useState<string | null>(null);
+
+  const filteredJobs = jobs.filter(
+    (job) =>
+      job.command.toLowerCase().includes(search.toLowerCase()) ||
+      job.description.toLowerCase().includes(search.toLowerCase()) ||
+      job.schedule.includes(search) ||
+      job.system_user.toLowerCase().includes(search.toLowerCase())
+  );
 
   const handleAddJob = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,37 +73,37 @@ export default function CronPage() {
       system_user: systemUser,
       description: description || 'Custom scheduled task',
       is_enabled: true,
+      last_run_at: new Date().toISOString(),
     };
 
     setJobs([...jobs, newJob]);
-    setModalOpen(false);
     setCommand('');
     setDescription('');
+    setModalOpen(false);
   };
 
   const handleToggle = (id: string) => {
-    setJobs(
-      jobs.map((j) => (j.id === id ? { ...j, is_enabled: !j.is_enabled } : j))
-    );
+    setJobs(jobs.map((j) => (j.id === id ? { ...j, is_enabled: !j.is_enabled } : j)));
   };
 
   const handleDelete = (id: string) => {
-    if (confirm('Delete this cron job?')) {
+    if (confirm('Are you sure you want to remove this cron task?')) {
       setJobs(jobs.filter((j) => j.id !== id));
     }
   };
 
   const handleRunNow = (cmd: string) => {
-    setRunOutput(`$ ${cmd}\n[Hostvra Runner] Command dispatched successfully.\nStatus: Process exited with return code 0.\nTimestamp: ${new Date().toISOString()}`);
+    setRunOutput(`[${new Date().toLocaleTimeString()}] Executing scheduled command manually...\n$ ${cmd}\nExit Code: 0 (OK)\nTask completed successfully in 142ms.`);
   };
 
   return (
     <DashboardShell>
-      <div className="space-y-8">
+      <div className="space-y-6 animate-fadeIn max-w-7xl mx-auto pb-12">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">Scheduled Cron Jobs</h1>
-            <p className="text-sm text-slate-400 mt-1">
+            <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">Scheduled Cron Jobs</h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
               Configure, test, and monitor automated Linux background tasks with 5-field cron syntax.
             </p>
           </div>
@@ -107,71 +116,95 @@ export default function CronPage() {
           </button>
         </div>
 
+        {/* Search / Filter Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl p-3 shadow-xs">
+          <div className="flex items-center gap-3 w-full sm:w-80 bg-slate-50 dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-3.5 py-2 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+            <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
+            <input
+              type="text"
+              placeholder="Search cron tasks by command or schedule..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 self-end sm:self-center">
+            Showing {filteredJobs.length} of {jobs.length} tasks
+          </div>
+        </div>
+
         {/* Cron Table */}
-        <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-xl">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-surface-800 bg-surface-950/40 text-slate-400 text-xs uppercase tracking-wider">
-                <th className="px-6 py-3.5 font-semibold">Schedule Expression</th>
-                <th className="px-6 py-3.5 font-semibold">Command & Description</th>
-                <th className="px-6 py-3.5 font-semibold">User</th>
-                <th className="px-6 py-3.5 font-semibold">Status</th>
-                <th className="px-6 py-3.5 font-semibold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-surface-800/60">
-              {jobs.map((job) => (
-                <tr key={job.id} className="hover:bg-surface-800/30 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className="font-mono text-xs px-2.5 py-1 rounded bg-surface-800 text-indigo-300 font-semibold border border-surface-700">
-                      {job.schedule}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="font-mono text-xs text-white truncate max-w-md">{job.command}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{job.description}</div>
-                  </td>
-                  <td className="px-6 py-4 font-mono text-xs text-slate-300">{job.system_user}</td>
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        job.is_enabled
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-slate-500/10 text-slate-400 border border-slate-500/20'
-                      }`}
-                    >
-                      {job.is_enabled ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleRunNow(job.command)}
-                        title="Run Immediately"
-                        className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-emerald-400 hover:bg-surface-800 transition-colors"
-                      >
-                        <Play className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleToggle(job.id)}
-                        title={job.is_enabled ? 'Disable' : 'Enable'}
-                        className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-amber-400 hover:bg-surface-800 transition-colors"
-                      >
-                        <Power className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(job.id)}
-                        title="Delete"
-                        className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-rose-400 hover:bg-surface-800 transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
+        <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#121824] text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
+                  <th className="px-6 py-3.5">Schedule Expression</th>
+                  <th className="px-6 py-3.5">Command & Description</th>
+                  <th className="px-6 py-3.5">User</th>
+                  <th className="px-6 py-3.5">Status</th>
+                  <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
+                {filteredJobs.map((job) => (
+                  <tr key={job.id} className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors">
+                    <td className="px-6 py-4">
+                      <span className="font-mono text-xs px-2.5 py-1 rounded bg-slate-100 dark:bg-surface-800 text-indigo-700 dark:text-indigo-300 font-bold border border-slate-200 dark:border-surface-700">
+                        {job.schedule}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="font-mono text-xs font-semibold text-slate-950 dark:text-white truncate max-w-md">{job.command}</div>
+                      <div className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 font-medium">{job.description}</div>
+                    </td>
+                    <td className="px-6 py-4 font-mono text-xs font-medium text-slate-700 dark:text-slate-300">{job.system_user}</td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          job.is_enabled
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                            : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20'
+                        }`}
+                      >
+                        {job.is_enabled ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleRunNow(job.command)}
+                          title="Run Immediately"
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleToggle(job.id)}
+                          title={job.is_enabled ? 'Disable' : 'Enable'}
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                        >
+                          <Power className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(job.id)}
+                          title="Delete"
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* Execution Output Drawer */}

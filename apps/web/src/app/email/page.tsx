@@ -25,6 +25,7 @@ import {
   Sliders,
   Sparkles,
   Layers,
+  X,
 } from 'lucide-react';
 
 interface EmailDomain {
@@ -456,36 +457,42 @@ export default function EmailHostingPage() {
         {/* Tab Content: Mailboxes */}
         {activeTab === 'mailboxes' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="relative w-full max-w-sm">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-2 w-full max-w-sm bg-slate-50 dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-3.5 py-2 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+                <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
                 <input
                   type="text"
                   placeholder="Search mailboxes..."
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-9 pr-4 py-2 bg-surface-900 border border-surface-800 rounded-xl text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
                 />
+                {search && (
+                  <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
-              <div className="text-xs text-slate-400">
-                Incoming IMAP: <code className="text-indigo-400 font-mono">mail.yourdomain.com:993 (SSL)</code> |
-                Outgoing SMTP: <code className="text-indigo-400 font-mono">mail.yourdomain.com:587 (TLS)</code>
+              <div className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                Incoming IMAP: <code className="text-indigo-600 dark:text-indigo-400 font-mono font-semibold">mail.yourdomain.com:993 (SSL)</code> |
+                Outgoing SMTP: <code className="text-indigo-600 dark:text-indigo-400 font-mono font-semibold">mail.yourdomain.com:587 (TLS)</code>
               </div>
             </div>
 
-            <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-sm">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-surface-800/60 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-surface-800">
-                  <tr>
-                    <th className="px-6 py-4">Account / Email</th>
-                    <th className="px-6 py-4">Display Name</th>
-                    <th className="px-6 py-4">Storage Quota</th>
-                    <th className="px-6 py-4">Status</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-surface-800">
+            <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#121824] text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
+                      <th className="px-6 py-4">Account / Email</th>
+                      <th className="px-6 py-4">Display Name</th>
+                      <th className="px-6 py-4">Storage Quota</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
                   {filteredMailboxes.map((mb) => {
                     const usagePercent = Math.round((mb.used_bytes / mb.quota_bytes) * 100);
                     const usedMB = (mb.used_bytes / (1024 * 1024)).toFixed(1);
@@ -562,6 +569,7 @@ export default function EmailHostingPage() {
               </table>
             </div>
           </div>
+        </div>
         )}
 
         {/* Tab Content: Webmail Client */}
@@ -711,41 +719,43 @@ export default function EmailHostingPage() {
 
         {/* Tab Content: Delivery Logs */}
         {activeTab === 'logs' && (
-          <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden">
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-surface-800/60 text-xs font-semibold text-slate-400 uppercase tracking-wider border-b border-surface-800">
-                <tr>
-                  <th className="px-6 py-4">Timestamp</th>
-                  <th className="px-6 py-4">Sender</th>
-                  <th className="px-6 py-4">Recipient</th>
-                  <th className="px-6 py-4">Status</th>
-                  <th className="px-6 py-4">Spam Score</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800 font-mono text-xs">
-                <tr>
-                  <td className="px-6 py-4 text-slate-400">2026-09-06 10:14:02 UTC</td>
-                  <td className="px-6 py-4 text-white">info@hostvra.com</td>
-                  <td className="px-6 py-4 text-slate-300">client@gmail.com</td>
-                  <td className="px-6 py-4 text-emerald-400">delivered (250 2.0.0 Ok)</td>
-                  <td className="px-6 py-4 text-slate-400">-1.20 (Clean)</td>
-                </tr>
-                <tr>
-                  <td className="px-6 py-4 text-slate-400">2026-09-06 10:11:45 UTC</td>
-                  <td className="px-6 py-4 text-white">support@hostvra.com</td>
-                  <td className="px-6 py-4 text-slate-300">user@outlook.com</td>
-                  <td className="px-6 py-4 text-emerald-400">delivered (250 2.0.0 Ok)</td>
-                  <td className="px-6 py-4 text-slate-400">-0.80 (Clean)</td>
-                </tr>
-                <tr>
-                  <td className="px-6 py-4 text-slate-400">2026-09-06 09:45:10 UTC</td>
-                  <td className="px-6 py-4 text-slate-400">spammer@badsource.net</td>
-                  <td className="px-6 py-4 text-slate-300">admin@hostvra.com</td>
-                  <td className="px-6 py-4 text-red-400">rejected (554 Relay Denied)</td>
-                  <td className="px-6 py-4 text-red-400">+16.40 (Spam Block)</td>
-                </tr>
-              </tbody>
-            </table>
+          <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#121824] text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
+                    <th className="px-6 py-4">Timestamp</th>
+                    <th className="px-6 py-4">Sender</th>
+                    <th className="px-6 py-4">Recipient</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Spam Score</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80 font-mono text-xs">
+                  <tr className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors">
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">2026-09-06 10:14:02 UTC</td>
+                    <td className="px-6 py-4 font-bold text-slate-950 dark:text-white">info@hostvra.com</td>
+                    <td className="px-6 py-4 text-slate-800 dark:text-slate-300">client@gmail.com</td>
+                    <td className="px-6 py-4 text-emerald-600 dark:text-emerald-400 font-semibold">delivered (250 2.0.0 Ok)</td>
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">-1.20 (Clean)</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors">
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">2026-09-06 10:11:45 UTC</td>
+                    <td className="px-6 py-4 font-bold text-slate-950 dark:text-white">support@hostvra.com</td>
+                    <td className="px-6 py-4 text-slate-800 dark:text-slate-300">user@outlook.com</td>
+                    <td className="px-6 py-4 text-emerald-600 dark:text-emerald-400 font-semibold">delivered (250 2.0.0 Ok)</td>
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">-0.80 (Clean)</td>
+                  </tr>
+                  <tr className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors">
+                    <td className="px-6 py-4 text-slate-600 dark:text-slate-400">2026-09-06 09:45:10 UTC</td>
+                    <td className="px-6 py-4 font-semibold text-rose-600 dark:text-rose-400">spammer@badsource.net</td>
+                    <td className="px-6 py-4 text-slate-800 dark:text-slate-300">admin@hostvra.com</td>
+                    <td className="px-6 py-4 text-rose-600 dark:text-rose-400 font-semibold">rejected (554 Relay Denied)</td>
+                    <td className="px-6 py-4 text-rose-600 dark:text-rose-400">+16.40 (Spam Block)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 

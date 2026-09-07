@@ -403,3 +403,187 @@ html:not(.dark) ::-webkit-scrollbar-thumb:hover {
 html.dark .gauge-track {
   stroke: #1e293b !important;
 }
+
+/* ==========================================================================
+   PROFESSIONAL DATA TABLES & ROWS SYSTEM (DUAL MODE)
+   ========================================================================== */
+
+table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  text-align: left;
+}
+
+/* Table Header Styles */
+thead th {
+  padding: 13px 18px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  white-space: nowrap !important;
+}
+
+html:not(.dark) thead tr {
+  background-color: #f8fafc !important;
+  border-bottom: 1.5px solid #cbd5e1 !important;
+}
+
+html:not(.dark) thead th {
+  color: #0f172a !important;
+  background-color: #f8fafc !important;
+  border-bottom: 1.5px solid #cbd5e1 !important;
+}
+
+html.dark thead tr {
+  background-color: #121824 !important;
+  border-bottom: 1px solid #1e293b !important;
+}
+
+html.dark thead th {
+  color: #94a3b8 !important;
+  background-color: #121824 !important;
+  border-bottom: 1px solid #1e293b !important;
+}
+
+/* Table Row & Cell Styles */
+tbody td {
+  padding: 14px 18px !important;
+  vertical-align: middle !important;
+  font-size: 13px !important;
+}
+
+html:not(.dark) tbody tr {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  transition: background-color 0.15s ease !important;
+}
+
+html:not(.dark) tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+html:not(.dark) tbody td {
+  color: #000000 !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+html.dark tbody tr {
+  background-color: transparent !important;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.6) !important;
+  transition: background-color 0.15s ease !important;
+}
+
+html.dark tbody tr:hover {
+  background-color: rgba(30, 41, 59, 0.45) !important;
+}
+
+html.dark tbody td {
+  color: #f1f5f9 !important;
+  border-bottom: 1px solid rgba(30, 41, 59, 0.6) !important;
+}
+
+/* ==========================================================================
+   PROFESSIONAL SEARCH BOX & FILTER BAR SYSTEM
+   ========================================================================== */
+
+/* Universal Search & Filter Container */
+div:has(> input[placeholder*="Search"]),
+div:has(> input[placeholder*="Filter"]),
+div:has(> svg + input) {
+  border-radius: 12px !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+html:not(.dark) div:has(> input[placeholder*="Search"]),
+html:not(.dark) div:has(> input[placeholder*="Filter"]) {
+  background-color: #ffffff !important;
+  border: 1.5px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
+}
+
+html:not(.dark) div:has(> input[placeholder*="Search"]):focus-within,
+html:not(.dark) div:has(> input[placeholder*="Filter"]):focus-within {
+  border-color: #20a53a !important;
+  box-shadow: 0 0 0 3px rgba(32, 165, 58, 0.15) !important;
+}
+
+html.dark div:has(> input[placeholder*="Search"]),
+html.dark div:has(> input[placeholder*="Filter"]) {
+  background-color: #121824 !important;
+  border: 1px solid #1e293b !important;
+}
+
+html.dark div:has(> input[placeholder*="Search"]):focus-within,
+html.dark div:has(> input[placeholder*="Filter"]):focus-within {
+  border-color: #20a53a !important;
+  box-shadow: 0 0 0 3px rgba(32, 165, 58, 0.25) !important;
+}
+
+/* Search input typography & colors */
+input[placeholder*="Search"],
+input[placeholder*="Filter"] {
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+html:not(.dark) input[placeholder*="Search"],
+html:not(.dark) input[placeholder*="Filter"] {
+  color: #000000 !important;
+}
+
+html:not(.dark) input[placeholder*="Search"]::placeholder,
+html:not(.dark) input[placeholder*="Filter"]::placeholder {
+  color: #64748b !important;
+  font-weight: 400 !important;
+}
+
+html.dark input[placeholder*="Search"],
+html.dark input[placeholder*="Filter"] {
+  color: #ffffff !important;
+}
+
+html.dark input[placeholder*="Search"]::placeholder,
+html.dark input[placeholder*="Filter"]::placeholder {
+  color: #64748b !important;
+}
+
+/* Table Card Wrapper & Outer Containers */
+div:has(> table),
+div:has(> div > table) {
+  border-radius: 16px;
+}
+
+html:not(.dark) div:has(> table),
+html:not(.dark) div:has(> div > table) {
+  background-color: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.dark div:has(> table),
+html.dark div:has(> div > table) {
+  background-color: #10141d !important;
+  border-color: #1e2536 !important;
+}
+
+.table-responsive-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+html:not(.dark) .table-responsive-wrapper {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+html.dark .table-responsive-wrapper {
+  background-color: #10141d !important;
+  border: 1px solid #1e2536 !important;
+}
+

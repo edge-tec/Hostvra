@@ -143,82 +143,101 @@ export default function DatabasesPage() {
           </div>
         </div>
 
-        {/* Search */}
-        <div className="flex items-center gap-3 bg-surface-900 border border-surface-800 rounded-xl px-4 py-2.5">
-          <Search className="w-4 h-4 text-slate-500" />
-          <input
-            type="text"
-            placeholder="Search databases..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-transparent text-sm text-slate-200 placeholder-slate-500 focus:outline-none"
-          />
+        {/* Search & Stats Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-md">
+            <div className="flex items-center gap-3 bg-white dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-4 py-2.5 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
+              <input
+                type="text"
+                placeholder="Search databases..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-transparent text-sm font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-black dark:hover:text-white"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+              Total: <strong className="text-slate-900 dark:text-white">{filteredDbs.length}</strong>
+            </span>
+          </div>
         </div>
 
         {/* Database List */}
         {loading ? (
-          <div className="py-20 text-center text-slate-400">
-            <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <div className="py-20 text-center text-slate-500">
+            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             Loading databases...
           </div>
         ) : servers.length === 0 ? (
-          <div className="py-16 text-center border border-dashed border-surface-800 rounded-2xl bg-surface-900/50">
-            <ServerIcon className="w-12 h-12 mx-auto text-slate-600 mb-3" />
-            <h3 className="text-base font-semibold text-white">No Servers Available</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          <div className="py-16 text-center border border-dashed border-slate-300 dark:border-surface-800 rounded-2xl bg-white dark:bg-surface-900/50 p-6 shadow-xs">
+            <ServerIcon className="w-12 h-12 mx-auto text-slate-400 dark:text-slate-600 mb-3" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">No Servers Available</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto font-medium">
               You must connect at least one server before managing databases.
             </p>
           </div>
         ) : filteredDbs.length === 0 ? (
-          <div className="py-16 text-center border border-dashed border-surface-800 rounded-2xl bg-surface-900/50">
-            <DatabaseIcon className="w-12 h-12 mx-auto text-slate-600 mb-3" />
-            <h3 className="text-base font-semibold text-white">No databases found on this server</h3>
-            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+          <div className="py-16 text-center border border-dashed border-slate-300 dark:border-surface-800 rounded-2xl bg-white dark:bg-surface-900/50 p-6 shadow-xs">
+            <DatabaseIcon className="w-12 h-12 mx-auto text-slate-400 dark:text-slate-600 mb-3" />
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">No databases found on this server</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto font-medium">
               Create a MySQL or PostgreSQL database to connect to your websites or applications.
             </p>
             <button
               onClick={() => setCreateDbOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md transition-all"
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#20a53a] hover:bg-[#1b8c31] text-white text-xs font-bold shadow-md transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               Create Database
             </button>
           </div>
         ) : (
-          <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-xl">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-surface-800 bg-surface-950/40 text-slate-400 text-xs uppercase tracking-wider">
-                  <th className="px-6 py-3.5 font-semibold">Database Name</th>
-                  <th className="px-6 py-3.5 font-semibold">Engine</th>
-                  <th className="px-6 py-3.5 font-semibold">Character Set & Collation</th>
-                  <th className="px-6 py-3.5 font-semibold">Estimated Size</th>
-                  <th className="px-6 py-3.5 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-800/60">
+          <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Database Name</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Engine</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Character Set & Collation</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Estimated Size</th>
+                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
                 {filteredDbs.map((db) => (
-                  <tr key={db.id} className="hover:bg-surface-800/30 transition-colors">
-                    <td className="px-6 py-4 font-mono font-bold text-white flex items-center gap-2.5">
-                      <DatabaseIcon className="w-4 h-4 text-indigo-400" />
+                  <tr key={db.id} className="hover:bg-slate-50/90 dark:hover:bg-[#182030] transition-colors">
+                    <td className="px-6 py-4 font-mono font-bold text-slate-900 dark:text-white flex items-center gap-2.5">
+                      <DatabaseIcon className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       <span>{db.name}</span>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center uppercase text-[11px] font-bold px-2 py-0.5 rounded bg-surface-800 text-slate-300 border border-surface-700">
+                      <span className="inline-flex items-center uppercase text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-slate-100 dark:bg-surface-800 text-slate-800 dark:text-slate-300 border border-slate-200 dark:border-surface-700">
                         {db.db_type}
                       </span>
                     </td>
-                    <td className="px-6 py-4 text-xs font-mono text-slate-400">
+                    <td className="px-6 py-4 text-xs font-mono text-slate-600 dark:text-slate-400">
                       {db.character_set || 'utf8mb4'} / {db.collation || 'utf8mb4_unicode_ci'}
                     </td>
-                    <td className="px-6 py-4 text-xs text-slate-400">
+                    <td className="px-6 py-4 text-xs font-medium text-slate-600 dark:text-slate-400">
                       {db.size_bytes ? `${(db.size_bytes / 1024 / 1024).toFixed(2)} MB` : '0 MB'}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <button
                         onClick={() => handleDeleteDatabase(db.id, db.name)}
                         title="Drop Database"
-                        className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-rose-400 hover:bg-surface-800 transition-colors"
+                        className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -228,6 +247,7 @@ export default function DatabasesPage() {
               </tbody>
             </table>
           </div>
+        </div>
         )}
 
         {/* Create Database Modal */}

@@ -11,6 +11,8 @@ import {
   CheckCircle2,
   Clock,
   UserCheck,
+  Search,
+  X,
 } from 'lucide-react';
 
 interface Member {
@@ -24,39 +26,47 @@ interface Member {
 
 const initialMembers: Member[] = [
   {
-    id: '1',
-    name: 'Root Administrator',
+    id: 'mem-1',
+    name: 'Mizanur Rahman',
     email: 'admin@hostvra.com',
     role: 'owner',
     status: 'active',
-    joined_at: '2 months ago',
+    joined_at: '2026-08-10',
   },
   {
-    id: '2',
-    name: 'Sarah Chen',
-    email: 'sarah.devops@hostvra.internal',
+    id: 'mem-2',
+    name: 'DevOps Automated Pipeline',
+    email: 'ci-runner@hostvra.internal',
     role: 'admin',
     status: 'active',
-    joined_at: '3 weeks ago',
+    joined_at: '2026-08-15',
   },
   {
-    id: '3',
-    name: 'Alex Morgan',
-    email: 'alex.dev@partner.io',
+    id: 'mem-3',
+    name: 'Sarah Chen',
+    email: 'sarah.c@techcorp.io',
     role: 'developer',
     status: 'active',
-    joined_at: '5 days ago',
+    joined_at: '2026-09-01',
   },
 ];
 
 export default function TeamPage() {
   const [members, setMembers] = useState<Member[]>(initialMembers);
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [search, setSearch] = useState('');
 
   // Invite state
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'admin' | 'manager' | 'developer' | 'viewer'>('developer');
+
+  const filteredMembers = members.filter(
+    (m) =>
+      m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.email.toLowerCase().includes(search.toLowerCase()) ||
+      m.role.toLowerCase().includes(search.toLowerCase())
+  );
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +76,7 @@ export default function TeamPage() {
       email: inviteEmail,
       role: inviteRole,
       status: 'invited',
-      joined_at: 'Pending Invitation',
+      joined_at: new Date().toISOString().split('T')[0],
     };
     setMembers([...members, newMember]);
     setShowInviteModal(false);
@@ -80,74 +90,95 @@ export default function TeamPage() {
 
   return (
     <DashboardShell>
-      <div className="space-y-6">
+      <div className="space-y-6 animate-fadeIn max-w-7xl mx-auto pb-12">
         {/* Page Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              <Users className="w-7 h-7 text-brand-400" />
+            <h1 className="text-2xl font-bold text-slate-950 dark:text-white tracking-tight flex items-center gap-2">
+              <Users className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
               Team & Organization Members
             </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Collaborative access management with granular Role-Based Access Control (RBAC).
+            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+              Role-based access control (RBAC) across server nodes, clusters, and website scopes.
             </p>
           </div>
           <button
             onClick={() => setShowInviteModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-500 hover:bg-brand-600 text-white text-xs font-semibold transition-colors shadow-lg shadow-brand-500/20"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all"
           >
             <Plus className="w-4 h-4" />
-            Invite Member
+            Invite Teammate
           </button>
         </div>
 
-        {/* Roles Info Cards */}
+        {/* Roles overview cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-surface-900 border border-surface-800 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-rose-400 font-bold text-xs uppercase">
-              <Shield className="w-4 h-4" /> Owner / Admin
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-purple-600 dark:text-purple-400 mb-1">
+              <span>Owner & Admin</span>
+              <Shield className="w-4 h-4" />
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Full unconstrained access to servers, databases, security, billing, and member management.
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Unrestricted control over billing, root daemons, licenses, and clustering.
             </p>
           </div>
-          <div className="bg-surface-900 border border-surface-800 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase">
-              <Shield className="w-4 h-4" /> Manager
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-amber-600 dark:text-amber-400 mb-1">
+              <span>Manager</span>
+              <UserCheck className="w-4 h-4" />
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Manage websites, databases, SSL certificates, cron jobs, and backup snapshots.
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              Can deploy vhosts, databases, manage backups, and configure webservers.
             </p>
           </div>
-          <div className="bg-surface-900 border border-surface-800 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs uppercase">
-              <Shield className="w-4 h-4" /> Developer
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-cyan-600 dark:text-cyan-400 mb-1">
+              <span>Developer</span>
+              <Mail className="w-4 h-4" />
             </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Read-write access to websites and web roots, view server metrics and service logs.
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+              SSH terminal access, SFTP file management, and runtime environment logs.
             </p>
           </div>
-          <div className="bg-surface-900 border border-surface-800 rounded-xl p-4">
-            <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase">
-              <Shield className="w-4 h-4" /> Viewer
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-xs">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+              <span>Viewer</span>
+              <Clock className="w-4 h-4" />
             </div>
-            <p className="text-xs text-slate-400 mt-2">
+            <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
               Read-only metrics, audit logs, and monitoring telemetry inspector.
             </p>
           </div>
         </div>
 
-        {/* Members Table */}
-        <div className="bg-surface-900 border border-surface-800 rounded-xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-surface-800 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Active Roster</h2>
-            <span className="text-xs font-mono text-slate-400">{members.length} team accounts</span>
+        {/* Filter Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl p-3 shadow-xs">
+          <div className="flex items-center gap-3 w-full sm:w-80 bg-slate-50 dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-3.5 py-2 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+            <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
+            <input
+              type="text"
+              placeholder="Search members by name or email..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 self-end sm:self-center">
+            Showing {filteredMembers.length} of {members.length} team members
+          </div>
+        </div>
 
+        {/* Members Table */}
+        <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-300 font-sans">
-              <thead className="bg-surface-950/60 text-xs uppercase font-semibold text-slate-400 border-b border-surface-800">
-                <tr>
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#121824] text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
                   <th className="px-6 py-3.5">User</th>
                   <th className="px-6 py-3.5">Assigned Role</th>
                   <th className="px-6 py-3.5">Status</th>
@@ -155,27 +186,27 @@ export default function TeamPage() {
                   <th className="px-6 py-3.5 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-surface-800/60 text-xs">
-                {members.map((m) => (
-                  <tr key={m.id} className="hover:bg-surface-800/30 transition-colors">
+              <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
+                {filteredMembers.map((m) => (
+                  <tr key={m.id} className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors">
                     <td className="px-6 py-4">
                       <div>
-                        <div className="font-bold text-white text-sm">{m.name}</div>
-                        <div className="text-slate-400 font-mono text-xs">{m.email}</div>
+                        <div className="font-bold text-slate-950 dark:text-white text-sm">{m.name}</div>
+                        <div className="text-slate-600 dark:text-slate-400 font-mono text-xs">{m.email}</div>
                       </div>
                     </td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase ${
                           m.role === 'owner'
-                            ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                            ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                             : m.role === 'admin'
-                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                            ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
                             : m.role === 'manager'
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                             : m.role === 'developer'
-                            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
-                            : 'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                            ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20'
+                            : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20'
                         }`}
                       >
                         {m.role}
@@ -183,24 +214,24 @@ export default function TeamPage() {
                     </td>
                     <td className="px-6 py-4">
                       {m.status === 'active' ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+                        <span className="inline-flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
                           <CheckCircle2 className="w-3.5 h-3.5" /> Active
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-amber-400 font-medium">
+                        <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-semibold text-xs">
                           <Clock className="w-3.5 h-3.5" /> Invitation Sent
                         </span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-slate-400">{m.joined_at}</td>
+                    <td className="px-6 py-4 text-xs font-medium text-slate-600 dark:text-slate-400 font-mono">{m.joined_at}</td>
                     <td className="px-6 py-4 text-right">
                       {m.role !== 'owner' && (
                         <button
                           onClick={() => handleRemove(m.id)}
-                          className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition-colors"
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
                           title="Revoke Access"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </td>

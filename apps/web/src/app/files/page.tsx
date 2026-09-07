@@ -194,12 +194,12 @@ export default function FileManagerPage() {
           </div>
         </div>
 
-        {/* Path Breadcrumbs & Search */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-surface-900 border border-surface-800 rounded-xl px-4 py-2.5">
-          <div className="flex items-center gap-1 text-xs font-mono text-slate-400 overflow-x-auto w-full sm:w-auto">
+        {/* Breadcrumb Path & Search Bar */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 p-3 rounded-2xl shadow-xs">
+          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto py-1">
             <button
               onClick={() => setCurrentPath('/var/www')}
-              className="hover:text-indigo-400 transition-colors font-bold text-slate-200"
+              className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-bold text-slate-900 dark:text-slate-200 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800"
             >
               root
             </button>
@@ -207,10 +207,10 @@ export default function FileManagerPage() {
               const partPath = '/' + pathParts.slice(0, i + 1).join('/');
               return (
                 <React.Fragment key={partPath}>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-600 flex-shrink-0" />
                   <button
                     onClick={() => setCurrentPath(partPath)}
-                    className="hover:text-indigo-400 transition-colors truncate max-w-[120px]"
+                    className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-semibold text-slate-800 dark:text-slate-300 truncate max-w-[120px]"
                   >
                     {part}
                   </button>
@@ -219,52 +219,53 @@ export default function FileManagerPage() {
             })}
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-64">
-            <Search className="w-4 h-4 text-slate-500" />
+          <div className="flex items-center gap-2 w-full sm:w-72 bg-slate-50 dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-3.5 py-2 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
+            <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
             <input
               type="text"
               placeholder="Search files..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+              className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
             />
           </div>
         </div>
 
         {/* Files Table */}
-        <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-xl">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-surface-800 bg-surface-950/40 text-slate-400 text-xs uppercase tracking-wider">
-                <th className="px-6 py-3.5 font-semibold">Name</th>
-                <th className="px-6 py-3.5 font-semibold">Size</th>
-                <th className="px-6 py-3.5 font-semibold">Permissions</th>
-                <th className="px-6 py-3.5 font-semibold">Last Modified</th>
-                <th className="px-6 py-3.5 font-semibold text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-surface-800/60">
+        <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
+                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Name</th>
+                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Size</th>
+                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Permissions</th>
+                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Last Modified</th>
+                  <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80">
               {filteredFiles.map((file) => (
                 <tr
                   key={file.path}
                   onDoubleClick={() => handleOpenFile(file)}
-                  className="hover:bg-surface-800/30 transition-colors cursor-pointer select-none"
+                  className="hover:bg-slate-50 dark:hover:bg-[#151d2d] transition-colors cursor-pointer select-none"
                 >
                   <td className="px-6 py-3.5 flex items-center gap-3">
                     {file.is_dir ? (
-                      <Folder className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                      <Folder className="w-5 h-5 text-indigo-600 dark:text-indigo-400 flex-shrink-0" />
                     ) : (
-                      <FileText className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                      <FileText className="w-5 h-5 text-slate-500 dark:text-slate-400 flex-shrink-0" />
                     )}
-                    <span className={`font-medium ${file.is_dir ? 'text-white' : 'text-slate-200'}`}>
+                    <span className={`font-semibold text-sm ${file.is_dir ? 'text-slate-950 dark:text-white' : 'text-slate-900 dark:text-slate-200'}`}>
                       {file.name}
                     </span>
                   </td>
-                  <td className="px-6 py-3.5 text-xs text-slate-400 font-mono">
+                  <td className="px-6 py-3.5 text-xs text-slate-700 dark:text-slate-400 font-mono font-medium">
                     {file.is_dir ? '-' : `${file.size} B`}
                   </td>
-                  <td className="px-6 py-3.5 text-xs font-mono text-slate-400">{file.mode}</td>
-                  <td className="px-6 py-3.5 text-xs text-slate-400">
+                  <td className="px-6 py-3.5 text-xs font-mono text-slate-700 dark:text-slate-400 font-medium">{file.mode}</td>
+                  <td className="px-6 py-3.5 text-xs text-slate-700 dark:text-slate-400 font-medium">
                     {new Date(file.modified_at).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-3.5 text-right">
@@ -273,7 +274,7 @@ export default function FileManagerPage() {
                         <button
                           onClick={() => handleOpenFile(file)}
                           title="Edit File"
-                          className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-indigo-400 hover:bg-surface-800 transition-colors"
+                          className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
                         >
                           <Edit className="w-3.5 h-3.5" />
                         </button>
@@ -281,7 +282,7 @@ export default function FileManagerPage() {
                       <button
                         onClick={() => handleDeleteItem(file.name)}
                         title="Delete"
-                        className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-rose-400 hover:bg-surface-800 transition-colors"
+                        className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -292,6 +293,7 @@ export default function FileManagerPage() {
             </tbody>
           </table>
         </div>
+      </div>
 
         {/* Code Editor Modal */}
         {editorOpen && editingFile && (
