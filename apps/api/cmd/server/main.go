@@ -240,6 +240,15 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesDelete)).Delete("/{id}", websiteHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl", websiteHandler.IssueSSL)
 
+				// Realtime Conf, Logs, Backup, WAF, Batch, Statistics
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/statistics", websiteHandler.Statistics)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/batch", websiteHandler.Batch)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/conf", websiteHandler.GetConf)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/conf", websiteHandler.UpdateConf)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/logs", websiteHandler.GetLogs)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/backup", websiteHandler.Backup)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/waf", websiteHandler.ToggleWAF)
+
 				// Per-Website PHP Integration
 				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{id}/php", phpHandler.GetWebsitePHP)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/php/switch", phpHandler.SwitchWebsitePHP)

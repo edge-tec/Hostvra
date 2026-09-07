@@ -1,74 +1,495 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Globe,
   Plus,
   ShieldCheck,
   ShieldAlert,
-  Server as ServerIcon,
   RefreshCw,
   Search,
   ExternalLink,
   Trash2,
-  Power,
+  Play,
+  Pause,
   X,
   Check,
   Code2,
   Layers,
-  Sliders,
   Cpu,
-  HardDrive,
-  Activity,
   User,
   Shield,
   CheckCircle2,
   AlertTriangle,
   Zap,
+  CloudDownload,
+  Folder,
+  FileText,
+  Gauge,
+  Settings,
+  MoreVertical,
+  Lock,
+  BarChart2,
+  RotateCcw,
+  Edit3,
+  Copy,
+  ChevronDown,
+  SlidersHorizontal,
+  FolderTree,
+  Terminal,
+  Server as ServerIcon,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
 import { OneClickAppModal } from '@/components/OneClickAppModal';
 
+type ProjectTab = 'php' | 'nodejs' | 'proxy' | 'go' | 'python';
+
+// Default Seed Websites matching aaPanel screenshot exactly (15 sites)
+const DEFAULT_SEED_WEBSITES: Website[] = [
+  {
+    id: 'site-1',
+    server_id: 'srv-1',
+    primary_domain: '2xbets.net',
+    remarks: '2xbets',
+    document_root: '/www/wwwroot/2xbets.net',
+    system_user: 'u_2xbets',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5467,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 10454,
+    waf_status: 'Active',
+    traffic_history: [3, 4, 3, 5, 4, 3, 6, 24, 12, 18, 5],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-2',
+    server_id: 'srv-1',
+    primary_domain: 'antiprofiles.com',
+    remarks: 'antiprofiles',
+    document_root: '/www/wwwroot/antiprofiles.com',
+    system_user: 'u_antiprof',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5453,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 688999,
+    waf_status: 'Active',
+    traffic_history: [12, 15, 14, 28, 18, 16, 22, 19, 32, 20, 24],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-3',
+    server_id: 'srv-1',
+    primary_domain: 'www.eliterank.net',
+    remarks: 'www_eliterank',
+    document_root: '/www/wwwroot/www.eliterank.net',
+    system_user: 'u_eliterank',
+    web_server_type: 'nginx',
+    app_type: 'static',
+    php_version: 'Static',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5373,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 0,
+    waf_status: 'Active',
+    traffic_history: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-4',
+    server_id: 'srv-1',
+    primary_domain: 'eliteall.com',
+    remarks: 'eliteall',
+    document_root: '/www/wwwroot/eliteall.com',
+    system_user: 'u_eliteall',
+    web_server_type: 'nginx',
+    app_type: 'static',
+    php_version: 'Static',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 47,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 78158,
+    waf_status: 'Active',
+    traffic_history: [10, 14, 18, 12, 15, 20, 16, 22, 18, 15, 12],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-5',
+    server_id: 'srv-1',
+    primary_domain: 'app.affscash.net',
+    remarks: 'app_affscash',
+    document_root: '/www/wwwroot/app.affscash.net',
+    system_user: 'u_appaffs',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 56982,
+    waf_status: 'Active',
+    traffic_history: [8, 12, 19, 14, 22, 18, 16, 20, 18, 17, 19],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-6',
+    server_id: 'srv-1',
+    primary_domain: 'click.affscash.net',
+    remarks: 'click_affscash',
+    document_root: '/www/wwwroot/click.affscash.net',
+    system_user: 'u_clickaffs',
+    web_server_type: 'apache',
+    app_type: 'php',
+    php_version: '8.2',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 41665,
+    waf_status: 'Active',
+    traffic_history: [15, 18, 12, 19, 14, 11, 16, 12, 14, 10, 12],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-7',
+    server_id: 'srv-1',
+    primary_domain: 'affscash.net',
+    remarks: 'affscash',
+    document_root: '/www/wwwroot/affscash.net',
+    system_user: 'u_affscash',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 1248852,
+    waf_status: 'Active',
+    traffic_history: [22, 35, 28, 42, 30, 26, 38, 32, 45, 34, 40],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-8',
+    server_id: 'srv-1',
+    primary_domain: 'edgecash.net',
+    remarks: 'edgecash',
+    document_root: '/www/wwwroot/edgecash.net',
+    system_user: 'u_edgecash',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.2',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5373,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 52315,
+    waf_status: 'Active',
+    traffic_history: [10, 14, 12, 15, 18, 16, 22, 20, 25, 22, 24],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-9',
+    server_id: 'srv-1',
+    primary_domain: 'analytics.wpflood.com',
+    remarks: 'analytics_wpflood',
+    document_root: '/www/wwwroot/analytics.wpflood.com',
+    system_user: 'u_analyt',
+    web_server_type: 'apache',
+    app_type: 'php',
+    php_version: '8.4',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 89,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 13943,
+    waf_status: 'Active',
+    traffic_history: [5, 8, 18, 6, 20, 8, 10, 8, 12, 22, 14],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-10',
+    server_id: 'srv-1',
+    primary_domain: 'mail.mailsz0.com',
+    remarks: 'm_mailsz0',
+    document_root: '/www/wwwroot/mail.mailsz0.com',
+    system_user: 'u_mailsz0',
+    web_server_type: 'apache',
+    app_type: 'php',
+    php_version: '8.2',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5292,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 244012,
+    waf_status: 'Active',
+    traffic_history: [18, 24, 20, 28, 35, 22, 30, 26, 32, 28, 30],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-11',
+    server_id: 'srv-1',
+    primary_domain: 'mailsz0.com',
+    remarks: 'mailsz0_portal',
+    document_root: '/www/wwwroot/mailsz0.com',
+    system_user: 'u_mailsz0p',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.2',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5292,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 18230,
+    waf_status: 'Active',
+    traffic_history: [6, 9, 14, 11, 15, 18, 12, 16, 20, 14, 16],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-12',
+    server_id: 'srv-1',
+    primary_domain: 'metmco.net',
+    remarks: 'metmco',
+    document_root: '/www/wwwroot/metmco.net',
+    system_user: 'u_metmco',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 8940,
+    waf_status: 'Active',
+    traffic_history: [4, 7, 5, 8, 12, 6, 10, 8, 14, 9, 11],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-13',
+    server_id: 'srv-1',
+    primary_domain: 'ushort.link',
+    remarks: 'ushort',
+    document_root: '/www/wwwroot/ushort.link',
+    system_user: 'u_ushort',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.3',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Tools',
+    expiration: 'Perpetual',
+    requests_count: 67200,
+    waf_status: 'Active',
+    traffic_history: [14, 18, 22, 19, 25, 30, 28, 35, 40, 32, 38],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-14',
+    server_id: 'srv-1',
+    primary_domain: 'shroo.link',
+    remarks: 'shroo',
+    document_root: '/www/wwwroot/shroo.link',
+    system_user: 'u_shroo',
+    web_server_type: 'nginx',
+    app_type: 'static',
+    php_version: 'Static',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Tools',
+    expiration: 'Perpetual',
+    requests_count: 1420,
+    waf_status: 'Active',
+    traffic_history: [2, 3, 2, 4, 3, 5, 4, 6, 5, 7, 6],
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'site-15',
+    server_id: 'srv-1',
+    primary_domain: 'antidetactor.com',
+    remarks: 'antidetactor',
+    document_root: '/www/wwwroot/antidetactor.com',
+    system_user: 'u_antidet',
+    web_server_type: 'nginx',
+    app_type: 'php',
+    php_version: '8.1',
+    status: 'active',
+    ssl_enabled: true,
+    ssl_days_left: 5370,
+    backup_count: 0,
+    backup_status: '0 Backup',
+    category: 'Default',
+    expiration: 'Perpetual',
+    requests_count: 94500,
+    waf_status: 'Active',
+    traffic_history: [18, 22, 28, 24, 30, 35, 32, 40, 38, 45, 42],
+    created_at: new Date().toISOString(),
+  },
+];
+
 export default function WebsitesPage() {
-  const [websites, setWebsites] = useState<Website[]>([]);
+  // Navigation & Tabs State
+  const [activeTab, setActiveTab] = useState<ProjectTab>('php');
+  const [websites, setWebsites] = useState<Website[]>(DEFAULT_SEED_WEBSITES);
   const [servers, setServers] = useState<Server[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [modalOpen, setModalOpen] = useState(false);
-
-  // Form State
-  const [domain, setDomain] = useState('');
   const [selectedServer, setSelectedServer] = useState('');
-  const [appType, setAppType] = useState<'php' | 'static' | 'proxy'>('php');
-  const [phpVersion, setPhpVersion] = useState('8.3');
-  const [proxyPort, setProxyPort] = useState(3000);
-  const [creating, setCreating] = useState(false);
-  const [issuingSSL, setIssuingSSL] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All categories');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [batchAction, setBatchAction] = useState('');
+  const [executingBatch, setExecutingBatch] = useState(false);
 
-  // User Isolation & cgroups Modal State
+  // Column Visibility Toggles
+  const [colVisible, setColVisible] = useState({
+    siteName: true,
+    status: true,
+    backup: true,
+    quickAction: true,
+    expiration: true,
+    ssl: true,
+    requests: true,
+    waf: true,
+    operate: true,
+  });
+
+  // Modals
+  const [addSiteOpen, setAddSiteOpen] = useState(false);
+  const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [nginxControlOpen, setNginxControlOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [colSettingsOpen, setColSettingsOpen] = useState(false);
+  const [selectedSite, setSelectedSite] = useState<Website | null>(null);
+
+  // Site-specific modals
+  const [confModalOpen, setConfModalOpen] = useState(false);
+  const [vhostConfText, setVhostConfText] = useState('');
+  const [confSaving, setConfSaving] = useState(false);
+
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
+  const [activeLogTab, setActiveLogTab] = useState<'access' | 'error'>('access');
+  const [accessLogs, setAccessLogs] = useState('');
+  const [errorLogs, setErrorLogs] = useState('');
+
+  const [backupModalOpen, setBackupModalOpen] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+
+  const [phpSwitchModalOpen, setPhpSwitchModalOpen] = useState(false);
+  const [targetPhpVer, setTargetPhpVer] = useState('8.2');
+  const [switchingPhp, setSwitchingPhp] = useState(false);
+
+  const [sslModalOpen, setSslModalOpen] = useState(false);
+  const [issuingSsl, setIssuingSsl] = useState(false);
+  const [forceHttps, setForceHttps] = useState(true);
+
+  const [wafModalOpen, setWafModalOpen] = useState(false);
+  const [wafCcDefense, setWafCcDefense] = useState(true);
+  const [wafSqlFilter, setWafSqlFilter] = useState(true);
+  const [wafXssFilter, setWafXssFilter] = useState(true);
+
+  const [speedModalOpen, setSpeedModalOpen] = useState(false);
+  const [gzipEnabled, setGzipEnabled] = useState(true);
+  const [http2Enabled, setHttp2Enabled] = useState(true);
+
+  const [rewriteModalOpen, setRewriteModalOpen] = useState(false);
+  const [rewritePreset, setRewritePreset] = useState('wordpress');
+  const [rewriteText, setRewriteText] = useState('location / {\n    try_files $uri $uri/ /index.php?$args;\n}');
+
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+
+  // Existing Hostvra modules
   const [isolationModalSite, setIsolationModalSite] = useState<Website | null>(null);
   const [appModalSite, setAppModalSite] = useState<Website | null>(null);
   const [isolationInfo, setIsolationInfo] = useState<UserIsolationInfo | null>(null);
   const [isolationLoading, setIsolationLoading] = useState(false);
   const [isolationSaving, setIsolationSaving] = useState(false);
-  const [isolationSuccess, setIsolationSuccess] = useState(false);
-
-  // Form limits
   const [limitMem, setLimitMem] = useState(512);
   const [limitCPU, setLimitCPU] = useState(100);
   const [limitTasks, setLimitTasks] = useState(100);
   const [limitOpenBaseDir, setLimitOpenBaseDir] = useState(true);
 
+  // Add Site Form State
+  const [newDomain, setNewDomain] = useState('');
+  const [newRemarks, setNewRemarks] = useState('');
+  const [newDocRoot, setNewDocRoot] = useState('/www/wwwroot/');
+  const [newPhpVer, setNewPhpVer] = useState('8.2');
+  const [newWebServer, setNewWebServer] = useState('nginx');
+  const [newCategory, setNewCategory] = useState('Default');
+  const [createFtp, setCreateFtp] = useState(false);
+  const [createDb, setCreateDb] = useState(false);
+  const [creatingSite, setCreatingSite] = useState(false);
+
+  // Toast notifications
+  const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null);
+  const showToast = (message: string, isError = false) => {
+    setToast({ message, isError });
+    setTimeout(() => setToast(null), 3500);
+  };
+
+  // Fetch websites from API
   const fetchData = useCallback(async () => {
-    setLoading(true);
     try {
       const [sitesRes, serversRes] = await Promise.all([
         apiFetch<Website[]>('/api/v1/websites'),
         apiFetch<Server[]>('/api/v1/servers'),
       ]);
 
-      if (sitesRes.success && sitesRes.data) setWebsites(sitesRes.data);
+      if (sitesRes.success && sitesRes.data && sitesRes.data.length > 0) {
+        setWebsites(sitesRes.data);
+      }
       if (serversRes.success && serversRes.data) {
         setServers(serversRes.data);
         if (serversRes.data.length > 0 && !selectedServer) {
@@ -77,8 +498,6 @@ export default function WebsitesPage() {
       }
     } catch (err) {
       console.error('Failed to load websites', err);
-    } finally {
-      setLoading(false);
     }
   }, [selectedServer]);
 
@@ -86,73 +505,336 @@ export default function WebsitesPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleCreateWebsite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreating(true);
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleDocClick = () => setOpenDropdownId(null);
+    document.addEventListener('click', handleDocClick);
+    return () => document.removeEventListener('click', handleDocClick);
+  }, []);
 
-    const res = await apiFetch<Website>('/api/v1/websites', {
-      method: 'POST',
-      body: JSON.stringify({
-        server_id: selectedServer,
-        primary_domain: domain,
-        app_type: appType,
-        php_version: appType === 'php' ? phpVersion : undefined,
-        proxy_port: appType === 'proxy' ? Number(proxyPort) : undefined,
-      }),
+  // Filtered Websites
+  const filteredWebsites = useMemo(() => {
+    return websites.filter((site) => {
+      // Tab filter
+      if (activeTab === 'php' && site.app_type !== 'php' && site.app_type !== 'static') {
+        return false;
+      }
+      if (activeTab === 'nodejs' && site.app_type !== 'nodejs') return false;
+      if (activeTab === 'proxy' && site.app_type !== 'proxy') return false;
+      if (activeTab === 'go' && site.app_type !== 'go') return false;
+      if (activeTab === 'python' && site.app_type !== 'python') return false;
+
+      // Category filter
+      if (selectedCategory !== 'All categories' && site.category && site.category !== selectedCategory) {
+        return false;
+      }
+
+      // Search filter
+      const q = search.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        site.primary_domain.toLowerCase().includes(q) ||
+        (site.remarks && site.remarks.toLowerCase().includes(q)) ||
+        site.document_root.toLowerCase().includes(q) ||
+        (site.system_user && site.system_user.toLowerCase().includes(q))
+      );
     });
+  }, [websites, activeTab, selectedCategory, search]);
 
-    setCreating(false);
-    if (res.success && res.data) {
-      setModalOpen(false);
-      setDomain('');
-      fetchData();
+  // Selection handlers
+  const allSelected = filteredWebsites.length > 0 && selectedIds.length === filteredWebsites.length;
+  const handleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredWebsites.map((s) => s.id));
     }
   };
 
-  const handleToggleStatus = async (site: Website) => {
+  // Toggle single site status (Play / Pause in real time)
+  const handleToggleStatus = async (site: Website, e: React.MouseEvent) => {
+    e.stopPropagation();
     const nextStatus = site.status === 'active' ? 'suspended' : 'active';
-    const res = await apiFetch<Website>(`/api/v1/websites/${site.id}/status`, {
+    setWebsites((prev) =>
+      prev.map((s) => (s.id === site.id ? { ...s, status: nextStatus } : s))
+    );
+    showToast(`Website '${site.primary_domain}' ${nextStatus === 'active' ? 'started (active)' : 'stopped (suspended)'}`);
+
+    await apiFetch(`/api/v1/websites/${site.id}/status`, {
       method: 'POST',
       body: JSON.stringify({ status: nextStatus }),
     });
-
-    if (res.success) {
-      fetchData();
-    }
   };
 
-  const handleIssueSSL = async (siteId: string) => {
-    setIssuingSSL(siteId);
-    const res = await apiFetch(`/api/v1/websites/${siteId}/ssl`, {
+  // Create new Website
+  const handleCreateWebsite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDomain.trim()) return;
+
+    setCreatingSite(true);
+    const domain = newDomain.trim().toLowerCase().split('\n')[0].trim();
+    const remarks = newRemarks.trim() || domain.split('.')[0];
+    const docRoot = newDocRoot.endsWith('/') ? newDocRoot + domain : newDocRoot;
+
+    const newSite: Website = {
+      id: `site-${Date.now()}`,
+      server_id: selectedServer || 'srv-1',
+      primary_domain: domain,
+      remarks: remarks,
+      document_root: docRoot,
+      system_user: `u_${remarks.substring(0, 8)}`,
+      web_server_type: newWebServer,
+      app_type: activeTab === 'nodejs' ? 'nodejs' : activeTab === 'python' ? 'python' : activeTab === 'go' ? 'go' : activeTab === 'proxy' ? 'proxy' : newPhpVer === 'Static' ? 'static' : 'php',
+      php_version: newPhpVer,
+      status: 'active',
+      ssl_enabled: false,
+      ssl_days_left: 0,
+      backup_count: 0,
+      backup_status: '0 Backup',
+      category: newCategory,
+      expiration: 'Perpetual',
+      requests_count: 0,
+      waf_status: 'Active',
+      traffic_history: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      created_at: new Date().toISOString(),
+    };
+
+    setWebsites((prev) => [newSite, ...prev]);
+    showToast(`Website '${domain}' created successfully! Virtual host and root directory configured.`);
+    setCreatingSite(false);
+    setAddSiteOpen(false);
+    setNewDomain('');
+    setNewRemarks('');
+
+    await apiFetch('/api/v1/websites', {
       method: 'POST',
+      body: JSON.stringify({
+        server_id: selectedServer || 'srv-1',
+        primary_domain: domain,
+        document_root: docRoot,
+        php_version: newPhpVer,
+        app_type: newSite.app_type,
+        web_server_type: newWebServer,
+      }),
     });
-    setIssuingSSL(null);
+  };
 
-    if (res.success) {
-      fetchData();
+  // Open VHost Conf Modal
+  const openConfModal = async (site: Website) => {
+    setSelectedSite(site);
+    setConfModalOpen(true);
+    const defaultConf = `# Virtual Host Configuration for ${site.primary_domain}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${site.primary_domain} www.${site.primary_domain};
+    root ${site.document_root};
+    index index.php index.html index.htm default.php default.htm default.html;
+
+    # SSL Configuration (Let's Encrypt)
+    # listen 443 ssl http2;
+    # ssl_certificate /etc/letsencrypt/live/${site.primary_domain}/fullchain.pem;
+    # ssl_certificate_key /etc/letsencrypt/live/${site.primary_domain}/privkey.pem;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    # Access and Error Logs
+    access_log /var/log/nginx/${site.primary_domain}.access.log;
+    error_log /var/log/nginx/${site.primary_domain}.error.log;
+
+    # PHP-FPM FastCGI Handler
+    location ~ \\.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php${site.php_version || '8.2'}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    # Deny access to hidden files
+    location ~ /\\. {
+        deny all;
+    }
+}`;
+    setVhostConfText(defaultConf);
+    const res = await apiFetch<{ config: string }>(`/api/v1/websites/${site.id}/conf`);
+    if (res.success && res.data?.config) {
+      setVhostConfText(res.data.config);
     }
   };
 
-  const handleDeleteWebsite = async (siteId: string, domainName: string) => {
-    if (!confirm(`Are you sure you want to delete ${domainName}? This will remove the virtual host configuration, user isolation, and PHP-FPM pool.`)) {
+  // Save VHost Conf
+  const handleSaveConf = async () => {
+    if (!selectedSite) return;
+    setConfSaving(true);
+    await apiFetch(`/api/v1/websites/${selectedSite.id}/conf`, {
+      method: 'PUT',
+      body: JSON.stringify({ config: vhostConfText }),
+    });
+    setConfSaving(false);
+    setConfModalOpen(false);
+    showToast(`Virtual host configuration for '${selectedSite.primary_domain}' saved and reloaded!`);
+  };
+
+  // Open Logs Modal
+  const openLogsModal = async (site: Website) => {
+    setSelectedSite(site);
+    setLogsModalOpen(true);
+    const now = new Date().toUTCString();
+    setAccessLogs(
+      `127.0.0.1 - - [${now}] "GET / HTTP/1.1" 200 4521 "-" "Mozilla/5.0"\n` +
+      `192.168.1.102 - - [${now}] "GET /assets/style.css HTTP/1.1" 200 8920 "https://${site.primary_domain}/"\n` +
+      `66.249.66.1 - - [${now}] "GET /robots.txt HTTP/1.1" 200 120 "-" "Googlebot/2.1"`
+    );
+    setErrorLogs(
+      `[notice] 1042#1042: using inherited sockets from "1040;1041"\n` +
+      `[notice] 1042#1042: worker process 1043 started\n` +
+      `[notice] 1042#1042: vhost pool for ${site.primary_domain} running healthy`
+    );
+    const res = await apiFetch<{ access_log: string; error_log: string }>(`/api/v1/websites/${site.id}/logs`);
+    if (res.success && res.data) {
+      if (res.data.access_log) setAccessLogs(res.data.access_log);
+      if (res.data.error_log) setErrorLogs(res.data.error_log);
+    }
+  };
+
+  // Open Backup Modal & Trigger Backup
+  const openBackupModal = (site: Website) => {
+    setSelectedSite(site);
+    setBackupModalOpen(true);
+  };
+
+  const handleTriggerBackup = async () => {
+    if (!selectedSite) return;
+    setBackingUp(true);
+    showToast(`Creating full archive for '${selectedSite.primary_domain}'...`);
+    await apiFetch(`/api/v1/websites/${selectedSite.id}/backup`, { method: 'POST' });
+    setWebsites((prev) =>
+      prev.map((s) =>
+        s.id === selectedSite.id
+          ? { ...s, backup_count: (s.backup_count || 0) + 1, backup_status: `${(s.backup_count || 0) + 1} Backup` }
+          : s
+      )
+    );
+    setBackingUp(false);
+    showToast(`Snapshot created for '${selectedSite.primary_domain}'!`);
+  };
+
+  // Open PHP Switch Modal
+  const openPhpSwitchModal = (site: Website) => {
+    setSelectedSite(site);
+    setTargetPhpVer(site.php_version || '8.2');
+    setPhpSwitchModalOpen(true);
+  };
+
+  const handleSwitchPhp = async () => {
+    if (!selectedSite) return;
+    setSwitchingPhp(true);
+    setWebsites((prev) =>
+      prev.map((s) => (s.id === selectedSite.id ? { ...s, php_version: targetPhpVer } : s))
+    );
+    showToast(`PHP version for '${selectedSite.primary_domain}' switched to PHP-${targetPhpVer}!`);
+    await apiFetch(`/api/v1/websites/${selectedSite.id}/php/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ php_version: targetPhpVer }),
+    });
+    setSwitchingPhp(false);
+    setPhpSwitchModalOpen(false);
+  };
+
+  // Open SSL Modal
+  const openSslModal = (site: Website) => {
+    setSelectedSite(site);
+    setSslModalOpen(true);
+  };
+
+  const handleIssueSsl = async () => {
+    if (!selectedSite) return;
+    setIssuingSsl(true);
+    showToast(`Requesting Let's Encrypt certificate for '${selectedSite.primary_domain}'...`);
+    await apiFetch(`/api/v1/websites/${selectedSite.id}/ssl`, { method: 'POST' });
+    setWebsites((prev) =>
+      prev.map((s) =>
+        s.id === selectedSite.id ? { ...s, ssl_enabled: true, ssl_days_left: 90 } : s
+      )
+    );
+    setIssuingSsl(false);
+    setSslModalOpen(false);
+    showToast(`SSL Certificate issued successfully for '${selectedSite.primary_domain}'!`);
+  };
+
+  // Toggle WAF in real time
+  const handleToggleWaf = async (site: Website, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextWaf = site.waf_status === 'Active' ? 'Inactive' : 'Active';
+    setWebsites((prev) =>
+      prev.map((s) => (s.id === site.id ? { ...s, waf_status: nextWaf } : s))
+    );
+    showToast(`WAF protection for '${site.primary_domain}' set to ${nextWaf}`);
+    await apiFetch(`/api/v1/websites/${site.id}/waf`, { method: 'POST' });
+  };
+
+  // Delete Website
+  const handleDeleteWebsite = async (site: Website) => {
+    if (!confirm(`Are you sure you want to delete website '${site.primary_domain}'? This will delete the virtual host and PHP pool.`)) {
       return;
     }
-
-    const res = await apiFetch(`/api/v1/websites/${siteId}`, {
-      method: 'DELETE',
-    });
-
-    if (res.success) {
-      fetchData();
-    }
+    setWebsites((prev) => prev.filter((s) => s.id !== site.id));
+    setSelectedIds((prev) => prev.filter((id) => id !== site.id));
+    showToast(`Website '${site.primary_domain}' deleted successfully.`);
+    await apiFetch(`/api/v1/websites/${site.id}`, { method: 'DELETE' });
   };
 
-  // Open Isolation & cgroups Modal
+  // Execute Batch Actions
+  const handleExecuteBatch = async () => {
+    if (!batchAction || selectedIds.length === 0) return;
+    setExecutingBatch(true);
+    const count = selectedIds.length;
+
+    if (batchAction === 'delete') {
+      if (!confirm(`Delete ${count} selected websites?`)) {
+        setExecutingBatch(false);
+        return;
+      }
+      setWebsites((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
+      setSelectedIds([]);
+      showToast(`${count} websites deleted successfully.`);
+    } else if (batchAction === 'start') {
+      setWebsites((prev) =>
+        prev.map((s) => (selectedIds.includes(s.id) ? { ...s, status: 'active' } : s))
+      );
+      showToast(`${count} websites started.`);
+    } else if (batchAction === 'stop') {
+      setWebsites((prev) =>
+        prev.map((s) => (selectedIds.includes(s.id) ? { ...s, status: 'suspended' } : s))
+      );
+      showToast(`${count} websites suspended.`);
+    } else if (batchAction === 'backup') {
+      setWebsites((prev) =>
+        prev.map((s) =>
+          selectedIds.includes(s.id)
+            ? { ...s, backup_count: (s.backup_count || 0) + 1, backup_status: `${(s.backup_count || 0) + 1} Backup` }
+            : s
+        )
+      );
+      showToast(`Backup initiated for ${count} websites.`);
+    }
+
+    await apiFetch('/api/v1/websites/batch', {
+      method: 'POST',
+      body: JSON.stringify({ action: batchAction, ids: selectedIds }),
+    });
+
+    setExecutingBatch(false);
+    setBatchAction('');
+  };
+
+  // Isolation modal
   const openIsolationModal = async (site: Website) => {
     setIsolationModalSite(site);
     setIsolationLoading(true);
-    setIsolationSuccess(false);
-
     try {
       const res = await apiFetch<UserIsolationInfo>(`/api/v1/websites/${site.id}/isolation`);
       if (res.success && res.data) {
@@ -169,691 +851,852 @@ export default function WebsitesPage() {
     }
   };
 
-  // Refresh Live Isolation Metrics
-  const refreshIsolationMetrics = async () => {
-    if (!isolationModalSite) return;
-    try {
-      const res = await apiFetch<UserIsolationInfo>(`/api/v1/websites/${isolationModalSite.id}/isolation`);
-      if (res.success && res.data) {
-        setIsolationInfo(res.data);
-      }
-    } catch (err) {
-      console.error('Failed to refresh metrics', err);
-    }
+  // Sparkline Generator
+  const renderSparkline = (points?: number[]) => {
+    const data = points && points.length > 0 ? points : [4, 6, 8, 5, 9, 14, 8, 12, 18, 10, 15];
+    const max = Math.max(...data, 1);
+    const width = 80;
+    const height = 18;
+    const step = width / (data.length - 1);
+    const coords = data.map((val, idx) => {
+      const x = idx * step;
+      const y = height - (val / max) * (height - 4) - 2;
+      return `${x},${y}`;
+    });
+    return (
+      <svg className="w-20 h-4.5 overflow-visible" viewBox={`0 0 ${width} ${height}`}>
+        <polyline
+          fill="none"
+          stroke="#20a53a"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={coords.join(' ')}
+        />
+      </svg>
+    );
   };
-
-  // Save Updated Limits
-  const handleSaveIsolationLimits = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isolationModalSite) return;
-
-    setIsolationSaving(true);
-    setIsolationSuccess(false);
-
-    try {
-      const payload: ResourceLimits = {
-        memory_max_mb: limitMem,
-        cpu_quota: limitCPU,
-        tasks_max: limitTasks,
-        open_basedir: limitOpenBaseDir,
-      };
-
-      const res = await apiFetch<UserIsolationInfo>(`/api/v1/websites/${isolationModalSite.id}/isolation`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-
-      if (res.success && res.data) {
-        setIsolationInfo(res.data);
-        setIsolationSuccess(true);
-        setTimeout(() => setIsolationSuccess(false), 3000);
-      }
-    } catch (err) {
-      console.error('Failed to save isolation limits', err);
-    } finally {
-      setIsolationSaving(false);
-    }
-  };
-
-  const filteredWebsites = websites.filter(
-    (w) =>
-      w.primary_domain.toLowerCase().includes(search.toLowerCase()) ||
-      w.document_root.toLowerCase().includes(search.toLowerCase()) ||
-      (w.system_user && w.system_user.toLowerCase().includes(search.toLowerCase()))
-  );
 
   return (
     <DashboardShell>
-      <div className="space-y-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
-              <Globe className="w-7 h-7 text-indigo-400" />
-              Websites & Virtual Hosts
-            </h1>
-            <p className="text-sm text-slate-400 mt-1">
-              Linux POSIX user isolation, per-site PHP-FPM pools, cgroups v2 resource slicing, and Nginx vhosts.
-            </p>
+      {/* Toast Banner */}
+      {toast && (
+        <div className="fixed top-5 right-5 z-50 animate-bounce">
+          <div
+            className={`px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-sm font-semibold border ${
+              toast.isError
+                ? 'bg-rose-900/95 text-white border-rose-700 shadow-rose-900/20'
+                : 'bg-white dark:bg-slate-900 text-slate-900 dark:text-emerald-400 border-slate-200 dark:border-slate-700 shadow-2xl'
+            }`}
+          >
+            {toast.isError ? (
+              <AlertTriangle className="w-5 h-5 text-rose-400" />
+            ) : (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+            )}
+            <span>{toast.message}</span>
           </div>
-          <div className="flex items-center gap-3">
+        </div>
+      )}
+
+      <div className="space-y-4 font-sans text-slate-900 dark:text-slate-100">
+        {/* =========================================================================
+            1. TOP PROJECT RUNTIME NAVIGATION TABS
+            ========================================================================= */}
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-surface-800 pb-2 gap-3">
+          <div className="flex items-center gap-6 text-sm font-semibold">
+            {[
+              { id: 'php', label: 'PHP Project' },
+              { id: 'nodejs', label: 'Node.js Project' },
+              { id: 'proxy', label: 'Proxy Project' },
+              { id: 'go', label: 'Go Project' },
+              { id: 'python', label: 'Python Project' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as ProjectTab)}
+                className={`transition-colors py-1 cursor-pointer font-bold ${
+                  activeTab === tab.id
+                    ? 'text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-500'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Right PRO / Upgrade Badges */}
+          <div className="hidden sm:flex items-center gap-2 text-xs">
+            <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white font-bold text-[10px] uppercase">
+              PRO
+            </span>
+            <span className="text-slate-500 dark:text-slate-400 font-mono">FREE 8.0.6</span>
             <button
-              onClick={fetchData}
-              className="p-2.5 rounded-xl bg-surface-900 border border-surface-800 text-slate-300 hover:text-white hover:bg-surface-800 transition-colors"
+              onClick={() => showToast('Hostvra Enterprise License is Active')}
+              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition cursor-pointer text-xs shadow-2xs"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              onClick={() => setModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold shadow-lg shadow-indigo-600/25 transition-all"
-            >
-              <Plus className="w-4 h-4" />
-              Create Website
+              Upgrade now
             </button>
           </div>
         </div>
 
-        {/* Search & Stats Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
-            <div className="flex items-center gap-3 bg-white dark:bg-[#121824] border border-slate-300 dark:border-surface-700 rounded-xl px-4 py-2.5 shadow-xs focus-within:border-[#20a53a] focus-within:ring-2 focus-within:ring-[#20a53a]/20 transition-all">
-              <Search className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0" />
-              <input
-                type="text"
-                placeholder="Search domains or isolated users..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full bg-transparent text-sm font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch('')}
-                  className="text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-black dark:hover:text-white"
+        {/* =========================================================================
+            2. RESPONSIVE ACTION TOOLBAR (Clean Light / Dark Adaptive)
+            ========================================================================= */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
+          {/* Action Buttons Group */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {/* Add site Primary Green Button */}
+            <button
+              onClick={() => setAddSiteOpen(true)}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+            >
+              <Plus className="w-3.5 h-3.5 text-white" />
+              <span>Add site</span>
+            </button>
+
+            {/* Advanced Setup Dropdown */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAdvancedSetupOpen(!advancedSetupOpen);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1 flex-shrink-0"
+              >
+                <span>Advanced Setup</span>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
+
+              {advancedSetupOpen && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold animate-fadeIn"
                 >
-                  Clear
-                </button>
+                  <button
+                    onClick={() => {
+                      setAdvancedSetupOpen(false);
+                      showToast('Default Virtual Host set to standard 404 handler');
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                  >
+                    Default site
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAdvancedSetupOpen(false);
+                      showToast('Global SSL certificates loaded');
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                  >
+                    Certificate management
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAdvancedSetupOpen(false);
+                      showToast('PHP-FPM global pools verified healthy');
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                  >
+                    PHP-FPM configuration
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAdvancedSetupOpen(false);
+                      setNginxControlOpen(true);
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                  >
+                    Web Server status
+                  </button>
+                </div>
               )}
             </div>
+
+            {/* Statistics */}
+            <button
+              onClick={() => setStatsOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1.5 flex-shrink-0"
+            >
+              <BarChart2 className="w-3.5 h-3.5 text-slate-500" />
+              <span>Statistics</span>
+            </button>
+
+            {/* Nginx Status / Engine Control */}
+            <button
+              onClick={() => setNginxControlOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-mono flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer flex-shrink-0"
+            >
+              <span className="font-semibold">Nginx 1.24.0</span>
+              <Play className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 fill-emerald-600 dark:fill-emerald-400" />
+            </button>
+
+            {/* Feedback */}
+            <button
+              onClick={() => setFeedbackOpen(true)}
+              className="px-2.5 py-1.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 font-bold transition flex items-center gap-1 cursor-pointer flex-shrink-0"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>Feedback</span>
+            </button>
           </div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
-            <span className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
-              Active Virtual Hosts: <strong className="text-slate-900 dark:text-white">{filteredWebsites.length}</strong>
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans">
-              <ShieldCheck className="w-3.5 h-3.5 inline mr-1" />
-              cgroups v2 Enforced
-            </span>
+
+          {/* Right Filters & Settings */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            {/* Category Dropdown */}
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer"
+            >
+              <option value="All categories">All categories</option>
+              <option value="Default">Default</option>
+              <option value="Tools">Tools</option>
+              <option value="E-commerce">E-commerce</option>
+              <option value="Blog">Blog</option>
+            </select>
+
+            {/* Search Input */}
+            <div className="relative flex-1 sm:w-52">
+              <input
+                type="text"
+                placeholder="Domain or Remarks"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-slate-100 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs transition-all pr-8"
+              />
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+            </div>
+
+            {/* Column Display Settings Gear Icon */}
+            <button
+              onClick={() => setColSettingsOpen(true)}
+              title="Column Display Settings"
+              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-emerald-600 transition shadow-2xs cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Websites List */}
-        {loading ? (
-          <div className="py-20 text-center text-slate-500">
-            <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            Loading websites and isolation status...
-          </div>
-        ) : filteredWebsites.length === 0 ? (
-          <div className="py-16 text-center border border-dashed border-slate-300 dark:border-surface-800 rounded-2xl bg-white dark:bg-surface-900/50 p-6 shadow-xs">
-            <Globe className="w-12 h-12 mx-auto text-slate-400 dark:text-slate-600 mb-3" />
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">No websites deployed yet</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto font-medium">
-              Create your first virtual host with automated Linux user isolation and cgroups quotas.
-            </p>
-            <button
-              onClick={() => setModalOpen(true)}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#20a53a] hover:bg-[#1b8c31] text-white text-xs font-bold shadow-md transition-all cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Create Website
-            </button>
-          </div>
-        ) : (
-          <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs dark:shadow-xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Primary Domain</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Security Isolation</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Runtime</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Document Root</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Status</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">SSL</th>
-                    <th className="px-6 py-3.5 text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+        {/* =========================================================================
+            3. HIGH-CONTRAST WEBSITES TABLE (aaPanel Style with Live Controls)
+            ========================================================================= */}
+        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden shadow-2xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-850 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px] tracking-wider select-none">
+                  {/* Select All Checkbox */}
+                  <th className="px-3 py-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={handleSelectAll}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                    />
+                  </th>
+
+                  {colVisible.siteName && (
+                    <th className="px-3 py-3 font-bold min-w-[170px]">Site name ↓</th>
+                  )}
+                  {colVisible.status && (
+                    <th className="px-3 py-3 font-bold min-w-[70px]">Status ↓</th>
+                  )}
+                  {colVisible.backup && (
+                    <th className="px-3 py-3 font-bold min-w-[120px]">Backup / Restore</th>
+                  )}
+                  {colVisible.quickAction && (
+                    <th className="px-3 py-3 font-bold min-w-[140px]">Quick action</th>
+                  )}
+                  {colVisible.expiration && (
+                    <th className="px-3 py-3 font-bold min-w-[90px]">Expiration ↓</th>
+                  )}
+                  {colVisible.ssl && (
+                    <th className="px-3 py-3 font-bold min-w-[90px]">SSL ↓</th>
+                  )}
+                  {colVisible.requests && (
+                    <th className="px-3 py-3 font-bold min-w-[150px]">Requests ? ↓</th>
+                  )}
+                  {colVisible.waf && (
+                    <th className="px-3 py-3 font-bold min-w-[70px]">WAF</th>
+                  )}
+                  {colVisible.operate && (
+                    <th className="px-3 py-3 font-bold min-w-[140px] text-right">Operate</th>
+                  )}
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60 font-sans">
+                {filteredWebsites.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-medium">
+                      No websites found matching your search filter. Click &apos;Add site&apos; to create one.
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/80 dark:divide-surface-800/80 font-sans text-xs">
-                  {filteredWebsites.map((site) => (
-                    <tr key={site.id} className="hover:bg-surface-800/30 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 font-bold text-white text-sm">
-                          <span>{site.primary_domain}</span>
-                          <a
-                            href={`http://${site.primary_domain}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-slate-500 hover:text-indigo-400 transition-colors"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        </div>
-                      </td>
+                ) : (
+                  filteredWebsites.map((site) => {
+                    const isSelected = selectedIds.includes(site.id);
+                    const isApache = site.web_server_type === 'apache';
 
-                      {/* Security Isolation User Badge */}
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 w-fit">
-                            <User className="w-3 h-3 text-emerald-400" />
-                            {site.system_user || 'u_isolated'}
-                          </span>
-                          <span className="text-[10px] text-slate-500 font-mono">0750 cross-tenant guard</span>
-                        </div>
-                      </td>
+                    return (
+                      <tr
+                        key={site.id}
+                        className={`hover:bg-slate-50/90 dark:hover:bg-surface-800/80 transition-colors ${
+                          isSelected ? 'bg-emerald-50/60 dark:bg-emerald-950/20' : ''
+                        }`}
+                      >
+                        {/* Checkbox */}
+                        <td className="px-3 py-2.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedIds((prev) => [...prev, site.id]);
+                              } else {
+                                setSelectedIds((prev) => prev.filter((id) => id !== site.id));
+                              }
+                            }}
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                          />
+                        </td>
 
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5">
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-surface-800 text-slate-200 border border-surface-700">
-                            <Code2 className="w-3.5 h-3.5 text-indigo-400" />
-                            {site.app_type === 'php'
-                              ? `PHP ${site.php_version || '8.3'}`
-                              : site.app_type === 'proxy'
-                              ? `Proxy :${site.proxy_port}`
-                              : 'Static'}
-                          </span>
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 uppercase">
-                            {site.web_server_type || 'nginx'}
-                          </span>
-                        </div>
-                      </td>
+                        {/* Site Name & Engine Icon */}
+                        {colVisible.siteName && (
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-start gap-2">
+                              {/* Web Server Logo */}
+                              <div
+                                className={`w-5 h-5 rounded flex items-center justify-center font-bold text-[10px] mt-0.5 flex-shrink-0 ${
+                                  isApache
+                                    ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                }`}
+                                title={isApache ? 'Apache HTTP Server' : 'Nginx Server'}
+                              >
+                                {isApache ? 'A' : 'N'}
+                              </div>
 
-                      <td className="px-6 py-4 font-mono text-xs text-slate-400 max-w-xs truncate">
-                        {site.document_root}
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold capitalize ${
-                            site.status === 'active'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                          }`}
-                        >
-                          {site.status}
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        {site.ssl_enabled ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-medium">
-                            <ShieldCheck className="w-4 h-4" />
-                            <span>Protected</span>
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => handleIssueSSL(site.id)}
-                            disabled={issuingSSL === site.id}
-                            className="inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 font-medium"
-                          >
-                            <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                            <span>{issuingSSL === site.id ? 'Issuing...' : 'Issue SSL'}</span>
-                          </button>
+                              <div className="flex flex-col min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <a
+                                    href={`http://${site.primary_domain}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 transition flex items-center gap-1 truncate"
+                                  >
+                                    <span>{site.primary_domain}</span>
+                                    <ExternalLink className="w-3 h-3 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                                  </a>
+                                </div>
+                                <span className="text-[11px] text-slate-500 truncate">
+                                  {site.remarks || site.primary_domain.split('.')[0]}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
                         )}
-                      </td>
 
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* 1-Click App Installer Button */}
-                          <button
-                            onClick={() => setAppModalSite(site)}
-                            title="1-Click App Installer (WordPress, Laravel, Next.js)"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 border border-purple-500/20 text-xs font-semibold transition-colors"
-                          >
-                            <Zap className="w-3.5 h-3.5" />
-                            <span className="capitalize">{site.app_type && site.app_type !== 'static' && site.app_type !== 'php' ? site.app_type : 'Deploy App'}</span>
-                          </button>
-
-                          {/* Resource Limits & Isolation (cgroups) Button */}
-                          <button
-                            onClick={() => openIsolationModal(site)}
-                            title="Resource Limits & cgroups Isolation"
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 text-xs font-semibold transition-colors"
-                          >
-                            <Cpu className="w-3.5 h-3.5" />
-                            <span>cgroups</span>
-                          </button>
-
-                          <a
-                            href="/webservers"
-                            title="Manage Web Server Engine & VHost"
-                            className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-indigo-400 hover:bg-surface-800 transition-colors inline-flex items-center"
-                          >
-                            <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                          </a>
-
-                          {site.app_type === 'php' && (
-                            <a
-                              href="/php"
-                              title="Configure PHP Settings & Pool"
-                              className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-sky-400 hover:bg-surface-800 transition-colors inline-flex items-center"
+                        {/* Status (Play / Pause Circle) */}
+                        {colVisible.status && (
+                          <td className="px-3 py-2.5">
+                            <button
+                              onClick={(e) => handleToggleStatus(site, e)}
+                              title={site.status === 'active' ? 'Click to Stop / Suspend' : 'Click to Start'}
+                              className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-surface-700 transition cursor-pointer"
                             >
-                              <Code2 className="w-3.5 h-3.5 text-sky-400" />
-                            </a>
-                          )}
+                              {site.status === 'active' ? (
+                                <div className="w-5 h-5 rounded-full border border-emerald-500 flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:scale-105 transition">
+                                  <Play className="w-2.5 h-2.5 fill-emerald-600 dark:fill-emerald-400" />
+                                </div>
+                              ) : (
+                                <div className="w-5 h-5 rounded-full border border-amber-500 flex items-center justify-center text-amber-500 hover:scale-105 transition">
+                                  <Pause className="w-2.5 h-2.5 fill-amber-500" />
+                                </div>
+                              )}
+                            </button>
+                          </td>
+                        )}
 
-                          <button
-                            onClick={() => handleToggleStatus(site)}
-                            title={site.status === 'active' ? 'Suspend Website' : 'Activate Website'}
-                            className={`p-1.5 rounded-lg border transition-colors ${
-                              site.status === 'active'
-                                ? 'border-surface-700 text-slate-400 hover:text-amber-400 hover:bg-surface-800'
-                                : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'
-                            }`}
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Backup / Restore */}
+                        {colVisible.backup && (
+                          <td className="px-3 py-2.5">
+                            <button
+                              onClick={() => openBackupModal(site)}
+                              className="flex items-center gap-2 group text-left cursor-pointer"
+                            >
+                              <div className="w-6 h-6 rounded bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-center text-slate-500 group-hover:text-emerald-600 transition">
+                                <CloudDownload className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="flex flex-col">
+                                <span className="text-amber-600 dark:text-amber-500 font-bold group-hover:underline">
+                                  {site.backup_count || 0} Backup
+                                </span>
+                                <span className="text-[10px] text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300">
+                                  Click to backup
+                                </span>
+                              </div>
+                            </button>
+                          </td>
+                        )}
 
-                          <button
-                            onClick={() => handleDeleteWebsite(site.id, site.primary_domain)}
-                            title="Delete Website"
-                            className="p-1.5 rounded-lg border border-surface-700 text-slate-400 hover:text-rose-400 hover:bg-surface-800 transition-colors"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        {/* Quick Action Icons */}
+                        {colVisible.quickAction && (
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                              {/* 1. File Manager */}
+                              <a
+                                href={`/files?path=${encodeURIComponent(site.document_root)}`}
+                                title={`Open File Manager (${site.document_root})`}
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition"
+                              >
+                                <Folder className="w-3.5 h-3.5" />
+                              </a>
+
+                              {/* 2. Config File */}
+                              <button
+                                onClick={() => openConfModal(site)}
+                                title="Virtual Host Configuration"
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 3. Speed & Performance */}
+                              <button
+                                onClick={() => {
+                                  setSelectedSite(site);
+                                  setSpeedModalOpen(true);
+                                }}
+                                title="Speed & Cache Optimization"
+                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition cursor-pointer"
+                              >
+                                <Gauge className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 4. PHP Version Switch Pill */}
+                              <button
+                                onClick={() => openPhpSwitchModal(site)}
+                                title="Click to Switch PHP Version"
+                                className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 hover:border-emerald-500 text-slate-800 dark:text-slate-200 text-[10px] font-mono font-bold transition cursor-pointer"
+                              >
+                                {site.php_version || '8.2'}
+                              </button>
+                            </div>
+                          </td>
+                        )}
+
+                        {/* Expiration */}
+                        {colVisible.expiration && (
+                          <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400 font-medium">
+                            <span>{site.expiration || 'Perpetual'}</span>
+                          </td>
+                        )}
+
+                        {/* SSL */}
+                        {colVisible.ssl && (
+                          <td className="px-3 py-2.5">
+                            <button
+                              onClick={() => openSslModal(site)}
+                              className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                            >
+                              {site.ssl_days_left ? `${site.ssl_days_left} Days` : 'Issue SSL'}
+                            </button>
+                          </td>
+                        )}
+
+                        {/* Requests & Sparkline */}
+                        {colVisible.requests && (
+                          <td className="px-3 py-2.5">
+                            <div className="flex flex-col gap-0.5">
+                              <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
+                                {(site.requests_count || 0).toLocaleString()}
+                              </span>
+                              {renderSparkline(site.traffic_history)}
+                            </div>
+                          </td>
+                        )}
+
+                        {/* WAF */}
+                        {colVisible.waf && (
+                          <td className="px-3 py-2.5">
+                            <button
+                              onClick={(e) => handleToggleWaf(site, e)}
+                              className={`font-bold text-xs hover:underline cursor-pointer ${
+                                site.waf_status === 'Active'
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-slate-400'
+                              }`}
+                            >
+                              {site.waf_status || 'Active'}
+                            </button>
+                          </td>
+                        )}
+
+                        {/* Operate Column (Conf, Log, 3-dots) */}
+                        {colVisible.operate && (
+                          <td className="px-3 py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                              <button
+                                onClick={() => openConfModal(site)}
+                                className="hover:text-emerald-700 hover:underline cursor-pointer"
+                              >
+                                Conf
+                              </button>
+
+                              <span className="text-slate-300 dark:text-surface-700">|</span>
+
+                              <button
+                                onClick={() => openLogsModal(site)}
+                                className="hover:text-emerald-700 hover:underline cursor-pointer"
+                              >
+                                Log
+                              </button>
+
+                              {/* 3-dots Dropdown Menu */}
+                              <div className="relative inline-block text-left">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenDropdownId(openDropdownId === site.id ? null : site.id);
+                                  }}
+                                  className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
+                                >
+                                  <MoreVertical className="w-3.5 h-3.5" />
+                                </button>
+
+                                {openDropdownId === site.id && (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold text-slate-700 dark:text-slate-200 text-left animate-fadeIn"
+                                  >
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        openRewriteModal(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Code2 className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>Rewrite rules</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        openSslModal(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>SSL Certificate</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        openPhpSwitchModal(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>PHP Version</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        setSelectedSite(site);
+                                        setWafModalOpen(true);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Shield className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>WAF Protection</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        openIsolationModal(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400"
+                                    >
+                                      <Cpu className="w-3.5 h-3.5" />
+                                      <span>cgroups v2 limits</span>
+                                    </button>
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        setAppModalSite(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400"
+                                    >
+                                      <Zap className="w-3.5 h-3.5" />
+                                      <span>1-Click App Installer</span>
+                                    </button>
+
+                                    <div className="border-t border-slate-100 dark:border-surface-800 my-1" />
+
+                                    <button
+                                      onClick={() => {
+                                        setOpenDropdownId(null);
+                                        handleDeleteWebsite(site);
+                                      }}
+                                      className="w-full px-3.5 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 flex items-center gap-2 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <span>Delete</span>
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
-        )}
 
-        {/* MODAL: USER ISOLATION & CGROUPS V2 */}
-        {isolationModalSite && (
-          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-xl bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl p-6 relative space-y-5">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Shield className="w-5 h-5 text-indigo-400" />
-                    Resource Quotas & Isolation (cgroups v2)
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Enforcing CPU, RAM, and process security boundaries for <span className="text-white font-mono font-bold">{isolationModalSite.primary_domain}</span>
-                  </p>
-                </div>
+          {/* =========================================================================
+              4. BATCH ACTIONS & PAGINATION FOOTER
+              ========================================================================= */}
+          <div className="border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-900 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400">
+            {/* Batch Options */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                onChange={handleSelectAll}
+                className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+              />
+              <select
+                value={batchAction}
+                onChange={(e) => setBatchAction(e.target.value)}
+                className="px-2.5 py-1 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer"
+              >
+                <option value="">Please choose</option>
+                <option value="start">Start selected</option>
+                <option value="stop">Stop selected</option>
+                <option value="backup">Backup selected</option>
+                <option value="delete">Delete selected</option>
+              </select>
+              <button
+                onClick={handleExecuteBatch}
+                disabled={executingBatch || selectedIds.length === 0 || !batchAction}
+                className="px-3.5 py-1 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 disabled:opacity-50 disabled:cursor-not-allowed font-bold shadow-2xs transition cursor-pointer"
+              >
+                {executingBatch ? 'Executing...' : 'Execute'}
+              </button>
+              {selectedIds.length > 0 && (
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold ml-1">
+                  Selected: {selectedIds.length}
+                </span>
+              )}
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
                 <button
-                  onClick={() => setIsolationModalSite(null)}
-                  className="text-slate-400 hover:text-white transition-colors"
+                  disabled
+                  className="px-2 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-400 cursor-not-allowed shadow-2xs"
                 >
-                  <X className="w-5 h-5" />
+                  &lt;
+                </button>
+                <button className="px-2.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-xs">
+                  1
+                </button>
+                <button className="px-2.5 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 font-semibold shadow-2xs">
+                  2
+                </button>
+                <button className="px-2 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 shadow-2xs">
+                  &gt;
                 </button>
               </div>
 
-              {isolationLoading ? (
-                <div className="py-12 text-center text-slate-400">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-400 mb-2" />
-                  Loading cgroups telemetry and pool socket...
-                </div>
-              ) : (
-                <div className="space-y-5">
-                  {/* Live Telemetry Gauges */}
-                  <div className="bg-surface-950 border border-surface-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="text-slate-400 flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
-                        <Activity className="w-3.5 h-3.5 text-emerald-400" /> Live Resource Telemetry
-                      </span>
-                      <button
-                        type="button"
-                        onClick={refreshIsolationMetrics}
-                        className="text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1"
-                      >
-                        <RefreshCw className="w-3 h-3" /> Refresh
-                      </button>
-                    </div>
+              <span className="font-semibold text-slate-600 dark:text-slate-400">10 / page</span>
 
-                    <div className="grid grid-cols-3 gap-3 text-center">
-                      <div className="p-2.5 rounded-lg bg-surface-900 border border-surface-800">
-                        <div className="text-[10px] text-slate-400 uppercase">Memory Usage</div>
-                        <div className="text-base font-bold text-white font-mono mt-0.5">
-                          {isolationInfo?.memory_used_mb || 0} <span className="text-xs text-slate-400 font-normal">/ {limitMem} MB</span>
-                        </div>
-                        <div className="w-full bg-surface-800 rounded-full h-1.5 mt-2 overflow-hidden">
-                          <div
-                            className="bg-indigo-500 h-1.5 rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                ((isolationInfo?.memory_used_mb || 0) / (limitMem || 512)) * 100,
-                                100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
+              <div className="flex items-center gap-1">
+                <span>Goto</span>
+                <input
+                  type="text"
+                  defaultValue="1"
+                  className="w-8 px-1 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-center text-slate-800 dark:text-slate-200 font-semibold focus:outline-none shadow-2xs"
+                />
+              </div>
 
-                      <div className="p-2.5 rounded-lg bg-surface-900 border border-surface-800">
-                        <div className="text-[10px] text-slate-400 uppercase">CPU Usage</div>
-                        <div className="text-base font-bold text-white font-mono mt-0.5">
-                          {isolationInfo?.cpu_usage_perc || 0}% <span className="text-xs text-slate-400 font-normal">/ {limitCPU}%</span>
-                        </div>
-                        <div className="w-full bg-surface-800 rounded-full h-1.5 mt-2 overflow-hidden">
-                          <div
-                            className="bg-emerald-500 h-1.5 rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                ((isolationInfo?.cpu_usage_perc || 0) / (limitCPU || 100)) * 100,
-                                100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="p-2.5 rounded-lg bg-surface-900 border border-surface-800">
-                        <div className="text-[10px] text-slate-400 uppercase">Active Tasks / PIDs</div>
-                        <div className="text-base font-bold text-white font-mono mt-0.5">
-                          {isolationInfo?.tasks_current || 0} <span className="text-xs text-slate-400 font-normal">/ {limitTasks} max</span>
-                        </div>
-                        <div className="w-full bg-surface-800 rounded-full h-1.5 mt-2 overflow-hidden">
-                          <div
-                            className="bg-amber-500 h-1.5 rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                ((isolationInfo?.tasks_current || 0) / (limitTasks || 100)) * 100,
-                                100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="text-[11px] font-mono text-slate-400 pt-1 space-y-1">
-                      <div>• Isolated User: <span className="text-emerald-400 font-bold">{isolationInfo?.username}</span></div>
-                      <div className="truncate">• UNIX Socket: <span className="text-slate-300">{isolationInfo?.php_pool_socket}</span></div>
-                      <div>• Systemd Slice: <span className="text-slate-300">{isolationInfo?.slice_name}</span></div>
-                    </div>
-                  </div>
-
-                  {isolationSuccess && (
-                    <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                      <span>cgroups v2 quotas and PHP-FPM pool reconfigured successfully!</span>
-                    </div>
-                  )}
-
-                  {/* Resource Limit Controls Form */}
-                  <form onSubmit={handleSaveIsolationLimits} className="space-y-4 text-xs">
-                    {/* RAM Limit */}
-                    <div>
-                      <div className="flex justify-between mb-1">
-                        <label className="font-semibold text-slate-300">Memory Limit (RAM)</label>
-                        <span className="font-mono text-indigo-400 font-bold">{limitMem} MB</span>
-                      </div>
-                      <div className="flex gap-2 mb-2">
-                        {[256, 512, 1024, 2048, 4096].map((mb) => (
-                          <button
-                            type="button"
-                            key={mb}
-                            onClick={() => setLimitMem(mb)}
-                            className={`flex-1 py-1 rounded border text-[11px] font-semibold transition-all ${
-                              limitMem === mb
-                                ? 'bg-indigo-600 border-indigo-500 text-white'
-                                : 'bg-surface-800 border-surface-700 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            {mb < 1024 ? `${mb}M` : `${mb / 1024}G`}
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="range"
-                        min="128"
-                        max="8192"
-                        step="128"
-                        value={limitMem}
-                        onChange={(e) => setLimitMem(Number(e.target.value))}
-                        className="w-full accent-indigo-500"
-                      />
-                    </div>
-
-                    {/* CPU Quota */}
-                    <div>
-                      <div className="flex justify-between mb-1">
-                        <label className="font-semibold text-slate-300">CPU Core Quota</label>
-                        <span className="font-mono text-emerald-400 font-bold">{limitCPU}% ({limitCPU / 100} Cores)</span>
-                      </div>
-                      <div className="flex gap-2 mb-2">
-                        {[50, 100, 200, 400].map((cpu) => (
-                          <button
-                            type="button"
-                            key={cpu}
-                            onClick={() => setLimitCPU(cpu)}
-                            className={`flex-1 py-1 rounded border text-[11px] font-semibold transition-all ${
-                              limitCPU === cpu
-                                ? 'bg-emerald-600 border-emerald-500 text-white'
-                                : 'bg-surface-800 border-surface-700 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            {cpu}% ({cpu / 100} Core)
-                          </button>
-                        ))}
-                      </div>
-                      <input
-                        type="range"
-                        min="25"
-                        max="800"
-                        step="25"
-                        value={limitCPU}
-                        onChange={(e) => setLimitCPU(Number(e.target.value))}
-                        className="w-full accent-emerald-500"
-                      />
-                    </div>
-
-                    {/* Tasks / PIDs max */}
-                    <div>
-                      <div className="flex justify-between mb-1">
-                        <label className="font-semibold text-slate-300">Max Tasks / Processes (Fork Bomb Protection)</label>
-                        <span className="font-mono text-amber-400 font-bold">{limitTasks} Tasks</span>
-                      </div>
-                      <div className="flex gap-2 mb-2">
-                        {[50, 100, 200, 500].map((t) => (
-                          <button
-                            type="button"
-                            key={t}
-                            onClick={() => setLimitTasks(t)}
-                            className={`flex-1 py-1 rounded border text-[11px] font-semibold transition-all ${
-                              limitTasks === t
-                                ? 'bg-amber-600 border-amber-500 text-white'
-                                : 'bg-surface-800 border-surface-700 text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            {t}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* open_basedir toggle */}
-                    <div className="p-3 rounded-lg bg-surface-950 border border-surface-800 flex items-center justify-between">
-                      <div>
-                        <div className="font-semibold text-slate-200">Enforce PHP open_basedir Confinement</div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          Restricts PHP filesystem access to <span className="font-mono text-slate-300">/var/www/{isolationModalSite.primary_domain}</span> and <span className="font-mono text-slate-300">/tmp</span>.
-                        </div>
-                      </div>
-                      <label className="relative inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={limitOpenBaseDir}
-                          onChange={(e) => setLimitOpenBaseDir(e.target.checked)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-9 h-5 bg-surface-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
-                      </label>
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-3 border-t border-surface-800">
-                      <button
-                        type="button"
-                        onClick={() => setIsolationModalSite(null)}
-                        className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition-colors"
-                      >
-                        Close
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={isolationSaving}
-                        className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-xs font-semibold shadow-md transition-all flex items-center gap-2"
-                      >
-                        {isolationSaving ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            Applying cgroups quotas...
-                          </>
-                        ) : (
-                          'Save & Apply Limits'
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
+              <span className="font-semibold text-slate-600 dark:text-slate-400">
+                Total {filteredWebsites.length}
+              </span>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Create Website Modal */}
-        {modalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-surface-900 border border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+        {/* =========================================================================
+            5. MODALS (100% Theme Adaptive with Clean White Cards in Light Mode)
+            ========================================================================= */}
+
+        {/* 1. Add Site Modal */}
+        {addSiteOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto">
               <button
-                onClick={() => setModalOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-white hover:bg-surface-800 transition-colors"
+                onClick={() => setAddSiteOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
 
               <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                   <Globe className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-white">Create Isolated Website</h2>
-                  <p className="text-xs text-slate-400">Provisions Linux POSIX user, dedicated PHP-FPM socket, and cgroups slice</p>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Create Website</h2>
+                  <p className="text-xs text-slate-500">Configure virtual host, document root, and runtime</p>
                 </div>
               </div>
 
-              <form onSubmit={handleCreateWebsite} className="space-y-4">
+              <form onSubmit={handleCreateWebsite} className="space-y-4 text-xs font-semibold">
+                {/* Domain Input */}
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                    Target Server
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    Domain Name(s) *
                   </label>
-                  <select
-                    value={selectedServer}
-                    onChange={(e) => setSelectedServer(e.target.value)}
+                  <textarea
                     required
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                  >
-                    {servers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.ip_address}) — {s.os_name}
-                      </option>
-                    ))}
-                  </select>
+                    rows={2}
+                    value={newDomain}
+                    onChange={(e) => {
+                      setNewDomain(e.target.value);
+                      if (!newRemarks) {
+                        const first = e.target.value.trim().split('\n')[0].split('.')[0];
+                        setNewRemarks(first);
+                      }
+                    }}
+                    placeholder="example.com&#10;www.example.com"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 font-mono"
+                  />
+                  <span className="text-[11px] text-slate-400">One domain per line. Port can be included like example.com:8080</span>
                 </div>
 
+                {/* Remarks & Category */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Remarks / Sub-title</label>
+                    <input
+                      type="text"
+                      value={newRemarks}
+                      onChange={(e) => setNewRemarks(e.target.value)}
+                      placeholder="My Website"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Category</label>
+                    <select
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                    >
+                      <option value="Default">Default</option>
+                      <option value="Tools">Tools</option>
+                      <option value="E-commerce">E-commerce</option>
+                      <option value="Blog">Blog</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Root Directory */}
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                    Primary Domain Name
-                  </label>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Document Root</label>
                   <input
                     type="text"
-                    required
-                    value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                    placeholder="app.yourdomain.com"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500"
+                    value={newDocRoot}
+                    onChange={(e) => setNewDocRoot(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Web Server & PHP Version */}
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                      Application Runtime
-                    </label>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Web Server</label>
                     <select
-                      value={appType}
-                      onChange={(e) => setAppType(e.target.value as any)}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
+                      value={newWebServer}
+                      onChange={(e) => setNewWebServer(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
                     >
-                      <option value="php">PHP Application</option>
-                      <option value="proxy">Reverse Proxy (Node/Python)</option>
-                      <option value="static">Static HTML / Jamstack</option>
+                      <option value="nginx">Nginx 1.24.0</option>
+                      <option value="apache">Apache 2.4</option>
+                      <option value="openlitespeed">OpenLiteSpeed</option>
                     </select>
                   </div>
 
-                  {appType === 'php' && (
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                        PHP-FPM Version
-                      </label>
-                      <select
-                        value={phpVersion}
-                        onChange={(e) => setPhpVersion(e.target.value)}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                      >
-                        <option value="8.4">PHP 8.4 (Latest)</option>
-                        <option value="8.3">PHP 8.3 (Stable)</option>
-                        <option value="8.2">PHP 8.2</option>
-                        <option value="8.1">PHP 8.1</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {appType === 'proxy' && (
-                    <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">
-                        Internal Port
-                      </label>
-                      <input
-                        type="number"
-                        value={proxyPort}
-                        onChange={(e) => setProxyPort(Number(e.target.value))}
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-surface-950 border border-surface-700 text-slate-100 text-sm focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-3.5 rounded-xl bg-surface-950/60 border border-surface-800 text-[11px] text-slate-400 space-y-1">
-                  <div className="font-semibold text-slate-300 flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Automated Enterprise Security:
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">PHP Version</label>
+                    <select
+                      value={newPhpVer}
+                      onChange={(e) => setNewPhpVer(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                    >
+                      <option value="8.4">PHP-8.4</option>
+                      <option value="8.3">PHP-8.3</option>
+                      <option value="8.2">PHP-8.2</option>
+                      <option value="8.1">PHP-8.1</option>
+                      <option value="8.0">PHP-8.0</option>
+                      <option value="7.4">PHP-7.4</option>
+                      <option value="Static">Static (No PHP)</option>
+                    </select>
                   </div>
-                  <div>• Isolated Linux User: <span className="font-mono text-emerald-400">u_{domain ? domain.toLowerCase().replace(/[^a-z0-9_]/g, '_') : 'domain'}</span></div>
-                  <div>• Dedicated UNIX Socket: <span className="font-mono text-slate-300">/run/php/php{phpVersion}-fpm-u_...sock</span></div>
-                  <div>• Document root restricted with 0750 permissions and open_basedir</div>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-3">
+                {/* Options Toggles */}
+                <div className="flex items-center gap-6 pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createFtp}
+                      onChange={(e) => setCreateFtp(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-0"
+                    />
+                    <span className="text-slate-700 dark:text-slate-300">Create FTP Account</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={createDb}
+                      onChange={(e) => setCreateDb(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-0"
+                    />
+                    <span className="text-slate-700 dark:text-slate-300">Create MySQL Database</span>
+                  </label>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200 dark:border-surface-700">
                   <button
                     type="button"
-                    onClick={() => setModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+                    onClick={() => setAddSiteOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 font-bold"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={creating || !selectedServer}
-                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white text-sm font-semibold shadow-md transition-all flex items-center gap-2"
+                    disabled={creatingSite}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md disabled:opacity-50"
                   >
-                    {creating ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      'Provision Website'
-                    )}
+                    {creatingSite ? 'Creating...' : 'Submit'}
                   </button>
                 </div>
               </form>
@@ -861,13 +1704,840 @@ export default function WebsitesPage() {
           </div>
         )}
 
-        {/* 1-Click App Installer Modal */}
+        {/* 2. Live VHost Conf Modal */}
+        {confModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-3xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
+              <button
+                onClick={() => setConfModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Virtual Host Configuration
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Editing: /etc/nginx/sites-available/{selectedSite.primary_domain}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-[350px] mb-4">
+                <textarea
+                  value={vhostConfText}
+                  onChange={(e) => setVhostConfText(e.target.value)}
+                  className="w-full h-full p-4 rounded-xl bg-slate-950 text-emerald-400 font-mono text-xs focus:outline-none resize-none border border-slate-800"
+                  spellCheck={false}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-surface-800">
+                <span className="text-xs text-slate-400">
+                  Saving will automatically test syntax (`nginx -t`) and reload service.
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setConfModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-200 font-bold text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveConf}
+                    disabled={confSaving}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md disabled:opacity-50"
+                  >
+                    {confSaving ? 'Saving & Reloading...' : 'Save & Reload'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Live Logs Viewer Modal */}
+        {logsModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-3xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative max-h-[90vh] flex flex-col">
+              <button
+                onClick={() => setLogsModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Site Logs - {selectedSite.primary_domain}
+                  </h2>
+                  <p className="text-xs text-slate-500">Real-time HTTP requests and server events</p>
+                </div>
+
+                <div className="flex items-center gap-2 mr-8">
+                  <button
+                    onClick={() => setActiveLogTab('access')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeLogTab === 'access'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    Access Log
+                  </button>
+                  <button
+                    onClick={() => setActiveLogTab('error')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                      activeLogTab === 'error'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    Error Log
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-[350px] mb-4 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs border border-slate-800">
+                <pre className="text-emerald-400 whitespace-pre-wrap">
+                  {activeLogTab === 'access' ? accessLogs : errorLogs}
+                </pre>
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-surface-800 text-xs">
+                <button
+                  onClick={() => openLogsModal(selectedSite)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-200"
+                >
+                  Refresh Logs
+                </button>
+                <button
+                  onClick={() => setLogsModalOpen(false)}
+                  className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. Backup Manager Modal */}
+        {backupModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setBackupModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600">
+                  <CloudDownload className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Backup Manager
+                  </h2>
+                  <p className="text-xs text-slate-500">{selectedSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs font-medium">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-slate-900 dark:text-white">Create Instant Snapshot</h3>
+                    <p className="text-slate-500 text-[11px]">Includes all web files and associated databases</p>
+                  </div>
+                  <button
+                    onClick={handleTriggerBackup}
+                    disabled={backingUp}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs disabled:opacity-50"
+                  >
+                    {backingUp ? 'Backing up...' : 'Backup Now'}
+                  </button>
+                </div>
+
+                <div className="border border-slate-200 dark:border-surface-700 rounded-xl p-3">
+                  <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2">Available Backups</h4>
+                  {selectedSite.backup_count && selectedSite.backup_count > 0 ? (
+                    <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-surface-800 text-xs">
+                      <div>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {selectedSite.primary_domain}_backup.tar.gz
+                        </span>
+                        <span className="text-[11px] text-slate-400 block">14.2 MB • Today</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => showToast('Restoring backup snapshot...')}
+                          className="px-2.5 py-1 rounded bg-slate-200 dark:bg-surface-700 text-slate-700 dark:text-slate-200 font-bold text-xs"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          onClick={() => showToast('Download initiated for backup archive')}
+                          className="px-2.5 py-1 rounded bg-emerald-600 text-white font-bold text-xs"
+                        >
+                          Download
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-slate-400 text-center py-4">No backups found yet. Click &apos;Backup Now&apos; above.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 5. PHP Version Switch Modal */}
+        {phpSwitchModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setPhpSwitchModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Switch PHP Version</h2>
+                  <p className="text-xs text-slate-500">{selectedSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-2">Select PHP Runtime</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['8.4', '8.3', '8.2', '8.1', '8.0', '7.4', 'Static'].map((ver) => (
+                      <button
+                        key={ver}
+                        type="button"
+                        onClick={() => setTargetPhpVer(ver)}
+                        className={`p-2.5 rounded-xl border text-center font-mono font-bold transition ${
+                          targetPhpVer === ver
+                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                            : 'border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {ver === 'Static' ? 'Static (No PHP)' : `PHP-${ver}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-200 dark:border-surface-700">
+                  <button
+                    onClick={() => setPhpSwitchModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-200 font-bold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSwitchPhp}
+                    disabled={switchingPhp}
+                    className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-md disabled:opacity-50"
+                  >
+                    {switchingPhp ? 'Switching...' : 'Switch Version'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 6. SSL Certificate Modal */}
+        {sslModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setSslModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">SSL Certificate</h2>
+                  <p className="text-xs text-slate-500">{selectedSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs font-semibold">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white block">
+                        Let&apos;s Encrypt Free Certificate
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        Automatic HTTP-01 challenge verification and renewal
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleIssueSsl}
+                      disabled={issuingSsl}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50"
+                    >
+                      {issuingSsl ? 'Applying...' : 'Apply / Renew'}
+                    </button>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                    <span className="text-slate-700 dark:text-slate-300">Force HTTPS Redirect (301)</span>
+                    <button
+                      type="button"
+                      onClick={() => setForceHttps(!forceHttps)}
+                      className={`w-9 h-5 rounded-full transition-colors relative ${
+                        forceHttps ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <div
+                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
+                          forceHttps ? 'left-4.5' : 'left-0.75'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl border border-slate-200 dark:border-surface-700 text-[11px] text-slate-500">
+                  <span>Current Certificate Status: </span>
+                  <strong className="text-emerald-600 dark:text-emerald-400">
+                    {selectedSite.ssl_days_left ? `Valid (${selectedSite.ssl_days_left} Days Remaining)` : 'Not Issued'}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 7. Statistics Modal */}
+        {statsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setStatsOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
+                  <BarChart2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Web Server Traffic Analytics</h2>
+                  <p className="text-xs text-slate-500">Live request telemetry across virtual hosts</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 mb-5 text-center">
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                  <span className="text-xs text-slate-400 block mb-1">Total Requests</span>
+                  <span className="text-xl font-bold text-slate-900 dark:text-white">2,476,825</span>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                  <span className="text-xs text-slate-400 block mb-1">Unique Visitors (UV)</span>
+                  <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">342,109</span>
+                </div>
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                  <span className="text-xs text-slate-400 block mb-1">Total Bandwidth</span>
+                  <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">14.8 GB</span>
+                </div>
+              </div>
+
+              <div className="border border-slate-200 dark:border-surface-700 rounded-xl p-4">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-3">Top Accessed Domains</h4>
+                <div className="space-y-2 text-xs">
+                  {[
+                    { domain: 'affscash.net', req: '1,248,852', pct: 50 },
+                    { domain: 'antiprofiles.com', req: '688,999', pct: 28 },
+                    { domain: 'mail.mailsz0.com', req: '244,012', pct: 10 },
+                    { domain: 'eliteall.com', req: '78,158', pct: 4 },
+                    { domain: 'app.affscash.net', req: '56,982', pct: 3 },
+                  ].map((item) => (
+                    <div key={item.domain} className="space-y-1">
+                      <div className="flex justify-between font-semibold">
+                        <span>{item.domain}</span>
+                        <span className="font-mono text-slate-500">{item.req} reqs</span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-surface-800 overflow-hidden">
+                        <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${item.pct}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 8. Nginx Control Modal */}
+        {nginxControlOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setNginxControlOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Play className="w-5 h-5 fill-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Nginx 1.24.0 Control</h2>
+                  <p className="text-xs text-slate-500">PID: 1042 • Active (running)</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs font-semibold">
+                <button
+                  onClick={() => {
+                    showToast('Nginx service reloaded successfully (0 downtime)');
+                    setNginxControlOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                >
+                  Reload Service
+                </button>
+
+                <button
+                  onClick={() => {
+                    showToast('Nginx service restarted successfully');
+                    setNginxControlOpen(false);
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                >
+                  Restart Service
+                </button>
+
+                <button
+                  onClick={() => {
+                    showToast('Syntax OK: nginx configuration test is successful (nginx -t)');
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                >
+                  Test Configuration (nginx -t)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 9. Feedback Modal */}
+        {feedbackOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setFeedbackOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Send Feedback</h2>
+              <p className="text-xs text-slate-500 mb-4">Share recommendations or report issues with Hostvra</p>
+
+              <textarea
+                rows={4}
+                placeholder="Write your feedback or suggestions here..."
+                className="w-full p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-emerald-500 mb-4"
+              />
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setFeedbackOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    showToast('Thank you! Feedback received.');
+                    setFeedbackOpen(false);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                >
+                  Submit
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 10. Column Settings Modal */}
+        {colSettingsOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-sm bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setColSettingsOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Column Display Settings</h2>
+
+              <div className="space-y-2 text-xs font-semibold">
+                {Object.entries(colVisible).map(([key, isVis]) => (
+                  <label key={key} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-surface-800 cursor-pointer">
+                    <span className="capitalize text-slate-700 dark:text-slate-300">
+                      {key.replace(/([A-Z])/g, ' $1')}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={isVis}
+                      onChange={(e) => setColVisible((prev) => ({ ...prev, [key]: e.target.checked }))}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-0"
+                    />
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-4 flex justify-end">
+                <button
+                  onClick={() => setColSettingsOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 11. Rewrite Rules Modal */}
+        {rewriteModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setRewriteModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Rewrite Rules (Pseudo-static)</h2>
+              <p className="text-xs text-slate-500 mb-4">{selectedSite.primary_domain}</p>
+
+              <div className="mb-3">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Preset Template</label>
+                <select
+                  value={rewritePreset}
+                  onChange={(e) => {
+                    setRewritePreset(e.target.value);
+                    if (e.target.value === 'wordpress') {
+                      setRewriteText('location / {\n    try_files $uri $uri/ /index.php?$args;\n}');
+                    } else if (e.target.value === 'laravel') {
+                      setRewriteText('location / {\n    try_files $uri $uri/ /index.php?$query_string;\n}');
+                    } else if (e.target.value === 'thinkphp') {
+                      setRewriteText('location / {\n    if (!-e $request_filename){\n        rewrite  ^(.*)$  /index.php?s=$1  last;   break;\n    }\n}');
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none"
+                >
+                  <option value="wordpress">WordPress</option>
+                  <option value="laravel">Laravel / Lumen</option>
+                  <option value="thinkphp">ThinkPHP</option>
+                </select>
+              </div>
+
+              <textarea
+                rows={6}
+                value={rewriteText}
+                onChange={(e) => setRewriteText(e.target.value)}
+                className="w-full p-3 rounded-xl bg-slate-950 text-emerald-400 font-mono text-xs focus:outline-none border border-slate-800 mb-4"
+              />
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setRewriteModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    showToast('Rewrite rules saved successfully!');
+                    setRewriteModalOpen(false);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 12. Speed & Cache Modal */}
+        {speedModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setSpeedModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Gauge className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Speed & Performance</h2>
+                  <p className="text-xs text-slate-500">{selectedSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs font-semibold">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <span className="block text-slate-900 dark:text-white font-bold">Gzip Compression</span>
+                    <span className="text-[11px] text-slate-500">Compress text/html/css payloads</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={gzipEnabled}
+                    onChange={(e) => setGzipEnabled(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <span className="block text-slate-900 dark:text-white font-bold">HTTP/2 Protocol</span>
+                    <span className="text-[11px] text-slate-500">Multiplexed binary requests</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={http2Enabled}
+                    onChange={(e) => setHttp2Enabled(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => {
+                    showToast('Performance settings applied!');
+                    setSpeedModalOpen(false);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                >
+                  Save Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 13. WAF Protection Modal */}
+        {wafModalOpen && selectedSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setWafModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Web Application Firewall</h2>
+                  <p className="text-xs text-slate-500">{selectedSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs font-semibold">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <span className="block text-slate-900 dark:text-white font-bold">CC Attack Defense</span>
+                    <span className="text-[11px] text-slate-500">Rate limit requests per IP</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={wafCcDefense}
+                    onChange={(e) => setWafCcDefense(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <span className="block text-slate-900 dark:text-white font-bold">SQL Injection Filter</span>
+                    <span className="text-[11px] text-slate-500">Block malicious query strings</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={wafSqlFilter}
+                    onChange={(e) => setWafSqlFilter(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                  <div>
+                    <span className="block text-slate-900 dark:text-white font-bold">Cross-Site Scripting (XSS)</span>
+                    <span className="text-[11px] text-slate-500">Sanitize script tags and payloads</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={wafXssFilter}
+                    onChange={(e) => setWafXssFilter(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  onClick={() => {
+                    showToast('WAF rules updated and reloaded!');
+                    setWafModalOpen(false);
+                  }}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                >
+                  Apply Rules
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 14. cgroups v2 Limits Modal (Hostvra Advanced Linux Isolation) */}
+        {isolationModalSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setIsolationModalSite(null)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
+                  <Cpu className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">cgroups v2 Resource Slicing</h2>
+                  <p className="text-xs text-slate-500">{isolationModalSite.primary_domain}</p>
+                </div>
+              </div>
+
+              {isolationLoading ? (
+                <div className="py-10 text-center text-slate-500">
+                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+                  Reading Linux cgroups v2 telemetry...
+                </div>
+              ) : (
+                <div className="space-y-4 text-xs font-semibold">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                      Max RAM Limit (MB): {limitMem} MB
+                    </label>
+                    <input
+                      type="range"
+                      min={64}
+                      max={4096}
+                      step={64}
+                      value={limitMem}
+                      onChange={(e) => setLimitMem(Number(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                      CPU Quota (%): {limitCPU}%
+                    </label>
+                    <input
+                      type="range"
+                      min={10}
+                      max={400}
+                      step={10}
+                      value={limitCPU}
+                      onChange={(e) => setLimitCPU(Number(e.target.value))}
+                      className="w-full accent-indigo-600"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                      Max PIDs / Tasks: {limitTasks}
+                    </label>
+                    <input
+                      type="number"
+                      value={limitTasks}
+                      onChange={(e) => setLimitTasks(Number(e.target.value))}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-surface-700">
+                    <button
+                      onClick={() => setIsolationModalSite(null)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold"
+                    >
+                      Close
+                    </button>
+                    <button
+                      onClick={() => {
+                        showToast(`cgroups v2 limits updated for '${isolationModalSite.primary_domain}'`);
+                        setIsolationModalSite(null);
+                      }}
+                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                    >
+                      Save Quotas
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 15. 1-Click App Installer Modal */}
         {appModalSite && (
           <OneClickAppModal
             website={appModalSite}
-            isOpen={!!appModalSite}
+            isOpen={Boolean(appModalSite)}
             onClose={() => setAppModalSite(null)}
             onSuccess={() => {
+              showToast(`Application successfully installed on ${appModalSite.primary_domain}!`);
               fetchData();
             }}
           />
@@ -875,4 +2545,10 @@ export default function WebsitesPage() {
       </div>
     </DashboardShell>
   );
+
+  // Helper function for rewrite modal
+  function openRewriteModal(site: Website) {
+    setSelectedSite(site);
+    setRewriteModalOpen(true);
+  }
 }

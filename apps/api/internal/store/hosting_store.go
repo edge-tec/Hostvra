@@ -53,7 +53,7 @@ func (m *MemoryStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([
 
 	sites := make([]*Website, 0)
 	for _, s := range m.websites {
-		if s.OrganizationID == orgID && s.DeletedAt == nil {
+		if (orgID == uuid.Nil || s.OrganizationID == orgID) && s.DeletedAt == nil {
 			sites = append(sites, s)
 		}
 	}

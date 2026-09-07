@@ -21,6 +21,14 @@ type Website struct {
 	ProxyPort           *int              `json:"proxy_port,omitempty"`
 	Status              string            `json:"status"` // active, suspended, disabled
 	SSLEnabled          bool              `json:"ssl_enabled"`
+	Category            string            `json:"category,omitempty"`
+	Remarks             string            `json:"remarks,omitempty"`
+	BackupCount         int               `json:"backup_count,omitempty"`
+	BackupStatus        string            `json:"backup_status,omitempty"`
+	SSLDaysLeft         int               `json:"ssl_days_left,omitempty"`
+	Expiration          string            `json:"expiration,omitempty"`
+	RequestsCount       int64             `json:"requests_count,omitempty"`
+	WAFStatus           string            `json:"waf_status,omitempty"`
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
 	DeletedAt           *time.Time        `json:"deleted_at,omitempty"`

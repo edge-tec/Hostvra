@@ -72,16 +72,25 @@ export interface EnrollmentTokenResponse {
 export interface Website {
   id: string;
   server_id: string;
-  organization_id: string;
+  organization_id?: string;
   primary_domain: string;
   document_root: string;
-  system_user: string;
+  system_user?: string;
   php_version?: string;
   web_server_type?: string;
-  app_type: 'php' | 'static' | 'proxy';
+  app_type: 'php' | 'static' | 'proxy' | 'nodejs' | 'python' | 'go';
   proxy_port?: number;
   status: 'active' | 'suspended' | 'disabled';
   ssl_enabled: boolean;
+  ssl_days_left?: number;
+  backup_count?: number;
+  backup_status?: string;
+  category?: string;
+  remarks?: string;
+  expiration?: string;
+  requests_count?: number;
+  waf_status?: 'Active' | 'Inactive';
+  traffic_history?: number[];
   created_at: string;
 }
 
