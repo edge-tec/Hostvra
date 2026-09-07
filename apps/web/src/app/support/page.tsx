@@ -41,42 +41,7 @@ import {
   TicketStatus
 } from '@/lib/api';
 
-const INITIAL_TICKETS: Ticket[] = [
-  {
-    id: '50000000-0000-0000-0000-000000000001',
-    ticket_number: 'TKT-2026-88124',
-    organization_id: 'org-demo',
-    user_id: 'user-demo-1',
-    user_email: 'mizan@example.com',
-    user_name: 'Mizanur Rahman',
-    department: 'technical',
-    priority: 'high',
-    status: 'answered',
-    subject: 'SSL Certificate Renewal on Cloudflare CNAME',
-    related_service: 'apexagency.com',
-    replies_count: 2,
-    last_reply_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 10 * 3600 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-  },
-  {
-    id: '50000000-0000-0000-0000-000000000002',
-    ticket_number: 'TKT-2026-92415',
-    organization_id: 'org-demo',
-    user_id: 'user-demo-2',
-    user_email: 'tanvir@example.com',
-    user_name: 'Tanvir Ahmed',
-    department: 'billing',
-    priority: 'medium',
-    status: 'open',
-    subject: 'bKash Merchant Auto-Renewal Confirmation',
-    related_service: 'Business Cloud (Yearly)',
-    replies_count: 1,
-    last_reply_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    updated_at: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-  },
-];
+const INITIAL_TICKETS: Ticket[] = [];
 
 const INITIAL_ARTICLES: KnowledgeArticle[] = [
   {
@@ -196,14 +161,14 @@ export default function SupportPage() {
   const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
   const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>(INITIAL_CANNED);
   const [stats, setStats] = useState<SupportStats | null>({
-    total_tickets: 2,
-    open_tickets: 1,
-    answered_tickets: 1,
+    total_tickets: 0,
+    open_tickets: 0,
+    answered_tickets: 0,
     closed_tickets: 0,
-    avg_response_mins: 12,
-    resolution_rate: 99.2,
-    total_articles: 5,
-    article_helpful_pct: 98.4
+    avg_response_mins: 0,
+    resolution_rate: 100,
+    total_articles: INITIAL_ARTICLES.length,
+    article_helpful_pct: 100
   });
 
   const [statusFilter, setStatusFilter] = useState('all');

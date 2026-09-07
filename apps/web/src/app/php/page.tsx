@@ -29,6 +29,7 @@ import {
   Power,
   Globe,
 } from 'lucide-react';
+import { apiFetch } from '@/lib/api';
 
 interface PHPVersionStatus {
   version: string;
@@ -134,20 +135,17 @@ export default function PHPManagementPage() {
   const loadVersions = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/versions`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data) {
-          setVersions(json.data);
-          // Set selected version to first installed if present
-          const installed = json.data.find((v: PHPVersionStatus) => v.is_installed);
-          if (installed) {
-            setSelectedVersion(installed.version);
-          }
+      const res = await apiFetch<PHPVersionStatus[]>(`/api/v1/servers/${serverId}/php/versions`);
+      if (res && res.data) {
+        setVersions(res.data);
+        // Set selected version to first installed if present
+        const installed = res.data.find((v: PHPVersionStatus) => v.is_installed);
+        if (installed) {
+          setSelectedVersion(installed.version);
         }
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP versions:', e);
     } finally {
       setLoading(false);
     }
@@ -156,68 +154,61 @@ export default function PHPManagementPage() {
   // Load extensions for selected version
   const loadExtensions = async (v: string) => {
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${v}/extensions`);
-      if (res.ok) {
-        const json = await res.json();
-        setExtensions(json.data || []);
+      const res = await apiFetch<ExtensionInfo[]>(`/api/v1/servers/${serverId}/php/${v}/extensions`);
+      if (res && res.data) {
+        setExtensions(res.data);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP extensions:', e);
     }
   };
 
   // Load INI settings
   const loadIni = async (v: string) => {
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${v}/ini`);
-      if (res.ok) {
-        const json = await res.json();
-        if (json.data) {
-          setSimpleDirectives(json.data.simple_settings || []);
-          setRawIni(json.data.raw_content || '');
-        }
+      const res = await apiFetch<{ simple_settings?: SimpleDirective[]; raw_content?: string }>(`/api/v1/servers/${serverId}/php/${v}/ini`);
+      if (res && res.data) {
+        setSimpleDirectives(res.data.simple_settings || []);
+        setRawIni(res.data.raw_content || '');
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP INI:', e);
     }
   };
 
   // Load FPM Status
   const loadFpmStatus = async (v: string) => {
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${v}/fpm`);
-      if (res.ok) {
-        const json = await res.json();
-        setFpmStatus(json.data || null);
+      const res = await apiFetch<FPMStatus>(`/api/v1/servers/${serverId}/php/${v}/fpm`);
+      if (res && res.data) {
+        setFpmStatus(res.data);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP FPM status:', e);
     }
   };
 
   // Load Health
   const loadHealth = async (v: string) => {
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${v}/health`);
-      if (res.ok) {
-        const json = await res.json();
-        setHealthReport(json.data || null);
+      const res = await apiFetch<HealthReport>(`/api/v1/servers/${serverId}/php/${v}/health`);
+      if (res && res.data) {
+        setHealthReport(res.data);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP health report:', e);
     }
   };
 
   // Load Pools
   const loadPools = async (v: string) => {
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${v}/pools`);
-      if (res.ok) {
-        const json = await res.json();
-        setPools(json.data || []);
+      const res = await apiFetch<FPMPool[]>(`/api/v1/servers/${serverId}/php/${v}/pools`);
+      if (res && res.data) {
+        setPools(res.data);
       }
     } catch (e) {
-      console.error(e);
+      console.error('Failed to load PHP pools:', e);
     }
   };
 
@@ -240,20 +231,18 @@ export default function PHPManagementPage() {
     setActionLoading(`install-${v}`);
     setMessage(null);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/versions/install`, {
+      const res = await apiFetch<{ message?: string }>(`/api/v1/servers/${serverId}/php/versions/install`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ version: v }),
       });
-      const json = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: json.data?.message || `PHP ${v} installed successfully!` });
+      if (res && res.success) {
+        setMessage({ type: 'success', text: res.data?.message || `PHP ${v} installed successfully!` });
         await loadVersions();
       } else {
-        setMessage({ type: 'error', text: json.error?.message || `Failed to install PHP ${v}` });
+        setMessage({ type: 'error', text: res?.error?.message || `Failed to install PHP ${v}` });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Network request error' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Network request error' });
     } finally {
       setActionLoading(null);
     }
@@ -265,18 +254,17 @@ export default function PHPManagementPage() {
     setActionLoading(`remove-${v}`);
     setMessage(null);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/versions/${v}`, {
+      const res = await apiFetch<{ message?: string }>(`/api/v1/servers/${serverId}/php/versions/${v}`, {
         method: 'DELETE',
       });
-      const json = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: json.data?.message || `PHP ${v} removed` });
+      if (res && res.success) {
+        setMessage({ type: 'success', text: res.data?.message || `PHP ${v} removed` });
         await loadVersions();
       } else {
-        setMessage({ type: 'error', text: json.error?.message || `Failed to remove PHP ${v}` });
+        setMessage({ type: 'error', text: res?.error?.message || `Failed to remove PHP ${v}` });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Network request error' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Network request error' });
     } finally {
       setActionLoading(null);
     }
@@ -286,13 +274,15 @@ export default function PHPManagementPage() {
   const handleSetDefaultCLI = async (v: string) => {
     setActionLoading(`cli-${v}`);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/versions/${v}/default-cli`, { method: 'POST' });
-      if (res.ok) {
+      const res = await apiFetch(`/api/v1/servers/${serverId}/php/versions/${v}/default-cli`, { method: 'POST' });
+      if (res && res.success) {
         setMessage({ type: 'success', text: `Default PHP CLI switched to PHP ${v}` });
         await loadVersions();
+      } else {
+        setMessage({ type: 'error', text: res?.error?.message || 'Failed to switch default CLI' });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to switch default CLI' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Failed to switch default CLI' });
     } finally {
       setActionLoading(null);
     }
@@ -302,20 +292,18 @@ export default function PHPManagementPage() {
   const handleToggleExtension = async (extName: string, currentlyEnabled: boolean) => {
     setActionLoading(`ext-${extName}`);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/extensions/${extName}/toggle`, {
+      const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/extensions/${extName}/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !currentlyEnabled }),
       });
-      if (res.ok) {
+      if (res && res.success) {
         await loadExtensions(selectedVersion);
         setMessage({ type: 'success', text: `Extension ${extName} ${!currentlyEnabled ? 'enabled' : 'disabled'}` });
       } else {
-        const json = await res.json();
-        setMessage({ type: 'error', text: json.error?.message || 'Toggle failed' });
+        setMessage({ type: 'error', text: res?.error?.message || 'Toggle failed' });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to toggle extension' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Failed to toggle extension' });
     } finally {
       setActionLoading(null);
     }
@@ -325,20 +313,18 @@ export default function PHPManagementPage() {
   const handleInstallExtension = async (extName: string) => {
     setActionLoading(`ext-install-${extName}`);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/extensions/install`, {
+      const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/extensions/install`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ extension: extName }),
       });
-      if (res.ok) {
+      if (res && res.success) {
         await loadExtensions(selectedVersion);
         setMessage({ type: 'success', text: `Extension ${extName} installed successfully` });
       } else {
-        const json = await res.json();
-        setMessage({ type: 'error', text: json.error?.message || 'Install failed' });
+        setMessage({ type: 'error', text: res?.error?.message || 'Install failed' });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Failed to install extension' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Failed to install extension' });
     } finally {
       setActionLoading(null);
     }
@@ -348,20 +334,18 @@ export default function PHPManagementPage() {
   const handleFpmAction = async (action: 'start' | 'stop' | 'restart' | 'reload') => {
     setActionLoading(`fpm-${action}`);
     try {
-      const res = await fetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/fpm/service`, {
+      const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/fpm/service`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) {
+      if (res && res.success) {
         setMessage({ type: 'success', text: `PHP ${selectedVersion}-FPM service ${action}ed successfully` });
         await loadFpmStatus(selectedVersion);
       } else {
-        const json = await res.json();
-        setMessage({ type: 'error', text: json.error?.message || `Failed to ${action} PHP-FPM` });
+        setMessage({ type: 'error', text: res?.error?.message || `Failed to ${action} PHP-FPM` });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Service action failed' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Service action failed' });
     } finally {
       setActionLoading(null);
     }
@@ -797,19 +781,17 @@ export default function PHPManagementPage() {
                           const val = e.target.value;
                           if (val !== d.current_value) {
                             try {
-                              const res = await fetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/ini`, {
+                              const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/ini`, {
                                 method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ directives: { [d.directive]: val } }),
                               });
-                              if (res.ok) {
+                              if (res && res.success) {
                                 setMessage({ type: 'success', text: `Updated ${d.directive} = ${val}` });
                               } else {
-                                const json = await res.json();
-                                setMessage({ type: 'error', text: json.error?.message || 'Update failed' });
+                                setMessage({ type: 'error', text: res?.error?.message || 'Update failed' });
                               }
-                            } catch (err) {
-                              setMessage({ type: 'error', text: 'Update failed' });
+                            } catch (err: any) {
+                              setMessage({ type: 'error', text: err?.message || 'Update failed' });
                             }
                           }
                         }}
@@ -839,19 +821,17 @@ export default function PHPManagementPage() {
                     onClick={async () => {
                       setActionLoading('save-ini');
                       try {
-                        const res = await fetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/ini`, {
+                        const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/ini`, {
                           method: 'PUT',
-                          headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ raw_content: rawIni }),
                         });
-                        const json = await res.json();
-                        if (res.ok) {
+                        if (res && res.success) {
                           setMessage({ type: 'success', text: 'Configuration saved and PHP-FPM reloaded safely!' });
                         } else {
-                          setMessage({ type: 'error', text: json.error?.message || 'Save failed and configuration was rolled back.' });
+                          setMessage({ type: 'error', text: res?.error?.message || 'Save failed and configuration was rolled back.' });
                         }
-                      } catch (e) {
-                        setMessage({ type: 'error', text: 'Error saving configuration' });
+                      } catch (e: any) {
+                        setMessage({ type: 'error', text: e?.message || 'Error saving configuration' });
                       } finally {
                         setActionLoading(null);
                       }

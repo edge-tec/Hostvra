@@ -59,65 +59,9 @@ export interface DNSRecord {
   proxied: boolean;
 }
 
-// Initial seed domains (or empty if user wants clear)
-const INITIAL_DOMAINS: DomainItem[] = [
-  {
-    id: 'dom-1',
-    domain: '2xbets.net',
-    provider: 'HostvraDns',
-    ssl_days: 5467,
-    ssl_expiration_time: '2041-09-08 12:00:00',
-    number_of_resolutions: 10454,
-    created_at: new Date().toISOString(),
-    dmarc_enabled: true,
-    dkim_spf_enabled: true,
-    ttl: 300,
-  },
-  {
-    id: 'dom-2',
-    domain: 'antiprofiles.com',
-    provider: 'HostvraDns',
-    ssl_days: 5453,
-    ssl_expiration_time: '2041-08-25 12:00:00',
-    number_of_resolutions: 688999,
-    created_at: new Date().toISOString(),
-    dmarc_enabled: true,
-    dkim_spf_enabled: true,
-    ttl: 300,
-  },
-  {
-    id: 'dom-3',
-    domain: 'affscash.net',
-    provider: 'HostvraDns',
-    ssl_days: 5370,
-    ssl_expiration_time: '2041-06-03 12:00:00',
-    number_of_resolutions: 1248852,
-    created_at: new Date().toISOString(),
-    dmarc_enabled: false,
-    dkim_spf_enabled: true,
-    ttl: 600,
-  },
-];
-
-const INITIAL_RECORDS: Record<string, DNSRecord[]> = {
-  '2xbets.net': [
-    { id: '1', type: 'A', name: '@', content: '198.51.100.42', ttl: 300, proxied: true },
-    { id: '2', type: 'A', name: 'www', content: '198.51.100.42', ttl: 300, proxied: true },
-    { id: '3', type: 'CNAME', name: 'api', content: '2xbets.net', ttl: 300, proxied: false },
-    { id: '4', type: 'MX', name: '@', content: 'mail.2xbets.net', ttl: 3600, priority: 10, proxied: false },
-    { id: '5', type: 'TXT', name: '@', content: 'v=spf1 mx a include:_spf.hostvra.com ~all', ttl: 3600, proxied: false },
-    { id: '6', type: 'TXT', name: '_dmarc', content: 'v=DMARC1; p=quarantine; sp=quarantine; pct=100; adkim=r; aspf=r', ttl: 3600, proxied: false },
-  ],
-  'antiprofiles.com': [
-    { id: '10', type: 'A', name: '@', content: '198.51.100.55', ttl: 300, proxied: true },
-    { id: '11', type: 'A', name: 'www', content: '198.51.100.55', ttl: 300, proxied: true },
-    { id: '12', type: 'TXT', name: '@', content: 'v=spf1 mx a ~all', ttl: 3600, proxied: false },
-  ],
-  'affscash.net': [
-    { id: '20', type: 'A', name: '@', content: '198.51.100.88', ttl: 600, proxied: true },
-    { id: '21', type: 'A', name: 'app', content: '198.51.100.88', ttl: 600, proxied: false },
-  ],
-};
+// Initial empty states (populated dynamically via Hostvra Core DNS API)
+const INITIAL_DOMAINS: DomainItem[] = [];
+const INITIAL_RECORDS: Record<string, DNSRecord[]> = {};
 
 export default function DNSPage() {
   // Top Tabs: Domains vs SSL Certificate
@@ -130,7 +74,8 @@ export default function DNSPage() {
   const [selectedProvider, setSelectedProvider] = useState('HostvraDns (Hostvra built-in DNS)');
 
   // Domains & Selection
-  const [domains, setDomains] = useState<DomainItem[]>(INITIAL_DOMAINS);
+  const [domains, setDomains] = useState<DomainItem[]>([]);
+  const [isLoadingZones, setIsLoadingZones] = useState(true);
   const [selectedDomainIds, setSelectedDomainIds] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -158,7 +103,7 @@ export default function DNSPage() {
   const [batchTtlValue, setBatchTtlValue] = useState(300);
 
   // Records state for active domain
-  const [domainRecords, setDomainRecords] = useState<Record<string, DNSRecord[]>>(INITIAL_RECORDS);
+  const [domainRecords, setDomainRecords] = useState<Record<string, DNSRecord[]>>({});
   const [recType, setRecType] = useState<'A' | 'AAAA' | 'CNAME' | 'TXT' | 'MX' | 'CAA' | 'SRV' | 'NS'>('A');
   const [recName, setRecName] = useState('');
   const [recContent, setRecContent] = useState('');
@@ -172,6 +117,37 @@ export default function DNSPage() {
     setToast({ message, isError });
     setTimeout(() => setToast(null), 3500);
   };
+
+  // Load zones from real API
+  const loadZones = async () => {
+    try {
+      setIsLoadingZones(true);
+      const res = await apiFetch<any[]>('/api/v1/dns/zones');
+      if (res && Array.isArray(res.data)) {
+        const mapped: DomainItem[] = res.data.map((z: any) => ({
+          id: z.id,
+          domain: z.domain,
+          provider: z.provider || 'HostvraDns',
+          ssl_days: 90,
+          ssl_expiration_time: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+          number_of_resolutions: z.record_count || 0,
+          created_at: z.created_at || new Date().toISOString(),
+          dmarc_enabled: false,
+          dkim_spf_enabled: false,
+          ttl: 300,
+        }));
+        setDomains(mapped);
+      }
+    } catch (err: any) {
+      console.error('Failed to load DNS zones:', err);
+    } finally {
+      setIsLoadingZones(false);
+    }
+  };
+
+  useEffect(() => {
+    loadZones();
+  }, []);
 
   // Filtered Domains
   const filteredDomains = useMemo(() => {
@@ -191,47 +167,54 @@ export default function DNSPage() {
   };
 
   // Add Domain Handler
-  const handleAddDomain = (e: React.FormEvent) => {
+  const handleAddDomain = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDomainName.trim()) return;
 
     const domain = newDomainName.trim().toLowerCase();
-    const newDom: DomainItem = {
-      id: `dom-${Date.now()}`,
-      domain: domain,
-      provider: newDomainProvider,
-      ssl_days: 90,
-      ssl_expiration_time: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
-      number_of_resolutions: 0,
-      created_at: new Date().toISOString(),
-      dmarc_enabled: false,
-      dkim_spf_enabled: false,
-      ttl: newDomainTtl,
-    };
+    try {
+      const res = await apiFetch<any>('/api/v1/dns/zones', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain: domain,
+          provider: newDomainProvider || 'local',
+        }),
+      });
+      const createdZone = res?.data;
+      const newDom: DomainItem = {
+        id: createdZone?.id || `dom-${Date.now()}`,
+        domain: domain,
+        provider: newDomainProvider,
+        ssl_days: 90,
+        ssl_expiration_time: new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+        number_of_resolutions: 0,
+        created_at: new Date().toISOString(),
+        dmarc_enabled: false,
+        dkim_spf_enabled: false,
+        ttl: newDomainTtl,
+      };
 
-    setDomains((prev) => [newDom, ...prev]);
-    // Create initial SOA and A records
-    setDomainRecords((prev) => ({
-      ...prev,
-      [domain]: [
-        { id: `rec-1-${Date.now()}`, type: 'A', name: '@', content: '198.51.100.42', ttl: newDomainTtl, proxied: true },
-        { id: `rec-2-${Date.now()}`, type: 'A', name: 'www', content: '198.51.100.42', ttl: newDomainTtl, proxied: true },
-        { id: `rec-3-${Date.now()}`, type: 'NS', name: '@', content: 'ns1.hostvra.com.', ttl: 86400, proxied: false },
-        { id: `rec-4-${Date.now()}`, type: 'NS', name: '@', content: 'ns2.hostvra.com.', ttl: 86400, proxied: false },
-      ],
-    }));
-
-    setAddDomainOpen(false);
-    setNewDomainName('');
-    showToast(`Domain '${domain}' added successfully with authoritative DNS zone!`);
+      setDomains((prev) => [newDom, ...prev]);
+      setAddDomainOpen(false);
+      setNewDomainName('');
+      showToast(`Domain '${domain}' added successfully with authoritative DNS zone!`);
+      loadZones();
+    } catch (err: any) {
+      showToast(err?.message || `Failed to add domain '${domain}'`, true);
+    }
   };
 
   // Delete Domain Handler
-  const handleDeleteDomain = (dom: DomainItem) => {
+  const handleDeleteDomain = async (dom: DomainItem) => {
     if (!confirm(`Are you sure you want to delete domain '${dom.domain}' and its DNS zone?`)) return;
-    setDomains((prev) => prev.filter((d) => d.id !== dom.id));
-    setSelectedDomainIds((prev) => prev.filter((id) => id !== dom.id));
-    showToast(`Domain '${dom.domain}' removed.`);
+    try {
+      await apiFetch(`/api/v1/dns/zones/${dom.id}`, { method: 'DELETE' });
+      setDomains((prev) => prev.filter((d) => d.id !== dom.id));
+      setSelectedDomainIds((prev) => prev.filter((id) => id !== dom.id));
+      showToast(`Domain '${dom.domain}' removed.`);
+    } catch (err: any) {
+      showToast(err?.message || `Failed to remove domain '${dom.domain}'`, true);
+    }
   };
 
   // DNS Clear / Flush Cache
@@ -328,44 +311,89 @@ export default function DNSPage() {
   };
 
   // Open Manage Records Modal
-  const openRecordsModal = (dom: DomainItem) => {
+  const openRecordsModal = async (dom: DomainItem) => {
     setActiveDomainForRecords(dom);
     setRecordsModalOpen(true);
+    try {
+      const res = await apiFetch<any[]>(`/api/v1/dns/zones/${dom.id}/records`);
+      if (res && Array.isArray(res.data)) {
+        const mappedRecords: DNSRecord[] = res.data.map((r: any) => ({
+          id: r.id,
+          type: r.type,
+          name: r.name,
+          content: r.content,
+          ttl: r.ttl,
+          priority: r.priority,
+          proxied: r.proxied || false,
+        }));
+        setDomainRecords((prev) => ({
+          ...prev,
+          [dom.domain]: mappedRecords,
+        }));
+      }
+    } catch (err: any) {
+      console.error('Failed to load DNS records:', err);
+    }
   };
 
   // Add Single Record
-  const handleAddSingleRecord = (e: React.FormEvent) => {
+  const handleAddSingleRecord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeDomainForRecords || !recContent.trim()) return;
 
-    const newRec: DNSRecord = {
-      id: `rec-${Date.now()}`,
-      type: recType,
-      name: recName.trim() || '@',
-      content: recContent.trim(),
-      ttl: recTTL,
-      priority: recType === 'MX' ? recPriority : undefined,
-      proxied: recProxied,
-    };
+    try {
+      const payload = {
+        type: recType,
+        name: recName.trim() || '@',
+        content: recContent.trim(),
+        ttl: Number(recTTL) || 300,
+        priority: recType === 'MX' ? Number(recPriority) : undefined,
+        proxied: recProxied,
+      };
 
-    setDomainRecords((prev) => ({
-      ...prev,
-      [activeDomainForRecords.domain]: [...(prev[activeDomainForRecords.domain] || []), newRec],
-    }));
+      const res = await apiFetch<any>(`/api/v1/dns/zones/${activeDomainForRecords.id}/records`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-    setRecName('');
-    setRecContent('');
-    showToast(`DNS record '${newRec.type} ${newRec.name}' added to ${activeDomainForRecords.domain}`);
+      const newRec: DNSRecord = {
+        id: res?.data?.id || `rec-${Date.now()}`,
+        type: recType,
+        name: recName.trim() || '@',
+        content: recContent.trim(),
+        ttl: recTTL,
+        priority: recType === 'MX' ? recPriority : undefined,
+        proxied: recProxied,
+      };
+
+      setDomainRecords((prev) => ({
+        ...prev,
+        [activeDomainForRecords.domain]: [...(prev[activeDomainForRecords.domain] || []), newRec],
+      }));
+
+      setRecName('');
+      setRecContent('');
+      showToast(`DNS record '${newRec.type} ${newRec.name}' added to ${activeDomainForRecords.domain}`);
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to add DNS record', true);
+    }
   };
 
   // Delete Single Record
-  const handleDeleteSingleRecord = (recId: string) => {
+  const handleDeleteSingleRecord = async (recId: string) => {
     if (!activeDomainForRecords) return;
-    setDomainRecords((prev) => ({
-      ...prev,
-      [activeDomainForRecords.domain]: (prev[activeDomainForRecords.domain] || []).filter((r) => r.id !== recId),
-    }));
-    showToast('Record deleted');
+    try {
+      await apiFetch(`/api/v1/dns/zones/${activeDomainForRecords.id}/records/${recId}`, {
+        method: 'DELETE',
+      });
+      setDomainRecords((prev) => ({
+        ...prev,
+        [activeDomainForRecords.domain]: (prev[activeDomainForRecords.domain] || []).filter((r) => r.id !== recId),
+      }));
+      showToast('Record deleted successfully.');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete DNS record', true);
+    }
   };
 
   // Export BIND zone

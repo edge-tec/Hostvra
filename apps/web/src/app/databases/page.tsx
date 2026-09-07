@@ -27,27 +27,6 @@ import { apiFetch, Database, Server } from '@/lib/api';
 
 type DBEngine = 'mysql' | 'sqlserver' | 'mongodb' | 'redis' | 'pgsql';
 
-const DEFAULT_SEED_DBS: Database[] = [
-  { id: 'db-1', db_type: 'mysql', name: 'sql_2xbets_net', username: 'sql_2xbets_net', password: 'pW9#xK2!mN7$', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: '2xbets.net', created_at: new Date().toISOString() },
-  { id: 'db-2', db_type: 'mysql', name: 'sql_antiprofiles_com', username: 'sql_antiprofiles_com', password: 'aR4@vB8*eT1%', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'antiprofiles.com', created_at: new Date().toISOString() },
-  { id: 'db-3', db_type: 'mysql', name: 'antidetactor', username: 'antidetactor', password: 'tY7&uI3#oP9^', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'antidetactor', created_at: new Date().toISOString() },
-  { id: 'db-4', db_type: 'mysql', name: 'mailsz0_1', username: 'mailsz0_1', password: 'qW1!eR2@tY3#', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'mailsz0_1', created_at: new Date().toISOString() },
-  { id: 'db-5', db_type: 'mysql', name: 'mailspro_order', username: 'mailspro_order', password: 'uI4$oP5%aS6^', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'mailspro_order', created_at: new Date().toISOString() },
-  { id: 'db-6', db_type: 'mysql', name: 'sql_metmco_net', username: 'sql_metmco_net', password: 'dF7&gH8*jK9(', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'metmco.net', created_at: new Date().toISOString() },
-  { id: 'db-7', db_type: 'mysql', name: 'biography', username: 'biography', password: 'zX1)cV2_bN3+', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'biography', created_at: new Date().toISOString() },
-  { id: 'db-8', db_type: 'mysql', name: 'newspaper', username: 'newspaper', password: 'mK4-jH5=gF6[', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'newspaper', created_at: new Date().toISOString() },
-  { id: 'db-9', db_type: 'mysql', name: 'edgecash', username: 'edgecash', password: 'dS7]aP8{oI9}', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'edgecash', created_at: new Date().toISOString() },
-  { id: 'db-10', db_type: 'mysql', name: 'sql_app_affscash_net', username: 'sql_app_affscash_net', password: 'uY1:tR2;eW3?', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'app.affscash.net', created_at: new Date().toISOString() },
-  { id: 'db-11', db_type: 'mysql', name: 'sql_affscash_net', username: 'sql_affscash_net', password: 'qA4<zS5>xD6/', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'affscash.net', created_at: new Date().toISOString() },
-  { id: 'db-12', db_type: 'mysql', name: 'sql_analytics_wpflood_com', username: 'sql_analytics_wpflood_com', password: 'cF7~vG8`bH9|', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'analytics.wpflood.com', created_at: new Date().toISOString() },
-  { id: 'db-13', db_type: 'mysql', name: 'sql_edgecash_net', username: 'sql_edgecash_net', password: 'nJ1!mK2@lP3#', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'edgecash.net', created_at: new Date().toISOString() },
-  { id: 'db-14', db_type: 'mysql', name: 'sql_mail_mailsz0_com', username: 'sql_mail_mailsz0_com', password: 'oI4$uY5%tT6^', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'mail.mailsz0.com', created_at: new Date().toISOString() },
-  { id: 'db-15', db_type: 'mysql', name: 'sql_mailsz0_com', username: 'sql_mailsz0_com', password: 'rE7&wQ8*aZ9(', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'mailsz0.com', created_at: new Date().toISOString() },
-  { id: 'db-16', db_type: 'mysql', name: 'sql_eliteall_com', username: 'sql_eliteall_com', password: 'sX1)dC2_fV3+', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'eliteall.com', created_at: new Date().toISOString() },
-  { id: 'db-17', db_type: 'mysql', name: 'sql_ushort_link', username: 'sql_ushort_link', password: 'gB4-hN5=jM6[', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'ushort.link', created_at: new Date().toISOString() },
-  { id: 'db-18', db_type: 'mysql', name: 'sql_shroo_link', username: 'sql_shroo_link', password: 'kL7]pO8{iU9}', quota: 'Not set', backup_status: 'Not exist', location: 'Localhost', note: 'shroo.link', created_at: new Date().toISOString() },
-];
-
 export default function DatabasesPage() {
   // Engine Tab State
   const [activeEngine, setActiveEngine] = useState<DBEngine>('mysql');

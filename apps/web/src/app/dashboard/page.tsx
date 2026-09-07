@@ -142,7 +142,7 @@ export default function DashboardPage() {
       setMemoText(savedMemo);
     }
 
-    // Seed initial rolling chart data (last 8 points)
+    // Initialize rolling chart history buffer (last 8 points)
     const now = new Date();
     const initialPoints = [];
     for (let i = 7; i >= 0; i--) {
@@ -150,10 +150,10 @@ export default function DashboardPage() {
       const timeStr = d.toTimeString().slice(0, 8);
       initialPoints.push({
         time: timeStr,
-        up: Math.floor(1200 + Math.random() * 1400),
-        down: Math.floor(1300 + Math.random() * 600),
-        read: Math.floor(600 + Math.random() * 800),
-        write: Math.floor(1400 + Math.random() * 1200),
+        up: 0,
+        down: 0,
+        read: 0,
+        write: 0,
       });
     }
     setChartHistory(initialPoints);
@@ -182,10 +182,10 @@ export default function DashboardPage() {
               totalWriteGb: t.disk_io.total_write_gb,
             });
 
-            const newUp = Math.round(t.network.upstream_kbps || Math.floor(1100 + Math.random() * 1200));
-            const newDown = Math.round(t.network.downstream_kbps || Math.floor(1200 + Math.random() * 700));
-            const newRead = Math.round(t.disk_io.read_kbps || Math.floor(600 + Math.random() * 800));
-            const newWrite = Math.round(t.disk_io.write_kbps || Math.floor(1200 + Math.random() * 1300));
+            const newUp = Math.round(t.network.upstream_kbps || 0);
+            const newDown = Math.round(t.network.downstream_kbps || 0);
+            const newRead = Math.round(t.disk_io.read_kbps || 0);
+            const newWrite = Math.round(t.disk_io.write_kbps || 0);
 
             setChartHistory((prev) => {
               const next = [...prev.slice(1), { time: timeStr, up: newUp, down: newDown, read: newRead, write: newWrite }];

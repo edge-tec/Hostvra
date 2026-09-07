@@ -325,6 +325,7 @@ func main() {
 			r.Route("/dns", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones", dnsHandler.ListZones)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Post("/zones", dnsHandler.CreateZone)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Delete("/zones/{zoneID}", dnsHandler.DeleteZone)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones/{zoneID}/records", dnsHandler.ListRecords)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Post("/zones/{zoneID}/records", dnsHandler.CreateRecord)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Delete("/zones/{zoneID}/records/{recordID}", dnsHandler.DeleteRecord)

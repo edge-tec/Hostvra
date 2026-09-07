@@ -80,6 +80,24 @@ func (h *DNSHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, zone, nil)
 }
 
+func (h *DNSHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
+	zoneIDStr := chi.URLParam(r, "zoneID")
+	zoneID, err := uuid.Parse(zoneIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid zone ID", nil, "")
+		return
+	}
+
+	if err := h.dnsService.DeleteZone(r.Context(), zoneID); err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "dns.zone.delete", "dns_zone", zoneID.String(), "success", "", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true, "zone_id": zoneID}, nil)
+}
+
 func (h *DNSHandler) ListRecords(w http.ResponseWriter, r *http.Request) {
 	zoneIDStr := chi.URLParam(r, "zoneID")
 	zoneID, err := uuid.Parse(zoneIDStr)

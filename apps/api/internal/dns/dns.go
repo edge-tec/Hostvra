@@ -164,6 +164,20 @@ func (s *Service) GetZone(ctx context.Context, zoneID uuid.UUID) (*Zone, error) 
 	return z, nil
 }
 
+// DeleteZone deletes a DNS zone and its associated records
+func (s *Service) DeleteZone(ctx context.Context, zoneID uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.zones[zoneID]; !ok {
+		return ErrZoneNotFound
+	}
+
+	delete(s.zones, zoneID)
+	delete(s.records, zoneID)
+	return nil
+}
+
 // AddRecord adds a record to a zone after validation
 func (s *Service) AddRecord(ctx context.Context, record *Record) error {
 	if err := ValidateRecord(record); err != nil {

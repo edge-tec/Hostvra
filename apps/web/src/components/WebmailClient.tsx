@@ -57,129 +57,8 @@ export interface EmailMessage {
   attachment_size?: string;
 }
 
-const defaultMailboxes: WebmailMailbox[] = [
-  {
-    id: 'm1',
-    email: 'info@hostvra.com',
-    name: 'General Information',
-    quota_bytes: 5368709120, // 5 GB
-    used_bytes: 482344960,  // 460 MB
-  },
-  {
-    id: 'm2',
-    email: 'admin@hostvra.com',
-    name: 'System Administrator',
-    quota_bytes: 10737418240, // 10 GB
-    used_bytes: 946226460,   // 902 MB
-  },
-  {
-    id: 'm3',
-    email: 'support@hostvra.com',
-    name: 'Customer Support Desk',
-    quota_bytes: 5368709120,
-    used_bytes: 154226460,
-  },
-  {
-    id: 'm4',
-    email: 'contact@mycompany.org',
-    name: 'Official Contact',
-    quota_bytes: 5368709120,
-    used_bytes: 428571420,
-  },
-];
-
-const seedMessages: EmailMessage[] = [
-  {
-    id: 'msg-1',
-    mailbox_email: 'info@hostvra.com',
-    folder: 'inbox',
-    from_name: 'Hostvra Mail Daemon',
-    from_email: 'daemon@hostvra.com',
-    to_name: 'General Information',
-    to_email: 'info@hostvra.com',
-    subject: 'Welcome to your Hostvra Webmail & Email Server',
-    body: `Hello,\n\nYour mailbox (info@hostvra.com) is fully configured and ready for secure communications.\n\nServer Security Status:\n• Postfix MTA: TLS 1.3 Active (Port 587 Submission)\n• Dovecot IMAP: SSL/TLS Active (Port 993)\n• Anti-Spam: Rspamd Milter Enabled with Bayes Filter\n• Zero Open Relay: Strictly Enforced\n\nYou can access this webmail client directly inside Hostvra or configure your iPhone, Android, Thunderbird, or Outlook using the IMAP/SMTP credentials.\n\nBest regards,\nHostvra Automation Team`,
-    date: 'Today, 11:20 AM',
-    is_unread: true,
-    is_starred: true,
-    has_attachment: true,
-    attachment_name: 'server_certificate.pem',
-    attachment_size: '2.4 KB',
-  },
-  {
-    id: 'msg-2',
-    mailbox_email: 'info@hostvra.com',
-    folder: 'inbox',
-    from_name: 'Security Operations',
-    from_email: 'secops@hostvra.com',
-    to_name: 'Hostvra Admin',
-    to_email: 'info@hostvra.com',
-    subject: 'DKIM & SPF Authentication Pass: 100% Deliverability',
-    body: `The automated RFC deliverability engine verified your domain DNS records:\n\n• SPF: v=spf1 mx ~all (Pass)\n• DKIM 2048-bit RSA: default._domainkey (Pass)\n• DMARC: v=DMARC1; p=none (Pass)\n\nAll outbound messages sent through this mailbox will arrive directly in user inboxes without spam penalties.`,
-    date: 'Yesterday, 04:45 PM',
-    is_unread: false,
-    is_starred: false,
-  },
-  {
-    id: 'msg-3',
-    mailbox_email: 'info@hostvra.com',
-    folder: 'sent',
-    from_name: 'General Information',
-    from_email: 'info@hostvra.com',
-    to_name: 'Client Services',
-    to_email: 'client@example.com',
-    subject: 'Confirmation of Server Deployment & DNS Delegation',
-    body: `Hi Alex,\n\nWe have provisioned the new web servers and attached the primary SSL certificates. Let us know if you need any additional subdomains configured.\n\nCheers,\nHostvra Ops`,
-    date: 'Sep 05, 02:10 PM',
-    is_unread: false,
-    is_starred: false,
-  },
-  {
-    id: 'msg-4',
-    mailbox_email: 'admin@hostvra.com',
-    folder: 'inbox',
-    from_name: 'Hostvra Backup Engine',
-    from_email: 'backups@hostvra.com',
-    to_name: 'System Administrator',
-    to_email: 'admin@hostvra.com',
-    subject: 'Nightly Database & VHost Backup Snapshot Succeeded',
-    body: `System Snapshot Summary:\n\n• Target: /var/backups/hostvra/daily-2026-09-07.tar.gz\n• Databases: MariaDB, PostgreSQL (Compressed, 1.4 GB)\n• Web roots: /var/www/* (Encrypted AES-256)\n• Status: Completed with 0 errors.\n\nRetained according to standard 14-day rotation policy.`,
-    date: 'Today, 03:00 AM',
-    is_unread: true,
-    is_starred: true,
-    has_attachment: true,
-    attachment_name: 'backup_manifest.json',
-    attachment_size: '18 KB',
-  },
-  {
-    id: 'msg-5',
-    mailbox_email: 'support@hostvra.com',
-    folder: 'inbox',
-    from_name: 'Sarah Jenkins',
-    from_email: 's.jenkins@clientcorp.io',
-    to_name: 'Customer Support Desk',
-    to_email: 'support@hostvra.com',
-    subject: 'Inquiry regarding SSL Wildcard configuration',
-    body: `Hello Support Team,\n\nWe would like to know if Let's Encrypt Wildcard (*.domain.com) SSL can be renewed automatically via Cloudflare DNS plugin on Hostvra.\n\nThank you,\nSarah`,
-    date: 'Today, 09:15 AM',
-    is_unread: true,
-    is_starred: false,
-  },
-  {
-    id: 'msg-6',
-    mailbox_email: 'contact@mycompany.org',
-    folder: 'inbox',
-    from_name: 'Acme Partner Network',
-    from_email: 'partners@acme.org',
-    to_name: 'Official Contact',
-    to_email: 'contact@mycompany.org',
-    subject: 'Annual Strategic Partner Review & API Access',
-    body: `Dear Team,\n\nWe are updating our technical integration credentials for Q3. Please review the attached contract addendum and verify your server IP endpoints.`,
-    date: 'Sep 04, 10:30 AM',
-    is_unread: false,
-    is_starred: false,
-  },
-];
+const defaultMailboxes: WebmailMailbox[] = [];
+const seedMessages: EmailMessage[] = [];
 
 interface WebmailClientProps {
   mailboxes?: WebmailMailbox[];
@@ -199,7 +78,7 @@ export function WebmailClient({
     if (initialSelectedEmail && mailboxes.some((m) => m.email === initialSelectedEmail)) {
       return initialSelectedEmail;
     }
-    return mailboxes[0]?.email || 'info@hostvra.com';
+    return mailboxes[0]?.email || '';
   });
 
   // Current folder
@@ -217,7 +96,7 @@ export function WebmailClient({
         }
       }
     }
-    return seedMessages;
+    return [];
   });
 
   // Save messages to localStorage
@@ -248,10 +127,10 @@ export function WebmailClient({
   const activeMailbox = useMemo(() => {
     return mailboxes.find((m) => m.email === selectedEmail) || mailboxes[0] || {
       id: 'default',
-      email: selectedEmail,
+      email: selectedEmail || 'No mailbox selected',
       name: 'Mailbox User',
       quota_bytes: 5368709120,
-      used_bytes: 482344960,
+      used_bytes: 0,
     };
   }, [mailboxes, selectedEmail]);
 
