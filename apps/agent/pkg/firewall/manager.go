@@ -222,24 +222,61 @@ func (fm *FirewallManager) AddRule(port, protocol, fromIP, action, comment strin
 
 // DeleteRule removes a rule by numbered index or port
 func (fm *FirewallManager) DeleteRule(ruleID string) error {
-	ruleNum, err := strconv.Atoi(ruleID)
-	if err == nil && ruleNum > 0 {
-		if fm.backend == "ufw" {
-			cmd := exec.Command("ufw", "--force", "delete", strconv.Itoa(ruleNum))
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("ufw delete rule failed: %s (%w)", string(out), err)
-			}
-			return nil
-		}
+	ruleID = strings.TrimSpace(ruleID)
+	if ruleID == "" {
+		return fmt.Errorf("rule ID or port required")
 	}
 
-	// Fallback port delete
 	if fm.backend == "ufw" {
-		cmd := exec.Command("ufw", "--force", "delete", "allow", ruleID)
-		_ = cmd.Run()
+		rules, _ := fm.ListRules()
+
+		// 1. Try matching by exact Rule Number or ID in active rules
+		for _, r := range rules {
+			if r.ID == ruleID || strconv.Itoa(r.Number) == ruleID {
+				cmd := exec.Command("ufw", "--force", "delete", strconv.Itoa(r.Number))
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					return nil
+				}
+				return fmt.Errorf("ufw delete rule failed: %s (%w)", string(out), err)
+			}
+		}
+
+		// 2. Try matching by port in active rules (e.g. ruleID is "8080" and r.To is "8080/tcp" or "8080")
+		for _, r := range rules {
+			cleanTo := strings.TrimSpace(strings.Split(r.To, "/")[0])
+			if cleanTo == ruleID || r.To == ruleID {
+				cmd := exec.Command("ufw", "--force", "delete", strconv.Itoa(r.Number))
+				out, err := cmd.CombinedOutput()
+				if err == nil {
+					return nil
+				}
+				return fmt.Errorf("ufw delete rule failed: %s (%w)", string(out), err)
+			}
+		}
+
+		// 3. If ruleID is a direct small number and within current rule count, try deleting by number
+		ruleNum, err := strconv.Atoi(ruleID)
+		if err == nil && ruleNum > 0 && ruleNum <= len(rules) {
+			cmd := exec.Command("ufw", "--force", "delete", strconv.Itoa(ruleNum))
+			if err := cmd.Run(); err == nil {
+				return nil
+			}
+		}
+
+		// 4. Fallback: try deleting by port or syntax directly
+		cmdAllowProto := exec.Command("ufw", "--force", "delete", "allow", ruleID+"/tcp")
+		if out, err := cmdAllowProto.CombinedOutput(); err == nil && !strings.Contains(string(out), "Could not find rule") {
+			return nil
+		}
+		cmdAllow := exec.Command("ufw", "--force", "delete", "allow", ruleID)
+		if out, err := cmdAllow.CombinedOutput(); err == nil && !strings.Contains(string(out), "Could not find rule") {
+			return nil
+		}
 		cmdDeny := exec.Command("ufw", "--force", "delete", "deny", ruleID)
 		_ = cmdDeny.Run()
+
+		return nil
 	}
 
 	return nil
