@@ -50,6 +50,7 @@ export default function TerminalPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Fetch initial terminal environment metadata
   useEffect(() => {
@@ -84,6 +85,27 @@ export default function TerminalPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, [isExecuting]);
+
+  const handleCancel = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsExecuting(false);
+    setHistory((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(),
+        command: commandHistory[commandHistory.length - 1] || 'command',
+        cwd,
+        stdout: '',
+        stderr: '^C [Hostvra Terminal] Process aborted by user.',
+        exitCode: 130,
+        durationMs: 0,
+        timestamp: new Date().toLocaleTimeString(),
+      },
+    ]);
+  };
 
   // Execute terminal command
   const handleExecute = async (cmdToRun?: string) => {
@@ -127,11 +149,14 @@ Available shortcuts & capabilities:
     setCommandHistory((prev) => [...prev, rawCmd]);
     setHistoryIndex(-1);
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     const startTs = new Date().toLocaleTimeString();
 
     try {
       const res = await apiFetch<TerminalExecutionResult>('/api/v1/terminal/execute', {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({
           command: rawCmd,
           cwd,
@@ -172,6 +197,9 @@ Available shortcuts & capabilities:
         ]);
       }
     } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted')) {
+        return;
+      }
       setHistory((prev) => [
         ...prev,
         {
@@ -187,12 +215,20 @@ Available shortcuts & capabilities:
       ]);
     } finally {
       setIsExecuting(false);
+      abortControllerRef.current = null;
       setCommand('');
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.ctrlKey && e.key === 'c') || e.key === 'Escape') {
+      if (isExecuting) {
+        e.preventDefault();
+        handleCancel();
+        return;
+      }
+    }
     if (e.key === 'Enter') {
       e.preventDefault();
       handleExecute();
@@ -418,9 +454,19 @@ Available shortcuts & capabilities:
 
             {/* In-Flight Command Spinner Indicator */}
             {isExecuting && (
-              <div className="flex items-center gap-2 text-xs text-indigo-400 py-1 pl-1">
-                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
-                <span>Executing on host...</span>
+              <div className="flex items-center justify-between gap-2 text-xs py-1.5 px-3 rounded-lg bg-indigo-950/40 border border-indigo-900/50 my-1">
+                <div className="flex items-center gap-2 text-indigo-400">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
+                  <span>Executing on host...</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 rounded cursor-pointer transition shadow-xs"
+                >
+                  <span>Stop</span>
+                  <kbd className="text-[9px] bg-black/40 px-1 rounded font-mono">Ctrl+C</kbd>
+                </button>
               </div>
             )}
 
