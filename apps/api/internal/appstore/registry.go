@@ -324,6 +324,21 @@ func (r *Registry) registerDefaults() {
 			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y clamav clamav-daemon && systemctl enable clamav-daemon && systemctl start clamav-daemon",
 			UninstallScript: "systemctl stop clamav-daemon && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y clamav clamav-daemon",
 		},
+		{
+			ID:             "docker",
+			Name:           "Docker Engine 27.x",
+			DisplayName:    "Docker Engine & Compose",
+			Version:        "27.x",
+			Category:       CategoryTools,
+			Description:    "Open-source application container engine and orchestration tools for containerized microservices.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "container",
+			ServiceName:    "docker",
+			BinaryPath:     "/usr/bin/docker",
+			InstallScript:  "curl -fsSL https://get.docker.com | sh && systemctl enable docker && systemctl start docker",
+			UninstallScript: "systemctl stop docker && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin",
+		},
 	}
 
 	for _, p := range defaults {
