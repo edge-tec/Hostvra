@@ -200,6 +200,10 @@ Available shortcuts & capabilities:
       if (err.name === 'AbortError' || err.message?.includes('aborted')) {
         return;
       }
+      let errMsg = err.message || 'Network communication error';
+      if (errMsg === 'Load failed' || errMsg.includes('Failed to fetch') || errMsg.includes('NetworkError')) {
+        errMsg = 'Connection reset or closed by host server. If you executed a service restart (e.g. systemctl restart hostvra-web), the server restarted. Please refresh your browser page.';
+      }
       setHistory((prev) => [
         ...prev,
         {
@@ -207,7 +211,7 @@ Available shortcuts & capabilities:
           command: rawCmd,
           cwd,
           stdout: '',
-          stderr: err.message || 'Network communication error',
+          stderr: errMsg,
           exitCode: 1,
           durationMs: 0,
           timestamp: startTs,
