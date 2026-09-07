@@ -463,3 +463,46 @@ export interface CronExecutionResult {
   timestamp: string;
   success: boolean;
 }
+
+export interface DockerStatus {
+  is_installed: boolean;
+  is_daemon_running: boolean;
+  server_version?: string;
+  containers_total?: number;
+  containers_running?: number;
+  containers_paused?: number;
+  containers_stopped?: number;
+  images_total?: number;
+  storage_driver?: string;
+}
+
+export interface DockerContainer {
+  id: string;
+  names: string;
+  image: string;
+  command?: string;
+  status: string;
+  state: 'running' | 'exited' | 'paused' | 'restarting';
+  ports: string;
+  created_at: string;
+}
+
+export interface DockerImage {
+  id: string;
+  repository: string;
+  tag: string;
+  size: string;
+  created_at: string;
+}
+
+export interface DockerStats {
+  id: string;
+  name: string;
+  cpu_perc: string;
+  mem_usage: string;
+  mem_perc: string;
+  net_io: string;
+  block_io: string;
+  pids: string;
+}
+

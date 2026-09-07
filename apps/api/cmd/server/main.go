@@ -96,6 +96,7 @@ func main() {
 	fileHandler := handlers.NewFileHandler(cfg, dataStore, auditLogger)
 	firewallHandler := handlers.NewFirewallHandler(cfg, dataStore, auditLogger)
 	cronHandler := handlers.NewCronHandler(cfg, dataStore, auditLogger)
+	dockerHandler := handlers.NewDockerHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -353,6 +354,24 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/toggle", cronHandler.ToggleJob)
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/run", cronHandler.RunJob)
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/test", cronHandler.TestCommand)
+			})
+
+			// Docker Engine & Container Management Subsystem
+			r.Route("/docker", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/status", dockerHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/containers", dockerHandler.ListContainers)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/containers/{id}/logs", dockerHandler.GetLogs)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/stats", dockerHandler.GetStats)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/images", dockerHandler.ListImages)
+
+				// Mutations
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/containers/{id}/start", dockerHandler.StartContainer)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/containers/{id}/stop", dockerHandler.StopContainer)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/containers/{id}/restart", dockerHandler.RestartContainer)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Delete("/containers/{id}", dockerHandler.DeleteContainer)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/containers/run", dockerHandler.RunContainer)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Delete("/images/{id}", dockerHandler.DeleteImage)
+				r.With(rbac.RequirePermission(rbac.PermDockerManage)).Post("/prune", dockerHandler.PruneSystem)
 			})
 
 			// 1-Click App Store & Extensions
