@@ -141,3 +141,102 @@ func TestFileHandler_Lifecycle(t *testing.T) {
 		t.Errorf("expected file to be deleted")
 	}
 }
+
+func TestFileHandler_NonAdminConfinedAndForbiddenFromSystemPaths(t *testing.T) {
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+
+	h := NewFileHandler(cfg, memStore, auditLogger)
+
+	devClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "dev@client.com",
+		Role:           "developer", // non-admin
+	}
+
+	// 1. Reading /etc/shadow must be forbidden
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/content?path=/etc/shadow", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, devClaims))
+	rec := httptest.NewRecorder()
+	h.GetContent(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for /etc/shadow access by developer, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Listing /root must be forbidden
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/files/list?path=/root", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, devClaims))
+	rec = httptest.NewRecorder()
+	h.List(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for /root list by developer, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Stat /etc/passwd must be forbidden
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/files/stat?path=/etc/passwd", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, devClaims))
+	rec = httptest.NewRecorder()
+	h.Stat(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for /etc/passwd stat by developer, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 4. Download /etc/hosts must be forbidden
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/files/download?path=/etc/hosts", nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, devClaims))
+	rec = httptest.NewRecorder()
+	h.Download(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for /etc/hosts download by developer, got %d", rec.Code)
+	}
+}
+
+func TestFileHandler_SymlinkOverwriteForbidden(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-api-symlink-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+
+	h := NewFileHandler(cfg, memStore, auditLogger)
+
+	adminClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "admin@hostvra.com",
+		Role:           "owner",
+	}
+
+	// Create an existing symlink pointing to another file
+	targetFile := filepath.Join(tempDir, "target.txt")
+	_ = os.WriteFile(targetFile, []byte("target initial"), 0644)
+	linkPath := filepath.Join(tempDir, "link.txt")
+	_ = os.Symlink(targetFile, linkPath)
+
+	// Attempt to SaveContent targeting the existing symlink
+	saveBody, _ := json.Marshal(map[string]string{
+		"path":    linkPath,
+		"content": "attempted overwrite",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/files/content", bytes.NewReader(saveBody))
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, adminClaims))
+	rec := httptest.NewRecorder()
+	h.SaveContent(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for symlink overwrite, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+

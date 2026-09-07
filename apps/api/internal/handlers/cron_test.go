@@ -143,3 +143,64 @@ func TestCronHandler_Lifecycle(t *testing.T) {
 		t.Fatalf("expected 200 for DeleteJob, got %d: %s", recDel.Code, recDel.Body.String())
 	}
 }
+
+func TestCronHandler_NonAdminForbiddenFromRunningRootJob(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-cron-perm-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	storageFile := filepath.Join(tempDir, "test-crontab")
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+
+	h := NewCronHandler(cfg, memStore, auditLogger)
+	h.cronMgr.SetStoragePath(storageFile)
+
+	adminClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "admin@hostvra.com",
+		Role:           "owner",
+	}
+
+	// Create root job as admin
+	goodJobBody, _ := json.Marshal(CreateCronJobRequest{
+		Schedule:    "0 1 * * *",
+		Command:     "echo 'root maintenance'",
+		SystemUser:  "root",
+		Description: "Root system job",
+	})
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/v1/cron/jobs", bytes.NewReader(goodJobBody))
+	reqCreate = reqCreate.WithContext(context.WithValue(reqCreate.Context(), auth.UserContextKey, adminClaims))
+	recCreate := httptest.NewRecorder()
+	h.CreateJob(recCreate, reqCreate)
+
+	var createdJob map[string]interface{}
+	_ = json.NewDecoder(recCreate.Body).Decode(&createdJob)
+	data := createdJob["data"].(map[string]interface{})
+	jobID := data["id"].(string)
+
+	// Now try to run this root job as non-admin user
+	devClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "developer@client.com",
+		Role:           "developer", // non-admin
+	}
+
+	r := chi.NewRouter()
+	r.Post("/api/v1/cron/jobs/{id}/run", h.RunJob)
+	reqRun := httptest.NewRequest(http.MethodPost, "/api/v1/cron/jobs/"+jobID+"/run", nil)
+	reqRun = reqRun.WithContext(context.WithValue(reqRun.Context(), auth.UserContextKey, devClaims))
+	recRun := httptest.NewRecorder()
+	r.ServeHTTP(recRun, reqRun)
+
+	if recRun.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for non-admin running root cron job, got %d: %s", recRun.Code, recRun.Body.String())
+	}
+}
+

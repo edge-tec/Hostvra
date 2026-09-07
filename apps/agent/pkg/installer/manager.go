@@ -63,8 +63,8 @@ func NewInstallerManager(opts ...Option) *InstallerManager {
 			if !validDBIdentRegex.MatchString(dbUser) {
 				return fmt.Errorf("invalid database user: %s", dbUser)
 			}
-			safePass := strings.ReplaceAll(dbPass, "'", "\\'")
-			safePass = strings.ReplaceAll(safePass, "\\", "\\\\")
+			safePass := strings.ReplaceAll(dbPass, "\\", "\\\\")
+			safePass = strings.ReplaceAll(safePass, "'", "\\'")
 
 			// Real MySQL / MariaDB provisioning when root access available
 			if _, err := exec.LookPath("mysql"); err == nil && os.Geteuid() == 0 {
@@ -590,7 +590,7 @@ $settings['update_free_access'] = FALSE;
 `, req.DBName, req.DBUser, req.DBPassword, req.DBHost, RandomString(64))
 
 	configPath := filepath.Join(sitesDir, "settings.php")
-	_ = os.WriteFile(configPath, []byte(settingsPHP), 0644)
+	_ = os.WriteFile(configPath, []byte(settingsPHP), 0600)
 
 	return &InstalledAppInfo{
 		AppID:        "drupal",
@@ -631,7 +631,7 @@ $cfg['SaveDir'] = '';
 `, blowfish)
 
 	configPath := filepath.Join(docRoot, "config.inc.php")
-	_ = os.WriteFile(configPath, []byte(configInc), 0644)
+	_ = os.WriteFile(configPath, []byte(configInc), 0600)
 
 	return &InstalledAppInfo{
 		AppID:        "phpmyadmin",

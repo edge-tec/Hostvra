@@ -423,10 +423,14 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 	}
 
 	if req.RestartPolicy != "" {
+		if err := validateRestartPolicy(req.RestartPolicy); err != nil {
+			return "", err
+		}
 		args = append(args, "--restart", req.RestartPolicy)
 	} else {
 		args = append(args, "--restart", "unless-stopped")
 	}
+
 
 	for _, p := range req.PortMappings {
 		p = strings.TrimSpace(p)
@@ -438,7 +442,11 @@ func (dm *DockerManager) RunContainer(req RunContainerRequest) (string, error) {
 		}
 	}
 
+	validEnvKeyRegex := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 	for k, v := range req.EnvVars {
+		if !validEnvKeyRegex.MatchString(k) {
+			return "", fmt.Errorf("invalid environment variable key '%s'", k)
+		}
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
@@ -469,23 +477,58 @@ func validateVolumeMount(mount string) error {
 		return nil
 	}
 	parts := strings.Split(mount, ":")
-	hostPath := filepath.Clean(strings.TrimSpace(parts[0]))
+	rawHostPath := strings.TrimSpace(parts[0])
+	if rawHostPath == "" {
+		return fmt.Errorf("%w: empty host path", ErrDangerousVolumeMount)
+	}
 
-	// Deny mounting sensitive host directories or Docker daemon socket
+	// Must be an absolute path (blocks relative paths like ../../etc)
+	if !filepath.IsAbs(rawHostPath) {
+		return fmt.Errorf("%w: volume mount host path must be absolute (got '%s')", ErrDangerousVolumeMount, rawHostPath)
+	}
+
+	hostPath := filepath.Clean(rawHostPath)
+
+	// Deny mounting sensitive host directories, docker daemon socket, or databases
 	forbiddenPrefixes := []string{
 		"/etc", "/root", "/bin", "/sbin", "/usr", "/lib", "/lib64",
 		"/var/run", "/run", "/proc", "/sys", "/dev", "/boot",
+		"/var/lib/docker", "/var/lib/hostvra",
 	}
 
 	if hostPath == "/" {
 		return fmt.Errorf("%w: cannot mount root '/'", ErrDangerousVolumeMount)
 	}
 
+	normHost := hostPath
+	if strings.HasPrefix(hostPath, "/private/") {
+		normHost = strings.TrimPrefix(hostPath, "/private")
+	}
+
 	for _, fp := range forbiddenPrefixes {
-		if hostPath == fp || strings.HasPrefix(hostPath, fp+"/") {
+		if hostPath == fp || strings.HasPrefix(hostPath, fp+"/") ||
+			normHost == fp || strings.HasPrefix(normHost, fp+"/") {
 			return fmt.Errorf("%w: path '%s' is a restricted system directory", ErrDangerousVolumeMount, hostPath)
 		}
 	}
+
+	// Resolve symlinks to prevent mounting a symlink that points to a forbidden directory
+	if resolved, err := filepath.EvalSymlinks(hostPath); err == nil {
+		if resolved == "/" {
+			return fmt.Errorf("%w: symlink resolves to root '/'", ErrDangerousVolumeMount)
+		}
+		normResolved := resolved
+		if strings.HasPrefix(resolved, "/private/") {
+			normResolved = strings.TrimPrefix(resolved, "/private")
+		}
+		for _, fp := range forbiddenPrefixes {
+			if resolved == fp || strings.HasPrefix(resolved, fp+"/") ||
+				normResolved == fp || strings.HasPrefix(normResolved, fp+"/") {
+				return fmt.Errorf("%w: symlink resolves to restricted system directory '%s'", ErrDangerousVolumeMount, resolved)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -513,3 +556,13 @@ func validateContainerIdent(idOrName string) error {
 	}
 	return nil
 }
+
+func validateRestartPolicy(policy string) error {
+	switch policy {
+	case "", "no", "on-failure", "always", "unless-stopped":
+		return nil
+	default:
+		return fmt.Errorf("invalid restart policy '%s': must be one of no, on-failure, always, unless-stopped", policy)
+	}
+}
+

@@ -272,8 +272,10 @@ LimitNOFILE=65536
 KillMode=process
 TimeoutStopSec=15
 
-ProtectSystem=full
-ProtectHome=read-only
+# Sandboxing & Security
+# Protect /usr and /boot as read-only while permitting daemon operations in /etc, /home, /var, and /run
+ProtectSystem=true
+ProtectHome=false
 PrivateTmp=true
 
 [Install]

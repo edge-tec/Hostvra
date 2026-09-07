@@ -139,10 +139,34 @@ func (fm *FTPManager) ValidateUserParams(username, homeDir string) error {
 	forbiddenSystemRoots := []string{
 		"/etc", "/root", "/bin", "/sbin", "/usr", "/lib", "/lib64",
 		"/var/run", "/run", "/proc", "/sys", "/dev", "/boot", "/var/log",
+		"/var/lib/hostvra", "/var/lib/docker",
 	}
+	normHome := homeDir
+	if strings.HasPrefix(homeDir, "/private/") {
+		normHome = strings.TrimPrefix(homeDir, "/private")
+	}
+
 	for _, fs := range forbiddenSystemRoots {
-		if homeDir == fs || strings.HasPrefix(homeDir, fs+"/") {
+		if homeDir == fs || strings.HasPrefix(homeDir, fs+"/") ||
+			normHome == fs || strings.HasPrefix(normHome, fs+"/") {
 			return fmt.Errorf("%w: home directory cannot be in system path '%s'", ErrInvalidDirectory, homeDir)
+		}
+	}
+
+	// Symlink evaluation to prevent pointing to forbidden directories
+	if resolved, err := filepath.EvalSymlinks(homeDir); err == nil {
+		if resolved == "/" {
+			return fmt.Errorf("%w: home directory symlink resolves to root '/'", ErrInvalidDirectory)
+		}
+		normResolved := resolved
+		if strings.HasPrefix(resolved, "/private/") {
+			normResolved = strings.TrimPrefix(resolved, "/private")
+		}
+		for _, fs := range forbiddenSystemRoots {
+			if resolved == fs || strings.HasPrefix(resolved, fs+"/") ||
+				normResolved == fs || strings.HasPrefix(normResolved, fs+"/") {
+				return fmt.Errorf("%w: home directory symlink resolves to restricted system path '%s'", ErrInvalidDirectory, resolved)
+			}
 		}
 	}
 

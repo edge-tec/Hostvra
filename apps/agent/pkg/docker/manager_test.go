@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -98,3 +100,43 @@ func TestDocker_ImageValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestDocker_Regression_RelativeAndSymlinkMounts(t *testing.T) {
+	// Relative mounts must be blocked
+	relativeMounts := []string{
+		"../../etc:/mnt",
+		"./data:/data",
+		"relative/path:/app",
+	}
+	for _, rm := range relativeMounts {
+		if err := validateVolumeMount(rm); err == nil {
+			t.Errorf("expected relative mount %q to be blocked, but it passed", rm)
+		}
+	}
+
+	// Host symlink resolving to restricted path or /
+	tmpDir := t.TempDir()
+	symlinkToEtc := filepath.Join(tmpDir, "evil_etc")
+	_ = os.Symlink("/etc", symlinkToEtc)
+
+	if err := validateVolumeMount(symlinkToEtc + ":/container_etc"); err == nil {
+		t.Errorf("expected symlink mount pointing to /etc to be blocked, but it passed")
+	}
+}
+
+func TestDocker_Regression_RestartPolicyValidation(t *testing.T) {
+	valid := []string{"", "no", "on-failure", "always", "unless-stopped"}
+	for _, p := range valid {
+		if err := validateRestartPolicy(p); err != nil {
+			t.Errorf("expected restart policy %q to be valid, got: %v", p, err)
+		}
+	}
+
+	invalid := []string{"invalid", "always; rm -rf /", "never", "on-failure:3"}
+	for _, p := range invalid {
+		if err := validateRestartPolicy(p); err == nil {
+			t.Errorf("expected invalid restart policy %q to fail, but it passed", p)
+		}
+	}
+}
+

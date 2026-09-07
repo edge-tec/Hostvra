@@ -16,8 +16,9 @@ KillMode=process
 TimeoutStopSec=15
 
 # Sandboxing & Security
-ProtectSystem=full
-ProtectHome=read-only
+# Protect /usr and /boot as read-only while permitting daemon operations in /etc, /home, /var, and /run
+ProtectSystem=true
+ProtectHome=false
 PrivateTmp=true
 
 [Install]

@@ -195,3 +195,69 @@ func TestFileManager_SymlinkInArchiveBlocked(t *testing.T) {
 		t.Errorf("expected symlink in zip to be rejected, got: %v", err)
 	}
 }
+
+func TestFileManager_WindowsSeparatorZipSlip(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-winzip-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	fm := NewFileManager(tempDir)
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	h := &zip.FileHeader{
+		Name: "..\\..\\..\\..\\tmp\\win_traversal.txt",
+	}
+	w, err := zw.CreateHeader(h)
+	if err != nil {
+		t.Fatalf("failed to create header: %v", err)
+	}
+	_, _ = w.Write([]byte("windows traversal attempt"))
+	_ = zw.Close()
+
+	winZip := filepath.Join(tempDir, "win_traversal.zip")
+	_ = os.WriteFile(winZip, buf.Bytes(), 0644)
+
+	extractDir := filepath.Join(tempDir, "extracted")
+	err = fm.Extract(winZip, extractDir)
+	if err == nil || !strings.Contains(err.Error(), "Zip Slip") {
+		t.Errorf("expected Windows separator Zip Slip to be blocked, got: %v", err)
+	}
+}
+
+func TestFileManager_ExtractionOverExistingSymlinkBlocked(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-symlinkoverwrite-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	fm := NewFileManager(tempDir)
+
+	extractDir := filepath.Join(tempDir, "extracted")
+	_ = os.MkdirAll(extractDir, 0755)
+
+	// Pre-create an existing symlink pointing outside
+	symlinkTarget := filepath.Join(tempDir, "target.txt")
+	_ = os.WriteFile(symlinkTarget, []byte("initial"), 0644)
+	existingLink := filepath.Join(extractDir, "attack.txt")
+	_ = os.Symlink(symlinkTarget, existingLink)
+
+	// Now create a benign ZIP containing attack.txt
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	w, _ := zw.Create("attack.txt")
+	_, _ = w.Write([]byte("overwritten via symlink"))
+	_ = zw.Close()
+
+	testZip := filepath.Join(tempDir, "test.zip")
+	_ = os.WriteFile(testZip, buf.Bytes(), 0644)
+
+	err = fm.Extract(testZip, extractDir)
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("expected extracting over an existing symlink to be blocked, got: %v", err)
+	}
+}
+

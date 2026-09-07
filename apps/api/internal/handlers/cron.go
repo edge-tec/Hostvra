@@ -254,6 +254,22 @@ func (h *CronHandler) RunJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	jobs, err := h.cronMgr.ListJobs()
+	if err == nil {
+		for _, j := range jobs {
+			if j.ID == jobID {
+				if j.SystemUser == "root" || j.SystemUser == "" {
+					claims, _ := auth.GetClaims(r.Context())
+					if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+						response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can execute root cron jobs", nil, "")
+						return
+					}
+				}
+				break
+			}
+		}
+	}
+
 	res, err := h.cronMgr.ExecuteJobNow(jobID)
 	if err != nil {
 		if errors.Is(err, cron.ErrJobNotFound) {

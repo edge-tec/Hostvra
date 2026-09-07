@@ -207,3 +207,56 @@ func TestUninstallApplication(t *testing.T) {
 		t.Errorf("index.html placeholder missing after uninstall")
 	}
 }
+
+func TestDeployDrupalAndPhpMyAdminHardenedPermissions(t *testing.T) {
+	tempDir := t.TempDir()
+	mgr := NewInstallerManager(
+		WithDBProvisioner(func(ctx context.Context, dbName, dbUser, dbPass, dbType string) error {
+			return nil
+		}),
+	)
+
+	// Test Drupal settings.php permission 0600
+	drupalRoot := filepath.Join(tempDir, "drupal_site")
+	reqDrupal := InstallSiteAppRequest{
+		PrimaryDomain: "drupal.test",
+		DocumentRoot:  drupalRoot,
+		AppID:         "drupal",
+		DBName:        "drupal_db",
+		DBUser:        "drupal_user",
+		DBPassword:    "secpass123",
+	}
+	_, err := mgr.InstallApplication(context.Background(), reqDrupal, nil)
+	if err != nil {
+		t.Fatalf("drupal install failed: %v", err)
+	}
+	drupalSettings := filepath.Join(drupalRoot, "sites", "default", "settings.php")
+	fi, err := os.Stat(drupalSettings)
+	if err != nil {
+		t.Fatalf("failed to stat drupal settings.php: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Errorf("expected drupal settings.php permissions 0600, got %o", fi.Mode().Perm())
+	}
+
+	// Test phpMyAdmin config.inc.php permission 0600
+	pmaRoot := filepath.Join(tempDir, "pma_site")
+	reqPMA := InstallSiteAppRequest{
+		PrimaryDomain: "pma.test",
+		DocumentRoot:  pmaRoot,
+		AppID:         "phpmyadmin",
+	}
+	_, err = mgr.InstallApplication(context.Background(), reqPMA, nil)
+	if err != nil {
+		t.Fatalf("pma install failed: %v", err)
+	}
+	pmaConfig := filepath.Join(pmaRoot, "config.inc.php")
+	fiPMA, err := os.Stat(pmaConfig)
+	if err != nil {
+		t.Fatalf("failed to stat config.inc.php: %v", err)
+	}
+	if fiPMA.Mode().Perm() != 0600 {
+		t.Errorf("expected phpmyadmin config.inc.php permissions 0600, got %o", fiPMA.Mode().Perm())
+	}
+}
+

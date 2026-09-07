@@ -504,7 +504,12 @@ func extractZip(zipPath, destDir string) error {
 			return fmt.Errorf("%w: entry %s is a symlink", ErrSymlinkBlocked, f.Name)
 		}
 
-		targetPath := filepath.Join(destDir, f.Name)
+		cleanEntry := filepath.Clean(strings.ReplaceAll(f.Name, "\\", "/"))
+		if strings.Contains(cleanEntry, "\x00") || strings.HasPrefix(cleanEntry, "/") {
+			return fmt.Errorf("%w: invalid archive entry path %s", ErrZipSlipDetected, f.Name)
+		}
+
+		targetPath := filepath.Join(destDir, cleanEntry)
 
 		// Zip Slip vulnerability check
 		cleanTarget := filepath.Clean(targetPath)
@@ -516,6 +521,11 @@ func extractZip(zipPath, destDir string) error {
 		if f.FileInfo().IsDir() {
 			_ = os.MkdirAll(cleanTarget, f.Mode())
 			continue
+		}
+
+		// Prevent overwriting through pre-existing symlinks
+		if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: destination entry %s is an existing symlink", ErrSymlinkBlocked, cleanTarget)
 		}
 
 		if err := os.MkdirAll(filepath.Dir(cleanTarget), 0755); err != nil {
@@ -594,7 +604,12 @@ func extractTarGz(tarPath, destDir string) error {
 			return fmt.Errorf("%w: tar entry %s is a link/symlink", ErrSymlinkBlocked, header.Name)
 		}
 
-		targetPath := filepath.Join(destDir, header.Name)
+		cleanEntry := filepath.Clean(strings.ReplaceAll(header.Name, "\\", "/"))
+		if strings.Contains(cleanEntry, "\x00") || strings.HasPrefix(cleanEntry, "/") {
+			return fmt.Errorf("%w: invalid archive entry path %s", ErrZipSlipDetected, header.Name)
+		}
+
+		targetPath := filepath.Join(destDir, cleanEntry)
 		cleanTarget := filepath.Clean(targetPath)
 		if !strings.HasPrefix(cleanTarget, cleanDest+string(filepath.Separator)) && cleanTarget != cleanDest {
 			return fmt.Errorf("%w: entry %s breaks out of destination", ErrZipSlipDetected, header.Name)
@@ -604,6 +619,11 @@ func extractTarGz(tarPath, destDir string) error {
 		case tar.TypeDir:
 			_ = os.MkdirAll(cleanTarget, 0755)
 		case tar.TypeReg:
+			// Prevent overwriting through pre-existing symlinks
+			if fi, err := os.Lstat(cleanTarget); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%w: destination entry %s is an existing symlink", ErrSymlinkBlocked, cleanTarget)
+			}
+
 			if err := os.MkdirAll(filepath.Dir(cleanTarget), 0755); err != nil {
 				return err
 			}

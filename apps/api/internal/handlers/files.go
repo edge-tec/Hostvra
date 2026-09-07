@@ -12,6 +12,7 @@ import (
 
 	"hostvra/agent/pkg/files"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -35,6 +36,33 @@ func NewFileHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FileHan
 		audit:   a,
 		fileMgr: fm,
 	}
+}
+
+// checkPathAuthorization enforces multi-tenant and role-based boundaries on file operations.
+// Non-admin roles (manager, developer) are strictly confined to /var/www, /home, or /tmp and
+// forbidden from reading, writing, or traversing sensitive system files (/etc, /root, /boot, etc.)
+func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string) error {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+		clean := filepath.Clean(targetPath)
+		restrictedRoots := []string{
+			"/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/run", "/var/run",
+			"/var/lib/hostvra", "/var/lib/docker", "/usr", "/bin", "/sbin", "/lib", "/lib64",
+		}
+		if clean == "/" {
+			return fmt.Errorf("root directory access forbidden for role '%s'", claims.Role)
+		}
+		for _, rr := range restrictedRoots {
+			if clean == rr || strings.HasPrefix(clean, rr+"/") {
+				return fmt.Errorf("system path '%s' is restricted for role '%s'", clean, claims.Role)
+			}
+		}
+		// Confinement to application and user spaces
+		if !strings.HasPrefix(clean, "/var/www") && !strings.HasPrefix(clean, "/home") && !strings.HasPrefix(clean, "/tmp") {
+			return fmt.Errorf("role '%s' is confined to web and home directories", claims.Role)
+		}
+	}
+	return nil
 }
 
 // Request DTOs
@@ -93,6 +121,11 @@ func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := h.checkPathAuthorization(r, dirPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	items, err := h.fileMgr.List(dirPath)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "FILE_LIST_ERROR", err.Error(), nil, "")
@@ -114,6 +147,11 @@ func (h *FileHandler) Stat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkPathAuthorization(r, targetPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	item, err := h.fileMgr.Stat(targetPath)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "FILE_NOT_FOUND", err.Error(), nil, "")
@@ -128,6 +166,11 @@ func (h *FileHandler) GetContent(w http.ResponseWriter, r *http.Request) {
 	targetPath := r.URL.Query().Get("path")
 	if targetPath == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path query parameter required", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, targetPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
 		return
 	}
 
@@ -157,7 +200,24 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.fileMgr.WriteFile(req.Path, []byte(req.Content)); err != nil {
+	if err := h.checkPathAuthorization(r, req.Path); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	validatedPath, err := h.fileMgr.ValidatePath(req.Path)
+	if err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	// Refuse overwriting through pre-existing symlinks
+	if fi, err := os.Lstat(validatedPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		response.Error(w, http.StatusForbidden, "SYMLINK_OVERWRITE_FORBIDDEN", "Destination is an existing symlink", nil, "")
+		return
+	}
+
+	if err := h.fileMgr.WriteFile(validatedPath, []byte(req.Content)); err != nil {
 		response.Error(w, http.StatusInternalServerError, "WRITE_ERROR", err.Error(), nil, "")
 		return
 	}
@@ -183,6 +243,11 @@ func (h *FileHandler) Mkdir(w http.ResponseWriter, r *http.Request) {
 
 	if req.Path == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, req.Path); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
 		return
 	}
 
@@ -212,6 +277,11 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		targetDir = "/var/www"
 	}
 
+	if err := h.checkPathAuthorization(r, targetDir); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "MISSING_FILE", "No file uploaded", nil, "")
@@ -219,16 +289,29 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	safeFilename := filepath.Base(filepath.Clean(header.Filename))
-	if safeFilename == "." || safeFilename == "/" || safeFilename == "" || strings.Contains(safeFilename, "\x00") {
+	// Normalize Windows slashes and prevent directory breakout
+	normalizedFilename := strings.ReplaceAll(header.Filename, "\\", "/")
+	safeFilename := filepath.Base(filepath.Clean(normalizedFilename))
+	if safeFilename == "." || safeFilename == "/" || safeFilename == "" || strings.Contains(safeFilename, "\x00") || strings.Contains(safeFilename, "..") {
 		response.Error(w, http.StatusBadRequest, "INVALID_FILENAME", "Invalid upload filename", nil, "")
 		return
 	}
 
 	destPath := filepath.Join(targetDir, safeFilename)
+	if err := h.checkPathAuthorization(r, destPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	validatedDest, err := h.fileMgr.ValidatePath(destPath)
 	if err != nil {
 		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	// Refuse overwriting through pre-existing symlinks
+	if fi, err := os.Lstat(validatedDest); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		response.Error(w, http.StatusForbidden, "SYMLINK_OVERWRITE_FORBIDDEN", "Destination is an existing symlink", nil, "")
 		return
 	}
 
@@ -271,6 +354,15 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkPathAuthorization(r, req.OldPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+	if err := h.checkPathAuthorization(r, req.NewPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.fileMgr.Rename(req.OldPath, req.NewPath); err != nil {
 		response.Error(w, http.StatusBadRequest, "RENAME_ERROR", err.Error(), nil, "")
 		return
@@ -297,6 +389,15 @@ func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 
 	if req.SrcPath == "" || req.DestPath == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_PATHS", "Both src_path and dest_path are required", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, req.SrcPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+	if err := h.checkPathAuthorization(r, req.DestPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
 		return
 	}
 
@@ -331,6 +432,11 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkPathAuthorization(r, targetPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.fileMgr.Delete(targetPath); err != nil {
 		response.Error(w, http.StatusBadRequest, "DELETE_ERROR", err.Error(), nil, "")
 		return
@@ -357,6 +463,11 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkPathAuthorization(r, req.Path); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	// Parse octal mode e.g. "0755"
 	if req.Mode != "" {
 		cleanMode := strings.TrimPrefix(req.Mode, "0")
@@ -365,6 +476,7 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusBadRequest, "INVALID_MODE", "Invalid octal permission mode (e.g. 0755 or 0644)", nil, "")
 			return
 		}
+
 		if err := h.fileMgr.Chmod(req.Path, os.FileMode(parsed)); err != nil {
 			response.Error(w, http.StatusBadRequest, "CHMOD_ERROR", err.Error(), nil, "")
 			return
@@ -372,6 +484,11 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UID > 0 || req.GID > 0 {
+		claims, _ := auth.GetClaims(r.Context())
+		if claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", "Only administrators can change file ownership (chown)", nil, "")
+			return
+		}
 		_ = h.fileMgr.Chown(req.Path, req.UID, req.GID)
 	}
 
@@ -398,6 +515,17 @@ func (h *FileHandler) Archive(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Paths) == 0 || req.DestPath == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_PARAMS", "paths and dest_path are required", nil, "")
+		return
+	}
+
+	for _, p := range req.Paths {
+		if err := h.checkPathAuthorization(r, p); err != nil {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+			return
+		}
+	}
+	if err := h.checkPathAuthorization(r, req.DestPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
 		return
 	}
 
@@ -430,6 +558,15 @@ func (h *FileHandler) Extract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.checkPathAuthorization(r, req.ArchivePath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+	if err := h.checkPathAuthorization(r, req.DestDir); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.fileMgr.Extract(req.ArchivePath, req.DestDir); err != nil {
 		response.Error(w, http.StatusBadRequest, "EXTRACT_ERROR", err.Error(), nil, "")
 		return
@@ -450,6 +587,11 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	targetPath := r.URL.Query().Get("path")
 	if targetPath == "" {
 		http.Error(w, "path parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, targetPath); err != nil {
+		http.Error(w, "access denied: "+err.Error(), http.StatusForbidden)
 		return
 	}
 
@@ -478,3 +620,4 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = io.Copy(w, file)
 }
+
