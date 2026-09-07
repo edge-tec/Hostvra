@@ -52,10 +52,10 @@ code, pre, kbd, samp {
    #E5E7EB borders, and accessible high-contrast buttons, tables, and inputs.
    ========================================================================== */
 
-/* 1. Light Mode Core Backgrounds */
+/* 1. Light Mode Core Backgrounds - 100% Clean, Eye-Friendly Surfaces */
 html:not(.dark) body {
   background-color: #F8FAFC !important;
-  color: #111827 !important;
+  color: #0F172A !important;
 }
 
 html:not(.dark) .bg-\[\#090d16\],
@@ -86,18 +86,43 @@ html:not(.dark) .bg-surface-800\/40,
 html:not(.dark) .bg-surface-800\/50,
 html:not(.dark) .bg-surface-800\/60,
 html:not(.dark) .bg-surface-800\/70,
-html:not(.dark) .bg-surface-800\/80 {
+html:not(.dark) .bg-surface-800\/80,
+html:not(.dark) .bg-slate-800\/30,
+html:not(.dark) .bg-slate-800\/40,
+html:not(.dark) .bg-slate-800\/50 {
   background-color: #F8FAFC !important;
 }
 
+/* Hover surfaces in Light Mode: always soft, clean and soothing to the eyes */
+html:not(.dark) .hover\:bg-surface-950:hover,
+html:not(.dark) .hover\:bg-surface-900:hover,
+html:not(.dark) .hover\:bg-surface-850:hover,
 html:not(.dark) .hover\:bg-surface-800:hover,
 html:not(.dark) .hover\:bg-surface-750:hover,
 html:not(.dark) .hover\:bg-surface-700:hover,
+html:not(.dark) .hover\:bg-slate-900:hover,
+html:not(.dark) .hover\:bg-slate-850:hover,
+html:not(.dark) .hover\:bg-slate-800:hover,
+html:not(.dark) .hover\:bg-slate-700:hover,
 html:not(.dark) .hover\:bg-slate-100:hover {
   background-color: #F1F5F9 !important;
 }
 
-/* 2. Light Mode Borders - Clean #E5E7EB Standard with #D1D5DB on Hover */
+/* Modal Backdrops in Light Mode */
+html:not(.dark) .bg-black\/75,
+html:not(.dark) .bg-black\/70,
+html:not(.dark) .bg-black\/60,
+html:not(.dark) .bg-black\/50,
+html:not(.dark) .bg-slate-950\/60,
+html:not(.dark) .bg-slate-950\/70,
+html:not(.dark) .bg-slate-950\/80 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+/* 2. Light Mode Borders - Clean Slate #E2E8F0 Standard */
+html:not(.dark) .border-surface-900,
+html:not(.dark) .border-surface-850,
 html:not(.dark) .border-surface-800,
 html:not(.dark) .border-surface-750,
 html:not(.dark) .border-surface-700,
@@ -106,21 +131,22 @@ html:not(.dark) .border-slate-700,
 html:not(.dark) .border-slate-300,
 html:not(.dark) .border-slate-200,
 html:not(.dark) [class*="border-surface-800"],
+html:not(.dark) [class*="border-surface-750"],
 html:not(.dark) [class*="border-surface-700"] {
-  border-color: #E5E7EB !important;
+  border-color: #E2E8F0 !important;
 }
 
 html:not(.dark) .border-surface-800:hover,
 html:not(.dark) .border-slate-200:hover,
 html:not(.dark) .border-slate-300:hover {
-  border-color: #D1D5DB !important;
+  border-color: #CBD5E1 !important;
 }
 
 /* ==========================================================================
-   3. LIGHT MODE TYPOGRAPHY: 100% VISIBLE, WCAG AA ACCESSIBLE
+   3. LIGHT MODE TYPOGRAPHY: 100% VISIBLE, WCAG AAA ACCESSIBLE
    ========================================================================== */
 
-/* Primary Headings & Labels: #111827 */
+/* Primary Headings & Labels: #0F172A (Deep Slate, Sharp and Clear) */
 html:not(.dark) h1,
 html:not(.dark) h2,
 html:not(.dark) h3,
@@ -128,8 +154,9 @@ html:not(.dark) h4,
 html:not(.dark) h5,
 html:not(.dark) h6,
 html:not(.dark) label,
-html:not(.dark) th {
-  color: #111827 !important;
+html:not(.dark) th,
+html:not(.dark) strong {
+  color: #0F172A !important;
   font-weight: 700;
 }
 
@@ -137,11 +164,11 @@ html:not(.dark) th {
 html:not(.dark) p,
 html:not(.dark) td,
 html:not(.dark) li,
-html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*="text-emerald"]):not([class*="text-indigo"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-purple"]):not([class*="text-blue"]):not([class*="text-green"]) {
-  color: #111827;
+html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*="text-emerald"]):not([class*="text-indigo"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-purple"]):not([class*="text-blue"]):not([class*="text-green"]):not([class*="text-cyan"]) {
+  color: #1E293B;
 }
 
-/* High-contrast text mapping */
+/* High-contrast text mapping: all pale light-slate classes become crisp dark text */
 html:not(.dark) .text-slate-950,
 html:not(.dark) .text-slate-900,
 html:not(.dark) .text-slate-800,
@@ -152,39 +179,48 @@ html:not(.dark) .text-slate-300,
 html:not(.dark) .text-surface-100,
 html:not(.dark) .text-surface-200,
 html:not(.dark) .text-surface-300 {
-  color: #111827 !important;
+  color: #0F172A !important;
 }
 
-/* Secondary Text: #4B5563 (Clean, readable, never faint) */
+/* Secondary & Informative Text: #334155 (Slate-700, perfect legibility) */
 html:not(.dark) .text-slate-600,
 html:not(.dark) .text-slate-500,
 html:not(.dark) .text-surface-400,
 html:not(.dark) .text-surface-500 {
-  color: #4B5563 !important;
+  color: #334155 !important;
 }
 
-/* Muted Captions & Placeholders: #6B7280 */
+/* Muted Subtitles & Captions: #475569 (Slate-600, never faint or hard on the eyes) */
 html:not(.dark) .text-slate-400 {
-  color: #6B7280 !important;
+  color: #475569 !important;
 }
 
-/* Overriding white text ONLY when not inside solid colored badges, buttons, or code blocks */
-html:not(.dark) .text-white:not(button *):not(button):not(a[class*="bg-"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="from-"]):not([class*="bg-gradient"]):not(pre *):not(pre):not(code):not(code *) {
-  color: #111827 !important;
+/* Prevent text turning white on light backgrounds */
+html:not(.dark) .text-white:not(button[class*="bg-indigo"] *):not(button[class*="bg-emerald"] *):not(button[class*="bg-[#20a53a]"] *):not(button[class*="bg-purple"] *):not(button[class*="bg-rose"] *):not(button[class*="bg-blue"] *):not(button[class*="bg-amber"] *):not(button[class*="bg-green"] *):not(button[class*="bg-red"] *):not(button[class*="bg-indigo"]):not(button[class*="bg-emerald"]):not(button[class*="bg-[#20a53a]"]):not(button[class*="bg-purple"]):not(button[class*="bg-rose"]):not(button[class*="bg-blue"]):not(button[class*="bg-amber"]):not(button[class*="bg-green"]):not(button[class*="bg-red"]):not(a[class*="bg-indigo"]):not(a[class*="bg-emerald"]):not(a[class*="bg-[#20a53a]"]):not(pre *):not(pre):not(code):not(code *) {
+  color: #0F172A !important;
+}
+
+/* On hover, non-primary buttons & links must hover to deep dark text, NEVER white */
+html:not(.dark) button.hover\:text-white:hover,
+html:not(.dark) button:hover .group-hover\:text-white,
+html:not(.dark) a.hover\:text-white:hover,
+html:not(.dark) a:hover .group-hover\:text-white,
+html:not(.dark) .hover\:text-slate-200:hover,
+html:not(.dark) .hover\:text-slate-100:hover {
+  color: #0F172A !important;
+  stroke: #0F172A !important;
 }
 
 /* ==========================================================================
-   4. BUTTON ARCHITECTURE: 8-12px RADIUS, HIGH CONTRAST, PREVENT TEXT INVISIBILITY
+   4. BUTTON ARCHITECTURE: CLEAN, EYE-PLEASING, HIGH CONTRAST & ACCESSIBLE
    ========================================================================== */
 
-/* Base button shape & transitions */
 button,
 a[class*="px-"][class*="py-"][class*="rounded"] {
   border-radius: 10px !important;
   transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
-/* Active & disabled states */
 button:active:not(:disabled) {
   transform: scale(0.98);
 }
@@ -195,83 +231,119 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* 4.1 Primary Solid Buttons (Always vibrant, high contrast, pure white text) */
+/* 4.1 Primary Solid Buttons (Eye-Friendly, Vibrant, Pure White Text) */
 html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-[#20a53a]"],
-html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-[#20a53a]"],
-html:not(.dark) a[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+  background-color: #4F46E5 !important;
   color: #FFFFFF !important;
   font-weight: 600 !important;
-  opacity: 1 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 2px 5px rgba(79, 70, 229, 0.25) !important;
 }
-
-/* Hover micro-interaction for solid primary buttons */
 html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) button[class*="bg-[#20a53a]"]:hover:not(:disabled),
-html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover,
-html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover,
-html:not(.dark) a[class*="bg-[#20a53a]"]:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1) !important;
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover {
+  background-color: #4338CA !important;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.35) !important;
 }
 
-/* Text & SVG icons inside primary buttons remain 100% white */
-html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-[#20a53a]"],
+html:not(.dark) a[class*="bg-[#20a53a]"],
+html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+  background-color: #16A34A !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 5px rgba(22, 163, 74, 0.25) !important;
+}
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover,
+html:not(.dark) button[class*="bg-[#20a53a]"]:hover:not(:disabled),
+html:not(.dark) a[class*="bg-[#20a53a]"]:hover {
+  background-color: #15803D !important;
+  box-shadow: 0 4px 10px rgba(22, 163, 74, 0.35) !important;
+}
+
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+  background-color: #2563EB !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 5px rgba(37, 99, 235, 0.25) !important;
+}
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover {
+  background-color: #1D4ED8 !important;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35) !important;
+}
+
+html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+  background-color: #7C3AED !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 5px rgba(124, 58, 237, 0.25) !important;
+}
+
+html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-red"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
+  background-color: #DC2626 !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 5px rgba(220, 38, 38, 0.25) !important;
+}
+html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) button[class*="bg-red"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled) {
+  background-color: #B91C1C !important;
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.35) !important;
+}
+
+/* All icons inside primary action buttons remain crisp white */
+html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]) *,
 html:not(.dark) button[class*="bg-[#20a53a]"] *,
-html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) button[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-[#20a53a]"] *,
-html:not(.dark) a[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-amber"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) *,
-html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) * {
+html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) button[class*="bg-rose"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]) *,
+html:not(.dark) a[class*="bg-[#20a53a]"] * {
   color: #FFFFFF !important;
   stroke: #FFFFFF !important;
 }
 
-/* 4.2 Secondary / Neutral Action Buttons in Light Mode */
-html:not(.dark) button:not([class*="bg-"]):not([class*="text-"]) {
-  background-color: #FFFFFF;
-  color: #111827;
-  border: 1px solid #E5E7EB;
-  font-weight: 600;
-  border-radius: 10px;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+/* 4.2 Secondary & Neutral Buttons (Eye-Friendly Slate Surfaces & High Contrast) */
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]),
+html:not(.dark) button.bg-surface-800,
+html:not(.dark) button.bg-surface-850,
+html:not(.dark) button.bg-surface-900,
+html:not(.dark) button.bg-slate-800,
+html:not(.dark) button.bg-slate-900 {
+  background-color: #F8FAFC !important;
+  color: #1E293B !important;
+  border: 1px solid #CBD5E1 !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
 }
 
-html:not(.dark) button:not([class*="bg-"]):not([class*="text-"]):hover:not(:disabled) {
-  background-color: #F8FAFC;
-  border-color: #D1D5DB;
-  color: #111827;
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):hover:not(:disabled),
+html:not(.dark) button.bg-surface-800:hover,
+html:not(.dark) button.bg-slate-800:hover {
+  background-color: #E2E8F0 !important;
+  border-color: #94A3B8 !important;
+  color: #0F172A !important;
 }
 
 /* 4.3 Icon & Control Buttons */
-html:not(.dark) button:not([class*="text-"]) svg:not([class*="text-"]) {
-  stroke: currentColor;
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-[#20a53a]"]):not([class*="bg-blue"]):not([class*="bg-purple"]) svg {
+  stroke: #334155;
 }
+html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-[#20a53a]"]):not([class*="bg-blue"]):not([class*="bg-purple"]):hover svg {
+  stroke: #0F172A;
+}
+
 
 /* ==========================================================================
    5. FORMS & INPUTS (CLEAN WHITE BG, #E5E7EB BORDER, ACCENT FOCUS RING)
