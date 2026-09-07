@@ -3,12 +3,14 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/isolation"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -17,16 +19,37 @@ import (
 )
 
 type WebsiteHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg          *config.Config
+	store        store.Store
+	audit        *audit.Logger
+	isolationMgr *isolation.Manager
 }
 
 func NewWebsiteHandler(cfg *config.Config, s store.Store, a *audit.Logger) *WebsiteHandler {
+	webRoot := os.Getenv("HOSTVRA_WEB_ROOT")
+	if webRoot == "" {
+		webRoot = "/var/www"
+	}
+	phpConfig := os.Getenv("HOSTVRA_PHP_CONFIG_DIR")
+	if phpConfig == "" {
+		phpConfig = "/etc/php"
+	}
+	systemdDir := os.Getenv("HOSTVRA_SYSTEMD_DIR")
+	if systemdDir == "" {
+		systemdDir = "/etc/systemd/system"
+	}
+
+	isoMgr, _ := isolation.NewManager(isolation.Config{
+		WebRootDir:   webRoot,
+		PHPConfigDir: phpConfig,
+		SystemdDir:   systemdDir,
+	})
+
 	return &WebsiteHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+		cfg:          cfg,
+		store:        s,
+		audit:        a,
+		isolationMgr: isoMgr,
 	}
 }
 
@@ -84,13 +107,24 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.AppType = "php"
 	}
 	if req.DocumentRoot == "" {
-		req.DocumentRoot = "/var/www/" + req.PrimaryDomain + "/public"
+		req.DocumentRoot = "/var/www/" + req.PrimaryDomain + "/public_html"
 	}
 
-	systemUser := "www-data"
 	defaultPHP := "8.3"
 	if req.AppType == "php" && req.PHPVersion == nil {
 		req.PHPVersion = &defaultPHP
+	}
+
+	// 1. Provision isolated POSIX system user, PHP-FPM pool, and cgroup slice
+	phpVer := "8.3"
+	if req.PHPVersion != nil && *req.PHPVersion != "" {
+		phpVer = *req.PHPVersion
+	}
+
+	systemUser := isolation.DeriveUsername(req.PrimaryDomain)
+	limits := isolation.DefaultResourceLimits()
+	if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), req.PrimaryDomain, phpVer, &limits); err == nil && isoInfo != nil {
+		systemUser = isoInfo.Username
 	}
 
 	site := &store.Website{
@@ -113,9 +147,10 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "website.create", "website", site.ID.String(), "success", "", map[string]interface{}{
-		"domain":    site.PrimaryDomain,
-		"server_id": serverID.String(),
-		"app_type":  site.AppType,
+		"domain":      site.PrimaryDomain,
+		"server_id":   serverID.String(),
+		"app_type":    site.AppType,
+		"system_user": site.SystemUser,
 	})
 
 	response.JSON(w, http.StatusCreated, site, nil)
@@ -189,13 +224,21 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Clean up user isolation, PHP pool, and cgroup slice
+	phpVer := "8.3"
+	if site.PHPVersion != nil && *site.PHPVersion != "" {
+		phpVer = *site.PHPVersion
+	}
+	_ = h.isolationMgr.DeprovisionWebsiteIsolation(r.Context(), site.SystemUser, phpVer)
+
 	if err := h.store.DeleteWebsite(r.Context(), siteID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete website", nil, "")
 		return
 	}
 
 	h.audit.Log(r.Context(), r, "website.delete", "website", siteID.String(), "success", "", map[string]interface{}{
-		"domain": site.PrimaryDomain,
+		"domain":      site.PrimaryDomain,
+		"system_user": site.SystemUser,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true}, nil)
@@ -242,4 +285,85 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 	})
 
 	response.JSON(w, http.StatusOK, cert, nil)
+}
+
+// GetIsolation returns user isolation metadata, PHP socket, and live cgroups v2 telemetry.
+func (h *WebsiteHandler) GetIsolation(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil || site.OrganizationID != claims.OrganizationID {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	username := site.SystemUser
+	if username == "" {
+		username = isolation.DeriveUsername(site.PrimaryDomain)
+	}
+
+	info, err := h.isolationMgr.GetIsolationInfo(r.Context(), username)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "ISOLATION_LOOKUP_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, info, nil)
+}
+
+// UpdateIsolation dynamically reconfigures cgroups v2 limits and PHP open_basedir.
+func (h *WebsiteHandler) UpdateIsolation(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil || site.OrganizationID != claims.OrganizationID {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	var limits isolation.ResourceLimits
+	if err := json.NewDecoder(r.Body).Decode(&limits); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	if limits.MemoryMaxMB <= 0 {
+		limits.MemoryMaxMB = 512
+	}
+	if limits.CPUQuota <= 0 {
+		limits.CPUQuota = 100
+	}
+	if limits.TasksMax <= 0 {
+		limits.TasksMax = 100
+	}
+
+	username := site.SystemUser
+	if username == "" {
+		username = isolation.DeriveUsername(site.PrimaryDomain)
+	}
+
+	if err := h.isolationMgr.UpdateResourceLimits(r.Context(), username, limits); err != nil {
+		response.Error(w, http.StatusInternalServerError, "LIMITS_UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "website.isolation.update", "website", siteID.String(), "success", "", map[string]interface{}{
+		"username":      username,
+		"memory_max_mb": limits.MemoryMaxMB,
+		"cpu_quota":     limits.CPUQuota,
+		"tasks_max":     limits.TasksMax,
+	})
+
+	info, _ := h.isolationMgr.GetIsolationInfo(r.Context(), username)
+	response.JSON(w, http.StatusOK, info, nil)
 }

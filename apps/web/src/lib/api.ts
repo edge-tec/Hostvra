@@ -576,5 +576,34 @@ export interface BackupSchedule {
   created_at: string;
 }
 
+export interface ResourceLimits {
+  memory_max_mb: number;
+  cpu_quota: number;
+  tasks_max: number;
+  io_read_mbps?: number;
+  io_write_mbps?: number;
+  open_basedir: boolean;
+}
+
+export interface UserIsolationInfo {
+  username: string;
+  group_name: string;
+  uid: number;
+  gid: number;
+  home_dir: string;
+  document_root: string;
+  php_version: string;
+  php_pool_socket: string;
+  php_pool_config: string;
+  slice_name: string;
+  limits: ResourceLimits;
+  memory_used_mb: number;
+  cpu_usage_perc: number;
+  tasks_current: number;
+  is_systemd_slice: boolean;
+  created_at: string;
+}
+
+
 
 

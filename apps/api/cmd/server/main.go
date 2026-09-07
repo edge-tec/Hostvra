@@ -245,6 +245,10 @@ func main() {
 				// Per-Website Web Server Integration
 				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/{id}/webserver", webServerHandler.GetWebsiteWebServer)
 				r.With(rbac.RequirePermission(rbac.PermWebServerSwitch)).Post("/{id}/webserver/switch", webServerHandler.SwitchWebsiteWebServer)
+
+				// Per-Website User Isolation & cgroups v2
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/isolation", websiteHandler.GetIsolation)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/isolation", websiteHandler.UpdateIsolation)
 			})
 
 			// Databases & DB Users
