@@ -229,6 +229,39 @@ export interface TerminalExecutionResult {
   timestamp: string;
 }
 
+export type AppCategory = 'process_manager' | 'web_server' | 'database' | 'runtime' | 'security' | 'tools';
+
+export interface AppPackage {
+  id: string;
+  name: string;
+  display_name: string;
+  version: string;
+  category: AppCategory;
+  description: string;
+  developer: string;
+  price: string;
+  icon: string;
+  service_name?: string;
+  binary_path?: string;
+  config_path?: string;
+  default_port?: number;
+  is_installed: boolean;
+  status: 'running' | 'stopped' | 'not_installed' | 'installing' | 'uninstalling';
+  installed_version?: string;
+}
+
+export interface AppInstallJob {
+  id: string;
+  app_id: string;
+  action: 'install' | 'uninstall';
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  progress: number;
+  logs: string[];
+  error?: string;
+  started_at: string;
+  ended_at?: string;
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem('hostvra_access_token');

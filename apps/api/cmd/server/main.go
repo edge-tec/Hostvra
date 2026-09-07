@@ -89,6 +89,7 @@ func main() {
 	webServerHandler := handlers.NewWebServerHandler(cfg, dataStore, auditLogger)
 	updateHandler := handlers.NewUpdateHandler(cfg, dataStore, auditLogger, AppVersion)
 	terminalHandler := handlers.NewTerminalHandler(cfg, dataStore, auditLogger)
+	appStoreHandler := handlers.NewAppStoreHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -294,6 +295,16 @@ func main() {
 			r.Route("/terminal", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Get("/info", terminalHandler.GetInfo)
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
+			})
+
+			// 1-Click App Store & Extensions
+			r.Route("/apps", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/", appStoreHandler.ListApps)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}", appStoreHandler.GetApp)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/install", appStoreHandler.InstallApp)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/uninstall", appStoreHandler.UninstallApp)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/service", appStoreHandler.ControlService)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/jobs/{jobID}", appStoreHandler.GetJob)
 			})
 
 			// Team & Collaborators

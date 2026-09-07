@@ -28,6 +28,7 @@ import {
   Code2,
   Layers,
   RefreshCw,
+  Boxes,
 } from 'lucide-react';
 
 interface NavItem {
@@ -41,6 +42,7 @@ const mainNavItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Servers', href: '/servers', icon: Server },
   { label: 'Websites', href: '/websites', icon: Globe },
+  { label: 'App Store', href: '/app-store', icon: Boxes, badge: '1-Click' },
   { label: 'Web Servers', href: '/webservers', icon: Layers, badge: 'Multi' },
   { label: 'PHP Management', href: '/php', icon: Code2 },
   { label: 'Email Hosting', href: '/email', icon: Mail },
