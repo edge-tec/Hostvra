@@ -201,6 +201,18 @@ type Store interface {
 	GetRegistrarConfig(ctx context.Context, registrar string) (*DomainRegistrarConfig, error)
 	SaveRegistrarConfig(ctx context.Context, config *DomainRegistrarConfig) error
 
+	// Support Tickets & Knowledgebase
+	ListTickets(ctx context.Context, orgID uuid.UUID, status string, dept string) ([]Ticket, error)
+	GetTicket(ctx context.Context, id uuid.UUID) (*Ticket, error)
+	CreateTicket(ctx context.Context, t *Ticket, initialReply string) error
+	UpdateTicketStatus(ctx context.Context, id uuid.UUID, status TicketStatus) error
+	AddTicketReply(ctx context.Context, reply *TicketReply) error
+	ListTicketReplies(ctx context.Context, ticketID uuid.UUID) ([]TicketReply, error)
+	ListKnowledgeArticles(ctx context.Context, category string, query string) ([]KnowledgeArticle, error)
+	GetKnowledgeArticle(ctx context.Context, idOrSlug string) (*KnowledgeArticle, error)
+	VoteKnowledgeArticle(ctx context.Context, id uuid.UUID, helpful bool) error
+	SaveKnowledgeArticle(ctx context.Context, article *KnowledgeArticle) error
+
 	// Close
 	Close() error
 }
@@ -244,6 +256,9 @@ type MemoryStore struct {
 	hostingAccounts     map[uuid.UUID]*HostingAccount
 	tldPricings         map[string]*TLDPricing
 	registrarConfigs    map[string]*DomainRegistrarConfig
+	tickets             []Ticket
+	ticketReplies       []TicketReply
+	articles            []KnowledgeArticle
 	filePath            string
 }
 
@@ -270,6 +285,9 @@ type memoryDumpData struct {
 	HostingAccounts    map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
 	TLDPricings        map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
 	RegistrarConfigs   map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
+	Tickets            []Ticket                               `json:"tickets,omitempty"`
+	TicketReplies      []TicketReply                          `json:"ticket_replies,omitempty"`
+	Articles           []KnowledgeArticle                     `json:"articles,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -318,6 +336,9 @@ func (m *MemoryStore) saveToDiskLocked() {
 		HostingAccounts:    m.hostingAccounts,
 		TLDPricings:        m.tldPricings,
 		RegistrarConfigs:   m.registrarConfigs,
+		Tickets:            m.tickets,
+		TicketReplies:      m.ticketReplies,
+		Articles:           m.articles,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -405,6 +426,15 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.RegistrarConfigs != nil {
 		m.registrarConfigs = data.RegistrarConfigs
 	}
+	if len(data.Tickets) > 0 {
+		m.tickets = data.Tickets
+	}
+	if len(data.TicketReplies) > 0 {
+		m.ticketReplies = data.TicketReplies
+	}
+	if len(data.Articles) > 0 {
+		m.articles = data.Articles
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -445,11 +475,15 @@ func NewMemoryStore() *MemoryStore {
 		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
 		tldPricings:         make(map[string]*TLDPricing),
 		registrarConfigs:    make(map[string]*DomainRegistrarConfig),
+		tickets:             make([]Ticket, 0),
+		ticketReplies:       make([]TicketReply, 0),
+		articles:            make([]KnowledgeArticle, 0),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
 	m.seedAccountData()
 	m.seedTLDData()
+	m.seedSupportData()
 	return m
 }
 

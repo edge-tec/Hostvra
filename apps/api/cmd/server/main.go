@@ -104,6 +104,7 @@ func main() {
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
 	domainRegistrarHandler := handlers.NewDomainRegistrarHandler(cfg, dataStore, auditLogger)
+	supportHandler := handlers.NewSupportHandler(cfg, dataStore, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -181,6 +182,10 @@ func main() {
 		r.Get("/domains/search", domainRegistrarHandler.SearchDomains)
 		r.Get("/domains/whois", domainRegistrarHandler.WhoisLookup)
 		r.Get("/domains/tlds", domainRegistrarHandler.ListTLDs)
+
+		// Public Knowledgebase Articles
+		r.Get("/support/articles", supportHandler.ListArticles)
+		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
 
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
@@ -575,6 +580,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/registrars", domainRegistrarHandler.ListRegistrars)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/registrars/{registrar}", domainRegistrarHandler.UpdateRegistrar)
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/order", domainRegistrarHandler.OrderDomain)
+			})
+
+			// Support Tickets & Helpdesk
+			r.Route("/support", func(r chi.Router) {
+				r.Get("/tickets", supportHandler.ListTickets)
+				r.Post("/tickets", supportHandler.CreateTicket)
+				r.Get("/tickets/{id}", supportHandler.GetTicket)
+				r.Post("/tickets/{id}/reply", supportHandler.ReplyTicket)
+				r.Post("/tickets/{id}/close", supportHandler.CloseTicket)
+				r.Post("/articles/{id}/vote", supportHandler.VoteArticle)
+				r.Post("/articles", supportHandler.SaveArticle)
 			})
 		})
 	})

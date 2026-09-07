@@ -893,3 +893,53 @@ export interface DomainOrderPayload {
   client_address?: string;
   payment_method?: string;
 }
+
+export type TicketDepartment = 'technical' | 'billing' | 'sales' | 'abuse';
+export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type TicketStatus = 'open' | 'in_progress' | 'answered' | 'customer_reply' | 'closed';
+
+export interface Ticket {
+  id: string;
+  ticket_number: string;
+  organization_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  department: TicketDepartment;
+  priority: TicketPriority;
+  status: TicketStatus;
+  subject: string;
+  related_service?: string;
+  replies_count: number;
+  last_reply_at: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string;
+}
+
+export interface TicketReply {
+  id: string;
+  ticket_id: string;
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  is_staff: boolean;
+  message: string;
+  attachments?: string[];
+  created_at: string;
+}
+
+export interface KnowledgeArticle {
+  id: string;
+  title: string;
+  slug: string;
+  category: string;
+  content: string;
+  summary: string;
+  views: number;
+  helpful_votes: number;
+  unhelpful_votes: number;
+  is_published: boolean;
+  created_at: string;
+  updated_at: string;
+}
