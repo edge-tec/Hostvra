@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -18,14 +20,16 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/domains"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type BillingHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg       *config.Config
+	store     store.Store
+	audit     *audit.Logger
+	domainSvc *domains.Service
 }
 
 func NewBillingHandler(cfg *config.Config, s store.Store, a *audit.Logger) *BillingHandler {
@@ -34,6 +38,10 @@ func NewBillingHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Bill
 		store: s,
 		audit: a,
 	}
+}
+
+func (h *BillingHandler) SetDomainService(svc *domains.Service) {
+	h.domainSvc = svc
 }
 
 // ----------------------------------------------------------------------------
@@ -639,6 +647,20 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Webhook replay attack check
+	eventID := payload.TransactionID
+	if eventID == "" {
+		hSum := sha256.Sum256(bodyBytes)
+		eventID = hex.EncodeToString(hSum[:])
+	}
+	if existingWebhook, _ := h.store.GetDomainWebhook(r.Context(), gatewayName, eventID); existingWebhook != nil {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "idempotent_duplicate",
+			"message": "Webhook event was already processed",
+		}, nil)
+		return
+	}
+
 	if payload.InvoiceID == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_INVOICE", "invoice_id is required", nil, "")
 		return
@@ -653,6 +675,18 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.store.GetInvoiceByID(r.Context(), invUUID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
+	// Verify Payment Amount
+	if payload.Amount > 0 && math.Abs(payload.Amount-inv.Total) > 0.01 {
+		response.Error(w, http.StatusBadRequest, "INVALID_AMOUNT", fmt.Sprintf("Payment amount mismatch: expected %.2f, received %.2f", inv.Total, payload.Amount), nil, "")
+		return
+	}
+
+	// Verify Payment Currency
+	if payload.Currency != "" && !strings.EqualFold(payload.Currency, inv.Currency) {
+		response.Error(w, http.StatusBadRequest, "INVALID_CURRENCY", fmt.Sprintf("Payment currency mismatch: expected %s, received %s", inv.Currency, payload.Currency), nil, "")
 		return
 	}
 
@@ -688,6 +722,45 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			if sub, err := h.store.GetSubscriptionByID(r.Context(), *inv.SubscriptionID); err == nil {
 				sub.Status = store.SubStatusActive
 				_ = h.store.UpdateSubscription(r.Context(), sub)
+			}
+		}
+
+		// Record Webhook to prevent replays
+		_ = h.store.RecordDomainWebhook(r.Context(), &store.DomainWebhook{
+			ID:              uuid.New(),
+			Provider:        gatewayName,
+			EventType:       "payment",
+			ExternalEventID: eventID,
+			Payload:         string(bodyBytes),
+			Status:          "processed",
+			ProcessedAt:     now,
+			CreatedAt:       now,
+		})
+
+		// Provision associated domain order if present (Direct O(1) lookup via index)
+		if domainOrder, err := h.store.GetDomainOrderByInvoiceID(r.Context(), inv.ID); err == nil && domainOrder != nil {
+			if domainOrder.PaymentStatus != "paid" {
+				domainOrder.PaymentStatus = "paid"
+				_ = h.store.UpdateDomainOrder(r.Context(), domainOrder)
+				if h.domainSvc != nil {
+					go func(orderID uuid.UUID) {
+						_ = h.domainSvc.Provisioning.ProcessPaidOrder(context.Background(), orderID, nil, nil)
+					}(domainOrder.ID)
+				}
+			}
+		} else {
+			// Fallback scanning
+			orders, _ := h.store.ListAllDomainOrders(r.Context())
+			for _, o := range orders {
+				if o.InvoiceID != nil && *o.InvoiceID == inv.ID && o.PaymentStatus != "paid" {
+					o.PaymentStatus = "paid"
+					_ = h.store.UpdateDomainOrder(r.Context(), o)
+					if h.domainSvc != nil {
+						go func(orderID uuid.UUID) {
+							_ = h.domainSvc.Provisioning.ProcessPaidOrder(context.Background(), orderID, nil, nil)
+						}(o.ID)
+					}
+				}
 			}
 		}
 

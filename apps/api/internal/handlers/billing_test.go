@@ -114,3 +114,143 @@ func TestBillingHandler_Flow(t *testing.T) {
 		t.Fatalf("expected 200 for gateways, got %d", rec.Code)
 	}
 }
+
+// TestBillingWebhook_SecurityAndReplay verifies Section 16 & 17 payment webhook safeguards
+func TestBillingWebhook_SecurityAndReplay(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewBillingHandler(cfg, s, auditLogger)
+
+	r := chi.NewRouter()
+	r.Post("/billing/webhook/{gateway}", h.HandleWebhook)
+
+	ctx := context.Background()
+
+	// 1. Setup payment gateway with secret key
+	gatewayName := "stripe"
+	_ = s.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:   gatewayName,
+		SecretKey: "stripe-secret-test-key",
+		TestMode:  false,
+		Enabled:   true,
+	})
+
+	// 2. Create an unpaid invoice
+	invID := uuid.New()
+	inv := &store.Invoice{
+		ID:            invID,
+		InvoiceNumber: "INV-TEST-001",
+		UserID:        uuid.New(),
+		Subtotal:      25.00,
+		Total:         25.00,
+		Currency:      "USD",
+		Status:        store.InvoiceStatusUnpaid,
+	}
+	_ = s.CreateInvoice(ctx, inv)
+
+	// Helper to send webhook
+	sendWebhook := func(payload WebhookPayload, signature string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest("POST", "/billing/webhook/"+gatewayName, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if signature != "" {
+			req.Header.Set("X-Signature", signature)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// 3. Test Invalid Signature
+	t.Run("InvalidSignature", func(t *testing.T) {
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_sig_test_1",
+			Amount:        25.00,
+			Currency:      "USD",
+			Status:        "paid",
+		}
+		rec := sendWebhook(payload, "invalid-hmac-signature")
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected 401 Unauthorized for bad signature, got %d", rec.Code)
+		}
+	})
+
+	// 4. Test Amount Mismatch
+	t.Run("AmountMismatch", func(t *testing.T) {
+		// Update gateway to test mode so signature isn't blocking
+		_ = s.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+			Gateway:   gatewayName,
+			TestMode:  true,
+			Enabled:   true,
+		})
+
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_amount_mismatch",
+			Amount:        10.00, // Expected 25.00
+			Currency:      "USD",
+			Status:        "paid",
+		}
+		rec := sendWebhook(payload, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for amount mismatch, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// 5. Test Currency Mismatch
+	t.Run("CurrencyMismatch", func(t *testing.T) {
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_curr_mismatch",
+			Amount:        25.00,
+			Currency:      "EUR", // Expected USD
+			Status:        "paid",
+		}
+		rec := sendWebhook(payload, "")
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("Expected 400 Bad Request for currency mismatch, got %d: %s", rec.Code, rec.Body.String())
+		}
+	})
+
+	// 6. Test Valid Webhook -> Success
+	t.Run("ValidWebhookAndReplayDeduplication", func(t *testing.T) {
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_success_valid_123",
+			Amount:        25.00,
+			Currency:      "USD",
+			Status:        "paid",
+		}
+
+		// First delivery -> 200 OK success
+		rec1 := sendWebhook(payload, "")
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK on first webhook, got %d: %s", rec1.Code, rec1.Body.String())
+		}
+
+		// Verify invoice marked paid
+		updatedInv, err := s.GetInvoiceByID(ctx, invID)
+		if err != nil || updatedInv.Status != store.InvoiceStatusPaid {
+			t.Fatalf("Expected invoice marked paid, got status: %s", updatedInv.Status)
+		}
+
+		// Webhook #2 (Replay) -> Must be recognized as duplicate
+		rec2 := sendWebhook(payload, "")
+		if rec2.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK on replayed webhook, got %d", rec2.Code)
+		}
+		if !bytes.Contains(rec2.Body.Bytes(), []byte("idempotent_duplicate")) && !bytes.Contains(rec2.Body.Bytes(), []byte("idempotent_success")) {
+			t.Errorf("Expected idempotent response on duplicate webhook, got: %s", rec2.Body.String())
+		}
+
+		// Webhook #3 (Replay)
+		rec3 := sendWebhook(payload, "")
+		if rec3.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK on 3rd webhook replay, got %d", rec3.Code)
+		}
+	})
+}

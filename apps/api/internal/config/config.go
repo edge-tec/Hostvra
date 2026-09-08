@@ -23,6 +23,17 @@ type Config struct {
 	SystemEdition        string
 	LogLevel             string
 	LogFormat            string
+
+	// Domain Reseller Subsystem (ResellerClub)
+	DomainRegistrar        string
+	ResellerClubResellerID string
+	ResellerClubAPIKey     string
+	ResellerClubMode       string
+	ResellerClubAPIBaseURL string
+	ResellerClubAPITimeout time.Duration
+	DomainDefaultNS1       string
+	DomainDefaultNS2       string
+	DomainEncryptionSecret string
 }
 
 func Load() *Config {
@@ -41,6 +52,16 @@ func Load() *Config {
 		SystemEdition:      getEnv("HOSTVRA_SYSTEM_EDITION", "community"),
 		LogLevel:           getEnv("LOG_LEVEL", "debug"),
 		LogFormat:          getEnv("LOG_FORMAT", "json"),
+
+		DomainRegistrar:        getEnv("DOMAIN_REGISTRAR", "resellerclub"),
+		ResellerClubResellerID: getEnv("RESELLERCLUB_RESELLER_ID", ""),
+		ResellerClubAPIKey:     getEnv("RESELLERCLUB_API_KEY", ""),
+		ResellerClubMode:       getEnv("RESELLERCLUB_MODE", "sandbox"),
+		ResellerClubAPIBaseURL: getEnv("RESELLERCLUB_API_BASE_URL", ""),
+		ResellerClubAPITimeout: time.Duration(getEnvInt("RESELLERCLUB_API_TIMEOUT_SECONDS", 30)) * time.Second,
+		DomainDefaultNS1:       getEnv("DOMAIN_DEFAULT_NS1", "ns1.hostvra.com"),
+		DomainDefaultNS2:       getEnv("DOMAIN_DEFAULT_NS2", "ns2.hostvra.com"),
+		DomainEncryptionSecret: getEnv("DOMAIN_ENCRYPTION_SECRET", "hostvra-domain-auth-encryption-key-32b"),
 	}
 }
 
@@ -57,6 +78,19 @@ func (c *Config) ValidateProduction() error {
 		if c.DatabaseURL == "" ||
 			strings.Contains(c.DatabaseURL, "hostvra_dev_password") {
 			return errors.New("CRITICAL STARTUP ERROR: DATABASE_URL must be explicitly configured in production with valid credentials")
+		}
+
+		// 3. Mandatory ResellerClub Production Credentials
+		if strings.EqualFold(c.DomainRegistrar, "resellerclub") {
+			if c.ResellerClubResellerID == "" {
+				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_RESELLER_ID must be provided in production")
+			}
+			if c.ResellerClubAPIKey == "" {
+				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_API_KEY must be provided in production")
+			}
+			if !strings.EqualFold(c.ResellerClubMode, "production") {
+				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_MODE must be set to 'production' in production environment (sandbox prohibited)")
+			}
 		}
 	}
 	return nil

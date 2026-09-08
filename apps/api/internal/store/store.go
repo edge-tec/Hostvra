@@ -193,7 +193,61 @@ type Store interface {
 	UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error
 	DeleteHostingAccount(ctx context.Context, id uuid.UUID) error
 
-	// Domain Registrar & TLD Pricing
+	// Domain Registrar, TLDs & Pricing
+	ListDomainTLDs(ctx context.Context) ([]*DomainTLD, error)
+	GetDomainTLD(ctx context.Context, tld string) (*DomainTLD, error)
+	SaveDomainTLD(ctx context.Context, tld *DomainTLD) error
+	ListDomainPrices(ctx context.Context) ([]*DomainPrice, error)
+	GetDomainPrice(ctx context.Context, tld string) (*DomainPrice, error)
+	SaveDomainPrice(ctx context.Context, price *DomainPrice) error
+
+	// Domains
+	CreateDomain(ctx context.Context, domain *Domain) error
+	GetDomainByID(ctx context.Context, id uuid.UUID) (*Domain, error)
+	GetDomainByName(ctx context.Context, domainName string) (*Domain, error)
+	ListDomainsByUserID(ctx context.Context, userID uuid.UUID) ([]*Domain, error)
+	ListAllDomains(ctx context.Context) ([]*Domain, error)
+	UpdateDomain(ctx context.Context, domain *Domain) error
+	DeleteDomain(ctx context.Context, id uuid.UUID) error
+
+	// Domain Orders
+	CreateDomainOrder(ctx context.Context, order *DomainOrder) error
+	GetDomainOrderByID(ctx context.Context, id uuid.UUID) (*DomainOrder, error)
+	GetDomainOrderByIdempotencyKey(ctx context.Context, key string) (*DomainOrder, error)
+	ListDomainOrdersByUserID(ctx context.Context, userID uuid.UUID) ([]*DomainOrder, error)
+	ListAllDomainOrders(ctx context.Context) ([]*DomainOrder, error)
+	UpdateDomainOrder(ctx context.Context, order *DomainOrder) error
+
+	// Contacts, Nameservers & DNS Records
+	SaveDomainContacts(ctx context.Context, contacts []*DomainContact) error
+	GetDomainContacts(ctx context.Context, domainID uuid.UUID) ([]*DomainContact, error)
+	SaveDomainNameservers(ctx context.Context, domainID uuid.UUID, ns []string) error
+	GetDomainNameservers(ctx context.Context, domainID uuid.UUID) ([]string, error)
+	CreateDomainDNSRecord(ctx context.Context, rec *DomainDNSRecord) error
+	GetDomainDNSRecords(ctx context.Context, domainID uuid.UUID) ([]*DomainDNSRecord, error)
+	GetDomainDNSRecordByID(ctx context.Context, id uuid.UUID) (*DomainDNSRecord, error)
+	UpdateDomainDNSRecord(ctx context.Context, rec *DomainDNSRecord) error
+	DeleteDomainDNSRecord(ctx context.Context, id uuid.UUID) error
+
+	// Transfers & Renewals
+	CreateDomainTransfer(ctx context.Context, transfer *DomainTransfer) error
+	GetDomainTransferByID(ctx context.Context, id uuid.UUID) (*DomainTransfer, error)
+	ListDomainTransfers(ctx context.Context, userID *uuid.UUID) ([]*DomainTransfer, error)
+	UpdateDomainTransfer(ctx context.Context, transfer *DomainTransfer) error
+	CreateDomainRenewal(ctx context.Context, renewal *DomainRenewal) error
+	ListDomainRenewals(ctx context.Context, domainID *uuid.UUID) ([]*DomainRenewal, error)
+
+	// Webhooks, Transactions & Audit
+	RecordDomainWebhook(ctx context.Context, hook *DomainWebhook) error
+	GetDomainWebhook(ctx context.Context, provider, externalEventID string) (*DomainWebhook, error)
+	TryAcquireDomainAdvisoryLock(ctx context.Context, lockKey string) (bool, func(), error)
+	GetDomainOrderByInvoiceID(ctx context.Context, invoiceID uuid.UUID) (*DomainOrder, error)
+	RecordDomainTransaction(ctx context.Context, txn *DomainTransaction) error
+	ListDomainTransactions(ctx context.Context, domainID *uuid.UUID) ([]*DomainTransaction, error)
+	RecordDomainAuditLog(ctx context.Context, log *DomainAuditLog) error
+	ListDomainAuditLogs(ctx context.Context, domainName string) ([]*DomainAuditLog, error)
+
+	// Legacy compatibility methods
 	ListTLDPricings(ctx context.Context) ([]*TLDPricing, error)
 	GetTLDPricing(ctx context.Context, tld string) (*TLDPricing, error)
 	SaveTLDPricing(ctx context.Context, pricing *TLDPricing) error
@@ -263,6 +317,19 @@ type MemoryStore struct {
 	hostingAccounts     map[uuid.UUID]*HostingAccount
 	tldPricings         map[string]*TLDPricing
 	registrarConfigs    map[string]*DomainRegistrarConfig
+	domainTLDs          map[string]*DomainTLD
+	domainPrices        map[string]*DomainPrice
+	domains             map[uuid.UUID]*Domain
+	domainOrders        map[uuid.UUID]*DomainOrder
+	domainContacts      map[uuid.UUID][]*DomainContact
+	domainNameservers   map[uuid.UUID][]string
+	domainDNSRecords    map[uuid.UUID][]*DomainDNSRecord
+	domainTransfers     map[uuid.UUID]*DomainTransfer
+	domainRenewals      map[uuid.UUID][]*DomainRenewal
+	domainWebhooks      map[string]*DomainWebhook
+	domainTransactions  []*DomainTransaction
+	domainAuditLogs     []*DomainAuditLog
+	domainAdvisoryLocks map[string]bool
 	tickets             []Ticket
 	ticketReplies       []TicketReply
 	articles            []KnowledgeArticle
@@ -494,6 +561,19 @@ func NewMemoryStore() *MemoryStore {
 		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
 		tldPricings:         make(map[string]*TLDPricing),
 		registrarConfigs:    make(map[string]*DomainRegistrarConfig),
+		domainTLDs:          make(map[string]*DomainTLD),
+		domainPrices:        make(map[string]*DomainPrice),
+		domains:             make(map[uuid.UUID]*Domain),
+		domainOrders:        make(map[uuid.UUID]*DomainOrder),
+		domainContacts:      make(map[uuid.UUID][]*DomainContact),
+		domainNameservers:   make(map[uuid.UUID][]string),
+		domainDNSRecords:    make(map[uuid.UUID][]*DomainDNSRecord),
+		domainTransfers:     make(map[uuid.UUID]*DomainTransfer),
+		domainRenewals:      make(map[uuid.UUID][]*DomainRenewal),
+		domainWebhooks:      make(map[string]*DomainWebhook),
+		domainTransactions:  make([]*DomainTransaction, 0),
+		domainAuditLogs:     make([]*DomainAuditLog, 0),
+		domainAdvisoryLocks: make(map[string]bool),
 		tickets:             make([]Ticket, 0),
 		ticketReplies:       make([]TicketReply, 0),
 		articles:            make([]KnowledgeArticle, 0),
@@ -502,7 +582,7 @@ func NewMemoryStore() *MemoryStore {
 	m.loadFromDisk()
 	m.seedBillingData()
 	m.seedAccountData()
-	m.seedTLDData()
+	m.seedDomainResellerData()
 	m.seedSupportData()
 	return m
 }
@@ -796,7 +876,232 @@ func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
+	if err := ensureDomainSchema(db); err != nil {
+		fmt.Printf("[PostgresStore] Warning: domain schema ensure error: %v\n", err)
+	}
+
 	return &PostgresStore{db: db}, nil
+}
+
+func ensureDomainSchema(db *sql.DB) error {
+	schema := `
+	CREATE TABLE IF NOT EXISTS domain_tlds (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tld VARCHAR(64) NOT NULL UNIQUE,
+		enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		registration_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		transfer_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		renewal_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		min_years INT NOT NULL DEFAULT 1,
+		max_years INT NOT NULL DEFAULT 10,
+		provider VARCHAR(64) NOT NULL DEFAULT 'resellerclub',
+		is_popular BOOLEAN NOT NULL DEFAULT FALSE,
+		category VARCHAR(64) NOT NULL DEFAULT 'popular',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_prices (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tld VARCHAR(64) NOT NULL UNIQUE REFERENCES domain_tlds(tld) ON DELETE CASCADE,
+		registration_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		registration_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		renewal_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		renewal_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		transfer_cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		transfer_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+		enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domains (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+		order_id UUID,
+		domain_name VARCHAR(255) NOT NULL UNIQUE,
+		tld VARCHAR(64) NOT NULL,
+		registrar VARCHAR(64) NOT NULL DEFAULT 'resellerclub',
+		provider_order_id VARCHAR(128),
+		provider_domain_id VARCHAR(128),
+		status VARCHAR(50) NOT NULL DEFAULT 'pending',
+		registration_date TIMESTAMPTZ,
+		expiry_date TIMESTAMPTZ,
+		transfer_status VARCHAR(50) NOT NULL DEFAULT 'none',
+		auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
+		registrar_lock BOOLEAN NOT NULL DEFAULT TRUE,
+		privacy_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		website_id UUID REFERENCES websites(id) ON DELETE SET NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_orders (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+		domain_id UUID REFERENCES domains(id) ON DELETE SET NULL,
+		domain_name VARCHAR(255) NOT NULL,
+		order_type VARCHAR(32) NOT NULL,
+		years INT NOT NULL DEFAULT 1,
+		amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+		payment_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+		provisioning_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+		provider_status VARCHAR(64) NOT NULL DEFAULT 'none',
+		provider_order_id VARCHAR(128),
+		idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+		failure_reason TEXT,
+		retry_count INT NOT NULL DEFAULT 0,
+		invoice_id UUID,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_contacts (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+		contact_type VARCHAR(32) NOT NULL,
+		first_name VARCHAR(100) NOT NULL,
+		last_name VARCHAR(100) NOT NULL,
+		organization VARCHAR(150),
+		email VARCHAR(255) NOT NULL,
+		phone VARCHAR(50) NOT NULL,
+		address1 VARCHAR(255) NOT NULL,
+		address2 VARCHAR(255),
+		city VARCHAR(100) NOT NULL,
+		state VARCHAR(100) NOT NULL,
+		postal_code VARCHAR(32) NOT NULL,
+		country VARCHAR(4) NOT NULL,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT uq_domain_contact_type UNIQUE (domain_id, contact_type)
+	);
+	CREATE TABLE IF NOT EXISTS domain_nameservers (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+		nameserver VARCHAR(255) NOT NULL,
+		position INT NOT NULL DEFAULT 1,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT uq_domain_nameserver_pos UNIQUE (domain_id, position)
+	);
+	CREATE TABLE IF NOT EXISTS domain_dns_records (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+		record_type VARCHAR(16) NOT NULL,
+		name VARCHAR(255) NOT NULL,
+		value TEXT NOT NULL,
+		ttl INT NOT NULL DEFAULT 3600,
+		priority INT,
+		provider_record_id VARCHAR(128),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_transfers (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID REFERENCES domains(id) ON DELETE SET NULL,
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		domain_name VARCHAR(255) NOT NULL,
+		auth_code_encrypted TEXT NOT NULL,
+		status VARCHAR(50) NOT NULL DEFAULT 'pending',
+		provider_order_id VARCHAR(128),
+		requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		completed_at TIMESTAMPTZ,
+		failed_at TIMESTAMPTZ,
+		failure_reason TEXT,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_renewals (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+		user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		years INT NOT NULL DEFAULT 1,
+		amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+		payment_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+		provider_order_id VARCHAR(128),
+		status VARCHAR(50) NOT NULL DEFAULT 'pending',
+		old_expiry_date TIMESTAMPTZ,
+		new_expiry_date TIMESTAMPTZ,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		completed_at TIMESTAMPTZ
+	);
+	CREATE TABLE IF NOT EXISTS domain_webhooks (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		provider VARCHAR(64) NOT NULL,
+		event_type VARCHAR(128) NOT NULL,
+		external_event_id VARCHAR(255) NOT NULL,
+		payload JSONB NOT NULL,
+		status VARCHAR(32) NOT NULL DEFAULT 'processed',
+		processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		CONSTRAINT uq_domain_webhook_provider_event UNIQUE (provider, external_event_id)
+	);
+	CREATE TABLE IF NOT EXISTS domain_transactions (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID REFERENCES domains(id) ON DELETE SET NULL,
+		order_id UUID REFERENCES domain_orders(id) ON DELETE SET NULL,
+		provider VARCHAR(64) NOT NULL DEFAULT 'resellerclub',
+		operation VARCHAR(64) NOT NULL,
+		request_id VARCHAR(128),
+		provider_order_id VARCHAR(128),
+		amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		cost NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+		currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+		status VARCHAR(32) NOT NULL DEFAULT 'success',
+		error_code VARCHAR(64),
+		error_message TEXT,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE TABLE IF NOT EXISTS domain_audit_logs (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		domain_id UUID REFERENCES domains(id) ON DELETE SET NULL,
+		domain_name VARCHAR(255) NOT NULL,
+		user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+		action VARCHAR(64) NOT NULL,
+		details TEXT NOT NULL,
+		ip_address VARCHAR(64),
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+	);
+	CREATE INDEX IF NOT EXISTS idx_domain_orders_invoice_id ON domain_orders(invoice_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS uq_active_domains ON domains(domain_name) WHERE status NOT IN ('cancelled', 'transferred_out');
+	CREATE UNIQUE INDEX IF NOT EXISTS uq_active_domain_provisioning ON domain_orders(domain_name) WHERE provisioning_status IN ('pending', 'provisioning') AND payment_status = 'paid';
+	INSERT INTO domain_tlds (tld, enabled, registration_enabled, transfer_enabled, renewal_enabled, min_years, max_years, provider, is_popular, category)
+	VALUES
+		('com', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', TRUE, 'popular'),
+		('net', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', TRUE, 'popular'),
+		('org', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', TRUE, 'popular'),
+		('xyz', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', TRUE, 'tech'),
+		('io',  TRUE, TRUE, TRUE, TRUE, 1, 5,  'resellerclub', TRUE, 'tech'),
+		('co',  TRUE, TRUE, TRUE, TRUE, 1, 5,  'resellerclub', FALSE, 'popular'),
+		('tech', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', FALSE, 'tech'),
+		('store', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', FALSE, 'business'),
+		('online', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', FALSE, 'popular'),
+		('info', TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', FALSE, 'popular'),
+		('biz',  TRUE, TRUE, TRUE, TRUE, 1, 10, 'resellerclub', FALSE, 'business')
+	ON CONFLICT (tld) DO NOTHING;
+
+	INSERT INTO domain_prices (tld, registration_cost, registration_price, renewal_cost, renewal_price, transfer_cost, transfer_price, currency, enabled)
+	VALUES
+		('com',    10.29, 14.99, 10.99, 16.99, 10.29, 14.99, 'USD', TRUE),
+		('net',    12.49, 16.99, 13.19, 18.99, 12.49, 16.99, 'USD', TRUE),
+		('org',    11.89, 15.99, 12.49, 17.99, 11.89, 15.99, 'USD', TRUE),
+		('xyz',     1.99,  2.99, 10.49, 13.99,  9.99, 12.99, 'USD', TRUE),
+		('io',     32.50, 44.99, 36.50, 49.99, 32.50, 44.99, 'USD', TRUE),
+		('co',      9.99, 14.99, 23.50, 29.99, 21.00, 27.99, 'USD', TRUE),
+		('tech',    3.89,  5.99, 17.50, 23.99, 16.00, 21.99, 'USD', TRUE),
+		('store',   2.99,  4.99, 26.50, 34.99, 24.00, 31.99, 'USD', TRUE),
+		('online',  1.89,  2.99, 22.50, 28.99, 20.00, 26.99, 'USD', TRUE),
+		('info',    4.29,  6.99, 16.50, 21.99, 15.00, 19.99, 'USD', TRUE),
+		('biz',     7.50, 11.99, 16.50, 21.99, 15.00, 19.99, 'USD', TRUE)
+	ON CONFLICT (tld) DO NOTHING;
+	`
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, err := db.ExecContext(ctx, schema)
+	return err
 }
 
 func (p *PostgresStore) Close() error {

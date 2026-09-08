@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math/rand"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,37 +15,58 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/domains"
+	"hostvra/api/internal/domains/resellerclub"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type DomainRegistrarHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg       *config.Config
+	store     store.Store
+	audit     *audit.Logger
+	domainSvc *domains.Service
 }
 
 func NewDomainRegistrarHandler(cfg *config.Config, s store.Store, a *audit.Logger) *DomainRegistrarHandler {
+	// Initialize ResellerClub client as default registrar
+	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
+		ResellerID: cfg.ResellerClubResellerID,
+		APIKey:     cfg.ResellerClubAPIKey,
+		Mode:       cfg.ResellerClubMode,
+		BaseURL:    cfg.ResellerClubAPIBaseURL,
+		Timeout:    cfg.ResellerClubAPITimeout,
+	})
+
+	domainService := domains.NewService(s, rcClient, cfg.DomainEncryptionSecret)
+
 	return &DomainRegistrarHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+		cfg:       cfg,
+		store:     s,
+		audit:     a,
+		domainSvc: domainService,
 	}
 }
 
+func (h *DomainRegistrarHandler) SetDomainService(svc *domains.Service) {
+	h.domainSvc = svc
+}
+
 // ----------------------------------------------------------------------------
-// Domain Search & Availability
+// 1. Domain Search & Availability
 // ----------------------------------------------------------------------------
 
 type DomainSearchResultItem struct {
 	Domain        string  `json:"domain"`
 	TLD           string  `json:"tld"`
 	Available     bool    `json:"available"`
+	Status        string  `json:"status"` // available, unavailable, error
 	RegisterPrice float64 `json:"register_price"`
 	RenewPrice    float64 `json:"renew_price"`
 	TransferPrice float64 `json:"transfer_price"`
 	Currency      string  `json:"currency"`
 	IsPopular     bool    `json:"is_popular"`
+	Message       string  `json:"message,omitempty"`
 }
 
 func (h *DomainRegistrarHandler) SearchDomains(w http.ResponseWriter, r *http.Request) {
@@ -55,170 +76,681 @@ func (h *DomainRegistrarHandler) SearchDomains(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Sanitize query: strip http://, https://, www., trailing slashes
-	clean := strings.TrimPrefix(rawQuery, "https://")
-	clean = strings.TrimPrefix(clean, "http://")
-	clean = strings.TrimPrefix(clean, "www.")
-	clean = strings.TrimRight(clean, "/")
-
-	// Extract base label and specific TLD if present
-	parts := strings.Split(clean, ".")
-	baseLabel := parts[0]
-	var requestedTLD string
-	if len(parts) > 1 {
-		requestedTLD = "." + strings.Join(parts[1:], ".")
-	}
-
-	tlds, err := h.store.ListTLDPricings(r.Context())
+	results, err := h.domainSvc.Availability.SearchDomain(r.Context(), rawQuery, nil)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve TLDs", err.Error(), "")
+		response.Error(w, http.StatusInternalServerError, "SEARCH_FAILED", "Domain availability check failed", err.Error(), "")
 		return
 	}
 
-	// Filter TLDs to check
-	var tldsToCheck []*store.TLDPricing
-	if requestedTLD != "" {
-		// Put requested TLD first
-		for _, t := range tlds {
-			if strings.EqualFold(t.TLD, requestedTLD) {
-				tldsToCheck = append(tldsToCheck, t)
-				break
-			}
-		}
-		// If custom or not found, still include it
-		if len(tldsToCheck) == 0 {
-			tldsToCheck = append(tldsToCheck, &store.TLDPricing{
-				TLD:           requestedTLD,
-				RegisterPrice: 12.99,
-				RenewPrice:    14.99,
-				Currency:      "USD",
-			})
-		}
-		// Add top popular TLDs as alternatives
-		for _, t := range tlds {
-			if !strings.EqualFold(t.TLD, requestedTLD) && t.IsPopular && len(tldsToCheck) < 7 {
-				tldsToCheck = append(tldsToCheck, t)
-			}
-		}
-	} else {
-		// No specific TLD requested -> check top TLDs
-		for _, t := range tlds {
-			if t.IsPopular || len(tldsToCheck) < 8 {
-				tldsToCheck = append(tldsToCheck, t)
-			}
-		}
-	}
-
-	var results []DomainSearchResultItem
-	for _, t := range tldsToCheck {
-		checkDomain := baseLabel + t.TLD
-		available := isDomainAvailable(checkDomain)
-
-		results = append(results, DomainSearchResultItem{
-			Domain:        checkDomain,
-			TLD:           t.TLD,
-			Available:     available,
-			RegisterPrice: t.RegisterPrice,
-			RenewPrice:    t.RenewPrice,
-			TransferPrice: t.TransferPrice,
-			Currency:      t.Currency,
-			IsPopular:     t.IsPopular,
+	var items []DomainSearchResultItem
+	for _, res := range results {
+		items = append(items, DomainSearchResultItem{
+			Domain:        res.Domain,
+			TLD:           res.TLD,
+			Available:     res.Available,
+			Status:        res.Status,
+			RegisterPrice: res.RegisterPrice,
+			RenewPrice:    res.RenewPrice,
+			TransferPrice: res.TransferPrice,
+			Currency:      res.Currency,
+			IsPopular:     res.IsPopular,
+			Message:       res.Message,
 		})
 	}
 
-	response.JSON(w, http.StatusOK, results, &response.Meta{Total: len(results)})
-}
-
-// Live DNS check with timeout
-func isDomainAvailable(domain string) bool {
-	// Known registered domains check
-	if strings.Contains(domain, "google") || strings.Contains(domain, "facebook") ||
-		strings.Contains(domain, "microsoft") || strings.Contains(domain, "github") ||
-		strings.Contains(domain, "hostvra") || strings.Contains(domain, "apple") ||
-		strings.Contains(domain, "amazon") {
-		return false
-	}
-
-	// Perform DNS NS and A record lookups
-	ips, err := net.LookupHost(domain)
-	if err == nil && len(ips) > 0 {
-		return false
-	}
-
-	nss, err := net.LookupNS(domain)
-	if err == nil && len(nss) > 0 {
-		return false
-	}
-
-	return true
+	response.JSON(w, http.StatusOK, items, &response.Meta{Total: len(items)})
 }
 
 // ----------------------------------------------------------------------------
-// Whois Lookup
+// 2. Whois & Live Domain Info
 // ----------------------------------------------------------------------------
 
 func (h *DomainRegistrarHandler) WhoisLookup(w http.ResponseWriter, r *http.Request) {
-	domain := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
-	if domain == "" {
+	domainParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
+	if domainParam == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Domain parameter is required", nil, "")
 		return
 	}
 
-	clean := strings.TrimPrefix(domain, "https://")
-	clean = strings.TrimPrefix(clean, "http://")
-	clean = strings.TrimPrefix(clean, "www.")
-	clean = strings.TrimRight(clean, "/")
-
-	available := isDomainAvailable(clean)
-	record := &store.WhoisRecord{
-		Domain:    clean,
-		Available: available,
-		CheckedAt: time.Now().UTC(),
+	cleanDomain, tld, err := domains.ValidateDomainName(domainParam)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_DOMAIN", err.Error(), nil, "")
+		return
 	}
 
-	// Extract TLD
-	if idx := strings.Index(clean, "."); idx != -1 {
-		record.TLD = clean[idx:]
+	info, err := h.domainSvc.Registrar.GetDomainInfo(r.Context(), cleanDomain)
+	if err != nil {
+		// Return basic whois record
+		response.JSON(w, http.StatusOK, &store.WhoisRecord{
+			Domain:    cleanDomain,
+			TLD:       "." + tld,
+			Available: false,
+			CheckedAt: time.Now().UTC(),
+		}, nil)
+		return
 	}
 
-	if !available {
-		// Resolve real nameservers and IP if active
-		if nss, err := net.LookupNS(clean); err == nil {
-			for _, ns := range nss {
-				record.NameServers = append(record.NameServers, strings.TrimSuffix(ns.Host, "."))
-			}
-		}
-		if len(record.NameServers) == 0 {
-			record.NameServers = []string{"ns1.hostvra.com", "ns2.hostvra.com"}
-		}
-
-		if ips, err := net.LookupHost(clean); err == nil && len(ips) > 0 {
-			record.IPAddress = ips[0]
-		}
-
-		record.Registrar = "Hostvra Cloud Registrar / Namecheap Global"
-		record.RegistrarURL = "https://www.hostvra.com"
-		record.CreationDate = "2022-04-15 09:30:00 UTC"
-		record.ExpirationDate = "2027-04-15 09:30:00 UTC"
-		record.UpdatedDate = "2024-03-10 14:22:15 UTC"
-		record.Status = []string{
-			"clientTransferProhibited https://icann.org/epp#clientTransferProhibited",
-			"clientUpdateProhibited https://icann.org/epp#clientUpdateProhibited",
-		}
-		record.DNSSEC = false
-
-		record.RawWhois = fmt.Sprintf(
-			"Domain Name: %s\nRegistry Domain ID: %d_DOMAIN_COM-VRSN\nRegistrar: %s\nRegistrar IANA ID: 1068\nRegistrar Abuse Contact Email: abuse@hostvra.com\nCreation Date: %s\nRegistry Expiry Date: %s\nDomain Status: %s\nName Server: %s\nDNSSEC: unsigned\n",
-			clean, rand.Intn(99999999)+10000000, record.Registrar, record.CreationDate, record.ExpirationDate,
-			strings.Join(record.Status, ", "), strings.Join(record.NameServers, ", "),
-		)
+	var regDateStr, expDateStr string
+	if info.RegistrationDate != nil {
+		regDateStr = info.RegistrationDate.Format(time.RFC3339)
+	}
+	if info.ExpiryDate != nil {
+		expDateStr = info.ExpiryDate.Format(time.RFC3339)
 	}
 
-	response.JSON(w, http.StatusOK, record, nil)
+	rec := &store.WhoisRecord{
+		Domain:         cleanDomain,
+		TLD:            "." + tld,
+		Available:      false,
+		Registrar:      "Hostvra Domain Reseller (ResellerClub)",
+		CreationDate:   regDateStr,
+		ExpirationDate: expDateStr,
+		NameServers:    info.Nameservers,
+		Status:         []string{info.Status},
+		CheckedAt:      time.Now().UTC(),
+	}
+
+	response.JSON(w, http.StatusOK, rec, nil)
 }
 
 // ----------------------------------------------------------------------------
-// TLD Pricings Catalog
+// 3. Customer Domains Listing & Details
+// ----------------------------------------------------------------------------
+
+func (h *DomainRegistrarHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	list, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve domains", err.Error(), "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, list, &response.Meta{Total: len(list)})
+}
+
+func (h *DomainRegistrarHandler) authorizeDomain(r *http.Request, domainID uuid.UUID) (*store.Domain, error) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		return nil, errors.New("unauthorized")
+	}
+
+	d, err := h.store.GetDomainByID(r.Context(), domainID)
+	if err != nil {
+		return nil, errors.New("not_found")
+	}
+
+	if claims.Role != "admin" && claims.Role != "owner" && d.UserID != claims.UserID {
+		return nil, errors.New("forbidden")
+	}
+
+	return d, nil
+}
+
+func (h *DomainRegistrarHandler) handleAuthError(w http.ResponseWriter, err error) {
+	switch err.Error() {
+	case "unauthorized":
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+	case "not_found":
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Domain not found", nil, "")
+	case "forbidden":
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Unauthorized access to this domain", nil, "")
+	default:
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil, "")
+	}
+}
+
+func (h *DomainRegistrarHandler) GetDomain(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	domainID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, err := h.authorizeDomain(r, domainID)
+	if err != nil {
+		h.handleAuthError(w, err)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, d, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 4. Domain Order & Registration Flow
+// ----------------------------------------------------------------------------
+
+type OrderDomainRequest struct {
+	Domain        string               `json:"domain"`
+	Years         int                  `json:"years"`
+	Nameservers   []string             `json:"nameservers"`
+	PaymentMethod string               `json:"payment_method"`
+	AutoRenew     bool                 `json:"auto_renew"`
+	Registrant    *domains.ContactInfo `json:"registrant"`
+}
+
+func (h *DomainRegistrarHandler) OrderDomain(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	var req OrderDomainRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.Registrant == nil {
+		email := claims.Email
+		if email == "" {
+			cleanDomain := strings.ToLower(strings.TrimSpace(req.Domain))
+			if cleanDomain != "" {
+				email = "admin@" + cleanDomain
+			} else {
+				email = "owner@hostvra.local"
+			}
+		}
+		req.Registrant = &domains.ContactInfo{
+			FirstName:  "Account",
+			LastName:   "Owner",
+			Email:      email,
+			Phone:      "15551234567",
+			Address1:   "100 Hostvra Way",
+			City:       "Wilmington",
+			State:      "DE",
+			PostalCode: "19801",
+			Country:    "US",
+		}
+	}
+
+	res, err := h.domainSvc.Orders.CreateRegistrationOrder(r.Context(), domains.CreateRegistrationOrderRequest{
+		UserID:         claims.UserID,
+		OrganizationID: &claims.OrganizationID,
+		DomainName:     req.DomainDomainOrEmpty(req.Domain),
+		Years:          req.Years,
+		Nameservers:    req.Nameservers,
+		Registrant:     req.Registrant,
+		PaymentMethod:  req.PaymentMethod,
+	})
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "ORDER_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "domains.order.create", "domain_order", res.Order.ID.String(), "success", fmt.Sprintf("Created order for %s ($%.2f)", res.Order.DomainName, res.Order.Amount), nil)
+
+	response.JSON(w, http.StatusCreated, map[string]interface{}{
+		"order":   res.Order,
+		"domain":  res.Order.DomainName,
+		"years":   res.Order.Years,
+		"amount":  res.Order.Amount,
+		"invoice": res.Invoice,
+		"message": res.Message,
+	}, nil)
+}
+
+func (r *OrderDomainRequest) DomainDomainOrEmpty(d string) string {
+	return strings.ToLower(strings.TrimSpace(d))
+}
+
+func (h *DomainRegistrarHandler) GetDomainOrder(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	orderID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid order ID", nil, "")
+		return
+	}
+
+	order, err := h.store.GetDomainOrderByID(r.Context(), orderID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, order, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 5. Nameservers Management
+// ----------------------------------------------------------------------------
+
+func (h *DomainRegistrarHandler) GetNameservers(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	nsList, err := h.domainSvc.Nameservers.GetNameservers(r.Context(), domainID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "NAMESERVERS_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"domain_id":   domainID,
+		"nameservers": nsList,
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) UpdateNameservers(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	var req struct {
+		Nameservers []string `json:"nameservers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if err := h.domainSvc.Nameservers.UpdateNameservers(r.Context(), domainID, req.Nameservers); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "domains.nameservers.update", "domain", domainID.String(), "success", "Updated nameservers", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"nameservers": req.Nameservers,
+		"message":     "Nameservers updated successfully",
+	}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 6. DNS Records Management
+// ----------------------------------------------------------------------------
+
+func (h *DomainRegistrarHandler) ListDNSRecords(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	records, err := h.domainSvc.DNS.ListRecords(r.Context(), domainID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DNS_LIST_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, records, &response.Meta{Total: len(records)})
+}
+
+func (h *DomainRegistrarHandler) CreateDNSRecord(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	var req struct {
+		Type     string `json:"type"`
+		Name     string `json:"name"`
+		Value    string `json:"value"`
+		TTL      int    `json:"ttl"`
+		Priority int    `json:"priority"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	rec, err := h.domainSvc.DNS.CreateRecord(r.Context(), domainID, req.Type, req.Name, req.Value, req.TTL, req.Priority)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "DNS_CREATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "domains.dns.create", "domain_dns_record", rec.ID.String(), "success", fmt.Sprintf("Created DNS %s record %s", req.Type, req.Name), nil)
+
+	response.JSON(w, http.StatusCreated, rec, nil)
+}
+
+func (h *DomainRegistrarHandler) DeleteDNSRecord(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	recordID, err := uuid.Parse(chi.URLParam(r, "recordId"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_RECORD_ID", "Invalid record ID", nil, "")
+		return
+	}
+
+	if err := h.domainSvc.DNS.DeleteRecord(r.Context(), domainID, recordID); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DNS_DELETE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "domains.dns.delete", "domain_dns_record", recordID.String(), "success", "Deleted DNS record", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "DNS record deleted"}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 7. Security: Registrar Lock & EPP Auth Code
+// ----------------------------------------------------------------------------
+
+func (h *DomainRegistrarHandler) GetLock(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	locked, err := h.domainSvc.Registrar.GetRegistrarLock(r.Context(), d.DomainName)
+	if err == nil {
+		d.RegistrarLock = locked
+		_ = h.store.UpdateDomain(r.Context(), d)
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"domain_id":      domainID,
+		"domain_name":    d.DomainName,
+		"registrar_lock": d.RegistrarLock,
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) SetLock(w http.ResponseWriter, r *http.Request) {
+	h.toggleLock(w, r, true)
+}
+
+func (h *DomainRegistrarHandler) SetUnlock(w http.ResponseWriter, r *http.Request) {
+	h.toggleLock(w, r, false)
+}
+
+func (h *DomainRegistrarHandler) toggleLock(w http.ResponseWriter, r *http.Request, lock bool) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	if err := h.domainSvc.Registrar.SetRegistrarLock(r.Context(), d.DomainName, lock); err != nil {
+		response.Error(w, http.StatusInternalServerError, "LOCK_UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	d.RegistrarLock = lock
+	_ = h.store.UpdateDomain(r.Context(), d)
+
+	action := "DOMAIN_LOCK_ENABLED"
+	if !lock {
+		action = "DOMAIN_LOCK_DISABLED"
+	}
+	h.audit.Log(r.Context(), r, "domains.lock.toggle", "domain", domainID.String(), "success", action, nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"domain_id":      domainID,
+		"registrar_lock": lock,
+		"message":        fmt.Sprintf("Registrar theft protection set to %v", lock),
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) GetEPPCode(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	epp, err := h.domainSvc.Registrar.GetEPPCode(r.Context(), d.DomainName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "EPP_FAILED", "Failed to retrieve authorization code from registrar", nil, "")
+		return
+	}
+
+	// Never log actual EPP code
+	h.audit.Log(r.Context(), r, "domains.epp.retrieve", "domain", domainID.String(), "success", "Retrieved transfer EPP authorization code", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"domain_name": d.DomainName,
+		"epp_code":    epp,
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) GetContacts(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	contacts, err := h.domainSvc.Registrar.GetContacts(r.Context(), d.DomainName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "CONTACTS_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, contacts, nil)
+}
+
+func (h *DomainRegistrarHandler) UpdateContacts(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	var req domains.ContactUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+	req.DomainName = d.DomainName
+
+	if err := h.domainSvc.Registrar.UpdateContacts(r.Context(), req); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "domains.contacts.update", "domain", domainID.String(), "success", "Updated WHOIS contacts", nil)
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true, "message": "Contacts updated successfully"}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 8. Renewal & Transfer
+// ----------------------------------------------------------------------------
+
+func (h *DomainRegistrarHandler) RenewDomain(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	_, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	var req struct {
+		Years int `json:"years"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Years < 1 {
+		req.Years = 1
+	}
+
+	inv, err := h.domainSvc.Renewals.RequestRenewal(r.Context(), domainID, claims.UserID, req.Years)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "RENEWAL_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]interface{}{
+		"invoice": inv,
+		"message": "Renewal order created. Please pay invoice to complete renewal.",
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) TransferDomain(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+
+	var req struct {
+		Domain     string               `json:"domain"`
+		AuthCode   string               `json:"auth_code"`
+		Registrant *domains.ContactInfo `json:"registrant"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.Registrant == nil {
+		email := claims.Email
+		if email == "" {
+			email = "owner@hostvra.local"
+		}
+		req.Registrant = &domains.ContactInfo{
+			FirstName:  "Transfer",
+			LastName:   "Owner",
+			Email:      email,
+			Phone:      "15551234567",
+			Address1:   "100 Hostvra Way",
+			City:       "Wilmington",
+			State:      "DE",
+			PostalCode: "19801",
+			Country:    "US",
+		}
+	}
+
+	record, inv, err := h.domainSvc.Transfers.InitiateTransfer(r.Context(), domains.InitiateTransferRequest{
+		UserID:         claims.UserID,
+		OrganizationID: &claims.OrganizationID,
+		DomainName:     req.Domain,
+		AuthCode:       req.AuthCode,
+		Registrant:     req.Registrant,
+	})
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "TRANSFER_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]interface{}{
+		"transfer": record,
+		"invoice":  inv,
+		"message":  "Transfer initiated. Complete invoice payment to submit to registrar.",
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) ToggleAutoRenew(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain ID", nil, "")
+		return
+	}
+
+	d, authErr := h.authorizeDomain(r, domainID)
+	if authErr != nil {
+		h.handleAuthError(w, authErr)
+		return
+	}
+
+	d.AutoRenew = !d.AutoRenew
+	_ = h.store.UpdateDomain(r.Context(), d)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"domain_id":  domainID,
+		"auto_renew": d.AutoRenew,
+	}, nil)
+}
+
+func (h *DomainRegistrarHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Admin permission required", nil, "")
+		return
+	}
+
+	result, err := h.domainSvc.Registrar.TestConnection(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusBadGateway, "REGISTRAR_CONNECTION_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, result, nil)
+}
+
+// ----------------------------------------------------------------------------
+// 9. Legacy Compatibility Endpoints
 // ----------------------------------------------------------------------------
 
 func (h *DomainRegistrarHandler) ListTLDs(w http.ResponseWriter, r *http.Request) {
@@ -232,11 +764,6 @@ func (h *DomainRegistrarHandler) ListTLDs(w http.ResponseWriter, r *http.Request
 
 func (h *DomainRegistrarHandler) UpdateTLD(w http.ResponseWriter, r *http.Request) {
 	tld := chi.URLParam(r, "tld")
-	if tld == "" {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "TLD is required", nil, "")
-		return
-	}
-
 	var req store.TLDPricing
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
@@ -245,160 +772,33 @@ func (h *DomainRegistrarHandler) UpdateTLD(w http.ResponseWriter, r *http.Reques
 
 	req.TLD = tld
 	if err := h.store.SaveTLDPricing(r.Context(), &req); err != nil {
-		response.Error(w, http.StatusInternalServerError, "SAVE_FAILED", "Failed to save TLD pricing", err.Error(), "")
+		response.Error(w, http.StatusInternalServerError, "SAVE_FAILED", err.Error(), nil, "")
 		return
 	}
-
-	h.audit.Log(r.Context(), r, "domains.tld.update", "tld_pricing", tld, "success", "Updated pricing for "+tld, nil)
 
 	response.JSON(w, http.StatusOK, req, nil)
 }
 
-// ----------------------------------------------------------------------------
-// Domain Registrars Config
-// ----------------------------------------------------------------------------
-
 func (h *DomainRegistrarHandler) ListRegistrars(w http.ResponseWriter, r *http.Request) {
-	registrars, err := h.store.ListRegistrarConfigs(r.Context())
+	configs, err := h.store.ListRegistrarConfigs(r.Context())
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve registrars", err.Error(), "")
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error(), nil, "")
 		return
 	}
-
-	// Mask sensitive keys
-	var safeList []*store.DomainRegistrarConfig
-	for _, reg := range registrars {
-		copyR := *reg
-		if copyR.APIKey != "" {
-			if len(copyR.APIKey) > 8 {
-				copyR.APIKey = copyR.APIKey[:4] + "••••••••" + copyR.APIKey[len(copyR.APIKey)-4:]
-			} else {
-				copyR.APIKey = "••••••••"
-			}
-		}
-		safeList = append(safeList, &copyR)
-	}
-
-	response.JSON(w, http.StatusOK, safeList, nil)
+	response.JSON(w, http.StatusOK, configs, nil)
 }
 
 func (h *DomainRegistrarHandler) UpdateRegistrar(w http.ResponseWriter, r *http.Request) {
-	regName := chi.URLParam(r, "registrar")
-	if regName == "" {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Registrar name is required", nil, "")
-		return
-	}
-
+	registrar := chi.URLParam(r, "registrar")
 	var req store.DomainRegistrarConfig
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
 		return
 	}
-
-	existing, err := h.store.GetRegistrarConfig(r.Context(), regName)
-	if err != nil {
-		existing = &store.DomainRegistrarConfig{
-			Registrar: regName,
-		}
-	}
-
-	if req.DisplayName != "" {
-		existing.DisplayName = req.DisplayName
-	}
-	existing.Enabled = req.Enabled
-	existing.TestMode = req.TestMode
-	if req.APIUser != "" {
-		existing.APIUser = req.APIUser
-	}
-	if req.APIKey != "" && !strings.Contains(req.APIKey, "••••") {
-		existing.APIKey = req.APIKey
-	}
-	if req.ClientIP != "" {
-		existing.ClientIP = req.ClientIP
-	}
-
-	if err := h.store.SaveRegistrarConfig(r.Context(), existing); err != nil {
-		response.Error(w, http.StatusInternalServerError, "SAVE_FAILED", "Failed to update registrar", err.Error(), "")
-		return
-	}
-
-	h.audit.Log(r.Context(), r, "domains.registrar.update", "registrar_config", regName, "success", "Updated registrar "+regName, nil)
-
-	response.JSON(w, http.StatusOK, existing, nil)
+	req.Registrar = registrar
+	_ = h.store.SaveRegistrarConfig(r.Context(), &req)
+	response.JSON(w, http.StatusOK, req, nil)
 }
 
-// ----------------------------------------------------------------------------
-// Order Domain Registration
-// ----------------------------------------------------------------------------
-
-type OrderDomainRequest struct {
-	Domain        string `json:"domain"`
-	Years         int    `json:"years"`
-	PaymentMethod string `json:"payment_method"`
-	AutoRenew     bool   `json:"auto_renew"`
-}
-
-func (h *DomainRegistrarHandler) OrderDomain(w http.ResponseWriter, r *http.Request) {
-	claims, _ := auth.GetClaims(r.Context())
-
-	var req OrderDomainRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
-		return
-	}
-
-	cleanDomain := strings.ToLower(strings.TrimSpace(req.Domain))
-	if cleanDomain == "" {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Domain name is required", nil, "")
-		return
-	}
-
-	if req.Years < 1 {
-		req.Years = 1
-	}
-
-	// Extract TLD
-	var tld string
-	if idx := strings.Index(cleanDomain, "."); idx != -1 {
-		tld = cleanDomain[idx:]
-	}
-
-	price := 9.99
-	if tldPricing, err := h.store.GetTLDPricing(r.Context(), tld); err == nil {
-		price = tldPricing.RegisterPrice
-	}
-
-	totalAmount := price * float64(req.Years)
-
-	// Create Corresponding Invoice in Store
-	now := time.Now().UTC()
-	paidAt := now
-	inv := &store.Invoice{
-		ID:            uuid.New(),
-		InvoiceNumber: fmt.Sprintf("DOM-%d-%05d", now.Year(), rand.Intn(90000)+10000),
-		UserID:        claims.UserID,
-		Description:   fmt.Sprintf("Domain Registration: %s (%d Year)", cleanDomain, req.Years),
-		Subtotal:      totalAmount,
-		Tax:           0.0,
-		Discount:      0.0,
-		Total:         totalAmount,
-		Currency:      "USD",
-		Status:        store.InvoiceStatusPaid,
-		PaymentMethod: req.PaymentMethod,
-		TransactionID: fmt.Sprintf("txn_dom_%d", time.Now().UnixNano()),
-		DueDate:       now.AddDate(0, 0, 7),
-		PaidAt:        &paidAt,
-		CreatedAt:     now,
-	}
-	_ = h.store.CreateInvoice(r.Context(), inv)
-
-	h.audit.Log(r.Context(), r, "domains.order", "domain", cleanDomain, "success", fmt.Sprintf("Ordered domain %s for %d years", cleanDomain, req.Years), nil)
-
-	response.JSON(w, http.StatusCreated, map[string]interface{}{
-		"domain":  cleanDomain,
-		"years":   req.Years,
-		"amount":  totalAmount,
-		"invoice": inv,
-		"message": fmt.Sprintf("Congratulations! Domain %s has been registered successfully.", cleanDomain),
-	}, nil)
-}
+// Unused suppressor
+var _ = strconv.Itoa

@@ -94,6 +94,7 @@ const navGroups: NavGroup[] = [
     title: 'SYSTEM & BILLING',
     items: [
       { label: 'Billing & Plans', href: '/billing', icon: CreditCard, badge: 'Cloud', badgeColor: 'amber' },
+      { label: 'Domain Reseller', href: '/admin/domains', icon: Globe, badge: 'Admin', badgeColor: 'purple' },
       { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
       { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },
       { label: 'Team', href: '/team', icon: Users },

@@ -22,6 +22,8 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/dns"
+	"hostvra/api/internal/domains"
+	"hostvra/api/internal/domains/resellerclub"
 	"hostvra/api/internal/handlers"
 	"hostvra/api/internal/license"
 	"hostvra/api/internal/migration"
@@ -115,7 +117,24 @@ func main() {
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
+
+	// Initialize ResellerClub Client & Domain Subsystem
+	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
+		ResellerID: cfg.ResellerClubResellerID,
+		APIKey:     cfg.ResellerClubAPIKey,
+		Mode:       cfg.ResellerClubMode,
+		BaseURL:    cfg.ResellerClubAPIBaseURL,
+		Timeout:    cfg.ResellerClubAPITimeout,
+	})
+	domainService := domains.NewService(dataStore, rcClient, cfg.DomainEncryptionSecret)
 	domainRegistrarHandler := handlers.NewDomainRegistrarHandler(cfg, dataStore, auditLogger)
+	domainRegistrarHandler.SetDomainService(domainService)
+	domainAdminHandler := handlers.NewDomainAdminHandler(cfg, dataStore, auditLogger, domainService)
+	billingHandler.SetDomainService(domainService)
+
+	// Start background domain reconciliation worker loop
+	domainService.Reconciliation.StartBackgroundLoop(context.Background(), 30*time.Minute)
+
 	supportHandler := handlers.NewSupportHandler(cfg, dataStore, auditLogger)
 	settingsHandler := handlers.NewSettingsHandler(cfg, dataStore, auditLogger)
 	migrationMgr := migration.NewManager()
@@ -592,15 +611,57 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Delete("/{id}", accountHandler.DeleteAccount)
 			})
 
-			// Enterprise Domain Registrar, TLD Pricing & Orders
+			// Domain Reseller & Management Subsystem (Customer Endpoints)
 			r.Route("/domains", func(r chi.Router) {
+				r.Get("/", domainRegistrarHandler.ListDomains)
 				r.Get("/search", domainRegistrarHandler.SearchDomains)
 				r.Get("/whois", domainRegistrarHandler.WhoisLookup)
 				r.Get("/tlds", domainRegistrarHandler.ListTLDs)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/tlds/{tld}", domainRegistrarHandler.UpdateTLD)
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/registrars", domainRegistrarHandler.ListRegistrars)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/registrars/{registrar}", domainRegistrarHandler.UpdateRegistrar)
-				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/order", domainRegistrarHandler.OrderDomain)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/test-connection", domainRegistrarHandler.TestConnection)
+				r.Post("/order", domainRegistrarHandler.OrderDomain)
+				r.Post("/orders", domainRegistrarHandler.OrderDomain)
+				r.Get("/orders/{id}", domainRegistrarHandler.GetDomainOrder)
+				r.Post("/transfer", domainRegistrarHandler.TransferDomain)
+
+				// Single Domain Operations
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", domainRegistrarHandler.GetDomain)
+					r.Get("/nameservers", domainRegistrarHandler.GetNameservers)
+					r.Put("/nameservers", domainRegistrarHandler.UpdateNameservers)
+					r.Get("/dns", domainRegistrarHandler.ListDNSRecords)
+					r.Post("/dns", domainRegistrarHandler.CreateDNSRecord)
+					r.Delete("/dns/{recordId}", domainRegistrarHandler.DeleteDNSRecord)
+					r.Get("/lock", domainRegistrarHandler.GetLock)
+					r.Post("/lock", domainRegistrarHandler.SetLock)
+					r.Post("/unlock", domainRegistrarHandler.SetUnlock)
+					r.Get("/epp-code", domainRegistrarHandler.GetEPPCode)
+					r.Post("/epp-code", domainRegistrarHandler.GetEPPCode)
+					r.Get("/contacts", domainRegistrarHandler.GetContacts)
+					r.Put("/contacts", domainRegistrarHandler.UpdateContacts)
+					r.Post("/renew", domainRegistrarHandler.RenewDomain)
+					r.Post("/auto-renew", domainRegistrarHandler.ToggleAutoRenew)
+				})
+			})
+
+			// Domain Reseller Admin Management Endpoints
+			r.Route("/admin/domains", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/", domainAdminHandler.ListDomains)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/metrics", domainAdminHandler.GetMetrics)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/orders", domainAdminHandler.ListOrders)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/orders/{id}/retry", domainAdminHandler.RetryOrder)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/transfers", domainAdminHandler.ListTransfers)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/renewals", domainAdminHandler.ListRenewals)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/tlds", domainAdminHandler.ListTLDs)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/tlds", domainAdminHandler.SaveTLD)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/prices", domainAdminHandler.ListPrices)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/prices/{id}", domainAdminHandler.SavePrice)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/prices", domainAdminHandler.SavePrice)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/test-registrar", domainAdminHandler.TestRegistrar)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/reconcile", domainAdminHandler.Reconcile)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/logs", domainAdminHandler.ListAuditLogs)
 			})
 
 			// Support Tickets, Stats & Canned Macros

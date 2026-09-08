@@ -1014,3 +1014,262 @@ export interface SystemSettings {
   updated_at?: string;
 }
 
+// ----------------------------------------------------------------------------
+// Domain Reseller & Management Types
+// ----------------------------------------------------------------------------
+
+export interface RegisteredDomain {
+  id: string;
+  user_id: string;
+  organization_id?: string;
+  domain_name: string;
+  tld: string;
+  status: 'active' | 'pending' | 'expired' | 'suspended' | 'cancelled' | 'transferring';
+  reseller_order_id?: string;
+  reseller_customer_id?: string;
+  auto_renew: boolean;
+  privacy_protected: boolean;
+  is_locked: boolean;
+  registration_date?: string;
+  expiry_date?: string;
+  nameservers: string[];
+  epp_code?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DomainOrder {
+  id: string;
+  user_id: string;
+  domain_name: string;
+  action: 'register' | 'renew' | 'transfer';
+  years: number;
+  amount: number;
+  currency: string;
+  status: 'pending_payment' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  payment_status: 'unpaid' | 'paid' | 'refunded';
+  payment_method?: string;
+  reseller_order_id?: string;
+  error_message?: string;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DomainContact {
+  id?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  company_name?: string;
+  address1: string;
+  address2?: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  country: string;
+}
+
+export interface DomainDnsRecordItem {
+  id: string;
+  type: string;
+  name: string;
+  content: string;
+  ttl: number;
+  priority?: number;
+}
+
+export interface DomainAdminMetrics {
+  total_domains: number;
+  active_domains: number;
+  expiring_30_days: number;
+  total_revenue: number;
+  total_cost: number;
+  gross_profit: number;
+}
+
+export interface DomainAdminPrice {
+  id: string;
+  tld: string;
+  register_price: number;
+  renew_price: number;
+  transfer_price: number;
+  cost_price: number;
+  currency: string;
+  min_years: number;
+  max_years: number;
+  enabled: boolean;
+  is_popular: boolean;
+  category?: string;
+  updated_at: string;
+}
+
+export interface ResellerClubTestResult {
+  status: string;
+  mode: string;
+  reseller_id: string;
+  base_url: string;
+  latency_ms: number;
+  message: string;
+}
+
+// ----------------------------------------------------------------------------
+// Domain Reseller API Helper Functions
+// ----------------------------------------------------------------------------
+
+export async function fetchRegisteredDomains(): Promise<ApiResponse<RegisteredDomain[]>> {
+  return apiFetch<RegisteredDomain[]>('/api/v1/domains');
+}
+
+export async function fetchRegisteredDomain(id: string): Promise<ApiResponse<RegisteredDomain>> {
+  return apiFetch<RegisteredDomain>(`/api/v1/domains/${id}`);
+}
+
+export async function searchDomainAvailability(query: string): Promise<ApiResponse<DomainSearchResultItem[]>> {
+  return apiFetch<DomainSearchResultItem[]>(`/api/v1/domains/search?query=${encodeURIComponent(query)}`);
+}
+
+export async function fetchTLDPricings(): Promise<ApiResponse<TLDPricing[]>> {
+  return apiFetch<TLDPricing[]>('/api/v1/domains/pricing/tlds');
+}
+
+export async function orderDomainRegistration(payload: {
+  domain: string;
+  years: number;
+  nameservers?: string[];
+  payment_method?: string;
+  auto_renew?: boolean;
+  registrant?: DomainContact;
+}): Promise<ApiResponse<{ order: DomainOrder; invoice: Invoice; domain: string; years: number; amount: number; message: string }>> {
+  return apiFetch('/api/v1/domains/order', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function initiateDomainTransfer(payload: {
+  domain: string;
+  auth_code: string;
+  years: number;
+  nameservers?: string[];
+  payment_method?: string;
+}): Promise<ApiResponse<{ order: DomainOrder; invoice: Invoice; message: string }>> {
+  return apiFetch('/api/v1/domains/transfer', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function renewDomainSubscription(domainId: string, payload: {
+  years: number;
+  payment_method?: string;
+}): Promise<ApiResponse<{ order: DomainOrder; invoice: Invoice; message: string }>> {
+  return apiFetch(`/api/v1/domains/${domainId}/renew`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchDomainNameservers(domainId: string): Promise<ApiResponse<string[]>> {
+  return apiFetch<string[]>(`/api/v1/domains/${domainId}/nameservers`);
+}
+
+export async function updateDomainNameservers(domainId: string, nameservers: string[]): Promise<ApiResponse<{ nameservers: string[] }>> {
+  return apiFetch(`/api/v1/domains/${domainId}/nameservers`, {
+    method: 'PUT',
+    body: JSON.stringify({ nameservers }),
+  });
+}
+
+export async function fetchDomainDnsRecords(domainId: string): Promise<ApiResponse<DomainDnsRecordItem[]>> {
+  return apiFetch<DomainDnsRecordItem[]>(`/api/v1/domains/${domainId}/dns`);
+}
+
+export async function addDomainDnsRecord(domainId: string, record: {
+  type: string;
+  name: string;
+  content: string;
+  ttl?: number;
+  priority?: number;
+}): Promise<ApiResponse<DomainDnsRecordItem>> {
+  return apiFetch(`/api/v1/domains/${domainId}/dns`, {
+    method: 'POST',
+    body: JSON.stringify(record),
+  });
+}
+
+export async function deleteDomainDnsRecord(domainId: string, recordId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch(`/api/v1/domains/${domainId}/dns/${recordId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function fetchDomainRegistrarLock(domainId: string): Promise<ApiResponse<{ locked: boolean }>> {
+  return apiFetch<{ locked: boolean }>(`/api/v1/domains/${domainId}/lock`);
+}
+
+export async function setDomainRegistrarLock(domainId: string, locked: boolean): Promise<ApiResponse<{ locked: boolean }>> {
+  return apiFetch(`/api/v1/domains/${domainId}/lock`, {
+    method: 'POST',
+    body: JSON.stringify({ locked }),
+  });
+}
+
+export async function fetchDomainEPPCode(domainId: string): Promise<ApiResponse<{ epp_code: string; domain: string }>> {
+  return apiFetch<{ epp_code: string; domain: string }>(`/api/v1/domains/${domainId}/epp-code`);
+}
+
+export async function fetchDomainContacts(domainId: string): Promise<ApiResponse<{ registrant: DomainContact; admin?: DomainContact; tech?: DomainContact; billing?: DomainContact }>> {
+  return apiFetch(`/api/v1/domains/${domainId}/contacts`);
+}
+
+// ----------------------------------------------------------------------------
+// Admin Domain Reseller API Helper Functions
+// ----------------------------------------------------------------------------
+
+export async function fetchDomainAdminMetrics(): Promise<ApiResponse<DomainAdminMetrics>> {
+  return apiFetch<DomainAdminMetrics>('/api/v1/admin/domains/metrics');
+}
+
+export async function fetchDomainAdminOrders(params?: {
+  page?: number;
+  limit?: number;
+  status?: string;
+}): Promise<ApiResponse<DomainOrder[]>> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set('page', params.page.toString());
+  if (params?.limit) query.set('limit', params.limit.toString());
+  if (params?.status) query.set('status', params.status);
+  const qStr = query.toString() ? `?${query.toString()}` : '';
+  return apiFetch<DomainOrder[]>(`/api/v1/admin/domains/orders${qStr}`);
+}
+
+export async function retryDomainAdminOrder(orderId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch(`/api/v1/admin/domains/orders/${orderId}/retry`, {
+    method: 'POST',
+  });
+}
+
+export async function fetchDomainAdminPrices(): Promise<ApiResponse<DomainAdminPrice[]>> {
+  return apiFetch<DomainAdminPrice[]>('/api/v1/admin/domains/prices');
+}
+
+export async function updateDomainAdminPrice(id: string, payload: Partial<DomainAdminPrice>): Promise<ApiResponse<DomainAdminPrice>> {
+  return apiFetch(`/api/v1/admin/domains/prices/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function testResellerClubConnection(): Promise<ApiResponse<ResellerClubTestResult>> {
+  return apiFetch<ResellerClubTestResult>('/api/v1/admin/domains/test-connection', {
+    method: 'POST',
+  });
+}
+
+export async function triggerDomainReconciliation(): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch('/api/v1/admin/domains/reconcile', {
+    method: 'POST',
+  });
+}
