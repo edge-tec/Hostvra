@@ -253,40 +253,11 @@ export default function SupportPage() {
         setSelectedTicket(res.data.ticket);
         setTicketReplies(res.data.replies || []);
       } else {
-        generateMockReplies(ticket);
+        setTicketReplies([]);
       }
     } catch {
-      generateMockReplies(ticket);
+      setTicketReplies([]);
     }
-  };
-
-  const generateMockReplies = (ticket: Ticket) => {
-    setTicketReplies([
-      {
-        id: 'rep-1',
-        ticket_id: ticket.id,
-        user_id: ticket.user_id,
-        user_email: ticket.user_email,
-        user_name: ticket.user_name,
-        is_staff: false,
-        message: 'Hello, I opened this ticket regarding ' + ticket.subject + '. Please assist as soon as possible.',
-        created_at: ticket.created_at
-      },
-      ...(ticket.status === 'answered'
-        ? [
-            {
-              id: 'rep-2',
-              ticket_id: ticket.id,
-              user_id: 'staff-1',
-              user_email: 'support@hostvra.com',
-              user_name: 'Hostvra Support Specialist',
-              is_staff: true,
-              message: 'Hello ' + ticket.user_name + ', our engineering team has looked into your query. The configuration has been updated and the service is performing normally.',
-              created_at: ticket.last_reply_at
-            }
-          ]
-        : [])
-    ]);
   };
 
   // Send Reply
@@ -386,30 +357,17 @@ export default function SupportPage() {
         body: JSON.stringify(payload)
       });
 
-      const newTicket: Ticket = res.success && res.data ? res.data : {
-        id: 'tkt-' + Date.now(),
-        ticket_number: 'TKT-2026-' + Math.floor(10000 + Math.random() * 90000),
-        organization_id: 'org-demo',
-        user_id: 'user-demo',
-        user_email: 'billing@hostvra.com',
-        user_name: 'Mizanur Rahman',
-        department: newDepartment,
-        priority: newPriority,
-        status: 'open',
-        subject: newSubject.trim(),
-        related_service: newRelatedService.trim(),
-        replies_count: 1,
-        last_reply_at: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      setTickets((prev) => [newTicket, ...prev]);
-      setCreateModalOpen(false);
-      setNewSubject('');
-      setNewInitialMessage('');
-      setNewRelatedService('');
-      setSuccessMessage(`Ticket ${newTicket.ticket_number} created successfully.`);
+      if (res.success && res.data) {
+        const newTicket = res.data;
+        setTickets((prev) => [newTicket, ...prev]);
+        setCreateModalOpen(false);
+        setNewSubject('');
+        setNewInitialMessage('');
+        setNewRelatedService('');
+        setSuccessMessage(`Ticket ${newTicket.ticket_number} created successfully.`);
+      } else {
+        setError(res.error?.message || 'Failed to create ticket.');
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to create ticket.');
     } finally {

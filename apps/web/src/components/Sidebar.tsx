@@ -58,6 +58,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Domain Manager', href: '/domains', icon: Globe },
+      { label: 'DNS Zones', href: '/dns', icon: Globe },
       { label: 'Websites', href: '/websites', icon: Server },
       { label: 'Directory (Files)', href: '/files', icon: FolderTree },
       { label: 'FTP Accounts', href: '/ftp', icon: FolderSync },

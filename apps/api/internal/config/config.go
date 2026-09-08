@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"strconv"
 	"strings"
@@ -43,18 +44,37 @@ func Load() *Config {
 	}
 }
 
-func getEnv(key, fallback string) string {
-	if val, ok := os.LookupEnv(key); ok && val != "" {
-		return val
-	}
-	return fallback
-}
+func (c *Config) ValidateProduction() error {
+	if strings.EqualFold(c.Environment, "production") {
+		// 1. Mandatory strong JWT Secret
+		if c.JWTSecret == "" ||
+			c.JWTSecret == "hostvra-dev-insecure-jwt-secret-key-change-in-production-min64char" ||
+			len(c.JWTSecret) < 32 {
+			return errors.New("CRITICAL STARTUP ERROR: JWT_SECRET must be explicitly provided in production and be at least 32 characters long")
+		}
 
-func getEnvInt(key string, fallback int) int {
-	if val, ok := os.LookupEnv(key); ok {
-		if intVal, err := strconv.Atoi(val); err == nil {
-			return intVal
+		// 2. Mandatory non-default Database URL
+		if c.DatabaseURL == "" ||
+			strings.Contains(c.DatabaseURL, "hostvra_dev_password") {
+			return errors.New("CRITICAL STARTUP ERROR: DATABASE_URL must be explicitly configured in production with valid credentials")
 		}
 	}
-	return fallback
+	return nil
 }
+
+func getEnv(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+func getEnvInt(key string, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if i, err := strconv.Atoi(val); err == nil {
+			return i
+		}
+	}
+	return defaultVal
+}
+

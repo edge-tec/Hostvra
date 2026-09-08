@@ -32,80 +32,8 @@ import {
 } from 'lucide-react';
 import { apiFetch, HostingAccount, HostingPlan, Server as ServerType } from '@/lib/api';
 
-const DEFAULT_ACCOUNTS: HostingAccount[] = [
-  {
-    id: '40000000-0000-0000-0000-000000000001',
-    organization_id: 'org-demo',
-    user_id: 'user-demo-1',
-    domain: 'apexagency.com',
-    username: 'c_apexagency',
-    document_root: '/home/c_apexagency/public_html',
-    plan_id: '10000000-0000-0000-0000-000000000002',
-    plan_name: 'Business Cloud',
-    status: 'active',
-    disk_limit_mb: 51200,
-    disk_used_mb: 12400,
-    bandwidth_limit_mb: 512000,
-    bandwidth_used_mb: 68500,
-    websites_limit: 5,
-    databases_limit: 10,
-    mailboxes_limit: 25,
-    ip_address: '192.168.1.105',
-    php_version: '8.3',
-    ssl_active: true,
-    created_at: new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '40000000-0000-0000-0000-000000000002',
-    organization_id: 'org-demo',
-    user_id: 'user-demo-2',
-    domain: 'dhakastore.net',
-    username: 'c_dhakastore',
-    document_root: '/home/c_dhakastore/public_html',
-    plan_id: '10000000-0000-0000-0000-000000000001',
-    plan_name: 'Starter Cloud',
-    status: 'active',
-    disk_limit_mb: 10240,
-    disk_used_mb: 4200,
-    bandwidth_limit_mb: 102400,
-    bandwidth_used_mb: 31000,
-    websites_limit: 1,
-    databases_limit: 2,
-    mailboxes_limit: 5,
-    ip_address: '192.168.1.105',
-    php_version: '8.2',
-    ssl_active: true,
-    created_at: new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: '40000000-0000-0000-0000-000000000003',
-    organization_id: 'org-demo',
-    user_id: 'user-demo-3',
-    domain: 'globalfintech.io',
-    username: 'c_globalfintech',
-    document_root: '/home/c_globalfintech/public_html',
-    plan_id: '10000000-0000-0000-0000-000000000003',
-    plan_name: 'Enterprise Cloud',
-    status: 'active',
-    disk_limit_mb: 204800,
-    disk_used_mb: 48900,
-    bandwidth_limit_mb: 2048000,
-    bandwidth_used_mb: 412000,
-    websites_limit: 25,
-    databases_limit: 100,
-    mailboxes_limit: 100,
-    ip_address: '192.168.1.108',
-    php_version: '8.3',
-    ssl_active: true,
-    created_at: new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<HostingAccount[]>(DEFAULT_ACCOUNTS);
+  const [accounts, setAccounts] = useState<HostingAccount[]>([]);
   const [plans, setPlans] = useState<HostingPlan[]>([]);
   const [servers, setServers] = useState<ServerType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -232,45 +160,8 @@ export default function AccountsPage() {
       } else {
         showNotify('error', res.error?.message || 'অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে');
       }
-    } catch {
-      // Fallback local creation
-      const plan = plans.find(p => p.id === selectedPlanId) || {
-        name: 'Business Cloud',
-        disk_space_mb: 51200,
-        bandwidth_mb: 512000,
-        max_websites: 5,
-        max_databases: 10,
-        max_mailboxes: 25,
-      };
-
-      const newAcc: HostingAccount = {
-        id: 'acc-' + Date.now(),
-        organization_id: 'demo-org',
-        user_id: 'demo-user',
-        domain: newDomain,
-        username: newUsername,
-        document_root: `/home/${newUsername}/public_html`,
-        plan_id: selectedPlanId || 'plan-1',
-        plan_name: plan.name,
-        status: 'active',
-        disk_limit_mb: plan.disk_space_mb,
-        disk_used_mb: 250,
-        bandwidth_limit_mb: plan.bandwidth_mb,
-        bandwidth_used_mb: 50,
-        websites_limit: plan.max_websites,
-        databases_limit: plan.max_databases,
-        mailboxes_limit: plan.max_mailboxes,
-        ip_address: '192.168.1.105',
-        php_version: selectedPHP,
-        ssl_active: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      setAccounts(prev => [newAcc, ...prev]);
-      showNotify('success', `ক্লায়েন্ট অ্যাকাউন্ট ${newAcc.username} তৈরি সম্পন্ন হয়েছে!`);
-      setCreateModalOpen(false);
-      resetForm();
+    } catch (err: any) {
+      showNotify('error', err.message || 'অ্যাকাউন্ট তৈরি করতে সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে');
     } finally {
       setActionLoading(null);
     }

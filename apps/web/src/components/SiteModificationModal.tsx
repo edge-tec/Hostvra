@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   X,
   Globe,
@@ -543,26 +543,44 @@ server {
   const [maintenanceIps, setMaintenanceIps] = useState("127.0.0.1\n103.140.157.238");
 
   // ----------------------------------------------------
-  // Tab 16: Response Log State
+  // Tab 16: Real Server Log State & Fetching
   // ----------------------------------------------------
   const [logType, setLogType] = useState<'access' | 'error'>('access');
   const [logFilter, setLogFilter] = useState<'all' | '2xx' | '4xx' | '5xx'>('all');
   const [logSearch, setLogSearch] = useState('');
-  const [autoRefreshLogs, setAutoRefreshLogs] = useState(true);
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState(false);
+  const [realLogs, setRealLogs] = useState<{ access_log: string; error_log: string }>({ access_log: '', error_log: '' });
+  const [loadingLogs, setLoadingLogs] = useState(false);
 
-  const mockLogs = useMemo(() => {
-    const now = new Date().toISOString();
-    return [
-      `13.140.157.238 - - [${now}] "GET / HTTP/1.1" 200 8945 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"`,
-      `13.140.157.238 - - [${now}] "GET /_next/static/css/styles.css HTTP/1.1" 200 4521 "https://${website?.primary_domain}/" "Mozilla/5.0"`,
-      `66.249.66.1 - - [${now}] "GET /robots.txt HTTP/1.1" 200 120 "-" "Googlebot/2.1 (+http://www.google.com/bot.html)"`,
-      `185.191.171.12 - - [${now}] "GET /wp-login.php HTTP/1.1" 404 153 "-" "SemrushBot/7~bl"`,
-      `194.26.29.114 - - [${now}] "POST /xmlrpc.php HTTP/1.1" 403 210 "-" "curl/7.68.0"`,
-      `13.140.157.238 - - [${now}] "GET /api/status HTTP/1.1" 200 45 "https://${website?.primary_domain}/" "Mozilla/5.0"`,
-      `192.168.1.105 - - [${now}] "GET /admin/db HTTP/1.1" 401 188 "-" "Mozilla/5.0"`,
-      `13.140.157.238 - - [${now}] "POST /login HTTP/1.1" 200 1024 "https://${website?.primary_domain}/login" "Mozilla/5.0"`,
-    ];
-  }, [website]);
+  const fetchRealLogs = useCallback(async () => {
+    if (!website?.id) return;
+    setLoadingLogs(true);
+    try {
+      const res = await apiFetch<{ access_log: string; error_log: string }>(`/api/v1/websites/${website.id}/logs`);
+      if (res.success && res.data) {
+        setRealLogs(res.data);
+      }
+    } catch {
+      // Graceful fallback to empty state
+    } finally {
+      setLoadingLogs(false);
+    }
+  }, [website?.id]);
+
+  useEffect(() => {
+    if (activeTab === 'logs' && website?.id) {
+      fetchRealLogs();
+    }
+  }, [activeTab, website?.id, fetchRealLogs]);
+
+  useEffect(() => {
+    if (activeTab === 'logs' && autoRefreshLogs && website?.id) {
+      const interval = setInterval(() => {
+        fetchRealLogs();
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, autoRefreshLogs, website?.id, fetchRealLogs]);
 
   if (!isOpen || !website) return null;
 
@@ -1773,18 +1791,31 @@ server {
                 </div>
 
                 <div className="flex-1 min-h-[380px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-900 dark:bg-[#0C0E14] p-3 font-mono text-xs overflow-y-auto space-y-1">
-                  {mockLogs.map((line, idx) => {
-                    let color = 'text-slate-300';
-                    if (line.includes(' 200 ')) color = 'text-emerald-400';
-                    else if (line.includes(' 403 ') || line.includes(' 404 ')) color = 'text-amber-400';
-                    else if (line.includes(' 500 ') || line.includes(' 502 ')) color = 'text-rose-400';
+                  {loadingLogs ? (
+                    <div className="text-slate-500 py-8 text-center italic">Loading server logs...</div>
+                  ) : (() => {
+                    const rawLog = logType === 'access' ? realLogs.access_log : realLogs.error_log;
+                    const lines = rawLog ? rawLog.trim().split('\n').filter(Boolean) : [];
+                    if (lines.length === 0) {
+                      return (
+                        <div className="text-slate-500 py-8 text-center italic">
+                          No log entries found for {logType}.log
+                        </div>
+                      );
+                    }
+                    return lines.map((line, idx) => {
+                      let color = 'text-slate-300';
+                      if (line.includes(' 200 ') || line.includes(' 201 ') || line.includes('[notice]')) color = 'text-emerald-400';
+                      else if (line.includes(' 403 ') || line.includes(' 404 ') || line.includes('[warn]')) color = 'text-amber-400';
+                      else if (line.includes(' 500 ') || line.includes(' 502 ') || line.includes('[error]')) color = 'text-rose-400';
 
-                    return (
-                      <div key={idx} className={`${color} leading-relaxed hover:bg-slate-800/60 px-1 rounded`}>
-                        {line}
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div key={idx} className={`${color} leading-relaxed hover:bg-slate-800/60 px-1 rounded`}>
+                          {line}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             )}

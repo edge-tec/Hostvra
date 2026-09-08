@@ -31,7 +31,7 @@ export default function DatabasesPage() {
   // Engine Tab State
   const [activeEngine, setActiveEngine] = useState<DBEngine>('mysql');
 
-  // Server & DB State (Initialized directly with demo/seed records so table is never blank)
+  // Server & DB State (Loaded dynamically from host MariaDB/MySQL database engine)
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedServer, setSelectedServer] = useState<string>('');
   const [databases, setDatabases] = useState<Database[]>([]);

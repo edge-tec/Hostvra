@@ -457,7 +457,7 @@ func (h *WebsiteHandler) UpdateConf(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// GetLogs returns access and error logs
+// GetLogs returns access and error logs from the server log directory
 func (h *WebsiteHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -470,18 +470,40 @@ func (h *WebsiteHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().Format("02/Jan/2006:15:04:05 -0700")
-	accessLog := `127.0.0.1 - - [` + now + `] "GET / HTTP/1.1" 200 4521 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-192.168.1.45 - - [` + now + `] "GET /assets/app.css HTTP/1.1" 200 12890 "https://` + site.PrimaryDomain + `/" "Mozilla/5.0"
-192.168.1.45 - - [` + now + `] "GET /assets/app.js HTTP/1.1" 200 48920 "https://` + site.PrimaryDomain + `/" "Mozilla/5.0"
-66.249.66.1 - - [` + now + `] "GET /robots.txt HTTP/1.1" 200 120 "-" "Googlebot/2.1 (+http://www.google.com/bot.html)"
-`
-	errorLog := `[notice] 1042#1042: using inherited sockets from "1040;1041"
-[notice] 1042#1042: OS: Linux 6.8.0-45-generic
-[notice] 1042#1042: getrlimit(RLIMIT_NOFILE): 102400:102400
-[notice] 1042#1042: start worker processes
-[notice] 1042#1042: start worker process 1043
-`
+	var accessLog, errorLog string
+
+	// Attempt to read actual log files from standard server paths
+	accessPaths := []string{
+		"/var/log/nginx/" + site.PrimaryDomain + ".access.log",
+		"/var/log/nginx/access.log",
+		"/var/log/httpd/" + site.PrimaryDomain + "-access_log",
+		"/usr/local/lsws/logs/access.log",
+	}
+	for _, p := range accessPaths {
+		if data, readErr := os.ReadFile(p); readErr == nil {
+			accessLog = string(data)
+			if len(accessLog) > 50000 {
+				accessLog = accessLog[len(accessLog)-50000:]
+			}
+			break
+		}
+	}
+
+	errorPaths := []string{
+		"/var/log/nginx/" + site.PrimaryDomain + ".error.log",
+		"/var/log/nginx/error.log",
+		"/var/log/httpd/" + site.PrimaryDomain + "-error_log",
+		"/usr/local/lsws/logs/error.log",
+	}
+	for _, p := range errorPaths {
+		if data, readErr := os.ReadFile(p); readErr == nil {
+			errorLog = string(data)
+			if len(errorLog) > 50000 {
+				errorLog = errorLog[len(errorLog)-50000:]
+			}
+			break
+		}
+	}
 
 	response.JSON(w, http.StatusOK, map[string]string{
 		"access_log": accessLog,

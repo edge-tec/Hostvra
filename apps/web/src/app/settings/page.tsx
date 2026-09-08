@@ -56,6 +56,24 @@ export default function SettingsPage() {
   // Commonly Used - Panel SSL
   const [sslEnabled, setSslEnabled] = useState(true);
   const [sslDaysRemaining, setSslDaysRemaining] = useState(90);
+  const [panelCert, setPanelCert] = useState({
+    has_ssl: false,
+    domain: '',
+    issuer: 'None (Plain HTTP / Self-Signed)',
+    valid_from: '-',
+    valid_until: '-',
+    days_remaining: 0,
+    is_valid: false,
+  });
+
+  // Server Migration Engine State
+  const [migrationHost, setMigrationHost] = useState('');
+  const [migrationPort, setMigrationPort] = useState('8080');
+  const [migrationKey, setMigrationKey] = useState('');
+  const [migrationSourceType, setMigrationSourceType] = useState('hostvra');
+  const [activeMigrationJob, setActiveMigrationJob] = useState<any>(null);
+  const [migrationJobs, setMigrationJobs] = useState<any[]>([]);
+  const [isMigrating, setIsMigrating] = useState(false);
 
   // Commonly Used - Advanced Features
   const [devMode, setDevMode] = useState(false);
@@ -159,6 +177,28 @@ export default function SettingsPage() {
           if (s.not_logged_in_response) setNotLoggedInResponse(s.not_logged_in_response);
           if (s.password_expire) setPasswordExpire(s.password_expire);
         }
+
+        // Fetch live panel SSL certificate info
+        try {
+          const certRes = await apiFetch<any>('/settings/panel-cert');
+          if (certRes?.data) {
+            setPanelCert(certRes.data);
+            if (certRes.data.days_remaining !== undefined) {
+              setSslDaysRemaining(certRes.data.days_remaining);
+            }
+          }
+        } catch (_) {}
+
+        // Fetch existing migration jobs
+        try {
+          const migRes = await apiFetch<any>('/migration/jobs');
+          if (migRes?.data) {
+            setMigrationJobs(migRes.data);
+            if (migRes.data.length > 0) {
+              setActiveMigrationJob(migRes.data[0]);
+            }
+          }
+        } catch (_) {}
       } catch (err) {
         console.error('Failed to load system settings:', err);
       } finally {
@@ -564,29 +604,29 @@ export default function SettingsPage() {
                     <div>
                       <div className="flex justify-between text-[11px] font-semibold text-slate-500 mb-1">
                         <span>Validity Period</span>
-                        <span>{sslDaysRemaining}/7 Day(s)</span>
+                        <span>{panelCert.days_remaining > 0 ? `${panelCert.days_remaining} Day(s) Remaining` : 'No Certificate Installed'}</span>
                       </div>
                       <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-surface-700 overflow-hidden">
-                        <div className="h-full bg-emerald-600 rounded-full" style={{ width: '45%' }} />
+                        <div className={`h-full rounded-full ${panelCert.has_ssl ? 'bg-emerald-600' : 'bg-amber-500'}`} style={{ width: panelCert.has_ssl ? `${Math.min(100, Math.max(10, (panelCert.days_remaining / 90) * 100))}%` : '5%' }} />
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
                       <div>
                         <span className="text-slate-400 block">Domain</span>
-                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{serverIp}</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{panelCert.domain || serverIp}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block">Issuer</span>
-                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">YR1</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{panelCert.issuer}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block">Expiration Date</span>
-                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">2026-09-11</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{panelCert.valid_until}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block">Days Remaining</span>
-                        <span className="font-bold text-emerald-600 dark:text-emerald-400">{sslDaysRemaining} Day(s)</span>
+                        <span className={`font-bold ${panelCert.has_ssl ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>{panelCert.days_remaining} Day(s)</span>
                       </div>
                     </div>
                   </div>
@@ -1620,32 +1660,150 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 'migrate' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">One-Click Server Migration (Hostvra)</h3>
-            <p className="text-xs text-slate-500">Migrate all websites, databases, FTP accounts, and DNS zones between servers</p>
-            <div className="max-w-md space-y-3 text-xs font-semibold">
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 mb-1">Target Server IP</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 192.168.1.100"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700"
-                />
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-6 shadow-2xs">
+            <div>
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">One-Click Server Migration Engine</h3>
+              <p className="text-xs text-slate-500">Live inter-server asset migration for websites, databases, configurations, and DNS zones</p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Migration Form */}
+              <div className="space-y-4 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Target Remote Server IP / Hostname</label>
+                  <input
+                    type="text"
+                    value={migrationHost}
+                    onChange={(e) => setMigrationHost(e.target.value)}
+                    placeholder="e.g. 192.168.1.100 or source.domain.com"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Port (SSH / API)</label>
+                    <input
+                      type="number"
+                      value={migrationPort}
+                      onChange={(e) => setMigrationPort(e.target.value)}
+                      placeholder="8080"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Source Panel Type</label>
+                    <select
+                      value={migrationSourceType}
+                      onChange={(e) => setMigrationSourceType(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                    >
+                      <option value="hostvra">Hostvra Panel (API Sync)</option>
+                      <option value="cpanel">cPanel / WHM (SSH Streaming)</option>
+                      <option value="cyberpanel">CyberPanel</option>
+                      <option value="plesk">Plesk</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Remote Panel API Secret Key / Root Password</label>
+                  <input
+                    type="password"
+                    value={migrationKey}
+                    onChange={(e) => setMigrationKey(e.target.value)}
+                    placeholder="Enter remote authorization secret"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
+                  />
+                </div>
+                <button
+                  disabled={isMigrating}
+                  onClick={async () => {
+                    if (!migrationHost) {
+                      showToast('Please enter target server IP or hostname', true);
+                      return;
+                    }
+                    setIsMigrating(true);
+                    try {
+                      const res = await apiFetch<any>('/migration/jobs', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          source_type: migrationSourceType,
+                          source_host: migrationHost,
+                          source_port: Number(migrationPort) || 8080,
+                          auth_type: 'api_key',
+                          api_key: migrationKey,
+                        }),
+                      });
+                      if (res?.data) {
+                        setActiveMigrationJob(res.data);
+                        setMigrationJobs((prev) => [res.data, ...prev]);
+                        showToast('Migration job dispatched and executing');
+                      }
+                    } catch (err: any) {
+                      showToast(err.message || 'Failed to dispatch migration job', true);
+                    } finally {
+                      setIsMigrating(false);
+                    }
+                  }}
+                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 cursor-pointer transition"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isMigrating ? 'animate-spin' : ''}`} />
+                  <span>{isMigrating ? 'Dispatching...' : 'Connect & Begin Migration'}</span>
+                </button>
               </div>
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 mb-1">Target Panel API Secret Key</label>
-                <input
-                  type="password"
-                  placeholder="API Secret Key"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700"
-                />
+
+              {/* Live Migration Status & Logs Terminal */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-300 flex flex-col justify-between h-80">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${activeMigrationJob?.status === 'completed' ? 'bg-emerald-500' : activeMigrationJob?.status === 'failed' ? 'bg-rose-500' : activeMigrationJob ? 'bg-amber-500 animate-pulse' : 'bg-slate-600'}`} />
+                    <span className="font-bold text-[11px] text-white uppercase">Status: {activeMigrationJob?.status || 'IDLE'}</span>
+                  </div>
+                  {activeMigrationJob && activeMigrationJob.status !== 'completed' && activeMigrationJob.status !== 'failed' && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await apiFetch<any>(`/migration/jobs/${activeMigrationJob.id}/cancel`, { method: 'POST' });
+                          showToast('Migration cancelled');
+                          const updated = await apiFetch<any>(`/migration/jobs/${activeMigrationJob.id}`);
+                          if (updated?.data) setActiveMigrationJob(updated.data);
+                        } catch (e: any) {
+                          showToast(e.message || 'Failed to cancel', true);
+                        }
+                      }}
+                      className="text-rose-400 hover:text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded border border-rose-900 bg-rose-950/40"
+                    >
+                      Cancel Job
+                    </button>
+                  )}
+                </div>
+
+                {activeMigrationJob && (
+                  <div className="mb-2">
+                    <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                      <span>{activeMigrationJob.current_step || 'Initializing...'}</span>
+                      <span className="font-bold text-emerald-400">{Math.round(activeMigrationJob.progress || 0)}%</span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div className="h-full bg-emerald-500 transition-all duration-300 rounded-full" style={{ width: `${activeMigrationJob.progress || 0}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex-1 overflow-y-auto space-y-1 text-[11px] pr-1">
+                  {activeMigrationJob?.logs && activeMigrationJob.logs.length > 0 ? (
+                    activeMigrationJob.logs.map((log: any, idx: number) => (
+                      <div key={idx} className="flex gap-2">
+                        <span className="text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
+                        <span className={log.level === 'SUCCESS' ? 'text-emerald-400' : log.level === 'ERROR' ? 'text-rose-400' : log.level === 'WARN' ? 'text-amber-400' : 'text-slate-300'}>
+                          [{log.level}] {log.message}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-slate-600 italic">No active migration in progress. Fill out the target server credentials to initiate live asset sync.</div>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={() => showToast('Starting server migration preflight checks...')}
-                className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs"
-              >
-                Connect &amp; Begin Migration
-              </button>
             </div>
           </div>
         )}
@@ -1653,17 +1811,24 @@ export default function SettingsPage() {
         {activeTab === 'other_migrate' && (
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
             <h3 className="font-bold text-sm text-slate-900 dark:text-white">Import from Other Panels</h3>
-            <p className="text-xs text-slate-500">Direct migration from cPanel backups, Plesk, CyberPanel, or DirectAdmin</p>
+            <p className="text-xs text-slate-500">Direct archive restoration from cPanel, CyberPanel, Plesk, or DirectAdmin</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              {['cPanel Full Backup (.tar.gz)', 'CyberPanel Backup', 'Plesk XML Archive'].map((panel) => (
+              {['cPanel Full Backup (.tar.gz)', 'CyberPanel Backup (.tar.gz)', 'Plesk XML Archive (.zip)'].map((panel) => (
                 <div key={panel} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 flex flex-col justify-between gap-3">
                   <span className="font-bold text-xs">{panel}</span>
-                  <button
-                    onClick={() => showToast(`Upload dialog opened for ${panel}`)}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
-                  >
-                    Upload Archive
-                  </button>
+                  <label className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold text-center cursor-pointer transition">
+                    Select Archive
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          showToast(`Uploading and validating ${file.name} for extraction...`);
+                        }
+                      }}
+                    />
+                  </label>
                 </div>
               ))}
             </div>

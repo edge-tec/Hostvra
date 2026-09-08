@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -383,6 +384,37 @@ func (h *DatabaseHandler) Backup(w http.ResponseWriter, r *http.Request) {
 		"size_bytes":    len(dump),
 		"timestamp":     time.Now().UTC().Format(time.RFC3339),
 	}, nil)
+}
+
+// Export dumps the database and streams the actual SQL dump directly as an attachment
+func (h *DatabaseHandler) Export(w http.ResponseWriter, r *http.Request) {
+	dbName := r.URL.Query().Get("db")
+	if dbName == "" {
+		idStr := chi.URLParam(r, "id")
+		if idStr != "" {
+			if dbID, err := uuid.Parse(idStr); err == nil {
+				if db, err := h.store.GetDatabaseByID(r.Context(), dbID); err == nil && db != nil {
+					dbName = db.Name
+				}
+			}
+		}
+	}
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_NAME", "Database name is required", nil, "")
+		return
+	}
+
+	dump, err := h.dbMgr.DumpDatabase(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DUMP_ERROR", "Failed to dump database: "+err.Error(), nil, "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/sql")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_dump_%d.sql\"", dbName, time.Now().Unix()))
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(dump)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(dump)
 }
 
 // Import restores a SQL dump

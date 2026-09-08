@@ -165,42 +165,42 @@ func (m *MemoryStore) seedBillingData() {
 		gateways := []*PaymentGatewayConfig{
 			{
 				Gateway:     "stripe",
-				DisplayName: "Stripe (Credit / Debit Cards)",
-				Enabled:     true,
+				DisplayName: "Stripe Payment Gateway",
+				Enabled:     false,
 				TestMode:    true,
-				ApiKey:      "pk_test_sample_hostvra_stripe_key",
-				SecretKey:   "sk_test_sample_hostvra_stripe_secret",
-				MerchantID:  "acct_hostvra_demo",
+				ApiKey:      "",
+				SecretKey:   "",
+				MerchantID:  "",
 				UpdatedAt:   now,
 			},
 			{
 				Gateway:     "bkash",
 				DisplayName: "bKash Direct API Payment",
-				Enabled:     true,
+				Enabled:     false,
 				TestMode:    true,
-				ApiKey:      "bkash_app_key_demo",
-				SecretKey:   "bkash_app_secret_demo",
-				MerchantID:  "01800000000",
+				ApiKey:      "",
+				SecretKey:   "",
+				MerchantID:  "",
 				UpdatedAt:   now,
 			},
 			{
 				Gateway:     "nagad",
 				DisplayName: "Nagad Online Payment",
-				Enabled:     true,
+				Enabled:     false,
 				TestMode:    true,
-				ApiKey:      "nagad_pgw_key_demo",
-				SecretKey:   "nagad_pgw_secret_demo",
-				MerchantID:  "NAGAD_MERCHANT_01",
+				ApiKey:      "",
+				SecretKey:   "",
+				MerchantID:  "",
 				UpdatedAt:   now,
 			},
 			{
 				Gateway:     "sslcommerz",
 				DisplayName: "SSLCommerz Multi-Channel Payment",
-				Enabled:     true,
+				Enabled:     false,
 				TestMode:    true,
-				ApiKey:      "sslcommerz_store_passwd",
-				SecretKey:   "sslcommerz_store_secret",
-				MerchantID:  "hostvralive",
+				ApiKey:      "",
+				SecretKey:   "",
+				MerchantID:  "",
 				UpdatedAt:   now,
 			},
 			{
@@ -208,9 +208,9 @@ func (m *MemoryStore) seedBillingData() {
 				DisplayName: "PayPal Express & Smart Buttons",
 				Enabled:     false,
 				TestMode:    true,
-				ApiKey:      "paypal_client_id_demo",
-				SecretKey:   "paypal_secret_demo",
-				MerchantID:  "hostvra-biz@paypal.com",
+				ApiKey:      "",
+				SecretKey:   "",
+				MerchantID:  "",
 				UpdatedAt:   now,
 			},
 		}
@@ -218,56 +218,6 @@ func (m *MemoryStore) seedBillingData() {
 		for _, g := range gateways {
 			m.gatewayConfigs[g.Gateway] = g
 		}
-	}
-
-	// Seed an initial demo subscription & invoice for easy testing if empty
-	if len(m.subscriptions) == 0 {
-		now := time.Now().UTC()
-		planID := uuid.MustParse("10000000-0000-0000-0000-000000000002") // Business
-		subID := uuid.MustParse("20000000-0000-0000-0000-000000000001")
-		invID := uuid.MustParse("30000000-0000-0000-0000-000000000001")
-
-		sub := &Subscription{
-			ID:              subID,
-			UserID:          uuid.Nil,
-			OrganizationID:  uuid.Nil,
-			PlanID:          planID,
-			PlanName:        "Business Cloud",
-			Status:          SubStatusActive,
-			BillingCycle:    "monthly",
-			Amount:          9.99,
-			Currency:        "USD",
-			DiskUsedMB:      12400, // 12.4 GB of 50 GB
-			BandwidthUsedMB: 68500, // 68.5 GB of 500 GB
-			WebsitesCount:   2,
-			NextBillingDate: now.AddDate(0, 1, 0),
-			AutoRenew:       true,
-			CreatedAt:       now.AddDate(0, -1, 0),
-			UpdatedAt:       now,
-		}
-		m.subscriptions[subID] = sub
-
-		paidTime := now.AddDate(0, -1, 2)
-		inv := &Invoice{
-			ID:             invID,
-			InvoiceNumber:  "INV-2026-0001",
-			UserID:         uuid.Nil,
-			SubscriptionID: &subID,
-			PlanID:         planID,
-			Description:    "Hostvra Business Cloud Hosting - 1 Month Plan",
-			Subtotal:       9.99,
-			Tax:            0.00,
-			Discount:       0.00,
-			Total:          9.99,
-			Currency:       "USD",
-			Status:         InvoiceStatusPaid,
-			PaymentMethod:  "stripe",
-			TransactionID:  "txn_live_stripe_98721389",
-			DueDate:        now.AddDate(0, -1, 5),
-			PaidAt:         &paidTime,
-			CreatedAt:      now.AddDate(0, -1, 0),
-		}
-		m.invoices[invID] = inv
 	}
 }
 

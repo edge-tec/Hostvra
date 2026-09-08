@@ -172,42 +172,42 @@ const DEFAULT_GATEWAYS: PaymentGatewayConfig[] = [
   {
     gateway: 'stripe',
     display_name: 'Stripe (Credit / Debit Cards)',
-    enabled: true,
+    enabled: false,
     test_mode: true,
-    api_key: 'pk_test_sample_hostvra_stripe_key',
-    merchant_id: 'acct_hostvra_demo',
+    api_key: '',
+    merchant_id: '',
   },
   {
     gateway: 'bkash',
     display_name: 'bKash Direct API Payment',
-    enabled: true,
+    enabled: false,
     test_mode: true,
-    api_key: 'bkash_app_key_demo',
-    merchant_id: '01800000000',
+    api_key: '',
+    merchant_id: '',
   },
   {
     gateway: 'nagad',
     display_name: 'Nagad Online Payment',
-    enabled: true,
+    enabled: false,
     test_mode: true,
-    api_key: 'nagad_pgw_key_demo',
-    merchant_id: 'NAGAD_MERCHANT_01',
+    api_key: '',
+    merchant_id: '',
   },
   {
     gateway: 'sslcommerz',
     display_name: 'SSLCommerz Multi-Channel Payment',
-    enabled: true,
+    enabled: false,
     test_mode: true,
-    api_key: 'sslcommerz_store_passwd',
-    merchant_id: 'hostvralive',
+    api_key: '',
+    merchant_id: '',
   },
   {
     gateway: 'paypal',
     display_name: 'PayPal Express & Smart Buttons',
     enabled: false,
     test_mode: true,
-    api_key: 'paypal_client_id_demo',
-    merchant_id: 'hostvra-biz@paypal.com',
+    api_key: '',
+    merchant_id: '',
   },
 ];
 
@@ -331,29 +331,7 @@ export default function BillingPage() {
         showNotify('error', res.error?.message || 'প্যাকেজ অর্ডার করতে ব্যর্থ হয়েছে');
       }
     } catch (err: any) {
-      // Offline fallback simulation
-      const newSub: Subscription = {
-        id: 'sub-' + Date.now(),
-        user_id: 'demo-user',
-        organization_id: 'demo-org',
-        plan_id: selectedPlanForOrder.id,
-        plan_name: selectedPlanForOrder.name,
-        status: 'active',
-        billing_cycle: billingCycle,
-        amount: billingCycle === 'yearly' ? selectedPlanForOrder.price_yearly : selectedPlanForOrder.price_monthly,
-        currency: currency,
-        disk_used_mb: 250,
-        bandwidth_used_mb: 120,
-        websites_count: 1,
-        next_billing_date: new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString(),
-        auto_renew: true,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      setSubscriptions(prev => [newSub, ...prev]);
-      showNotify('success', `ধন্যবাদ! ${selectedPlanForOrder.name} প্যাকেজটি সফলভাবে অর্ডার হয়েছে!`);
-      setCheckoutModalOpen(false);
-      setActiveTab('subscriptions');
+      showNotify('error', err.message || 'প্যাকেজ অর্ডার করতে সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে');
     } finally {
       setActionLoading(null);
     }

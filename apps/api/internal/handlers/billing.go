@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -575,3 +579,145 @@ func (h *BillingHandler) UpdateGateway(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, existing, nil)
 }
+
+// ----------------------------------------------------------------------------
+// Payment Webhook Receiver API
+// ----------------------------------------------------------------------------
+
+type WebhookPayload struct {
+	Event         string  `json:"event"`
+	InvoiceID     string  `json:"invoice_id"`
+	TransactionID string  `json:"transaction_id"`
+	Amount        float64 `json:"amount"`
+	Currency      string  `json:"currency"`
+	Status        string  `json:"status"` // paid, success, failed, refunded
+	Signature     string  `json:"signature"`
+}
+
+func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
+	gatewayName := strings.ToLower(chi.URLParam(r, "gateway"))
+	if gatewayName == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_GATEWAY", "Gateway parameter required", nil, "")
+		return
+	}
+
+	cfg, err := h.store.GetGatewayConfig(r.Context(), gatewayName)
+	if err != nil || cfg == nil {
+		response.Error(w, http.StatusNotFound, "GATEWAY_NOT_FOUND", "Gateway not found", nil, "")
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Failed to read request body", nil, "")
+		return
+	}
+
+	var payload WebhookPayload
+	if err := json.Unmarshal(bodyBytes, &payload); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	// Signature verification (HMAC verification or token check)
+	reqSig := r.Header.Get("X-Signature")
+	if reqSig == "" {
+		reqSig = r.Header.Get("Stripe-Signature")
+	}
+	if reqSig == "" {
+		reqSig = payload.Signature
+	}
+
+	if cfg.SecretKey != "" && reqSig != "" {
+		mac := hmac.New(sha256.New, []byte(cfg.SecretKey))
+		mac.Write(bodyBytes)
+		expectedSig := hex.EncodeToString(mac.Sum(nil))
+		if !cfg.TestMode && reqSig != expectedSig {
+			h.audit.Log(r.Context(), r, "billing.webhook.reject", "webhook", gatewayName, "failure", "Invalid HMAC signature", nil)
+			response.Error(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "Webhook signature verification failed", nil, "")
+			return
+		}
+	}
+
+	if payload.InvoiceID == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_INVOICE", "invoice_id is required", nil, "")
+		return
+	}
+
+	invUUID, err := uuid.Parse(payload.InvoiceID)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_ID", "Invalid invoice ID format", nil, "")
+		return
+	}
+
+	inv, err := h.store.GetInvoiceByID(r.Context(), invUUID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
+	// Idempotency: If invoice is already paid with same transaction ID, return 200 OK immediately
+	if inv.Status == store.InvoiceStatusPaid {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "idempotent_success",
+			"message": "Invoice was already paid",
+			"invoice": inv,
+		}, nil)
+		return
+	}
+
+	now := time.Now().UTC()
+	statusLower := strings.ToLower(payload.Status)
+	if statusLower == "paid" || statusLower == "success" || statusLower == "completed" {
+		inv.Status = store.InvoiceStatusPaid
+		inv.PaidAt = &now
+		inv.PaymentMethod = gatewayName
+		if payload.TransactionID != "" {
+			inv.TransactionID = payload.TransactionID
+		} else {
+			inv.TransactionID = fmt.Sprintf("txn_%s_%d", gatewayName, now.Unix())
+		}
+
+		if err := h.store.UpdateInvoice(r.Context(), inv); err != nil {
+			response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update invoice", err.Error(), "")
+			return
+		}
+
+		// Activate associated subscription if present
+		if inv.SubscriptionID != nil {
+			if sub, err := h.store.GetSubscriptionByID(r.Context(), *inv.SubscriptionID); err == nil {
+				sub.Status = store.SubStatusActive
+				_ = h.store.UpdateSubscription(r.Context(), sub)
+			}
+		}
+
+		h.audit.Log(r.Context(), r, "billing.webhook.paid", "invoice", inv.ID.String(), "success", fmt.Sprintf("Processed %s webhook payment for %s", gatewayName, inv.InvoiceNumber), map[string]interface{}{
+			"gateway":        gatewayName,
+			"transaction_id": inv.TransactionID,
+			"amount":         inv.Total,
+		})
+
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":         "success",
+			"message":        "Payment verified and invoice marked paid",
+			"invoice_number": inv.InvoiceNumber,
+			"transaction_id": inv.TransactionID,
+		}, nil)
+		return
+	} else if statusLower == "failed" || statusLower == "cancelled" {
+		inv.Status = store.InvoiceStatusUnpaid
+		_ = h.store.UpdateInvoice(r.Context(), inv)
+		h.audit.Log(r.Context(), r, "billing.webhook.failed", "invoice", inv.ID.String(), "failure", fmt.Sprintf("Payment failed via %s", gatewayName), nil)
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "payment_failed",
+			"message": "Payment marked as failed",
+		}, nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "ignored",
+		"message": "Unhandled event status: " + payload.Status,
+	}, nil)
+}
+

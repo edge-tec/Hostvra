@@ -33,11 +33,6 @@ export default function LoginPage() {
     }
   };
 
-  const handlePrefillDemo = () => {
-    setEmail('admin@hostvra.com');
-    setPassword('SuperSecretP@ss123!');
-  };
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#090d16] flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 relative overflow-hidden transition-colors">
       {/* Subtle Background Glows */}
@@ -119,18 +114,6 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials */}
-          <div className="mt-6 pt-6 border-t border-slate-200 dark:border-surface-800 text-center">
-            <button
-              type="button"
-              onClick={handlePrefillDemo}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-900 dark:text-indigo-300 border border-slate-300 dark:border-surface-600 text-xs font-bold transition cursor-pointer"
-            >
-              <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-              <span>Prefill sample administrator credentials</span>
-            </button>
-          </div>
         </div>
 
         {/* Footer */}

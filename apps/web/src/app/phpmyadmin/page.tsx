@@ -1004,15 +1004,24 @@ function PhpMyAdminManager() {
                   </div>
 
                   <button
-                    onClick={() => {
-                      const dummySql = `-- Hostvra Database Dump\n-- Database: ${currentDb}\n-- Generation Time: ${new Date().toISOString()}\n\nCREATE DATABASE IF NOT EXISTS \`${currentDb}\`;\nUSE \`${currentDb}\`;\n`;
-                      const blob = new Blob([dummySql], { type: 'application/sql' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${currentDb}_dump_${Date.now()}.sql`;
-                      a.click();
-                      showToast(`Exported ${currentDb} SQL dump.`);
+                    onClick={async () => {
+                      try {
+                        showToast(`Generating live SQL dump for ${currentDb}...`);
+                        const token = typeof window !== 'undefined' ? localStorage.getItem('hv_token') || sessionStorage.getItem('hv_token') : '';
+                        const res = await fetch(`/api/v1/databases/export?db=${encodeURIComponent(currentDb)}`, {
+                          headers: token ? { Authorization: `Bearer ${token}` } : {},
+                        });
+                        if (!res.ok) throw new Error('Failed to generate database dump');
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${currentDb}_dump_${Date.now()}.sql`;
+                        a.click();
+                        showToast(`Exported ${currentDb} SQL dump successfully.`);
+                      } catch (err: any) {
+                        showToast(err.message || 'Export failed');
+                      }
                     }}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs cursor-pointer"
                   >

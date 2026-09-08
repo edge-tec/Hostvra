@@ -166,23 +166,8 @@ export default function DomainsPage() {
 
       if (webRes.success && webRes.data) {
         setDomains(webRes.data);
-      } else if (!webRes.data || webRes.data.length === 0) {
-        // Fallback seeded preview website
-        setDomains([
-          {
-            id: 'site-preview-1',
-            server_id: 'srv-local',
-            primary_domain: 'hostvra.com',
-            document_root: '/home/hostvra/public_html',
-            app_type: 'php',
-            php_version: '8.3',
-            proxy_port: 80,
-            status: 'active',
-            ssl_enabled: true,
-            ssl_days_left: 89,
-            created_at: new Date().toISOString(),
-          },
-        ]);
+      } else {
+        setDomains([]);
       }
 
       if (tldRes.success && tldRes.data && tldRes.data.length > 0) {
@@ -287,23 +272,7 @@ export default function DomainsPage() {
         setSuccessMessage(`Domain ${formData.domain} successfully added to server.`);
         setAddModalOpen(false);
       } else {
-        // Optimistic addition if API mock fallback
-        const newSite: Website = {
-          id: `site-${Date.now()}`,
-          server_id: 'srv-local',
-          primary_domain: formData.domain,
-          document_root: formData.documentRoot,
-          app_type: 'php',
-          php_version: formData.phpVersion,
-          proxy_port: parseInt(formData.port) || 80,
-          status: 'active',
-          ssl_enabled: formData.enableSSL,
-          ssl_days_left: 90,
-          created_at: new Date().toISOString(),
-        };
-        setDomains((prev) => [newSite, ...prev]);
-        setSuccessMessage(`Domain ${formData.domain} successfully created.`);
-        setAddModalOpen(false);
+        setError(res.error?.message || 'Failed to create website domain on server');
       }
     } catch (err: any) {
       setError(err.message || 'Failed to add domain');
@@ -457,23 +426,14 @@ export default function DomainsPage() {
       if (res.success && res.data && res.data.length > 0) {
         setSearchResults(res.data);
       } else {
-        // Generate clean mock items for preview
-        const base = searchQuery.trim().toLowerCase().replace(/^https?:\/\//, '').split('.')[0];
-        const mocked: DomainSearchResultItem[] = [
-          { domain: `${base}.com`, tld: '.com', available: true, register_price: 12.99, renew_price: 14.99, transfer_price: 11.99, currency: 'USD', is_popular: true },
-          { domain: `${base}.net`, tld: '.net', available: true, register_price: 14.99, renew_price: 16.99, transfer_price: 13.99, currency: 'USD', is_popular: true },
-          { domain: `${base}.org`, tld: '.org', available: false, register_price: 13.99, renew_price: 15.99, transfer_price: 12.99, currency: 'USD', is_popular: true },
-          { domain: `${base}.io`, tld: '.io', available: true, register_price: 39.99, renew_price: 49.99, transfer_price: 38.99, currency: 'USD', is_popular: true },
-          { domain: `${base}.com.bd`, tld: '.com.bd', available: true, register_price: 18.00, renew_price: 18.00, transfer_price: 15.00, currency: 'USD', is_popular: true },
-        ];
-        setSearchResults(mocked);
+        setSearchResults([]);
+        if (res.error?.message) {
+          setError(res.error.message);
+        }
       }
     } catch {
-      const base = searchQuery.trim().toLowerCase().split('.')[0];
-      setSearchResults([
-        { domain: `${base}.com`, tld: '.com', available: true, register_price: 12.99, renew_price: 14.99, transfer_price: 11.99, currency: 'USD', is_popular: true },
-        { domain: `${base}.net`, tld: '.net', available: true, register_price: 14.99, renew_price: 16.99, transfer_price: 13.99, currency: 'USD', is_popular: false },
-      ]);
+      setSearchResults([]);
+      setError('Unable to connect to domain registrar. Please check your registrar configuration and try again.');
     } finally {
       setIsSearching(false);
     }

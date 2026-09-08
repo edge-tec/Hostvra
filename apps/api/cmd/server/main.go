@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"hostvra/api/internal/dns"
 	"hostvra/api/internal/handlers"
 	"hostvra/api/internal/license"
+	"hostvra/api/internal/migration"
 	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/store"
 )
@@ -48,10 +50,20 @@ func main() {
 		"port", cfg.Port,
 	)
 
-	// Initialize Storage Layer (PostgreSQL with fallback to In-Memory if Postgres is unreachable)
+	// Validate production configuration
+	if err := cfg.ValidateProduction(); err != nil {
+		logger.Error("Production startup validation failed", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize Storage Layer (PostgreSQL required in production)
 	var dataStore store.Store
 	pgStore, err := store.NewPostgresStore(cfg.DatabaseURL)
 	if err != nil {
+		if strings.EqualFold(cfg.Environment, "production") {
+			logger.Error("FATAL: PostgreSQL unavailable at configured DATABASE_URL in production environment. In-memory store fallback is prohibited in production.", "error", err)
+			os.Exit(1)
+		}
 		logger.Warn("PostgreSQL unavailable at configured URL, falling back to In-Memory persistence engine for local development", "error", err)
 		dataStore = store.NewMemoryStore()
 	} else {
@@ -60,8 +72,8 @@ func main() {
 	}
 	defer dataStore.Close()
 
-	// Seed default administrator account for local dev / initial access
-	seedDefaultAdmin(context.Background(), dataStore, logger)
+	// Seed administrator account if configured or in development
+	seedDefaultAdmin(context.Background(), dataStore, cfg, logger)
 	autoRecoverLocalAgentNode(context.Background(), dataStore, logger)
 
 	// Initialize Audit Logger
@@ -106,6 +118,8 @@ func main() {
 	domainRegistrarHandler := handlers.NewDomainRegistrarHandler(cfg, dataStore, auditLogger)
 	supportHandler := handlers.NewSupportHandler(cfg, dataStore, auditLogger)
 	settingsHandler := handlers.NewSettingsHandler(cfg, dataStore, auditLogger)
+	migrationMgr := migration.NewManager()
+	migrationHandler := handlers.NewMigrationHandler(migrationMgr, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -175,9 +189,10 @@ func main() {
 			r.Post("/heartbeat", agentHandler.Heartbeat)
 		})
 
-		// Public Hosting Plans Catalog
+		// Public Hosting Plans Catalog & Payment Webhooks
 		r.Get("/billing/plans", billingHandler.ListPlans)
 		r.Get("/billing/plans/{id}", billingHandler.GetPlan)
+		r.Post("/billing/webhooks/{gateway}", billingHandler.HandleWebhook)
 
 		// Public Domain Search, Whois & TLD Pricing
 		r.Get("/domains/search", domainRegistrarHandler.SearchDomains)
@@ -313,9 +328,10 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/recycle-bin", databaseHandler.ListRecycleBin)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/recycle-bin/{id}/restore", databaseHandler.RestoreRecycleBin)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/batch", databaseHandler.Batch)
-				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/users", databaseHandler.CreateUser)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/tables", databaseHandler.GetTables)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/query", databaseHandler.ExecuteQuery)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/export", databaseHandler.Export)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/{id}/export", databaseHandler.Export)
 			})
 
 			// Audit Logs
@@ -605,8 +621,17 @@ func main() {
 			// System Settings (Global Panel Preferences, Port, Entrance, Security)
 			r.Route("/settings", func(r chi.Router) {
 				r.Get("/", settingsHandler.Get)
+				r.Get("/panel-cert", settingsHandler.GetPanelCert)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Put("/", settingsHandler.Update)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/sync-time", settingsHandler.SyncTime)
+			})
+
+			// Server Migration Engine
+			r.Route("/migration", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/jobs", migrationHandler.CreateJob)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Get("/jobs", migrationHandler.ListJobs)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Get("/jobs/{id}", migrationHandler.GetJob)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/jobs/{id}/cancel", migrationHandler.CancelJob)
 			})
 		})
 	})
@@ -645,20 +670,43 @@ func main() {
 	logger.Info("Hostvra API server stopped.")
 }
 
-func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
-	passwordHash, err := auth.HashPassword("SuperSecretP@ss123!", nil)
+func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, logger *slog.Logger) {
+	adminEmail := os.Getenv("INITIAL_ADMIN_EMAIL")
+	adminPass := os.Getenv("INITIAL_ADMIN_PASSWORD")
+
+	if strings.EqualFold(cfg.Environment, "production") {
+		// In production, require explicit INITIAL_ADMIN_EMAIL and strong INITIAL_ADMIN_PASSWORD
+		if adminEmail == "" || adminPass == "" {
+			logger.Info("Production environment detected: Skipping automatic admin seeding (INITIAL_ADMIN_EMAIL or INITIAL_ADMIN_PASSWORD not set)")
+			return
+		}
+		if adminPass == "SuperSecretP@ss123!" || len(adminPass) < 12 {
+			logger.Error("FATAL: INITIAL_ADMIN_PASSWORD cannot be the default weak password in production and must be at least 12 characters")
+			os.Exit(1)
+		}
+	} else {
+		// Development default fallback
+		if adminEmail == "" {
+			adminEmail = "admin@hostvra.com"
+		}
+		if adminPass == "" {
+			adminPass = "SuperSecretP@ss123!"
+		}
+	}
+
+	passwordHash, err := auth.HashPassword(adminPass, nil)
 	if err != nil {
-		logger.Error("Failed to hash default admin password", "error", err)
+		logger.Error("Failed to hash initial admin password", "error", err)
 		return
 	}
 
-	existingUser, err := s.GetUserByEmail(ctx, "admin@hostvra.com")
+	existingUser, err := s.GetUserByEmail(ctx, adminEmail)
 	if err == nil && existingUser != nil {
-		// Sync existing admin account with the known default password
-		if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
-			logger.Warn("Failed to synchronize default admin password", "error", err)
-		} else {
-			logger.Info("Default administrator password synchronized successfully", "email", "admin@hostvra.com")
+		if !strings.EqualFold(cfg.Environment, "production") {
+			// In dev mode sync password
+			if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
+				logger.Warn("Failed to synchronize dev admin password", "error", err)
+			}
 		}
 		return
 	}
@@ -676,7 +724,7 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
 
 	adminUser := &store.User{
 		ID:           uuid.MustParse("00000000-0000-0000-0000-000000000002"),
-		Email:        "admin@hostvra.com",
+		Email:        adminEmail,
 		PasswordHash: passwordHash,
 		FullName:     "Hostvra Administrator",
 		IsActive:     true,
@@ -684,9 +732,9 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, logger *slog.Logger) {
 	}
 
 	if err := s.CreateUser(ctx, adminUser, defaultOrgID, "owner"); err != nil {
-		logger.Warn("Failed to seed default admin user", "error", err)
+		logger.Warn("Failed to seed initial admin user", "error", err)
 	} else {
-		logger.Info("Default administrator account successfully seeded", "email", "admin@hostvra.com")
+		logger.Info("Initial administrator account successfully initialized", "email", adminEmail)
 	}
 }
 
