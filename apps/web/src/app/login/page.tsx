@@ -26,7 +26,11 @@ export default function LoginPage() {
 
       if (res.success && res.data) {
         setStoredToken(res.data.tokens.access_token);
-        router.push('/dashboard');
+        if (typeof document !== 'undefined') {
+          document.cookie = `hostvra_token=${res.data.tokens.access_token}; path=/; max-age=604800; SameSite=Lax`;
+        }
+        window.location.href = '/dashboard';
+        return;
       } else {
         setError(res.error?.message || 'Invalid email or password');
       }
