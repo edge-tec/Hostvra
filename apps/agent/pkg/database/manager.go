@@ -404,13 +404,20 @@ func (m *Manager) DumpDatabase(ctx context.Context, dbName string) ([]byte, erro
 			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
 		}
 		cmd := exec.CommandContext(ctx, path, args...)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
 		out, err := cmd.Output()
-		if err == nil {
-			return out, nil
+		if err != nil {
+			errStr := strings.TrimSpace(stderr.String())
+			if errStr == "" {
+				errStr = err.Error()
+			}
+			return nil, fmt.Errorf("mysqldump failed: %s", errStr)
 		}
+		return out, nil
 	}
 
-	// Fallback SQL dump
+	// Fallback SQL dump when mysqldump binary is not installed in local environment
 	header := fmt.Sprintf("-- Hostvra Database Backup Snapshot\n-- Database: %s\n-- Dump Date: %s\n-- Host: 127.0.0.1\n\nCREATE DATABASE IF NOT EXISTS `%s`;\nUSE `%s`;\n-- Dump Complete.\n",
 		dbName, time.Now().UTC().Format(time.RFC3339), dbName, dbName)
 	return []byte(header), nil

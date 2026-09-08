@@ -627,7 +627,7 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Signature verification (HMAC verification or token check)
+	// Signature verification (HMAC verification, Stripe protocol, or provider token check)
 	reqSig := r.Header.Get("X-Signature")
 	if reqSig == "" {
 		reqSig = r.Header.Get("Stripe-Signature")
@@ -636,11 +636,48 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		reqSig = payload.Signature
 	}
 
-	if cfg.SecretKey != "" && reqSig != "" {
+	if cfg.SecretKey != "" && !cfg.TestMode {
+		if reqSig == "" {
+			h.audit.Log(r.Context(), r, "billing.webhook.reject", "webhook", gatewayName, "failure", "Missing webhook signature", nil)
+			response.Error(w, http.StatusUnauthorized, "MISSING_SIGNATURE", "Webhook signature is required", nil, "")
+			return
+		}
+
 		mac := hmac.New(sha256.New, []byte(cfg.SecretKey))
 		mac.Write(bodyBytes)
 		expectedSig := hex.EncodeToString(mac.Sum(nil))
-		if !cfg.TestMode && reqSig != expectedSig {
+
+		var sigValid bool
+		if hmac.Equal([]byte(reqSig), []byte(expectedSig)) {
+			sigValid = true
+		} else if strings.Contains(reqSig, "v1=") {
+			// Official Stripe webhook signature scheme: t=timestamp,v1=signature
+			var v1Sig, timestamp string
+			for _, part := range strings.Split(reqSig, ",") {
+				part = strings.TrimSpace(part)
+				if strings.HasPrefix(part, "v1=") {
+					v1Sig = strings.TrimPrefix(part, "v1=")
+				} else if strings.HasPrefix(part, "t=") {
+					timestamp = strings.TrimPrefix(part, "t=")
+				}
+			}
+
+			if v1Sig != "" {
+				if hmac.Equal([]byte(v1Sig), []byte(expectedSig)) {
+					sigValid = true
+				} else if timestamp != "" {
+					stripeMac := hmac.New(sha256.New, []byte(cfg.SecretKey))
+					stripeMac.Write([]byte(timestamp + "."))
+					stripeMac.Write(bodyBytes)
+					stripeExpected := hex.EncodeToString(stripeMac.Sum(nil))
+					if hmac.Equal([]byte(v1Sig), []byte(stripeExpected)) {
+						sigValid = true
+					}
+				}
+			}
+		}
+
+		if !sigValid {
 			h.audit.Log(r.Context(), r, "billing.webhook.reject", "webhook", gatewayName, "failure", "Invalid HMAC signature", nil)
 			response.Error(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "Webhook signature verification failed", nil, "")
 			return

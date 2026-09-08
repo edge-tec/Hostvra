@@ -62,6 +62,31 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 		if !strings.HasPrefix(clean, "/var/www") && !strings.HasPrefix(clean, "/home") && !strings.HasPrefix(clean, "/tmp") {
 			return fmt.Errorf("role '%s' is confined to web and home directories", claims.Role)
 		}
+
+		// Security: Prevent symlink escape traversal (resolve target if path exists)
+		if resolved, err := filepath.EvalSymlinks(clean); err == nil && resolved != clean {
+			for _, rr := range restrictedRoots {
+				if resolved == rr || strings.HasPrefix(resolved, rr+"/") {
+					return fmt.Errorf("symlink target '%s' is restricted for role '%s'", resolved, claims.Role)
+				}
+			}
+			if !strings.HasPrefix(resolved, "/var/www") && !strings.HasPrefix(resolved, "/home") && !strings.HasPrefix(resolved, "/tmp") {
+				return fmt.Errorf("symlink target '%s' escapes authorized user spaces", resolved)
+			}
+		}
+
+		// Check parent directory symlink resolution for creation mode
+		parent := filepath.Dir(clean)
+		if resolvedParent, err := filepath.EvalSymlinks(parent); err == nil && resolvedParent != parent {
+			for _, rr := range restrictedRoots {
+				if resolvedParent == rr || strings.HasPrefix(resolvedParent, rr+"/") {
+					return fmt.Errorf("parent directory symlink '%s' is restricted for role '%s'", resolvedParent, claims.Role)
+				}
+			}
+			if !strings.HasPrefix(resolvedParent, "/var/www") && !strings.HasPrefix(resolvedParent, "/home") && !strings.HasPrefix(resolvedParent, "/tmp") {
+				return fmt.Errorf("parent directory symlink '%s' escapes authorized user spaces", resolvedParent)
+			}
+		}
 	}
 	return nil
 }

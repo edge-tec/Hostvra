@@ -240,3 +240,54 @@ func TestFileHandler_SymlinkOverwriteForbidden(t *testing.T) {
 	}
 }
 
+func TestFileHandler_NonAdminSymlinkEscapeTraversalBlocked(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "hostvra-api-symlink-escape-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+
+	h := NewFileHandler(cfg, memStore, auditLogger)
+
+	devClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "developer@client.com",
+		Role:           "developer", // non-admin
+	}
+
+	// Create a fake sensitive target outside user space
+	sensitiveFile := filepath.Join(tempDir, "shadow_file")
+	_ = os.WriteFile(sensitiveFile, []byte("root:secret_hash:12345"), 0600)
+
+	// Create symlink inside an allowed user space prefix (e.g. /tmp) pointing to the sensitive file
+	linkInTmp := filepath.Join(tempDir, "link_to_sensitive")
+	_ = os.Symlink(sensitiveFile, linkInTmp)
+
+	// Developer attempts to read via the symlink
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/files/content?path="+linkInTmp, nil)
+	req = req.WithContext(context.WithValue(req.Context(), auth.UserContextKey, devClaims))
+	rec := httptest.NewRecorder()
+	h.GetContent(rec, req)
+
+	// If the sensitive file is outside /var/www, /home, /tmp or in restricted roots, it must be forbidden
+	// Let's create a symlink to /etc/hosts (which exists on all Unix systems)
+	hostsLink := filepath.Join(tempDir, "hosts_symlink")
+	_ = os.Symlink("/etc/hosts", hostsLink)
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/v1/files/content?path="+hostsLink, nil)
+	req2 = req2.WithContext(context.WithValue(req2.Context(), auth.UserContextKey, devClaims))
+	rec2 := httptest.NewRecorder()
+	h.GetContent(rec2, req2)
+
+	if rec2.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for symlink pointing to /etc/hosts by developer, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+

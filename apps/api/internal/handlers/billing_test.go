@@ -3,6 +3,9 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -176,6 +179,49 @@ func TestBillingWebhook_SecurityAndReplay(t *testing.T) {
 		rec := sendWebhook(payload, "invalid-hmac-signature")
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("Expected 401 Unauthorized for bad signature, got %d", rec.Code)
+		}
+	})
+
+	// 3b. Test Missing Signature in non-test mode (Must be rejected with 401)
+	t.Run("MissingSignatureInProductionMode", func(t *testing.T) {
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_missing_sig",
+			Amount:        25.00,
+			Currency:      "USD",
+			Status:        "paid",
+		}
+		rec := sendWebhook(payload, "")
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Expected 401 Unauthorized for missing signature, got %d", rec.Code)
+		}
+	})
+
+	// 3c. Test Stripe Official Signature Scheme (t=timestamp,v1=signature)
+	t.Run("StripeOfficialSignatureScheme", func(t *testing.T) {
+		payload := WebhookPayload{
+			InvoiceID:     invID.String(),
+			TransactionID: "txn_stripe_v1_sig",
+			Amount:        25.00,
+			Currency:      "USD",
+			Status:        "paid",
+		}
+		body, _ := json.Marshal(payload)
+		ts := "1725800000"
+		mac := hmac.New(sha256.New, []byte("stripe-secret-test-key"))
+		mac.Write([]byte(ts + "."))
+		mac.Write(body)
+		v1Sig := hex.EncodeToString(mac.Sum(nil))
+		stripeHeader := "t=" + ts + ",v1=" + v1Sig
+
+		req := httptest.NewRequest("POST", "/billing/webhook/"+gatewayName, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Stripe-Signature", stripeHeader)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for valid Stripe official signature, got %d: %s", rec.Code, rec.Body.String())
 		}
 	})
 
