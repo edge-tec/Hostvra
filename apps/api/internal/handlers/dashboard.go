@@ -176,51 +176,60 @@ func (h *DashboardHandler) gatherTelemetry() TelemetryData {
 	osName := detectOSName()
 	uptimeSec := int64(time.Since(h.startTime).Seconds())
 
+	// Read real system uptime if /proc/uptime exists
+	if upFile, err := os.Open("/proc/uptime"); err == nil {
+		var upSec float64
+		if _, err := fmt.Fscanf(upFile, "%f", &upSec); err == nil && upSec > 0 {
+			uptimeSec = int64(upSec)
+		}
+		_ = upFile.Close()
+	}
+
 	data := TelemetryData{
 		CPU: CPUTelemetry{
 			Cores:   cores,
 			Model:   "Intel/AMD x86_64 Processor",
-			Percent: 5.0,
+			Percent: 0.0,
 		},
 		Load: LoadTelemetry{
 			Text:    "Normal",
-			Avg:     "0.42 / 0.43 / 0.40",
-			Percent: 5.0,
-			Load1m:  0.42,
-			Load5m:  0.43,
-			Load15m: 0.40,
+			Avg:     "0.00 / 0.00 / 0.00",
+			Percent: 0.0,
+			Load1m:  0.0,
+			Load5m:  0.0,
+			Load15m: 0.0,
 		},
 		RAM: RAMTelemetry{
-			UsedMB:   3940,
-			TotalMB:  7750,
-			UsedStr:  "3.94GB",
-			TotalStr: "7.57GB",
-			Percent:  52.0,
+			UsedMB:   0,
+			TotalMB:  0,
+			UsedStr:  "0 GB",
+			TotalStr: "0 GB",
+			Percent:  0.0,
 		},
 		Disk: DiskTelemetry{
 			Path:     "/",
-			UsedGB:   26,
-			TotalGB:  72,
-			UsedStr:  "26.0GB",
-			TotalStr: "71.6GB",
-			Percent:  37.0,
+			UsedGB:   0,
+			TotalGB:  0,
+			UsedStr:  "0 GB",
+			TotalStr: "0 GB",
+			Percent:  0.0,
 		},
 		Network: NetworkTelemetry{
 			Interface:       "All",
-			UpstreamMb:      "1.50 MB",
-			DownstreamMb:    "1.52 MB",
-			TotalSentGb:     "424.45 GB",
-			TotalReceivedGb: "369.47 GB",
-			UpstreamKbps:    1250,
-			DownstreamKbps:  1350,
+			UpstreamMb:      "0.00 MB",
+			DownstreamMb:    "0.00 MB",
+			TotalSentGb:     "0.00 GB",
+			TotalReceivedGb: "0.00 GB",
+			UpstreamKbps:    0,
+			DownstreamKbps:  0,
 		},
 		DiskIO: DiskIOTelemetry{
-			ReadMb:       "0.82 MB",
-			WriteMb:      "2.14 MB",
-			TotalReadGb:  "128.40 GB",
-			TotalWriteGb: "312.80 GB",
-			ReadKbps:     820,
-			WriteKbps:    2140,
+			ReadMb:       "0.00 MB",
+			WriteMb:      "0.00 MB",
+			TotalReadGb:  "0.00 GB",
+			TotalWriteGb: "0.00 GB",
+			ReadKbps:     0,
+			WriteKbps:    0,
 		},
 		UptimeSeconds: uptimeSec,
 		Hostname:      hostname,
@@ -271,6 +280,22 @@ func (h *DashboardHandler) gatherTelemetry() TelemetryData {
 			data.RAM.Percent = float64(int(pct*10)) / 10
 			data.RAM.UsedStr = formatBytesGB(usedMB * 1024 * 1024)
 			data.RAM.TotalStr = formatBytesGB(totalMB * 1024 * 1024)
+		}
+	}
+
+	// Darwin / macOS Development Fallback for RAM
+	if data.RAM.TotalMB == 0 && runtime.GOOS == "darwin" {
+		if out, err := exec.Command("sysctl", "-n", "hw.memsize").Output(); err == nil {
+			if totalBytes, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64); err == nil && totalBytes > 0 {
+				data.RAM.TotalMB = totalBytes / (1024 * 1024)
+				data.RAM.TotalStr = formatBytesGB(totalBytes)
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				usedBytes := int64(m.Sys)
+				data.RAM.UsedMB = usedBytes / (1024 * 1024)
+				data.RAM.UsedStr = formatBytesGB(usedBytes)
+				data.RAM.Percent = float64(int(float64(data.RAM.UsedMB)/float64(data.RAM.TotalMB)*1000)) / 10
+			}
 		}
 	}
 

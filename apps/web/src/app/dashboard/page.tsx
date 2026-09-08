@@ -62,10 +62,10 @@ export default function DashboardPage() {
 
   // Realtime System Entity Counts
   const [counts, setCounts] = useState({
-    websites_running: 16,
+    websites_running: 0,
     websites_stopped: 0,
-    websites_total: 16,
-    databases_total: 18,
+    websites_total: 0,
+    databases_total: 0,
     ftp_accounts_total: 0,
     servers_total: 1,
     security_risks: 0,
@@ -74,19 +74,21 @@ export default function DashboardPage() {
 
   // Realtime Hardware telemetry
   const [telemetry, setTelemetry] = useState({
-    load: { text: 'Normal', avg: '0.42 / 0.43 / 0.40', percent: 5 },
-    cpu: { cores: 4, percent: 6 },
-    ram: { used: '3.94GB', total: '7.57GB', percent: 52 },
-    disk: { used: '26.0GB', total: '71.6GB', percent: 37 },
-    upstreamMb: '1.50 MB',
-    downstreamMb: '1.52 MB',
-    totalSentGb: '424.45 GB',
-    totalReceivedGb: '369.47 GB',
-    readMb: '0.82 MB',
-    writeMb: '2.14 MB',
-    totalReadGb: '128.40 GB',
-    totalWriteGb: '312.80 GB',
+    load: { text: 'Sampling...', avg: '0.00 / 0.00 / 0.00', percent: 0 },
+    cpu: { cores: 1, percent: 0 },
+    ram: { used: '0 GB', total: '0 GB', percent: 0 },
+    disk: { used: '0 GB', total: '0 GB', percent: 0 },
+    upstreamMb: '0.00 MB',
+    downstreamMb: '0.00 MB',
+    totalSentGb: '0.00 GB',
+    totalReceivedGb: '0.00 GB',
+    readMb: '0.00 MB',
+    writeMb: '0.00 MB',
+    totalReadGb: '0.00 GB',
+    totalWriteGb: '0.00 GB',
   });
+
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -97,6 +99,7 @@ export default function DashboardPage() {
       ]);
 
       if (overviewRes.success && overviewRes.data) {
+        setApiError(null);
         if (overviewRes.data.telemetry) {
           const t = overviewRes.data.telemetry;
           setTelemetry({
@@ -117,6 +120,8 @@ export default function DashboardPage() {
         if (overviewRes.data.counts) {
           setCounts(overviewRes.data.counts);
         }
+      } else if (overviewRes.error) {
+        setApiError(overviewRes.error.message);
       }
 
       if (serversRes.success && serversRes.data) {
@@ -125,7 +130,8 @@ export default function DashboardPage() {
       if (appsRes.success && appsRes.data) {
         setApps(appsRes.data);
       }
-    } catch (err) {
+    } catch (err: any) {
+      setApiError(err?.message || 'Failed to load live dashboard telemetry');
       console.error('Failed to load dashboard data', err);
     } finally {
       setLoading(false);
@@ -164,6 +170,7 @@ export default function DashboardPage() {
       try {
         const res = await apiFetch<DashboardOverview>('/api/v1/dashboard/overview');
         if (res.success && res.data) {
+          setApiError(null);
           const t = res.data.telemetry;
           const c = res.data.counts;
           if (t) {
@@ -195,9 +202,11 @@ export default function DashboardPage() {
           if (c) {
             setCounts(c);
           }
+        } else if (res.error) {
+          setApiError(res.error.message);
         }
-      } catch (e) {
-        // Fallback smooth ticker if offline
+      } catch (err: any) {
+        setApiError(err?.message || 'Network error fetching realtime telemetry');
       }
     }, 2500);
 
@@ -281,6 +290,22 @@ export default function DashboardPage() {
   return (
     <DashboardShell>
       <div className="space-y-4">
+        {/* Realtime API Disconnected Alert */}
+        {apiError && (
+          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+              <span><strong>Live Telemetry Disconnected:</strong> {apiError}</span>
+            </div>
+            <button
+              onClick={fetchData}
+              className="px-2.5 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 text-[11px] font-semibold text-amber-200 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* ROW 1: 4 Circular System Gauge Cards (Load, CPU, RAM, Disk) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
           {/* Card 1: Load Status */}
