@@ -14,7 +14,13 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
   const headers = new Headers();
   req.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
-    if (lower !== 'host' && lower !== 'connection') {
+    if (
+      lower !== 'host' &&
+      lower !== 'connection' &&
+      lower !== 'content-length' &&
+      lower !== 'transfer-encoding' &&
+      lower !== 'keep-alive'
+    ) {
       headers.set(key, value);
     }
   });
@@ -27,6 +33,7 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
       headers,
       body,
       cache: 'no-store',
+      signal: AbortSignal.timeout(10000),
     });
 
     const data = await res.arrayBuffer();

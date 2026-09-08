@@ -392,22 +392,17 @@ export function clearStoredAuth() {
   }
 }
 
-export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const token = getStoredToken();
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> || {}),
-  };
-
-  if (token && !headers['Authorization']) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-
+async function executeFetch<T>(
+  baseUrl: string,
+  endpoint: string,
+  options: RequestInit,
+  headers: Record<string, string>
+): Promise<ApiResponse<T>> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
+    const res = await fetch(`${baseUrl}${endpoint}`, {
       ...options,
       headers,
       signal: options.signal || controller.signal,
@@ -455,7 +450,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
         success: false,
         error: {
           code: 'TIMEOUT',
-          message: 'Connection timed out. The Hostvra API server did not respond within 12 seconds.',
+          message: 'Connection timed out. The Hostvra API server did not respond within 10 seconds.',
         },
       };
     }
@@ -467,6 +462,46 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
       },
     };
   }
+}
+
+export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token && !headers['Authorization']) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Attempt 1: Standard primary endpoint (Same-origin Next.js route proxy)
+  const primaryRes = await executeFetch<T>(getApiBaseUrl(), endpoint, options, headers);
+  if (
+    primaryRes.success ||
+    (primaryRes.error &&
+      primaryRes.error.code !== 'GATEWAY_ERROR' &&
+      primaryRes.error.code !== 'NETWORK_ERROR' &&
+      primaryRes.error.code !== 'TIMEOUT')
+  ) {
+    return primaryRes;
+  }
+
+  // Attempt 2: Direct Go API fallback on port 8080 if running in browser
+  if (typeof window !== 'undefined' && window.location.port === '3000') {
+    const directUrl = `${window.location.protocol}//${window.location.hostname}:8080`;
+    try {
+      const fallbackRes = await executeFetch<T>(directUrl, endpoint, options, headers);
+      if (fallbackRes.success || fallbackRes.data) {
+        return fallbackRes;
+      }
+      return fallbackRes;
+    } catch {
+      return primaryRes;
+    }
+  }
+
+  return primaryRes;
 }
 
 export interface FirewallStatus {
