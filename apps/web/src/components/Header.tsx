@@ -46,6 +46,7 @@ export function Header() {
   const [osName, setOsName] = useState<string>('Ubuntu 24');
   const [hasAlerts, setHasAlerts] = useState<boolean>(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
     async function loadMe() {
@@ -69,6 +70,8 @@ export function Header() {
         }
       } catch (e) {
         // Fallback gracefully
+      } finally {
+        setAuthChecked(true);
       }
     }
     loadMe();
@@ -244,83 +247,94 @@ export function Header() {
             )}
           </button>
 
-          {/* User Profile Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="flex items-center gap-2.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition cursor-pointer"
-            >
-              <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold text-xs">
-                {(user?.full_name?.[0] || 'A').toUpperCase()}
-              </div>
-
-              <div className="text-left hidden sm:block">
-                <div className="text-xs font-semibold text-slate-900 dark:text-white leading-tight truncate max-w-[120px]">
-                  {user?.full_name || 'Enterprise Admin'}
-                </div>
-                <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                  <span>Enterprise Admin</span>
-                </div>
-              </div>
-
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-            </button>
-
-            {/* Dropdown Menu */}
-            {userMenuOpen && (
-              <div
-                className="absolute right-0 mt-2 w-56 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
-                onMouseLeave={() => setUserMenuOpen(false)}
+          {/* User Profile Dropdown or Sign In */}
+          {user ? (
+            <div className="relative">
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition cursor-pointer"
               >
-                <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
-                  <p className="text-xs font-bold text-slate-900 dark:text-white">{user?.full_name || 'Administrator'}</p>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{user?.email || 'admin@hostvra.internal'}</p>
-                  <div className="mt-1.5 inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                    Enterprise Plan
+                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold text-xs">
+                  {(user.full_name?.[0] || 'U').toUpperCase()}
+                </div>
+
+                <div className="text-left hidden sm:block">
+                  <div className="text-xs font-semibold text-slate-900 dark:text-white leading-tight truncate max-w-[120px]">
+                    {user.full_name}
+                  </div>
+                  <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <span>{user.role || 'Admin'}</span>
                   </div>
                 </div>
 
-                <div className="py-1">
-                  <button
-                    onClick={() => {
-                      setUserMenuOpen(false);
-                      router.push('/settings');
-                    }}
-                    className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <span>System Settings</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setUserMenuOpen(false);
-                      router.push('/api-keys');
-                    }}
-                    className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <span>API Credentials</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setUserMenuOpen(false);
-                      router.push('/audit-logs');
-                    }}
-                    className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
-                  >
-                    <span>Activity Logs</span>
-                  </button>
-                </div>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+              </button>
 
-                <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full px-3.5 py-1.5 text-xs text-left text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 font-medium cursor-pointer"
-                  >
-                    <span>Sign out</span>
-                  </button>
+              {/* Dropdown Menu */}
+              {userMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-56 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
+                  onMouseLeave={() => setUserMenuOpen(false)}
+                >
+                  <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
+                    <p className="text-xs font-bold text-slate-900 dark:text-white">{user.full_name}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
+                    <div className="mt-1.5 inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                      {org?.plan_tier || 'Enterprise Plan'}
+                    </div>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        router.push('/settings');
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                    >
+                      <span>System Settings</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        router.push('/api-keys');
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                    >
+                      <span>API Credentials</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        router.push('/audit-logs');
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2 cursor-pointer"
+                    >
+                      <span>Activity Logs</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-1 border-t border-slate-200 dark:border-slate-800">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 font-medium cursor-pointer"
+                    >
+                      <span>Sign out</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : authChecked ? (
+            <button
+              onClick={() => router.push('/login')}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm cursor-pointer"
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+          ) : null}
+
         </div>
       </header>
 

@@ -41,6 +41,35 @@ func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 	}
 }
 
+// OptionalMiddleware extracts claims if an Authorization header is present,
+// but does NOT block or return 401 if missing or invalid.
+func OptionalMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			claims, err := ValidateAccessToken(parts[1], jwtSecret)
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), UserContextKey, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 func GetClaims(ctx context.Context) (*Claims, bool) {
 	claims, ok := ctx.Value(UserContextKey).(*Claims)
 	return claims, ok

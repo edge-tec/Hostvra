@@ -223,13 +223,17 @@ func main() {
 		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
 		r.Post("/support/ai-assistant", supportHandler.AskAIAssistant)
 
+		// Real-Time Dashboard & Telemetry (Optional Auth - serves live server hardware metrics and user/default counts)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.OptionalMiddleware(cfg.JWTSecret))
+			r.Get("/dashboard/overview", dashboardHandler.GetOverview)
+			r.Get("/system/telemetry", dashboardHandler.GetOverview)
+		})
+
 		// Protected Fleet Management Endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(cfg.JWTSecret))
 
-			// Real-Time Dashboard & Telemetry
-			r.Get("/dashboard/overview", dashboardHandler.GetOverview)
-			r.Get("/system/telemetry", dashboardHandler.GetOverview)
 			r.Post("/system/fix", dashboardHandler.RunFix)
 			r.Post("/system/restart", dashboardHandler.RestartTarget)
 
