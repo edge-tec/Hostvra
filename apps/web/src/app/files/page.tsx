@@ -474,10 +474,10 @@ export default function FileManagerPage() {
         </div>
 
         {/* Quick Jump Shortcuts */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-slate-400 font-medium">Quick Jump:</span>
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-slate-400 font-medium text-[11px] mr-1">Quick Jump:</span>
           {[
-            { label: '/var/www (Websites)', path: '/var/www' },
+            { label: '/var/www', path: '/var/www' },
             { label: '/home', path: '/home' },
             { label: '/etc/nginx', path: '/etc/nginx' },
             { label: '/etc/php', path: '/etc/php' },
@@ -487,10 +487,10 @@ export default function FileManagerPage() {
             <button
               key={sc.path}
               onClick={() => fetchDirectory(sc.path)}
-              className={`px-2.5 py-1 rounded-lg font-mono text-[11px] transition ${
+              className={`px-2.5 py-1 rounded-md font-mono text-[11px] transition-colors border-0 shadow-none cursor-pointer ${
                 currentPath.startsWith(sc.path)
-                  ? 'bg-emerald-600 text-white font-bold'
-                  : 'bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300'
+                  ? 'bg-emerald-600 text-white font-semibold'
+                  : 'bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300'
               }`}
             >
               {sc.label}
@@ -499,32 +499,41 @@ export default function FileManagerPage() {
         </div>
 
         {/* Breadcrumb Path & Search Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 p-2.5 rounded-2xl shadow-xs">
-          <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto py-1">
+        <div data-breadcrumb className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-[#121824] border border-slate-200/80 dark:border-surface-800/80 p-2 sm:p-2.5 rounded-xl shadow-xs">
+          <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 overflow-x-auto py-0.5 no-scrollbar">
             <button
               onClick={handleNavigateUp}
               disabled={currentPath === '/'}
-              className="p-1 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 disabled:opacity-40"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors border-0 shadow-none bg-transparent"
               title="Up one level"
             >
-              <ArrowUp className="w-3.5 h-3.5" />
+              <ArrowUp className="w-4 h-4" />
             </button>
 
             <button
               onClick={() => fetchDirectory('/')}
-              className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-bold text-slate-900 dark:text-slate-200 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800"
+              className={`px-2 py-1 rounded-md text-xs transition-colors border-0 shadow-none bg-transparent cursor-pointer ${
+                currentPath === '/'
+                  ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                  : 'text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-surface-800 font-medium'
+              }`}
             >
               root /
             </button>
 
             {pathParts.map((part, i) => {
               const partPath = '/' + pathParts.slice(0, i + 1).join('/');
+              const isLast = i === pathParts.length - 1;
               return (
                 <React.Fragment key={partPath}>
                   <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   <button
                     onClick={() => fetchDirectory(partPath)}
-                    className="hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors font-semibold text-slate-800 dark:text-slate-300 truncate max-w-[140px]"
+                    className={`px-2 py-1 rounded-md text-xs transition-colors truncate max-w-[150px] border-0 shadow-none bg-transparent cursor-pointer ${
+                      isLast
+                        ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                        : 'text-slate-700 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-surface-800 font-medium'
+                    }`}
                   >
                     {part}
                   </button>
@@ -533,14 +542,14 @@ export default function FileManagerPage() {
             })}
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-64 bg-slate-50 dark:bg-surface-900 border border-slate-300 dark:border-surface-700 rounded-xl px-3 py-1.5 shadow-xs focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
+          <div className="flex items-center gap-2 w-full sm:w-64 bg-slate-50 dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg px-3 py-1.5 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20 transition-all">
             <Search className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
             <input
               type="text"
               placeholder="Search current folder..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none"
+              className="w-full bg-transparent text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none border-none shadow-none"
             />
           </div>
         </div>
@@ -554,20 +563,20 @@ export default function FileManagerPage() {
         )}
 
         {/* Files Table */}
-        <div className="bg-white dark:bg-[#121824] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
+        <div className="bg-white dark:bg-[#121824] border border-slate-200/80 dark:border-surface-800/80 rounded-xl overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#151b28]">
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Name</th>
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Size</th>
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Permissions</th>
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Owner/Group</th>
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">Last Modified</th>
-                  <th className="px-5 py-3 font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 text-right">Actions</th>
+                <tr className="border-b border-slate-200/80 dark:border-surface-800/80 bg-slate-50/80 dark:bg-[#151b28]">
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Name</th>
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Size</th>
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Permissions</th>
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400 hidden md:table-cell">Owner/Group</th>
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400 hidden sm:table-cell">Last Modified</th>
+                  <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+              <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60">
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
@@ -590,24 +599,24 @@ export default function FileManagerPage() {
                     return (
                       <tr
                         key={file.path}
-                        className="hover:bg-slate-50 dark:hover:bg-surface-800/50 transition cursor-pointer group"
+                        className="hover:bg-slate-50/75 dark:hover:bg-surface-800/40 transition-colors cursor-pointer group"
                         onDoubleClick={() => handleItemClick(file)}
                       >
                         {/* File Name & Icon */}
-                        <td className="px-5 py-2.5 font-medium text-slate-900 dark:text-slate-200">
+                        <td className="px-4 py-2.5 font-medium">
                           <div className="flex items-center gap-2.5">
                             {file.is_dir ? (
-                              <Folder className="w-4 h-4 text-amber-500 flex-shrink-0" />
+                              <Folder className="w-4 h-4 text-amber-500 flex-shrink-0 fill-amber-500/20" />
                             ) : isArchive ? (
                               <FolderArchive className="w-4 h-4 text-purple-500 flex-shrink-0" />
                             ) : file.name.endsWith('.bak') ? (
                               <ShieldCheck className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                             ) : (
-                              <FileCode className="w-4 h-4 text-indigo-400 flex-shrink-0" />
+                              <FileCode className="w-4 h-4 text-indigo-500 dark:text-indigo-400 flex-shrink-0" />
                             )}
                             <button
                               onClick={() => handleItemClick(file)}
-                              className="text-left font-semibold text-slate-800 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-400 transition truncate max-w-xs sm:max-w-md"
+                              className="text-left font-medium text-slate-800 dark:text-slate-200 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors truncate max-w-xs sm:max-w-md cursor-pointer border-0 bg-transparent shadow-none p-0"
                             >
                               {file.name}
                             </button>
@@ -615,12 +624,12 @@ export default function FileManagerPage() {
                         </td>
 
                         {/* File Size */}
-                        <td className="px-5 py-2.5 font-mono text-slate-500 dark:text-slate-400">
+                        <td className="px-4 py-2.5 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
                           {formatSize(file.size, file.is_dir)}
                         </td>
 
                         {/* Permissions (Octal) */}
-                        <td className="px-5 py-2.5 font-mono text-slate-600 dark:text-slate-300">
+                        <td className="px-4 py-2.5">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -628,7 +637,7 @@ export default function FileManagerPage() {
                               setPermMode(file.perm_octal || '0755');
                               setPermModalOpen(true);
                             }}
-                            className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:border-emerald-500 border border-transparent transition text-[11px]"
+                            className="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400 transition-colors cursor-pointer border-0 shadow-none"
                             title="Click to change permissions"
                           >
                             {file.perm_octal}
@@ -636,25 +645,25 @@ export default function FileManagerPage() {
                         </td>
 
                         {/* Owner / Group */}
-                        <td className="px-5 py-2.5 text-slate-500 dark:text-slate-400 font-mono text-[11px]">
+                        <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400 font-mono text-[11px] hidden md:table-cell">
                           {file.owner}:{file.group}
                         </td>
 
                         {/* Modified Time */}
-                        <td className="px-5 py-2.5 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        <td className="px-4 py-2.5 text-slate-500 dark:text-slate-400 whitespace-nowrap hidden sm:table-cell">
                           {file.modified_at ? new Date(file.modified_at).toLocaleString() : '--'}
                         </td>
 
                         {/* Actions */}
-                        <td className="px-5 py-2.5 text-right">
-                          <div className="flex items-center justify-end gap-1.5">
+                        <td className="px-4 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-0.5">
                             {!file.is_dir && (
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleItemClick(file);
                                 }}
-                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 hover:border-emerald-200 transition shadow-2xs cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                                 title="Edit File"
                               >
                                 <Edit className="w-3.5 h-3.5" />
@@ -667,7 +676,7 @@ export default function FileManagerPage() {
                                   e.stopPropagation();
                                   handleDownload(file);
                                 }}
-                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 hover:border-indigo-200 transition shadow-2xs cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                                 title="Download File"
                               >
                                 <Download className="w-3.5 h-3.5" />
@@ -680,7 +689,7 @@ export default function FileManagerPage() {
                                   e.stopPropagation();
                                   handleExtract(file);
                                 }}
-                                className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:border-purple-200 transition shadow-2xs cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                                 title="Extract Archive"
                               >
                                 <Archive className="w-3.5 h-3.5" />
@@ -693,7 +702,7 @@ export default function FileManagerPage() {
                                 setItemToArchive(file);
                                 setArchiveModalOpen(true);
                               }}
-                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30 hover:border-purple-200 transition shadow-2xs cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Compress / Archive"
                             >
                               <Archive className="w-3.5 h-3.5" />
@@ -706,7 +715,7 @@ export default function FileManagerPage() {
                                 setNewName(file.name);
                                 setRenameModalOpen(true);
                               }}
-                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-200 transition shadow-2xs cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Rename"
                             >
                               <Copy className="w-3.5 h-3.5" />
@@ -717,7 +726,7 @@ export default function FileManagerPage() {
                                 e.stopPropagation();
                                 handleDelete(file);
                               }}
-                              className="p-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:border-rose-200 transition shadow-2xs cursor-pointer"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Delete Permanently"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

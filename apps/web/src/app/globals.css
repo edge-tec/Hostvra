@@ -538,8 +538,32 @@ html:not(.dark) a[class*="bg-[#20a53a]"] * {
   stroke: #FFFFFF !important;
 }
 
+/* Clean Borderless Buttons for Tables, Breadcrumbs, and Inline Text */
+table button,
+[data-breadcrumb] button,
+.btn-plain,
+.btn-ghost,
+button.btn-plain,
+button.btn-ghost,
+button[class*="text-left"],
+button[class*="truncate"],
+button[class*="bg-transparent"],
+button[class*="border-0"],
+button[class*="border-none"] {
+  border: none !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+
+html:not(.dark) table button:not([class*="bg-emerald"]):not([class*="bg-indigo"]):not([class*="bg-rose"]):not([class*="bg-blue"]):not([class*="bg-amber"]),
+html:not(.dark) [data-breadcrumb] button {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 /* 4.2 Secondary & Neutral Buttons (Eye-Friendly Slate Surfaces & High Contrast) */
-html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):not(table button):not([data-breadcrumb] button):not([class*="text-left"]):not([class*="truncate"]):not([class*="bg-transparent"]):not([class*="border-0"]):not([class*="border-none"]):not(.btn-plain):not(.btn-ghost),
 html:not(.dark) button.bg-surface-800,
 html:not(.dark) button.bg-surface-850,
 html:not(.dark) button.bg-surface-900,
@@ -552,7 +576,7 @@ html:not(.dark) button.bg-slate-900 {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
 }
 
-html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):hover:not(:disabled),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):not(table button):not([data-breadcrumb] button):not([class*="text-left"]):not([class*="truncate"]):not([class*="bg-transparent"]):not([class*="border-0"]):not([class*="border-none"]):not(.btn-plain):not(.btn-ghost):hover:not(:disabled),
 html:not(.dark) button.bg-surface-800:hover,
 html:not(.dark) button.bg-slate-800:hover {
   background-color: #E2E8F0 !important;
