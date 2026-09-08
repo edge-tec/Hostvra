@@ -674,6 +674,8 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 	adminEmail := os.Getenv("INITIAL_ADMIN_EMAIL")
 	adminPass := os.Getenv("INITIAL_ADMIN_PASSWORD")
 
+	var emailsToSeed []string
+
 	if strings.EqualFold(cfg.Environment, "production") {
 		// In production, require explicit INITIAL_ADMIN_EMAIL and strong INITIAL_ADMIN_PASSWORD
 		if adminEmail == "" || adminPass == "" {
@@ -684,30 +686,22 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 			logger.Error("FATAL: INITIAL_ADMIN_PASSWORD cannot be the default weak password in production and must be at least 12 characters")
 			os.Exit(1)
 		}
+		emailsToSeed = []string{adminEmail}
 	} else {
-		// Development default fallback
-		if adminEmail == "" {
-			adminEmail = "admin@hostvra.com"
-		}
+		// Development default fallback: support both admin@hostvra.com and admin@hostvra.local
 		if adminPass == "" {
 			adminPass = "SuperSecretP@ss123!"
+		}
+		if adminEmail != "" {
+			emailsToSeed = []string{adminEmail}
+		} else {
+			emailsToSeed = []string{"admin@hostvra.com", "admin@hostvra.local"}
 		}
 	}
 
 	passwordHash, err := auth.HashPassword(adminPass, nil)
 	if err != nil {
 		logger.Error("Failed to hash initial admin password", "error", err)
-		return
-	}
-
-	existingUser, err := s.GetUserByEmail(ctx, adminEmail)
-	if err == nil && existingUser != nil {
-		if !strings.EqualFold(cfg.Environment, "production") {
-			// In dev mode sync password
-			if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
-				logger.Warn("Failed to synchronize dev admin password", "error", err)
-			}
-		}
 		return
 	}
 
@@ -722,19 +716,33 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 	}
 	_ = s.CreateOrganization(ctx, org)
 
-	adminUser := &store.User{
-		ID:           uuid.MustParse("00000000-0000-0000-0000-000000000002"),
-		Email:        adminEmail,
-		PasswordHash: passwordHash,
-		FullName:     "Hostvra Administrator",
-		IsActive:     true,
-		IsSuperAdmin: true,
-	}
+	for i, email := range emailsToSeed {
+		existingUser, err := s.GetUserByEmail(ctx, email)
+		if err == nil && existingUser != nil {
+			if !strings.EqualFold(cfg.Environment, "production") {
+				// In dev mode sync password
+				if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
+					logger.Warn("Failed to synchronize dev admin password", "email", email, "error", err)
+				}
+			}
+			continue
+		}
 
-	if err := s.CreateUser(ctx, adminUser, defaultOrgID, "owner"); err != nil {
-		logger.Warn("Failed to seed initial admin user", "error", err)
-	} else {
-		logger.Info("Initial administrator account successfully initialized", "email", adminEmail)
+		userUUID := uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+2))
+		adminUser := &store.User{
+			ID:           userUUID,
+			Email:        email,
+			PasswordHash: passwordHash,
+			FullName:     "Hostvra Administrator",
+			IsActive:     true,
+			IsSuperAdmin: true,
+		}
+
+		if err := s.CreateUser(ctx, adminUser, defaultOrgID, "owner"); err != nil {
+			logger.Warn("Failed to seed initial admin user", "email", email, "error", err)
+		} else {
+			logger.Info("Initial administrator account successfully initialized", "email", email)
+		}
 	}
 }
 

@@ -99,6 +99,22 @@ export default function LoginPage() {
               </div>
             </div>
 
+            <div className="flex items-center justify-between text-xs pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@hostvra.local');
+                  setPassword('SuperSecretP@ss123!');
+                }}
+                className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
+              >
+                Prefill Default Credentials
+              </button>
+              <Link href="/register" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                Create Account
+              </Link>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
