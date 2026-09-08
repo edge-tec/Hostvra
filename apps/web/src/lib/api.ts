@@ -3,6 +3,10 @@ export function getApiBaseUrl(): string {
     if (process.env.NEXT_PUBLIC_API_URL) {
       return process.env.NEXT_PUBLIC_API_URL;
     }
+    // Direct VPS IP/localhost access on port 3000 connects directly to Go API backend on port 8080
+    if (window.location.port === '3000') {
+      return `${window.location.protocol}//${window.location.hostname}:8080`;
+    }
     return '';
   }
   return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8080';
