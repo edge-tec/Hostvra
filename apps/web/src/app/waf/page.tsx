@@ -377,57 +377,61 @@ export default function WAFPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-surface-800 gap-6 text-sm font-semibold">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('events')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'events' ? 'text-purple-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'events'
+                ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Activity className="w-4 h-4" />
-            Live Attack Events ({events.length})
-            {activeTab === 'events' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400 rounded-full" />
-            )}
+            <span>Live Attack Events ({events.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('rules')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'rules' ? 'text-purple-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'rules'
+                ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Shield className="w-4 h-4" />
-            OWASP Core Rule Set ({rules.length})
-            {activeTab === 'rules' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400 rounded-full" />
-            )}
+            <span>OWASP Core Rule Set ({rules.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('websites')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'websites' ? 'text-purple-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'websites'
+                ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Globe className="w-4 h-4" />
-            Per-Website Policies ({websites.length})
-            {activeTab === 'websites' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400 rounded-full" />
-            )}
+            <span>Per-Website Policies ({websites.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('settings')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'settings' ? 'text-purple-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'settings'
+                ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Settings2 className="w-4 h-4" />
-            Engine Settings & Probes
-            {activeTab === 'settings' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-400 rounded-full" />
-            )}
+            <span>Engine Settings & Probes</span>
           </button>
         </div>
 

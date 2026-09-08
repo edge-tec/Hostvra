@@ -376,74 +376,92 @@ export default function EmailHostingPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="border-b border-surface-800 flex gap-6 text-sm font-medium">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('mailboxes')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'mailboxes' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'mailboxes'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Server className="w-4 h-4" />
             <span>Mailboxes ({mailboxes.length})</span>
-            {activeTab === 'mailboxes' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('webmail')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'webmail' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'webmail'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Inbox className="w-4 h-4" />
             <span>Webmail Suite</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-500 dark:text-indigo-400">
               Live
             </span>
-            {activeTab === 'webmail' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('domains')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'domains' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'domains'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Globe className="w-4 h-4" />
             <span>Email Domains ({domains.length})</span>
-            {activeTab === 'domains' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('health')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'health' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'health'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
             <span>Deliverability & Security (100%)</span>
-            {activeTab === 'health' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('queue')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'queue' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'queue'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Send className="w-4 h-4" />
             <span>Mail Queue</span>
-            {activeTab === 'queue' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('logs')}
-            className={`pb-3 relative transition flex items-center gap-2 ${
-              activeTab === 'logs' ? 'text-indigo-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'logs'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Sliders className="w-4 h-4" />
             <span>Delivery Logs</span>
-            {activeTab === 'logs' && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-indigo-500" />}
           </button>
         </div>
 

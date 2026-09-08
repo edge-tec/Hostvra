@@ -523,8 +523,8 @@ export default function WebsitesPage() {
         {/* =========================================================================
             1. TOP PROJECT RUNTIME NAVIGATION TABS
             ========================================================================= */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-surface-800 pb-2 gap-3">
-          <div className="flex items-center gap-6 text-sm font-semibold">
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 gap-3">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl">
             {[
               { id: 'php', label: 'PHP Project' },
               { id: 'nodejs', label: 'Node.js Project' },
@@ -534,11 +534,13 @@ export default function WebsitesPage() {
             ].map((tab) => (
               <button
                 key={tab.id}
+                role="tab"
+                data-tab="true"
                 onClick={() => setActiveTab(tab.id as ProjectTab)}
-                className={`transition-colors py-1 cursor-pointer font-bold ${
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
                   activeTab === tab.id
-                    ? 'text-emerald-600 dark:text-emerald-400 border-b-2 border-emerald-600 dark:border-emerald-500'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-700/40'
                 }`}
               >
                 {tab.label}

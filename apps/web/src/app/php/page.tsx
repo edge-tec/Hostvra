@@ -437,7 +437,7 @@ export default function PHPManagementPage() {
         )}
 
         {/* Navigation Tabs */}
-        <div className="flex items-center gap-1 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-1 text-sm font-medium">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           {[
             { id: 'overview', label: 'Overview', icon: Activity },
             { id: 'versions', label: 'Versions', icon: Server },
@@ -452,11 +452,13 @@ export default function PHPManagementPage() {
             return (
               <button
                 key={tab.id}
+                role="tab"
+                data-tab="true"
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg transition-colors border-b-2 whitespace-nowrap ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer font-medium ${
                   isActive
-                    ? 'border-sky-600 text-sky-600 dark:border-sky-500 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10 font-bold'
-                    : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/50'
+                    ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
                 }`}
               >
                 <Icon className="w-4 h-4" />

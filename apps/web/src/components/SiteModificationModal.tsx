@@ -613,6 +613,8 @@ server {
               return (
                 <button
                   key={tab.id}
+                  role="tab"
+                  data-tab="true"
                   onClick={() => setActiveTab(tab.id as SiteModalTab)}
                   className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-left transition font-medium cursor-pointer ${
                     isActive

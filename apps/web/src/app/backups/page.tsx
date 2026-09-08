@@ -572,44 +572,47 @@ export default function BackupsPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-surface-800 gap-6 text-sm font-semibold">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('snapshots')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'snapshots' ? 'text-brand-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'snapshots'
+                ? 'bg-white dark:bg-slate-900 text-brand-500 dark:text-brand-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <FileArchive className="w-4 h-4" />
-            Snapshots & Archives ({backups.length})
-            {activeTab === 'snapshots' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-400 rounded-full" />
-            )}
+            <span>Snapshots & Archives ({backups.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('destinations')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'destinations' ? 'text-brand-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'destinations'
+                ? 'bg-white dark:bg-slate-900 text-brand-500 dark:text-brand-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Cloud className="w-4 h-4" />
-            Remote Cloud Storage ({destinations.length})
-            {activeTab === 'destinations' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-400 rounded-full" />
-            )}
+            <span>Remote Cloud Storage ({destinations.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('schedules')}
-            className={`pb-3 flex items-center gap-2 transition-colors relative ${
-              activeTab === 'schedules' ? 'text-brand-400' : 'text-slate-400 hover:text-white'
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+              activeTab === 'schedules'
+                ? 'bg-white dark:bg-slate-900 text-brand-500 dark:text-brand-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Calendar className="w-4 h-4" />
-            Automated Schedules ({schedules.length})
-            {activeTab === 'schedules' && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-400 rounded-full" />
-            )}
+            <span>Automated Schedules ({schedules.length})</span>
           </button>
         </div>
 

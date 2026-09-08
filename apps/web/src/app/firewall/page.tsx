@@ -431,28 +431,32 @@ export default function FirewallPage() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b border-slate-200 dark:border-surface-800">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('rules')}
-            className={`px-5 py-3 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'rules'
-                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            Firewall Rules ({rules.length})
+            <span>Firewall Rules ({rules.length})</span>
           </button>
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('fail2ban')}
-            className={`px-5 py-3 text-sm font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'fail2ban'
-                ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <UserX className="w-4 h-4" />
-            Fail2ban Jails & Banned IPs ({bannedIPs.length})
+            <span>Fail2ban Jails & Banned IPs ({bannedIPs.length})</span>
           </button>
         </div>
 

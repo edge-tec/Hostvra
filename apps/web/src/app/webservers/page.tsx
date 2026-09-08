@@ -430,50 +430,58 @@ export default function WebServersPage() {
         )}
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 border-b border-surface-800">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'overview'
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-surface-400 hover:text-surface-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Cpu className="w-4 h-4" />
-            Engines Overview
+            <span>Engines Overview</span>
           </button>
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('vhosts')}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'vhosts'
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-surface-400 hover:text-surface-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <Globe className="w-4 h-4" />
-            VirtualHosts ({websites.length})
+            <span>VirtualHosts ({websites.length})</span>
           </button>
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('migration')}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'migration'
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-surface-400 hover:text-surface-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <ArrowRightLeft className="w-4 h-4" />
-            Safe Engine Migration
+            <span>Safe Engine Migration</span>
           </button>
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('config')}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
               activeTab === 'config'
-                ? 'border-indigo-500 text-white'
-                : 'border-transparent text-surface-400 hover:text-surface-200'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <FileCode2 className="w-4 h-4" />
-            Master Config Editor
+            <span>Master Config Editor</span>
           </button>
         </div>
 

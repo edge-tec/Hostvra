@@ -663,41 +663,47 @@ export default function SupportPage() {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-2 border-b border-border/60 pb-1 overflow-x-auto">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('tickets')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer font-medium ${
               activeTab === 'tickets'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <MessageSquare className="w-4 h-4" />
-            My Support Tickets ({tickets.length})
+            <span>My Support Tickets ({tickets.length})</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('ai-assistant')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer font-medium ${
               activeTab === 'ai-assistant'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            AI Diagnostic Assistant
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>AI Diagnostic Assistant</span>
           </button>
 
           <button
+            role="tab"
+            data-tab="true"
             onClick={() => setActiveTab('knowledgebase')}
-            className={`flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all whitespace-nowrap cursor-pointer font-medium ${
               activeTab === 'knowledgebase'
-                ? 'bg-primary text-primary-foreground shadow-md shadow-primary/20'
-                : 'text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
             <BookOpen className="w-4 h-4" />
-            Knowledgebase & Tutorials ({articles.length})
+            <span>Knowledgebase & Tutorials ({articles.length})</span>
           </button>
         </div>
 

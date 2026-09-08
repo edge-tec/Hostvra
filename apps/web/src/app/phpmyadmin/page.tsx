@@ -344,7 +344,7 @@ function PhpMyAdminManager() {
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex flex-wrap items-center gap-1 border-t border-slate-200 dark:border-surface-800 mt-4 pt-3 text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100/80 dark:bg-slate-800/60 rounded-2xl mt-4 text-xs font-semibold">
             {[
               { id: 'structure', label: `Structure (${tables.length})`, icon: Table },
               { id: 'sql', label: 'SQL Query Console', icon: Play },
@@ -360,14 +360,16 @@ function PhpMyAdminManager() {
               return (
                 <button
                   key={tab.id}
+                  role="tab"
+                  data-tab="true"
                   onClick={() => setActiveTab(tab.id as TabType)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer font-medium ${
                     isActive
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50'
-                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 hover:text-slate-900 dark:hover:text-white'
+                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500'}`} />
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
                   <span>{tab.label}</span>
                 </button>
               );

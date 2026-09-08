@@ -539,7 +539,7 @@ html:not(.dark) a[class*="bg-[#20a53a]"] * {
 }
 
 /* 4.2 Secondary & Neutral Buttons (Eye-Friendly Slate Surfaces & High Contrast) */
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button),
 html:not(.dark) button.bg-surface-800,
 html:not(.dark) button.bg-surface-850,
 html:not(.dark) button.bg-surface-900,
@@ -552,7 +552,7 @@ html:not(.dark) button.bg-slate-900 {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
 }
 
-html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):hover:not(:disabled),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):hover:not(:disabled),
 html:not(.dark) button.bg-surface-800:hover,
 html:not(.dark) button.bg-slate-800:hover {
   background-color: #E2E8F0 !important;
@@ -560,7 +560,41 @@ html:not(.dark) button.bg-slate-800:hover {
   color: #0F172A !important;
 }
 
-/* 4.3 Icon & Control Buttons */
+/* 4.3 Tab Navigation Buttons & Segmented Controls (Zero Border / Clean Modern Underline or Soft Pill) */
+button[role="tab"],
+button[data-tab],
+.nav-tab-btn,
+.tab-item,
+div[class*="border-b"] button,
+nav button,
+[role="tablist"] button,
+div[class*="bg-slate-100"] button,
+div[class*="bg-slate-200"] button {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+}
+
+html:not(.dark) button[role="tab"]:not([class*="border-b-2"]):not([class*="border-emerald"]):not([class*="border-indigo"]):not([class*="border-sky"]):not([class*="border-brand"]):not([class*="border-purple"]),
+html:not(.dark) button[data-tab]:not([class*="border-b-2"]):not([class*="border-emerald"]):not([class*="border-indigo"]):not([class*="border-sky"]):not([class*="border-brand"]):not([class*="border-purple"]),
+html:not(.dark) .nav-tab-btn,
+html:not(.dark) div[class*="bg-slate-100"] button,
+html:not(.dark) div[class*="bg-slate-200"] button {
+  border: none !important;
+  box-shadow: none !important;
+  background-color: transparent;
+}
+
+html:not(.dark) button[role="tab"].bg-white,
+html:not(.dark) button[data-tab].bg-white,
+html:not(.dark) div[class*="bg-slate-100"] button.bg-white,
+html:not(.dark) div[class*="bg-slate-200"] button.bg-white {
+  background-color: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+  border: none !important;
+}
+
+/* 4.4 Icon & Control Buttons */
 html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-rose"]):not([class*="bg-[#20a53a]"]):not([class*="bg-blue"]):not([class*="bg-purple"]) svg {
   stroke: #334155;
 }
