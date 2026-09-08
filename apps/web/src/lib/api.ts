@@ -406,13 +406,35 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
       headers,
     });
 
-    const data: ApiResponse<T> = await res.json();
+    const contentType = res.headers.get('content-type') || '';
+    let data: any = null;
+    if (contentType.includes('application/json')) {
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+    }
+
+    if (!data) {
+      const text = await res.text().catch(() => '');
+      return {
+        success: false,
+        error: {
+          code: `HTTP_${res.status}`,
+          message: res.status === 404
+            ? `API endpoint not found (404) at ${endpoint}. Please restart the Hostvra Go API backend.`
+            : (text.slice(0, 150) || `Request failed with HTTP status ${res.status}`),
+        },
+      };
+    }
+
     if (!res.ok && !data.error) {
       return {
         success: false,
         error: {
           code: 'HTTP_ERROR',
-          message: `Request failed with status ${res.status}`,
+          message: data.message || `Request failed with status ${res.status}`,
         },
       };
     }

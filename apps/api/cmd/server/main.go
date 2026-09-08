@@ -659,6 +659,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/prices", domainAdminHandler.ListPrices)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/prices/{id}", domainAdminHandler.SavePrice)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/prices", domainAdminHandler.SavePrice)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/test-connection", domainAdminHandler.TestRegistrar)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/test-registrar", domainAdminHandler.TestRegistrar)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/reconcile", domainAdminHandler.Reconcile)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/logs", domainAdminHandler.ListAuditLogs)
