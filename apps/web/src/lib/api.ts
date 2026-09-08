@@ -3,10 +3,8 @@ export function getApiBaseUrl(): string {
     if (process.env.NEXT_PUBLIC_API_URL) {
       return process.env.NEXT_PUBLIC_API_URL;
     }
-    // Direct VPS IP/localhost access on port 3000 connects directly to Go API backend on port 8080
-    if (window.location.port === '3000') {
-      return `${window.location.protocol}//${window.location.hostname}:8080`;
-    }
+    // In browser, always use same-origin relative URLs so requests pass securely
+    // through the Next.js API proxy to the internal Go backend on port 8080.
     return '';
   }
   return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8080';
@@ -479,33 +477,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // Attempt 1: Standard primary endpoint (Same-origin Next.js route proxy)
-  const primaryRes = await executeFetch<T>(getApiBaseUrl(), endpoint, options, headers);
-  if (
-    primaryRes.success ||
-    (primaryRes.error &&
-      primaryRes.error.code !== 'GATEWAY_ERROR' &&
-      primaryRes.error.code !== 'NETWORK_ERROR' &&
-      primaryRes.error.code !== 'TIMEOUT')
-  ) {
-    return primaryRes;
-  }
-
-  // Attempt 2: Direct Go API fallback on port 8080 if running in browser
-  if (typeof window !== 'undefined' && window.location.port === '3000') {
-    const directUrl = `${window.location.protocol}//${window.location.hostname}:8080`;
-    try {
-      const fallbackRes = await executeFetch<T>(directUrl, endpoint, options, headers);
-      if (fallbackRes.success || fallbackRes.data) {
-        return fallbackRes;
-      }
-      return fallbackRes;
-    } catch {
-      return primaryRes;
-    }
-  }
-
-  return primaryRes;
+  return executeFetch<T>(getApiBaseUrl(), endpoint, options, headers);
 }
 
 export interface FirewallStatus {
