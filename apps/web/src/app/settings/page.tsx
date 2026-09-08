@@ -405,18 +405,15 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          {/* Right PRO / Upgrade Badges */}
+          {/* Right Enterprise Edition Badge */}
           <div className="hidden sm:flex items-center gap-2 text-xs">
-            <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white font-bold text-[10px] uppercase">
-              PRO
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-xs tracking-wide">
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>ENTERPRISE</span>
             </span>
-            <span className="text-slate-500 dark:text-slate-400 font-mono">FREE 8.0.6</span>
-            <button
-              onClick={() => showToast('Hostvra Enterprise License is Active')}
-              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition cursor-pointer text-xs shadow-2xs"
-            >
-              Upgrade now
-            </button>
+            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40">
+              Active
+            </span>
           </div>
         </div>
 
