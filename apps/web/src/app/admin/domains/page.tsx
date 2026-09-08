@@ -664,15 +664,27 @@ export default function AdminDomainsPage() {
                 </div>
               </div>
 
-              <div className="p-4 rounded-lg bg-slate-900 text-slate-200 font-mono text-[11px] space-y-1.5 overflow-x-auto">
-                <div className="text-slate-500"># ResellerClub Provider Config</div>
-                <div>DOMAIN_PROVIDER=resellerclub</div>
-                <div>RESELLERCLUB_MODE=sandbox <span className="text-slate-500"># or production</span></div>
-                <div>RESELLERCLUB_RESELLER_ID=your_reseller_id</div>
-                <div>RESELLERCLUB_API_KEY=your_api_key</div>
-                <div>RESELLERCLUB_TIMEOUT_SECONDS=20</div>
-                <div className="text-slate-500 mt-2"># Automated Sync & Reconciliation</div>
-                <div>DOMAIN_RECONCILE_INTERVAL_HOURS=6</div>
+              <div className="dark-box p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs space-y-1.5 overflow-x-auto shadow-inner">
+                <div className="text-slate-400 font-medium text-[11px]"># ResellerClub Provider Config</div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">DOMAIN_PROVIDER</span>=<span className="text-emerald-300">resellerclub</span>
+                </div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">RESELLERCLUB_MODE</span>=<span className="text-emerald-300">sandbox</span> <span className="text-slate-400 text-[11px]"># or production</span>
+                </div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">RESELLERCLUB_RESELLER_ID</span>=<span className="text-amber-300">your_reseller_id</span>
+                </div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">RESELLERCLUB_API_KEY</span>=<span className="text-amber-300">your_api_key</span>
+                </div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">RESELLERCLUB_TIMEOUT_SECONDS</span>=<span className="text-purple-300">20</span>
+                </div>
+                <div className="text-slate-400 font-medium text-[11px] pt-1"># Automated Sync & Reconciliation</div>
+                <div className="text-slate-100">
+                  <span className="text-sky-400 font-semibold">DOMAIN_RECONCILE_INTERVAL_HOURS</span>=<span className="text-purple-300">6</span>
+                </div>
               </div>
 
               <p className="text-xs text-slate-500 dark:text-slate-400">

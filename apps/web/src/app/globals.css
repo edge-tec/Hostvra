@@ -392,36 +392,112 @@ html:not(.dark) span:not([class*="bg-"]):not([class*="text-white"]):not([class*=
   color: #1E293B;
 }
 
-/* High-contrast text mapping: all pale light-slate classes become crisp dark text */
-html:not(.dark) .text-slate-950,
-html:not(.dark) .text-slate-900,
-html:not(.dark) .text-slate-800,
-html:not(.dark) .text-slate-700,
-html:not(.dark) .text-slate-100,
-html:not(.dark) .text-slate-200,
-html:not(.dark) .text-slate-300,
-html:not(.dark) .text-surface-100,
-html:not(.dark) .text-surface-200,
-html:not(.dark) .text-surface-300 {
+/* High-contrast text mapping for light backgrounds */
+html:not(.dark) .text-slate-950:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-slate-900:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-slate-800:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-slate-700:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-surface-100:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-surface-200:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-surface-300:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *) {
   color: #0F172A !important;
 }
 
-/* Secondary & Informative Text: #334155 (Slate-700, perfect legibility) */
-html:not(.dark) .text-slate-600,
-html:not(.dark) .text-slate-500,
-html:not(.dark) .text-surface-400,
-html:not(.dark) .text-surface-500 {
+/* Secondary & Informative Text: #334155 (Slate-700, perfect legibility on light surfaces) */
+html:not(.dark) .text-slate-600:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-slate-500:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-surface-400:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *),
+html:not(.dark) .text-surface-500:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *) {
   color: #334155 !important;
 }
 
-/* Muted Subtitles & Captions: #475569 (Slate-600, never faint or hard on the eyes) */
-html:not(.dark) .text-slate-400 {
+/* Muted Subtitles & Captions: #475569 on light surfaces */
+html:not(.dark) .text-slate-400:not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *):not(pre *):not(code *) {
   color: #475569 !important;
 }
 
-/* Prevent text turning white on light backgrounds */
-html:not(.dark) .text-white:not(button[class*="bg-indigo"] *):not(button[class*="bg-emerald"] *):not(button[class*="bg-[#20a53a]"] *):not(button[class*="bg-purple"] *):not(button[class*="bg-rose"] *):not(button[class*="bg-blue"] *):not(button[class*="bg-amber"] *):not(button[class*="bg-green"] *):not(button[class*="bg-red"] *):not(button[class*="bg-indigo"]):not(button[class*="bg-emerald"]):not(button[class*="bg-[#20a53a]"]):not(button[class*="bg-purple"]):not(button[class*="bg-rose"]):not(button[class*="bg-blue"]):not(button[class*="bg-amber"]):not(button[class*="bg-green"]):not(button[class*="bg-red"]):not(a[class*="bg-indigo"]):not(a[class*="bg-emerald"]):not(a[class*="bg-[#20a53a]"]):not(pre *):not(pre):not(code):not(code *) {
+/* Prevent text turning white only on light backgrounds (exempt dark boxes, terminals, code blocks) */
+html:not(.dark) .text-white:not(button[class*="bg-indigo"] *):not(button[class*="bg-emerald"] *):not(button[class*="bg-[#20a53a]"] *):not(button[class*="bg-purple"] *):not(button[class*="bg-rose"] *):not(button[class*="bg-blue"] *):not(button[class*="bg-amber"] *):not(button[class*="bg-green"] *):not(button[class*="bg-red"] *):not(button[class*="bg-indigo"]):not(button[class*="bg-emerald"]):not(button[class*="bg-[#20a53a]"]):not(button[class*="bg-purple"]):not(button[class*="bg-rose"]):not(button[class*="bg-blue"]):not(button[class*="bg-amber"]):not(button[class*="bg-green"]):not(button[class*="bg-red"]):not(a[class*="bg-indigo"]):not(a[class*="bg-emerald"]):not(a[class*="bg-[#20a53a]"]):not(pre *):not(pre):not(code):not(code *):not(.bg-slate-900 *):not(.bg-slate-950 *):not(.bg-black *):not([class*="bg-[#"]):not([class*="bg-[#"] *):not(.dark-box *) {
   color: #0F172A !important;
+}
+
+/* Dark Surfaces, Code Blocks & Terminals Text Visibility (Guaranteed 100% Crisp Visibility in Both Modes) */
+.bg-slate-900,
+.bg-slate-950,
+.bg-black,
+.bg-\[\#0B1120\],
+.bg-\[\#121824\],
+.bg-\[\#090D16\],
+.bg-\[\#0C0E14\],
+.dark-box,
+pre,
+code {
+  color: #F8FAFC !important;
+}
+
+.bg-slate-900 *,
+.bg-slate-950 *,
+.bg-black *,
+.bg-\[\#0B1120\] *,
+.bg-\[\#121824\] *,
+.bg-\[\#090D16\] *,
+.bg-\[\#0C0E14\] *,
+.dark-box *,
+pre * {
+  color: inherit;
+}
+
+.bg-slate-900 .text-white,
+.bg-slate-900 .text-slate-50,
+.bg-slate-900 .text-slate-100,
+.bg-slate-900 .text-slate-200,
+.bg-slate-900 .text-slate-300,
+.bg-slate-950 .text-white,
+.bg-slate-950 .text-slate-50,
+.bg-slate-950 .text-slate-100,
+.bg-slate-950 .text-slate-200,
+.bg-slate-950 .text-slate-300,
+.bg-\[\#0B1120\] .text-white,
+.bg-\[\#0B1120\] .text-slate-50,
+.bg-\[\#0B1120\] .text-slate-100,
+.bg-\[\#0B1120\] .text-slate-200,
+.bg-\[\#0B1120\] .text-slate-300,
+.dark-box .text-white,
+.dark-box .text-slate-100,
+.dark-box .text-slate-200,
+pre .text-white,
+pre .text-slate-100,
+pre .text-slate-200 {
+  color: #F8FAFC !important;
+}
+
+.bg-slate-900 .text-slate-400,
+.bg-slate-900 .text-slate-500,
+.bg-slate-950 .text-slate-400,
+.bg-slate-950 .text-slate-500,
+.bg-\[\#0B1120\] .text-slate-400,
+.bg-\[\#0B1120\] .text-slate-500,
+.dark-box .text-slate-400,
+pre .text-slate-400 {
+  color: #94A3B8 !important;
+}
+
+.bg-slate-900 .text-emerald-400,
+.bg-\[\#0B1120\] .text-emerald-400,
+pre .text-emerald-400 {
+  color: #34D399 !important;
+}
+
+.bg-slate-900 .text-sky-400,
+.bg-\[\#0B1120\] .text-sky-400,
+pre .text-sky-400 {
+  color: #38BDF8 !important;
+}
+
+.bg-slate-900 .text-amber-400,
+.bg-\[\#0B1120\] .text-amber-400,
+pre .text-amber-400 {
+  color: #FBBF24 !important;
 }
 
 /* On hover, non-primary buttons & links must hover to deep dark text, NEVER white */
