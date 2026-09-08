@@ -403,11 +403,17 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
   try {
     const res = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       ...options,
       headers,
+      signal: options.signal || controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     const contentType = res.headers.get('content-type') || '';
     let data: any = null;
@@ -443,6 +449,16 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     }
     return data;
   } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      return {
+        success: false,
+        error: {
+          code: 'TIMEOUT',
+          message: 'Connection timed out. The Hostvra API server did not respond within 12 seconds.',
+        },
+      };
+    }
     return {
       success: false,
       error: {

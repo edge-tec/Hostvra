@@ -18,18 +18,22 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
 
-    const res = await apiFetch<{ tokens: { access_token: string } }>('/api/v1/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
+    try {
+      const res = await apiFetch<{ tokens: { access_token: string } }>('/api/v1/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
 
-    setLoading(false);
-
-    if (res.success && res.data) {
-      setStoredToken(res.data.tokens.access_token);
-      router.push('/dashboard');
-    } else {
-      setError(res.error?.message || 'Invalid email or password');
+      if (res.success && res.data) {
+        setStoredToken(res.data.tokens.access_token);
+        router.push('/dashboard');
+      } else {
+        setError(res.error?.message || 'Invalid email or password');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Authentication request failed. Please check network connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
