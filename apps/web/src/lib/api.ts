@@ -1131,12 +1131,13 @@ export interface DomainAdminPrice {
 }
 
 export interface ResellerClubTestResult {
-  status: string;
-  mode: string;
-  reseller_id: string;
-  base_url: string;
-  latency_ms: number;
-  message: string;
+  connected?: boolean;
+  status?: string;
+  mode?: string;
+  reseller_id?: string;
+  base_url?: string;
+  latency_ms?: number;
+  message?: string;
 }
 
 // ----------------------------------------------------------------------------

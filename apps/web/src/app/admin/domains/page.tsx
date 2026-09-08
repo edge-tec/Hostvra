@@ -117,10 +117,15 @@ export default function AdminDomainsPage() {
       setTestingConnection(true);
       setConnectionResult(null);
       setErrorMessage(null);
+      setSuccessMessage(null);
       const res = await testResellerClubConnection();
       if (res.success && res.data) {
         setConnectionResult(res.data);
-        setSuccessMessage(`ResellerClub API connection verified (${res.data.latency_ms}ms)`);
+        if (res.data.connected !== false) {
+          setSuccessMessage(`ResellerClub API connection verified (${res.data.latency_ms || 0}ms)`);
+        } else {
+          setErrorMessage(res.data.message || 'Connection test failed');
+        }
       } else {
         setErrorMessage(res.error?.message || 'Connection test failed');
       }
@@ -297,28 +302,42 @@ export default function AdminDomainsPage() {
 
         {/* ResellerClub Connection Status Box */}
         {connectionResult && (
-          <div className="p-4 rounded-xl bg-slate-900 text-white border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+          <div className={`p-4 rounded-xl text-white border flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm ${
+            connectionResult.connected !== false
+              ? 'bg-slate-900 border-slate-800'
+              : 'bg-rose-950/40 border-rose-900/60'
+          }`}>
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <ShieldCheck className="w-5 h-5" />
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                connectionResult.connected !== false
+                  ? 'bg-emerald-500/20 border border-emerald-500/30 text-emerald-400'
+                  : 'bg-rose-500/20 border border-rose-500/30 text-rose-400'
+              }`}>
+                {connectionResult.connected !== false ? <ShieldCheck className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold">{connectionResult.message}</span>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    {connectionResult.mode}
-                  </span>
+                  <span className="text-sm font-bold text-slate-100">{connectionResult.message}</span>
+                  {connectionResult.mode && (
+                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
+                      connectionResult.connected !== false
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                    }`}>
+                      {connectionResult.mode}
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
-                  <span>Reseller ID: <strong className="font-mono text-slate-200">{connectionResult.reseller_id}</strong></span>
+                <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-3">
+                  <span>Reseller ID: <strong className="font-mono text-slate-200">{connectionResult.reseller_id || '<Not configured in .env>'}</strong></span>
                   <span>•</span>
-                  <span>Endpoint: <strong className="font-mono text-slate-200">{connectionResult.base_url}</strong></span>
+                  <span>Endpoint: <strong className="font-mono text-slate-200">{connectionResult.base_url || '<Default>'}</strong></span>
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-mono text-emerald-400 border border-slate-700">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 text-xs font-mono text-emerald-400 border border-slate-700">
               <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>{connectionResult.latency_ms} ms</span>
+              <span>{connectionResult.latency_ms || 0} ms</span>
             </div>
           </div>
         )}

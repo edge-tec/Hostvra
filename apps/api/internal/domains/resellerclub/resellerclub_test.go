@@ -199,3 +199,56 @@ func TestResellerClubClient_EndpointProtection(t *testing.T) {
 		t.Fatalf("expected error when configuring production mode with sandbox URL, got nil")
 	}
 }
+
+func TestResellerClubClient_CloudflareBlockParsing(t *testing.T) {
+	cfHTML := `<!DOCTYPE html><html><head><title>Attention Required! | Cloudflare</title></head><body>
+		<h1>Sorry, you have been blocked</h1>
+		<div id="cf-footer-item-ip">Your IP: <span id="cf-footer-ip">13.140.157.238</span></div>
+		<div>Cloudflare Ray ID: <strong class="font-semibold">a37db599ac4a5010</strong></div>
+	</body></html>`
+
+	err := ParseAPIError(403, []byte(cfHTML))
+	if err == nil {
+		t.Fatalf("expected error from ParseAPIError, got nil")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "Cloudflare blocked API request (HTTP 403)") {
+		t.Errorf("expected clean Cloudflare message, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "13.140.157.238") {
+		t.Errorf("expected server IP to be extracted, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "a37db599ac4a5010") {
+		t.Errorf("expected Ray ID to be extracted, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "Authorized IP Addresses") {
+		t.Errorf("expected instructions to whitelist IP, got: %s", errMsg)
+	}
+}
+
+func TestResellerClubClient_TestConnectionCredentials(t *testing.T) {
+	client, err := NewClient(Config{
+		ResellerID: "",
+		APIKey:     "",
+		Mode:       "sandbox",
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	res, err := client.TestConnection(context.Background())
+	if err == nil {
+		t.Fatalf("expected error when credentials missing, got nil")
+	}
+	if res == nil {
+		t.Fatalf("expected structured ConnectionTestResult, got nil")
+	}
+	if res.Connected {
+		t.Errorf("expected Connected=false")
+	}
+	if !strings.Contains(res.Message, "RESELLERCLUB_RESELLER_ID") {
+		t.Errorf("expected helpful message regarding missing env vars, got: %s", res.Message)
+	}
+}
+

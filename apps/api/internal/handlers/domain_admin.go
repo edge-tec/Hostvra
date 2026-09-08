@@ -242,6 +242,10 @@ func (h *DomainAdminHandler) SavePrice(w http.ResponseWriter, r *http.Request) {
 func (h *DomainAdminHandler) TestRegistrar(w http.ResponseWriter, r *http.Request) {
 	result, err := h.domainSvc.Registrar.TestConnection(r.Context())
 	if err != nil {
+		if result != nil {
+			response.JSON(w, http.StatusOK, result, nil)
+			return
+		}
 		response.JSON(w, http.StatusOK, map[string]interface{}{
 			"connected": false,
 			"provider":  "resellerclub",

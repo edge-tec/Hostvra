@@ -424,12 +424,29 @@ func (c *Client) UpdateContacts(ctx context.Context, req domains.ContactUpdateRe
 func (c *Client) TestConnection(ctx context.Context) (*domains.ConnectionTestResult, error) {
 	start := time.Now()
 
+	// Validate credentials existence before attempting network call
+	if strings.TrimSpace(c.cfg.ResellerID) == "" || strings.TrimSpace(c.cfg.APIKey) == "" {
+		errMsg := "ResellerClub credentials missing: RESELLERCLUB_RESELLER_ID and RESELLERCLUB_API_KEY must be configured in your server .env"
+		return &domains.ConnectionTestResult{
+			Connected:    false,
+			Provider:     "resellerclub",
+			Mode:         c.cfg.Mode,
+			ResellerID:   c.cfg.ResellerID,
+			BaseURL:      c.baseURL,
+			LatencyMs:    0,
+			Message:      errMsg,
+			ResponseTime: "0ms",
+		}, fmt.Errorf("%s", errMsg)
+	}
+
 	params := url.Values{}
 	params.Set("domain-name", "resellerclubconnectivitytest")
 	params.Set("tlds", "com")
 
 	_, err := c.Get(ctx, "domains/available.json", params)
-	duration := time.Since(start).Round(time.Millisecond).String()
+	dur := time.Since(start)
+	duration := dur.Round(time.Millisecond).String()
+	latencyMs := dur.Milliseconds()
 
 	if err != nil {
 		return &domains.ConnectionTestResult{
@@ -437,6 +454,8 @@ func (c *Client) TestConnection(ctx context.Context) (*domains.ConnectionTestRes
 			Provider:     "resellerclub",
 			Mode:         c.cfg.Mode,
 			ResellerID:   c.cfg.ResellerID,
+			BaseURL:      c.baseURL,
+			LatencyMs:    latencyMs,
 			Message:      err.Error(),
 			ResponseTime: duration,
 		}, err
@@ -447,6 +466,8 @@ func (c *Client) TestConnection(ctx context.Context) (*domains.ConnectionTestRes
 		Provider:     "resellerclub",
 		Mode:         c.cfg.Mode,
 		ResellerID:   c.cfg.ResellerID,
+		BaseURL:      c.baseURL,
+		LatencyMs:    latencyMs,
 		Message:      fmt.Sprintf("Successfully connected to ResellerClub (%s mode)", c.cfg.Mode),
 		ResponseTime: duration,
 	}, nil

@@ -191,6 +191,8 @@ type ConnectionTestResult struct {
 	Provider     string `json:"provider"`
 	Mode         string `json:"mode"` // sandbox or production
 	ResellerID   string `json:"reseller_id"`
+	BaseURL      string `json:"base_url,omitempty"`
+	LatencyMs    int64  `json:"latency_ms,omitempty"`
 	Message      string `json:"message"`
 	ResponseTime string `json:"response_time"`
 }

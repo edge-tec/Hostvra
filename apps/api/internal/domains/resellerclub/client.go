@@ -92,6 +92,9 @@ func (c *Client) Get(ctx context.Context, endpoint string, params url.Values) ([
 	if err != nil {
 		return nil, fmt.Errorf("failed to create http request: %w", err)
 	}
+	req.Header.Set("User-Agent", "Hostvra-DomainRegistrar/1.0 (LogicBoxes-API-Client; +https://hostvra.com)")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	slog.Debug("Executing ResellerClub GET request",
 		"endpoint", cleanEndpoint,
@@ -145,6 +148,9 @@ func (c *Client) Post(ctx context.Context, endpoint string, data url.Values) ([]
 		return nil, fmt.Errorf("failed to create http request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "Hostvra-DomainRegistrar/1.0 (LogicBoxes-API-Client; +https://hostvra.com)")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	slog.Debug("Executing ResellerClub POST request",
 		"endpoint", cleanEndpoint,
