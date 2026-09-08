@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -160,14 +161,58 @@ func (h *DomainAdminHandler) ListPrices(w http.ResponseWriter, r *http.Request) 
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), nil, "")
 		return
 	}
-	response.JSON(w, http.StatusOK, prices, &response.Meta{Total: len(prices)})
+
+	type priceDTO struct {
+		store.DomainPrice
+		CostPrice     float64 `json:"cost_price"`
+		RegisterPrice float64 `json:"register_price"`
+		RenewPrice    float64 `json:"renew_price"`
+	}
+
+	res := make([]priceDTO, len(prices))
+	for i, p := range prices {
+		res[i] = priceDTO{
+			DomainPrice:   *p,
+			CostPrice:     p.RegistrationCost,
+			RegisterPrice: p.RegistrationPrice,
+			RenewPrice:    p.RenewalPrice,
+		}
+	}
+
+	response.JSON(w, http.StatusOK, res, &response.Meta{Total: len(res)})
 }
 
 func (h *DomainAdminHandler) SavePrice(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", err.Error(), nil, "")
+		return
+	}
+
+	var raw map[string]interface{}
+	_ = json.Unmarshal(bodyBytes, &raw)
+
 	var req store.DomainPrice
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), nil, "")
 		return
+	}
+
+	// Support alternate frontend keys
+	if req.RegistrationCost == 0 {
+		if cp, ok := raw["cost_price"].(float64); ok {
+			req.RegistrationCost = cp
+		}
+	}
+	if req.RegistrationPrice == 0 {
+		if rp, ok := raw["register_price"].(float64); ok {
+			req.RegistrationPrice = rp
+		}
+	}
+	if req.RenewalPrice == 0 {
+		if rp, ok := raw["renew_price"].(float64); ok {
+			req.RenewalPrice = rp
+		}
 	}
 
 	cleanTLD := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(req.TLD)), ".")

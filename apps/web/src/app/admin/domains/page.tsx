@@ -89,7 +89,14 @@ export default function AdminDomainsPage() {
         setMetrics(mRes.data);
       }
       if (pRes?.success && pRes.data) {
-        setPrices(pRes.data);
+        const normalizedPrices = (pRes.data || []).map((p: any) => ({
+          ...p,
+          cost_price: Number(p.cost_price ?? p.registration_cost ?? 0),
+          register_price: Number(p.register_price ?? p.registration_price ?? 0),
+          renew_price: Number(p.renew_price ?? p.renewal_price ?? 0),
+          transfer_price: Number(p.transfer_price ?? 0),
+        }));
+        setPrices(normalizedPrices);
       }
       if (oRes?.success && oRes.data) {
         setOrders(oRes.data);
@@ -145,12 +152,12 @@ export default function AdminDomainsPage() {
   const handleOpenEditPrice = (price: DomainAdminPrice) => {
     setEditingPrice(price);
     setPriceForm({
-      register_price: price.register_price,
-      renew_price: price.renew_price,
-      transfer_price: price.transfer_price,
-      cost_price: price.cost_price,
+      register_price: Number(price.register_price ?? price.registration_price ?? 0),
+      renew_price: Number(price.renew_price ?? price.renewal_price ?? 0),
+      transfer_price: Number(price.transfer_price ?? 0),
+      cost_price: Number(price.cost_price ?? price.registration_cost ?? 0),
       enabled: price.enabled,
-      is_popular: price.is_popular,
+      is_popular: price.is_popular ?? false,
     });
   };
 
@@ -160,9 +167,23 @@ export default function AdminDomainsPage() {
     try {
       setSavingPrice(true);
       setErrorMessage(null);
-      const res = await updateDomainAdminPrice(editingPrice.id, priceForm);
+      const payload = {
+        ...priceForm,
+        registration_cost: priceForm.cost_price,
+        registration_price: priceForm.register_price,
+        renewal_price: priceForm.renew_price,
+        transfer_price: priceForm.transfer_price,
+      };
+      const res = await updateDomainAdminPrice(editingPrice.id, payload);
       if (res.success && res.data) {
-        setPrices((prev) => prev.map((p) => (p.id === editingPrice.id ? res.data! : p)));
+        const updated = {
+          ...res.data,
+          cost_price: Number(res.data.cost_price ?? res.data.registration_cost ?? priceForm.cost_price),
+          register_price: Number(res.data.register_price ?? res.data.registration_price ?? priceForm.register_price),
+          renew_price: Number(res.data.renew_price ?? res.data.renewal_price ?? priceForm.renew_price),
+          transfer_price: Number(res.data.transfer_price ?? priceForm.transfer_price),
+        };
+        setPrices((prev) => prev.map((p) => (p.id === editingPrice.id ? updated : p)));
         setSuccessMessage(`Pricing for ${editingPrice.tld} updated successfully`);
         setEditingPrice(null);
       } else {
@@ -427,8 +448,12 @@ export default function AdminDomainsPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {filteredPrices.map((price) => {
-                      const margin = price.register_price - price.cost_price;
-                      const marginPct = price.cost_price > 0 ? (margin / price.cost_price) * 100 : 0;
+                      const cost = Number(price.cost_price ?? price.registration_cost ?? 0);
+                      const reg = Number(price.register_price ?? price.registration_price ?? 0);
+                      const renew = Number(price.renew_price ?? price.renewal_price ?? 0);
+                      const transfer = Number(price.transfer_price ?? 0);
+                      const margin = reg - cost;
+                      const marginPct = cost > 0 ? (margin / cost) * 100 : 0;
                       return (
                         <tr key={price.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                           <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
@@ -453,16 +478,16 @@ export default function AdminDomainsPage() {
                             </span>
                           </td>
                           <td className="py-3 px-4 font-mono font-medium text-slate-500 dark:text-slate-400">
-                            ${price.cost_price.toFixed(2)}
+                            ${cost.toFixed(2)}
                           </td>
                           <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                            ${price.register_price.toFixed(2)}
+                            ${reg.toFixed(2)}
                           </td>
                           <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300">
-                            ${price.renew_price.toFixed(2)}
+                            ${renew.toFixed(2)}
                           </td>
                           <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300">
-                            ${price.transfer_price.toFixed(2)}
+                            ${transfer.toFixed(2)}
                           </td>
                           <td className="py-3 px-4">
                             <span className={`font-mono font-bold ${margin >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600'}`}>
@@ -551,7 +576,7 @@ export default function AdminDomainsPage() {
                           </td>
                           <td className="py-3 px-4">{order.years} yr</td>
                           <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                            ${order.amount.toFixed(2)}
+                            ${(order.amount ?? 0).toFixed(2)}
                           </td>
                           <td className="py-3 px-4">
                             <span

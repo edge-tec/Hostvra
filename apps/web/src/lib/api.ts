@@ -1114,17 +1114,20 @@ export interface DomainAdminMetrics {
 export interface DomainAdminPrice {
   id: string;
   tld: string;
-  register_price: number;
-  renew_price: number;
-  transfer_price: number;
-  cost_price: number;
+  register_price?: number;
+  registration_price?: number;
+  renew_price?: number;
+  renewal_price?: number;
+  transfer_price?: number;
+  cost_price?: number;
+  registration_cost?: number;
   currency: string;
-  min_years: number;
-  max_years: number;
+  min_years?: number;
+  max_years?: number;
   enabled: boolean;
-  is_popular: boolean;
+  is_popular?: boolean;
   category?: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface ResellerClubTestResult {
