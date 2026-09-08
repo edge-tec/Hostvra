@@ -1,13 +1,13 @@
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
-    if (process.env.NEXT_PUBLIC_API_URL) {
-      return process.env.NEXT_PUBLIC_API_URL;
+    const customUrl = process.env.NEXT_PUBLIC_API_URL;
+    // If NEXT_PUBLIC_API_URL points to blocked internal port 8080, ignore it and use same-origin proxy
+    if (customUrl && !customUrl.includes(':8080')) {
+      return customUrl;
     }
-    // In browser, always use same-origin relative URLs so requests pass securely
-    // through the Next.js API proxy to the internal Go backend on port 8080.
     return '';
   }
-  return process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8080';
+  return process.env.INTERNAL_API_URL || 'http://127.0.0.1:8080';
 }
 
 export interface ApiResponse<T> {
