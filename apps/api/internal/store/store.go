@@ -876,8 +876,8 @@ func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	if err := ensureDomainSchema(db); err != nil {
-		fmt.Printf("[PostgresStore] Warning: domain schema ensure error: %v\n", err)
+	if err := EnsureAllSchemas(db); err != nil {
+		fmt.Printf("[PostgresStore] Warning: automatic schema migration error: %v\n", err)
 	}
 
 	return &PostgresStore{db: db}, nil

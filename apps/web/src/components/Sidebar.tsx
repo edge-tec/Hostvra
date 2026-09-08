@@ -99,7 +99,7 @@ const navGroups: NavGroup[] = [
       { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },
       { label: 'Team', href: '/team', icon: Users },
       { label: 'API Keys', href: '/api-keys', icon: Key },
-      { label: 'Licensing', href: '/license', icon: Award, badge: 'Free', badgeColor: 'emerald' },
+      { label: 'Licensing', href: '/license', icon: Award, badge: 'Enterprise', badgeColor: 'purple' },
       { label: 'Settings', href: '/settings', icon: Settings },
     ],
   },

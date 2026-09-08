@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -68,36 +69,72 @@ type Manager struct {
 
 func NewManager() *Manager {
 	pub, priv, _ := ed25519.GenerateKey(nil)
+
+	tier := TierCommunity
+	if envTier := strings.ToLower(strings.TrimSpace(os.Getenv("LICENSE_TIER"))); envTier != "" {
+		switch envTier {
+		case "enterprise":
+			tier = TierEnterprise
+		case "pro":
+			tier = TierPro
+		default:
+			tier = TierCommunity
+		}
+	}
+
+	entitlements := Entitlements{
+		MaxServers:      1,
+		S3Backups:       false,
+		TeamCollab:      false,
+		DockerManager:   true,
+		WhiteLabel:      false,
+		PrioritySupport: false,
+		EmailHosting:    true,
+		MaxMailboxes:    25,
+		Webmail:         true,
+		EmailAntiSpam:   true,
+		PHPMultiVersion: true,
+		PHPExtensionMgr: true,
+		PHPAdvancedIni:  true,
+		PHPAdvancedFPM:  true,
+		ApacheSupport:   true,
+		OpenLiteSpeed:   true,
+		LiteSpeedEnt:    true,
+		MultiWebSwitch:  true,
+	}
+
+	licenseID := "HV-COMMUNITY-DEFAULT"
+	customerName := "Community Administrator"
+
+	if tier == TierEnterprise {
+		licenseID = "HV-ENTERPRISE-UNLIMITED"
+		customerName = "Hostvra Enterprise Administrator"
+		entitlements.MaxServers = -1
+		entitlements.S3Backups = true
+		entitlements.TeamCollab = true
+		entitlements.WhiteLabel = true
+		entitlements.PrioritySupport = true
+		entitlements.MaxMailboxes = -1
+	} else if tier == TierPro {
+		licenseID = "HV-PRO-DEFAULT"
+		customerName = "Hostvra Pro Administrator"
+		entitlements.MaxServers = 10
+		entitlements.S3Backups = true
+		entitlements.TeamCollab = true
+		entitlements.MaxMailboxes = 100
+	}
+
 	mgr := &Manager{
-		currentTier: TierCommunity,
+		currentTier: tier,
 		publicKey:   pub,
 		privateKey:  priv,
 		activeInfo: &LicensePayload{
-			LicenseID:    "HV-COMMUNITY-DEFAULT",
-			CustomerName: "Community Administrator",
-			Tier:         TierCommunity,
+			LicenseID:    licenseID,
+			CustomerName: customerName,
+			Tier:         tier,
 			IssuedAt:     time.Now().UTC(),
-			ExpiresAt:    time.Now().UTC().AddDate(100, 0, 0), // Lifetime free
-			Entitlements: Entitlements{
-				MaxServers:      1,
-				S3Backups:       false,
-				TeamCollab:      false,
-				DockerManager:   true,
-				WhiteLabel:      false,
-				PrioritySupport: false,
-				EmailHosting:    true,
-				MaxMailboxes:    25,
-				Webmail:         true,
-				EmailAntiSpam:   true,
-				PHPMultiVersion: true,
-				PHPExtensionMgr: true,
-				PHPAdvancedIni:  true,
-				PHPAdvancedFPM:  true,
-				ApacheSupport:   true,
-				OpenLiteSpeed:   true,
-				LiteSpeedEnt:    true,
-				MultiWebSwitch:  true,
-			},
+			ExpiresAt:    time.Now().UTC().AddDate(100, 0, 0), // Lifetime
+			Entitlements: entitlements,
 		},
 	}
 	return mgr
