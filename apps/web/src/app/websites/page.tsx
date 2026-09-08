@@ -1647,14 +1647,16 @@ export default function WebsitesPage() {
                     <span className="text-slate-700 dark:text-slate-300">Force HTTPS Redirect (301)</span>
                     <button
                       type="button"
+                      role="switch"
+                      aria-checked={forceHttps}
                       onClick={() => setForceHttps(!forceHttps)}
-                      className={`w-9 h-5 rounded-full transition-colors relative ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         forceHttps ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          forceHttps ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          forceHttps ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>

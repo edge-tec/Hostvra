@@ -539,7 +539,7 @@ html:not(.dark) a[class*="bg-[#20a53a]"] * {
 }
 
 /* 4.2 Secondary & Neutral Buttons (Eye-Friendly Slate Surfaces & High Contrast) */
-html:not(.dark) button:not([role="tab"]):not([data-tab]):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button),
 html:not(.dark) button.bg-surface-800,
 html:not(.dark) button.bg-surface-850,
 html:not(.dark) button.bg-surface-900,
@@ -552,7 +552,7 @@ html:not(.dark) button.bg-slate-900 {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
 }
 
-html:not(.dark) button:not([role="tab"]):not([data-tab]):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):hover:not(:disabled),
+html:not(.dark) button:not([role="tab"]):not([data-tab]):not([role="switch"]):not([data-switch]):not(.toggle-switch):not(.tab-item):not([class*="tab"]):not([class*="bg-indigo"]):not([class*="bg-emerald"]):not([class*="bg-purple"]):not([class*="bg-rose"]):not([class*="bg-amber"]):not([class*="bg-blue"]):not([class*="bg-[#20a53a]"]):not([class*="bg-green"]):not([class*="bg-red"]):not(.btn-tab):not([class*="border-b"]):not([class*="border-transparent"]):not(nav button):not([role="tablist"] button):not(div[class*="border-b"] button):not(div[class*="bg-slate-100"] button):not(div[class*="bg-slate-200"] button):hover:not(:disabled),
 html:not(.dark) button.bg-surface-800:hover,
 html:not(.dark) button.bg-slate-800:hover {
   background-color: #E2E8F0 !important;
@@ -602,6 +602,24 @@ html:not(.dark) button:not([class*="bg-indigo"]):not([class*="bg-emerald"]):not(
   stroke: #0F172A;
 }
 
+/* 4.5 Modern Toggle Switch (Rock-solid flexbox centering & smooth transition) */
+button[role="switch"],
+.toggle-switch-track {
+  border: none !important;
+  box-shadow: none !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  flex-shrink: 0 !important;
+  cursor: pointer !important;
+  padding: 2px !important;
+}
+
+button[role="switch"]:focus-visible,
+.toggle-switch-track:focus-visible {
+  outline: 2px solid #10B981 !important;
+  outline-offset: 2px !important;
+}
+
 
 /* ==========================================================================
    5. FORMS & INPUTS (CLEAN WHITE BG, #E5E7EB BORDER, ACCENT FOCUS RING)
@@ -616,6 +634,93 @@ html:not(.dark) select {
   border-radius: 10px !important;
   font-weight: 500 !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+/* 5.1 Premium Radio Buttons & Checkboxes (Responsive, High Contrast & Centered) */
+input[type="radio"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 1.125rem !important;
+  height: 1.125rem !important;
+  border-radius: 9999px !important;
+  border: 1.5px solid #CBD5E1 !important;
+  background-color: #FFFFFF !important;
+  outline: none !important;
+  cursor: pointer !important;
+  display: inline-grid !important;
+  place-content: center !important;
+  margin: 0 !important;
+  vertical-align: middle !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+html.dark input[type="radio"] {
+  border-color: #475569 !important;
+  background-color: #1E293B !important;
+}
+
+input[type="radio"]::before {
+  content: "" !important;
+  width: 0.5rem !important;
+  height: 0.5rem !important;
+  border-radius: 50% !important;
+  transform: scale(0) !important;
+  transition: 120ms transform ease-in-out !important;
+  box-shadow: inset 1em 1em #10B981 !important;
+  background-color: #10B981 !important;
+}
+
+input[type="radio"]:checked {
+  border-color: #10B981 !important;
+  background-color: #FFFFFF !important;
+}
+
+html.dark input[type="radio"]:checked {
+  border-color: #10B981 !important;
+  background-color: #0F172A !important;
+}
+
+input[type="radio"]:checked::before {
+  transform: scale(1) !important;
+}
+
+input[type="radio"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
+}
+
+input[type="checkbox"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  width: 1.125rem !important;
+  height: 1.125rem !important;
+  border-radius: 6px !important;
+  border: 1.5px solid #CBD5E1 !important;
+  background-color: #FFFFFF !important;
+  outline: none !important;
+  cursor: pointer !important;
+  display: inline-grid !important;
+  place-content: center !important;
+  margin: 0 !important;
+  vertical-align: middle !important;
+  transition: all 0.15s ease-in-out !important;
+}
+
+html.dark input[type="checkbox"] {
+  border-color: #475569 !important;
+  background-color: #1E293B !important;
+}
+
+input[type="checkbox"]:checked {
+  border-color: #10B981 !important;
+  background-color: #10B981 !important;
+  background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e") !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  background-size: 85% !important;
+}
+
+input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
 }
 
 html:not(.dark) input:not([type="checkbox"]):not([type="radio"]):hover,

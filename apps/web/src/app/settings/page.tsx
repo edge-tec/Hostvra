@@ -561,19 +561,22 @@ export default function SettingsPage() {
                   <div className="flex items-center justify-between pt-1">
                     <div className="flex items-center gap-3">
                       <button
+                        type="button"
+                        role="switch"
+                        aria-checked={sslEnabled}
                         onClick={async () => {
                           const next = !sslEnabled;
                           setSslEnabled(next);
                           await persistSettings({ ssl_enabled: next });
                           showToast(`Panel SSL ${next ? 'Enabled' : 'Disabled'}`);
                         }}
-                        className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                        className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                           sslEnabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                         }`}
                       >
-                        <div
-                          className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                            sslEnabled ? 'left-4.5' : 'left-0.75'
+                        <span
+                          className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                            sslEnabled ? 'translate-x-4' : 'translate-x-0'
                           }`}
                         />
                       </button>
@@ -653,19 +656,22 @@ export default function SettingsPage() {
                       <span className="text-[11px] text-slate-400">For third-party developers only during redevelopment</span>
                     </div>
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={devMode}
                       onClick={async () => {
                         const next = !devMode;
                         setDevMode(next);
                         await persistSettings({ dev_mode: next });
                         showToast(`Developer mode ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         devMode ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          devMode ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          devMode ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -680,19 +686,22 @@ export default function SettingsPage() {
                       </span>
                     </div>
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={apiEnabled}
                       onClick={async () => {
                         const next = !apiEnabled;
                         setApiEnabled(next);
                         await persistSettings({ api_enabled: next });
                         showToast(`API Interface access ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         apiEnabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          apiEnabled ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          apiEnabled ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -912,19 +921,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Close panel</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={closePanel}
                       onClick={() => {
                         const next = !closePanel;
                         setClosePanel(next);
                         persistSettings({ close_panel: next });
                         showToast(`Close panel option set to ${next}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         closePanel ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          closePanel ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          closePanel ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -939,19 +951,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">IPv6</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={ipv6Enabled}
                       onClick={() => {
                         const next = !ipv6Enabled;
                         setIpv6Enabled(next);
                         persistSettings({ ipv6_enabled: next });
                         showToast(`IPv6 panel access ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         ipv6Enabled ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          ipv6Enabled ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          ipv6Enabled ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -966,19 +981,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Offline mode</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={offlineMode}
                       onClick={() => {
                         const next = !offlineMode;
                         setOfflineMode(next);
                         persistSettings({ offline_mode: next });
                         showToast(`Offline mode ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         offlineMode ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          offlineMode ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          offlineMode ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -993,19 +1011,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">CDN Proxy</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={cdnProxy}
                       onClick={() => {
                         const next = !cdnProxy;
                         setCdnProxy(next);
                         persistSettings({ cdn_proxy: next });
                         showToast(`CDN Proxy IP real retrieval ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         cdnProxy ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          cdnProxy ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          cdnProxy ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1020,19 +1041,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Home Bulletin</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={homeBulletin}
                       onClick={() => {
                         const next = !homeBulletin;
                         setHomeBulletin(next);
                         persistSettings({ home_bulletin: next });
                         showToast(`Home Bulletin announcements ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         homeBulletin ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          homeBulletin ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          homeBulletin ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1047,19 +1071,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Site Monitor</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={siteMonitor}
                       onClick={() => {
                         const next = !siteMonitor;
                         setSiteMonitor(next);
                         persistSettings({ site_monitor: next });
                         showToast(`Site Monitor ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         siteMonitor ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          siteMonitor ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          siteMonitor ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1072,19 +1099,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Auto-fetch favicon</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoFetchFavicon}
                       onClick={() => {
                         const next = !autoFetchFavicon;
                         setAutoFetchFavicon(next);
                         persistSettings({ auto_fetch_favicon: next });
                         showToast(`Auto-fetch favicon ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         autoFetchFavicon ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          autoFetchFavicon ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          autoFetchFavicon ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1099,19 +1129,22 @@ export default function SettingsPage() {
                   <span className="w-44 text-slate-800 dark:text-slate-200">Auto Backup Panel</span>
                   <div className="flex-1 flex flex-wrap items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoBackupPanel}
                       onClick={() => {
                         const next = !autoBackupPanel;
                         setAutoBackupPanel(next);
                         persistSettings({ auto_backup_panel: next });
                         showToast(`Auto Backup Panel ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         autoBackupPanel ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          autoBackupPanel ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          autoBackupPanel ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1378,19 +1411,22 @@ export default function SettingsPage() {
                   <span className="w-48 text-slate-800 dark:text-slate-200">Panel Security Alarm</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={securityAlarm}
                       onClick={() => {
                         const next = !securityAlarm;
                         setSecurityAlarm(next);
                         persistSettings({ security_alarm: next });
                         showToast(`Panel Security Alarm ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         securityAlarm ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          securityAlarm ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          securityAlarm ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1411,19 +1447,22 @@ export default function SettingsPage() {
                   <span className="w-48 text-slate-800 dark:text-slate-200">BasicAuth</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={basicAuth}
                       onClick={() => {
                         const next = !basicAuth;
                         setBasicAuth(next);
                         persistSettings({ basic_auth: next });
                         showToast(`BasicAuth secondary barrier ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         basicAuth ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          basicAuth ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          basicAuth ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1439,19 +1478,22 @@ export default function SettingsPage() {
                   <span className="w-48 text-slate-800 dark:text-slate-200">Google Authenticator</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={googleAuth}
                       onClick={() => {
                         const next = !googleAuth;
                         setGoogleAuth(next);
                         persistSettings({ google_auth: next });
                         showToast(`Google Authenticator ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         googleAuth ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          googleAuth ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          googleAuth ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>
@@ -1473,19 +1515,22 @@ export default function SettingsPage() {
                   <span className="w-48 text-slate-800 dark:text-slate-200">Strong password</span>
                   <div className="flex-1 flex items-center gap-3">
                     <button
+                      type="button"
+                      role="switch"
+                      aria-checked={strongPassword}
                       onClick={() => {
                         const next = !strongPassword;
                         setStrongPassword(next);
                         persistSettings({ strong_password: next });
                         showToast(`Strong password enforcement ${next ? 'Enabled' : 'Disabled'}`);
                       }}
-                      className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                         strongPassword ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
                       }`}
                     >
-                      <div
-                        className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                          strongPassword ? 'left-4.5' : 'left-0.75'
+                      <span
+                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                          strongPassword ? 'translate-x-4' : 'translate-x-0'
                         }`}
                       />
                     </button>

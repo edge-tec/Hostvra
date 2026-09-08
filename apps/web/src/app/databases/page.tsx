@@ -525,16 +525,19 @@ export default function DatabasesPage() {
             <span className="font-bold text-slate-900 dark:text-slate-100">Auto Backup Database</span>
             {/* Real-time Toggle Switch */}
             <button
+              type="button"
+              role="switch"
+              aria-checked={autoBackup}
               onClick={handleToggleAutoBackup}
               disabled={togglingAutoBackup}
               title={autoBackup ? 'Auto backup is ON' : 'Auto backup is OFF'}
-              className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${
+              className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
                 autoBackup ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
               }`}
             >
-              <div
-                className={`w-3.5 h-3.5 rounded-full bg-white transition-transform absolute top-0.75 ${
-                  autoBackup ? 'left-4.5' : 'left-0.75'
+              <span
+                className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
+                  autoBackup ? 'translate-x-4' : 'translate-x-0'
                 }`}
               />
             </button>
