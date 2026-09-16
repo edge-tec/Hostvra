@@ -91,6 +91,12 @@ export default function FileManagerPage() {
   const [archiveFormat, setArchiveFormat] = useState<'zip' | 'tar.gz'>('zip');
   const [isProcessingArchive, setIsProcessingArchive] = useState(false);
 
+  // Delete Confirmation Modal State
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<FileItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   // Fetch directory listing from real backend
   const fetchDirectory = async (path: string) => {
     try {
@@ -245,21 +251,45 @@ export default function FileManagerPage() {
     fetchDirectory(currentPath);
   };
 
-  // Delete item
-  const handleDelete = async (file: FileItem) => {
-    if (!confirm(`Are you sure you want to permanently delete "${file.name}"?`)) return;
+  // Open Delete Confirmation Modal
+  const promptDelete = (file: FileItem) => {
+    setItemToDelete(file);
+    setDeleteError(null);
+    setDeleteModalOpen(true);
+  };
+
+  // Perform confirmed deletion
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
 
     try {
-      const res = await apiFetch(`/api/v1/files/delete?path=${encodeURIComponent(file.path)}`, {
+      const encodedPath = encodeURIComponent(itemToDelete.path);
+      let res = await apiFetch(`/api/v1/files/delete?path=${encodedPath}`, {
         method: 'DELETE',
+        body: JSON.stringify({ path: itemToDelete.path }),
       });
+
+      // If DELETE returned 405 Method Not Allowed due to proxy, fallback to POST
+      if (!res.success && res.error?.code === 'HTTP_405') {
+        res = await apiFetch('/api/v1/files/delete', {
+          method: 'POST',
+          body: JSON.stringify({ path: itemToDelete.path }),
+        });
+      }
+
       if (res.success) {
+        setDeleteModalOpen(false);
+        setItemToDelete(null);
         fetchDirectory(currentPath);
       } else {
-        alert(res.error?.message || 'Delete failed');
+        setDeleteError(res.error?.message || 'Delete failed. Check permissions or disk state.');
       }
     } catch (err: any) {
-      alert(err.message || 'Delete failed');
+      setDeleteError(err.message || 'Error communicating with host filesystem API');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -724,7 +754,7 @@ export default function FileManagerPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDelete(file);
+                                promptDelete(file);
                               }}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Delete Permanently"
@@ -1109,6 +1139,74 @@ export default function FileManagerPage() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {/* Delete Confirmation Modal */}
+      {deleteModalOpen && itemToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Delete {itemToDelete.is_dir ? 'Directory' : 'File'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    This action cannot be undone
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !deleting && setDeleteModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-surface-800/60 rounded-xl border border-slate-200 dark:border-surface-700/60 text-xs">
+              <p className="text-slate-700 dark:text-slate-200">
+                Are you sure you want to permanently delete{' '}
+                <strong className="font-mono text-rose-600 dark:text-rose-400 break-all">
+                  {itemToDelete.name}
+                </strong>
+                ?
+              </p>
+              <p className="text-[11px] text-slate-400 font-mono mt-1 break-all">
+                {itemToDelete.path}
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 rounded-xl text-xs text-rose-700 dark:text-rose-300">
+                {deleteError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteModalOpen(false)}
+                disabled={deleting}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteConfirm}
+                disabled={deleting}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{deleting ? 'Deleting...' : 'Delete Permanently'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </DashboardShell>

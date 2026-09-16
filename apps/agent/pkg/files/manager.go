@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -260,7 +261,37 @@ func (fm *FileManager) Delete(targetPath string) error {
 		}
 	}
 
-	return os.RemoveAll(validated)
+	// 1. First attempt standard removal
+	removeErr := os.RemoveAll(validated)
+	if removeErr == nil {
+		return nil
+	}
+
+	// 2. If RemoveAll failed (e.g. read-only subdirectories or restricted permissions),
+	// attempt to make directories/files writable and retry
+	_ = filepath.Walk(validated, func(p string, info os.FileInfo, walkErr error) error {
+		if walkErr == nil {
+			if info.IsDir() {
+				_ = os.Chmod(p, 0755)
+			} else {
+				_ = os.Chmod(p, 0644)
+			}
+		}
+		return nil
+	})
+
+	if err := os.RemoveAll(validated); err == nil {
+		return nil
+	}
+
+	// 3. Fallback to system command 'rm -rf' on Linux/Unix
+	if execCmd := exec.Command("rm", "-rf", "--", validated); execCmd.Run() == nil {
+		if _, statErr := os.Lstat(validated); os.IsNotExist(statErr) {
+			return nil
+		}
+	}
+
+	return removeErr
 }
 
 // Rename renames or moves a file/directory

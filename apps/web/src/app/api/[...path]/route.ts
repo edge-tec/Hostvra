@@ -25,7 +25,11 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     }
   });
 
-  const body = req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : undefined;
+  const rawBody = req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : undefined;
+  const body = rawBody && rawBody.length > 0 ? rawBody : undefined;
+  if (!body) {
+    headers.delete('content-type');
+  }
 
   try {
     const res = await fetch(targetUrl.toString(), {

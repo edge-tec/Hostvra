@@ -440,6 +440,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/rename", fileHandler.Rename)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/copy", fileHandler.Copy)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Delete("/delete", fileHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/delete", fileHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/permissions", fileHandler.Permissions)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/archive", fileHandler.Archive)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/extract", fileHandler.Extract)

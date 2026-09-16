@@ -461,16 +461,22 @@ func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes a file or directory
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	targetPath := r.URL.Query().Get("path")
-	if targetPath == "" {
+	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if targetPath == "" && r.Body != nil {
 		var req DeleteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			targetPath = req.Path
+			targetPath = strings.TrimSpace(req.Path)
 		}
 	}
 
 	if targetPath == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	targetPath = filepath.Clean(targetPath)
+	if targetPath == "/" || targetPath == "." {
+		response.Error(w, http.StatusForbidden, "ROOT_DELETE_BLOCKED", "Root filesystem directory cannot be deleted", nil, "")
 		return
 	}
 
