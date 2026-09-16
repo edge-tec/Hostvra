@@ -133,11 +133,19 @@ install_dependencies() {
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get install -y -qq curl wget tar gzip openssl ufw nginx ca-certificates \
-            postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd rspamd > /dev/null
+            postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd rspamd \
+            php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip > /dev/null
     elif [[ "$PKG_MGR" == "dnf" ]]; then
         dnf install -y -q curl wget tar gzip openssl firewalld nginx ca-certificates \
-            postfix dovecot rspamd > /dev/null
+            postfix dovecot rspamd php-fpm php-mysqlnd php-gd php-mbstring php-xml > /dev/null
     fi
+
+    # Disable Apache/httpd to prevent port 80/443 conflict with Nginx
+    systemctl stop apache2 2>/dev/null || true
+    systemctl disable apache2 2>/dev/null || true
+    systemctl stop httpd 2>/dev/null || true
+    systemctl disable httpd 2>/dev/null || true
+
     log_success "System and email dependencies satisfied."
 }
 

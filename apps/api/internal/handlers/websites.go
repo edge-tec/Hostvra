@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -146,6 +149,9 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Automatically deploy Nginx Virtual Host configuration
+	_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+
 	h.audit.Log(r.Context(), r, "website.create", "website", site.ID.String(), "success", "", map[string]interface{}{
 		"domain":      site.PrimaryDomain,
 		"server_id":   serverID.String(),
@@ -230,6 +236,9 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		phpVer = *site.PHPVersion
 	}
 	_ = h.isolationMgr.DeprovisionWebsiteIsolation(r.Context(), site.SystemUser, phpVer)
+
+	// Clean up Nginx Virtual Host
+	removeNginxVHost(site.PrimaryDomain)
 
 	if err := h.store.DeleteWebsite(r.Context(), siteID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete website", nil, "")
@@ -446,6 +455,17 @@ func (h *WebsiteHandler) UpdateConf(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
+	if req.Config != "" {
+		confPath := "/etc/nginx/sites-available/" + site.PrimaryDomain
+		enabledPath := "/etc/nginx/sites-enabled/" + site.PrimaryDomain
+		_ = os.WriteFile(confPath, []byte(req.Config), 0644)
+		_ = os.Remove(enabledPath)
+		_ = os.Symlink(confPath, enabledPath)
+		if err := exec.Command("nginx", "-t").Run(); err == nil {
+			_ = exec.Command("systemctl", "reload", "nginx").Run()
+		}
+	}
+
 	h.audit.Log(r.Context(), r, "website.conf.update", "website", siteID.String(), "success", "", map[string]interface{}{
 		"domain": site.PrimaryDomain,
 	})
@@ -644,4 +664,91 @@ func (h *WebsiteHandler) Statistics(w http.ResponseWriter, r *http.Request) {
 		},
 	}, nil)
 }
+
+// deployNginxVHost writes the virtual host configuration file and reloads Nginx
+func deployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) error {
+	sitesAvailable := "/etc/nginx/sites-available"
+	sitesEnabled := "/etc/nginx/sites-enabled"
+	if _, err := os.Stat(sitesAvailable); err != nil {
+		// Nginx not installed or non-Linux dev environment
+		return nil
+	}
+	_ = os.MkdirAll(sitesAvailable, 0755)
+	_ = os.MkdirAll(sitesEnabled, 0755)
+	_ = os.MkdirAll(docRoot, 0755)
+
+	phpSocket := fmt.Sprintf("unix:/run/php/php%s-fpm.sock", phpVer)
+	if _, err := os.Stat(fmt.Sprintf("/run/php/php%s-fpm.sock", phpVer)); err != nil {
+		matches, _ := filepath.Glob("/run/php/php*-fpm.sock")
+		if len(matches) > 0 {
+			phpSocket = "unix:" + matches[0]
+		}
+	}
+
+	confPath := filepath.Join(sitesAvailable, domain)
+	var conf string
+	if appType == "proxy" && proxyPort != nil && *proxyPort > 0 {
+		conf = fmt.Sprintf(`server {
+    listen 80;
+    listen [::]:80;
+    server_name %s www.%s;
+
+    location / {
+        proxy_pass http://127.0.0.1:%d;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`, domain, domain, *proxyPort)
+	} else {
+		conf = fmt.Sprintf(`server {
+    listen 80;
+    listen [::]:80;
+    server_name %s www.%s;
+    root %s;
+    index index.php index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass %s;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+`, domain, domain, docRoot, phpSocket)
+	}
+
+	if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
+		return err
+	}
+
+	symlinkPath := filepath.Join(sitesEnabled, domain)
+	_ = os.Remove(symlinkPath)
+	_ = os.Symlink(confPath, symlinkPath)
+
+	if err := exec.Command("nginx", "-t").Run(); err == nil {
+		_ = exec.Command("systemctl", "reload", "nginx").Run()
+	}
+	return nil
+}
+
+// removeNginxVHost deletes the virtual host configuration and reloads Nginx
+func removeNginxVHost(domain string) {
+	_ = os.Remove(filepath.Join("/etc/nginx/sites-enabled", domain))
+	_ = os.Remove(filepath.Join("/etc/nginx/sites-available", domain))
+	if err := exec.Command("nginx", "-t").Run(); err == nil {
+		_ = exec.Command("systemctl", "reload", "nginx").Run()
+	}
+}
+
 
