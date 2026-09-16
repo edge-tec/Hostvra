@@ -387,8 +387,7 @@ php_admin_value[upload_tmp_dir] = %s/tmp
 php_admin_value[session.save_path] = %s/tmp
 php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen,curl_multi_exec,parse_ini_file,show_source
 
-; cgroups v2 integration
-systemd_slice = hostvra-user-%s.slice
+; cgroups v2 slice: hostvra-user-%s.slice
 `,
 		username,
 		username,
