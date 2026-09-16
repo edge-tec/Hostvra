@@ -1235,3 +1235,29 @@ html:not(.dark) div[class*="absolute left-0"][class*="rounded-"] {
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.03) !important;
 }
 
+/* ==========================================================================
+   12. CODE EDITOR OVERRIDES
+   ========================================================================== */
+.code-editor-textarea,
+textarea.code-editor-textarea,
+html:not(.dark) textarea.code-editor-textarea,
+html.dark textarea.code-editor-textarea {
+  background-color: #FFFFFF !important;
+  color: #000000 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.code-editor-textarea:focus,
+textarea.code-editor-textarea:focus,
+html:not(.dark) textarea.code-editor-textarea:focus,
+html.dark textarea.code-editor-textarea:focus {
+  background-color: #FFFFFF !important;
+  color: #000000 !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+

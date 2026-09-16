@@ -785,13 +785,14 @@ export default function FileManagerPage() {
             </div>
 
             {/* Editor Textarea */}
-            <div className="flex-1 p-0 relative bg-slate-950 text-slate-100 font-mono text-xs overflow-hidden flex">
+            <div className="flex-1 p-0 relative bg-white text-black font-mono text-xs overflow-hidden flex">
               <textarea
                 value={fileContent}
                 onChange={(e) => setFileContent(e.target.value)}
                 onKeyDown={handleEditorKeyDown}
                 spellCheck={false}
-                className="w-full h-full p-4 bg-transparent resize-none focus:outline-none font-mono text-xs leading-relaxed text-slate-200 selection:bg-emerald-500/30 overflow-auto"
+                style={{ backgroundColor: '#ffffff', color: '#000000', border: 'none', outline: 'none', boxShadow: 'none', borderRadius: 0 }}
+                className="code-editor-textarea w-full h-full p-4 !bg-white !text-black resize-none focus:outline-none font-mono text-xs leading-relaxed selection:bg-emerald-500/20 overflow-auto !border-0 !shadow-none !ring-0"
                 placeholder="File content..."
               />
             </div>
