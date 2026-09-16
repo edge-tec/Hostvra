@@ -400,8 +400,16 @@ async function executeFetch<T>(
   options: RequestInit,
   headers: Record<string, string>
 ): Promise<ApiResponse<T>> {
+  const isLongRunning =
+    endpoint.includes('terminal') ||
+    endpoint.includes('backup') ||
+    endpoint.includes('update') ||
+    endpoint.includes('docker') ||
+    endpoint.includes('websites');
+  const timeoutMs = isLongRunning ? 900000 : 60000;
+
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${baseUrl}${endpoint}`, {

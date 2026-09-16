@@ -143,8 +143,8 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 300-second (5 minutes) execution deadline for builds and maintenance tasks
-	ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
+	// 900-second (15 minutes) execution deadline for builds, docker operations, and maintenance tasks
+	ctx, cancel := context.WithTimeout(r.Context(), 900*time.Second)
 	defer cancel()
 
 	const pwdSep = "___HV_PWD_DELIM___"

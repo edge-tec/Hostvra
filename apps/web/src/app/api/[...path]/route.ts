@@ -31,13 +31,22 @@ async function handleProxy(req: NextRequest, { params }: { params: Promise<{ pat
     headers.delete('content-type');
   }
 
+  // Allow up to 15 minutes (900,000ms) for terminal commands, docker builds, backups, etc.
+  const isLongRunning =
+    subpath.includes('terminal') ||
+    subpath.includes('backup') ||
+    subpath.includes('update') ||
+    subpath.includes('docker') ||
+    subpath.includes('websites');
+  const timeoutMs = isLongRunning ? 900000 : 60000;
+
   try {
     const res = await fetch(targetUrl.toString(), {
       method: req.method,
       headers,
       body,
       cache: 'no-store',
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     const data = await res.arrayBuffer();
