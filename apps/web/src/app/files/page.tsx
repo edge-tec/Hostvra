@@ -88,20 +88,26 @@ export default function FileManagerPage() {
   // Archive & Extract States
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [itemToArchive, setItemToArchive] = useState<FileItem | null>(null);
+  const [archivePaths, setArchivePaths] = useState<string[]>([]);
   const [archiveFormat, setArchiveFormat] = useState<'zip' | 'tar.gz'>('zip');
   const [isProcessingArchive, setIsProcessingArchive] = useState(false);
 
   // Delete Confirmation Modal State
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<FileItem | null>(null);
+  const [itemsToDelete, setItemsToDelete] = useState<FileItem[]>([]);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Selection / Mark States
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<string>('delete');
 
   // Fetch directory listing from real backend
   const fetchDirectory = async (path: string) => {
     try {
       setLoading(true);
       setErrorMsg(null);
+      setSelectedPaths(new Set());
       const res = await apiFetch<FileListResponse>(`/api/v1/files/list?path=${encodeURIComponent(path)}`);
       if (res.success && res.data) {
         setFiles(res.data.items || []);
@@ -251,37 +257,61 @@ export default function FileManagerPage() {
     fetchDirectory(currentPath);
   };
 
-  // Open Delete Confirmation Modal
+  // Open Delete Confirmation Modal for a single item
   const promptDelete = (file: FileItem) => {
-    setItemToDelete(file);
+    setItemsToDelete([file]);
     setDeleteError(null);
     setDeleteModalOpen(true);
   };
 
-  // Perform confirmed deletion
+  // Perform confirmed deletion (single or batch)
   const handleDeleteConfirm = async () => {
-    if (!itemToDelete) return;
+    if (itemsToDelete.length === 0) return;
     setDeleting(true);
     setDeleteError(null);
 
     try {
-      const encodedPath = encodeURIComponent(itemToDelete.path);
-      let res = await apiFetch(`/api/v1/files/delete?path=${encodedPath}`, {
-        method: 'DELETE',
-        body: JSON.stringify({ path: itemToDelete.path }),
-      });
-
-      // If DELETE returned 405 Method Not Allowed due to proxy, fallback to POST
-      if (!res.success && res.error?.code === 'HTTP_405') {
-        res = await apiFetch('/api/v1/files/delete', {
-          method: 'POST',
-          body: JSON.stringify({ path: itemToDelete.path }),
+      let res;
+      if (itemsToDelete.length === 1) {
+        const item = itemsToDelete[0];
+        const encodedPath = encodeURIComponent(item.path);
+        res = await apiFetch(`/api/v1/files/delete?path=${encodedPath}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ path: item.path }),
         });
+
+        // Fallback to POST if proxy blocks DELETE
+        if (!res.success && res.error?.code === 'HTTP_405') {
+          res = await apiFetch('/api/v1/files/delete', {
+            method: 'POST',
+            body: JSON.stringify({ path: item.path }),
+          });
+        }
+      } else {
+        const paths = itemsToDelete.map((i) => i.path);
+        res = await apiFetch('/api/v1/files/delete', {
+          method: 'DELETE',
+          body: JSON.stringify({ paths }),
+        });
+
+        // Fallback to POST if proxy blocks DELETE
+        if (!res.success && res.error?.code === 'HTTP_405') {
+          res = await apiFetch('/api/v1/files/delete', {
+            method: 'POST',
+            body: JSON.stringify({ paths }),
+          });
+        }
       }
 
       if (res.success) {
         setDeleteModalOpen(false);
-        setItemToDelete(null);
+        const deletedSet = new Set(itemsToDelete.map((i) => i.path));
+        setSelectedPaths((prev) => {
+          const next = new Set(prev);
+          deletedSet.forEach((p) => next.delete(p));
+          return next;
+        });
+        setItemsToDelete([]);
         fetchDirectory(currentPath);
       } else {
         setDeleteError(res.error?.message || 'Delete failed. Check permissions or disk state.');
@@ -349,20 +379,28 @@ export default function FileManagerPage() {
     }
   };
 
-  // Archive item
+  // Archive items (single or multiple)
   const handleArchiveSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!itemToArchive) return;
+    const targets = itemToArchive ? [itemToArchive.path] : archivePaths;
+    if (targets.length === 0) return;
 
     setIsProcessingArchive(true);
     const ext = archiveFormat === 'tar.gz' ? '.tar.gz' : '.zip';
-    const destPath = `${itemToArchive.path}${ext}`;
+    let destPath = '';
+    if (itemToArchive) {
+      destPath = `${itemToArchive.path}${ext}`;
+    } else {
+      const cleanCurrent = currentPath.replace(/\/$/, '');
+      const folderName = currentPath.split('/').filter(Boolean).pop() || 'archive';
+      destPath = `${cleanCurrent}/${folderName}_selected_${Math.floor(Date.now() / 1000)}${ext}`;
+    }
 
     try {
       const res = await apiFetch('/api/v1/files/archive', {
         method: 'POST',
         body: JSON.stringify({
-          paths: [itemToArchive.path],
+          paths: targets,
           dest_path: destPath,
           format: archiveFormat,
         }),
@@ -371,6 +409,7 @@ export default function FileManagerPage() {
       if (res.success) {
         setArchiveModalOpen(false);
         setItemToArchive(null);
+        setArchivePaths([]);
         fetchDirectory(currentPath);
       } else {
         alert(res.error?.message || 'Compression failed');
@@ -445,6 +484,74 @@ export default function FileManagerPage() {
   );
 
   const pathParts = currentPath.split('/').filter(Boolean);
+
+  const allVisiblePaths = filteredFiles.map((f) => f.path);
+  const isAllSelected =
+    allVisiblePaths.length > 0 && allVisiblePaths.every((p) => selectedPaths.has(p));
+  const isSomeSelected =
+    allVisiblePaths.some((p) => selectedPaths.has(p)) && !isAllSelected;
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        allVisiblePaths.forEach((p) => next.delete(p));
+        return next;
+      });
+    } else {
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        allVisiblePaths.forEach((p) => next.add(p));
+        return next;
+      });
+    }
+  };
+
+  const toggleSelect = (path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const promptBulkDelete = () => {
+    const selected = filteredFiles.filter((f) => selectedPaths.has(f.path));
+    if (selected.length === 0) return;
+    setItemsToDelete(selected);
+    setDeleteError(null);
+    setDeleteModalOpen(true);
+  };
+
+  const promptArchiveSingle = (file: FileItem) => {
+    setItemToArchive(file);
+    setArchivePaths([file.path]);
+    setArchiveModalOpen(true);
+  };
+
+  const promptArchiveBulk = () => {
+    const selected = filteredFiles.filter((f) => selectedPaths.has(f.path));
+    if (selected.length === 0) return;
+    setItemToArchive(null);
+    setArchivePaths(selected.map((s) => s.path));
+    setArchiveModalOpen(true);
+  };
+
+  const handleExecuteBulkAction = () => {
+    if (selectedPaths.size === 0) {
+      alert('Please mark at least one file or folder first.');
+      return;
+    }
+    if (bulkAction === 'delete') {
+      promptBulkDelete();
+    } else if (bulkAction === 'compress') {
+      promptArchiveBulk();
+    }
+  };
 
   return (
     <DashboardShell>
@@ -598,6 +705,18 @@ export default function FileManagerPage() {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-200/80 dark:border-surface-800/80 bg-slate-50/80 dark:bg-[#151b28]">
+                  <th className="w-10 px-3.5 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = isSomeSelected;
+                      }}
+                      onChange={handleSelectAll}
+                      className="w-4 h-4 rounded border-slate-300 dark:border-surface-600 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                      title={isAllSelected ? 'Deselect all' : 'Select all'}
+                    />
+                  </th>
                   <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Name</th>
                   <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Size</th>
                   <th className="px-4 py-3 font-semibold text-slate-600 dark:text-slate-400">Permissions</th>
@@ -609,29 +728,47 @@ export default function FileManagerPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60">
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                    <td colSpan={7} className="px-5 py-8 text-center text-slate-400">
                       <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-emerald-500" />
                       Loading directory contents from server...
                     </td>
                   </tr>
                 ) : filteredFiles.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-8 text-center text-slate-400">
+                    <td colSpan={7} className="px-5 py-8 text-center text-slate-400">
                       <Folder className="w-6 h-6 mx-auto mb-1.5 opacity-40" />
                       This directory is currently empty.
                     </td>
                   </tr>
                 ) : (
                   filteredFiles.map((file) => {
+                    const isSelected = selectedPaths.has(file.path);
                     const isArchive =
                       file.name.endsWith('.zip') || file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz');
 
                     return (
                       <tr
                         key={file.path}
-                        className="hover:bg-slate-50/75 dark:hover:bg-surface-800/40 transition-colors cursor-pointer group"
+                        className={`transition-colors cursor-pointer group ${
+                          isSelected
+                            ? 'bg-emerald-50/70 dark:bg-emerald-950/25 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/40'
+                            : 'hover:bg-slate-50/75 dark:hover:bg-surface-800/40'
+                        }`}
                         onDoubleClick={() => handleItemClick(file)}
                       >
+                        {/* Checkbox / Mark Option */}
+                        <td
+                          className="w-10 px-3.5 py-2.5 text-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelect(file.path)}
+                            className="w-4 h-4 rounded border-slate-300 dark:border-surface-600 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                          />
+                        </td>
+
                         {/* File Name & Icon */}
                         <td className="px-4 py-2.5 font-medium">
                           <div className="flex items-center gap-2.5">
@@ -729,8 +866,7 @@ export default function FileManagerPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setItemToArchive(file);
-                                setArchiveModalOpen(true);
+                                promptArchiveSingle(file);
                               }}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Compress / Archive"
@@ -769,6 +905,62 @@ export default function FileManagerPage() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          {/* Table Footer: Bulk Mark Actions & Counts */}
+          <div className="px-4 py-3 border-t border-slate-200/80 dark:border-surface-800/80 bg-slate-50/60 dark:bg-[#151b28] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+              <label className="flex items-center gap-2 cursor-pointer select-none text-slate-700 dark:text-slate-300 font-medium">
+                <input
+                  type="checkbox"
+                  checked={isAllSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = isSomeSelected;
+                  }}
+                  onChange={handleSelectAll}
+                  className="w-4 h-4 rounded border-slate-300 dark:border-surface-600 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                />
+                <span className="hidden sm:inline">Select all</span>
+              </label>
+
+              <select
+                value={bulkAction}
+                onChange={(e) => setBulkAction(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
+              >
+                <option value="delete">Delete marked</option>
+                <option value="compress">Compress marked (.zip)</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={handleExecuteBulkAction}
+                disabled={selectedPaths.size === 0}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 dark:bg-surface-700 dark:hover:bg-surface-600 text-white font-medium transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+              >
+                Execute
+              </button>
+
+              {selectedPaths.size > 0 && (
+                <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-semibold pl-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>{selectedPaths.size} selected</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPaths(new Set())}
+                    className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 underline cursor-pointer ml-1"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="text-slate-500 dark:text-slate-400 text-[11px] font-mono whitespace-nowrap self-end sm:self-auto">
+              Total {filteredFiles.length} items (
+              {filteredFiles.filter((f) => f.is_dir).length} folders,{' '}
+              {filteredFiles.filter((f) => !f.is_dir).length} files)
+            </div>
           </div>
         </div>
       </div>
@@ -1073,7 +1265,7 @@ export default function FileManagerPage() {
       )}
 
       {/* Archive Modal */}
-      {archiveModalOpen && itemToArchive && (
+      {archiveModalOpen && (itemToArchive || archivePaths.length > 0) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
           <form onSubmit={handleArchiveSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -1091,7 +1283,10 @@ export default function FileManagerPage() {
             </div>
 
             <p className="text-xs text-slate-500 truncate">
-              Compress: <span className="font-mono text-slate-800 dark:text-slate-200">{itemToArchive.name}</span>
+              Compress:{' '}
+              <span className="font-mono text-slate-800 dark:text-slate-200">
+                {itemToArchive ? itemToArchive.name : `${archivePaths.length} marked items`}
+              </span>
             </p>
 
             <div className="space-y-1.5">
@@ -1133,7 +1328,7 @@ export default function FileManagerPage() {
               <button
                 type="submit"
                 disabled={isProcessingArchive}
-                className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+                className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
               >
                 {isProcessingArchive ? 'Compressing...' : 'Start Compression'}
               </button>
@@ -1141,8 +1336,9 @@ export default function FileManagerPage() {
           </form>
         </div>
       )}
+
       {/* Delete Confirmation Modal */}
-      {deleteModalOpen && itemToDelete && (
+      {deleteModalOpen && itemsToDelete.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -1152,7 +1348,9 @@ export default function FileManagerPage() {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Delete {itemToDelete.is_dir ? 'Directory' : 'File'}
+                    {itemsToDelete.length === 1
+                      ? `Delete ${itemsToDelete[0].is_dir ? 'Directory' : 'File'}`
+                      : `Delete ${itemsToDelete.length} Items`}
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     This action cannot be undone
@@ -1169,16 +1367,34 @@ export default function FileManagerPage() {
             </div>
 
             <div className="p-3 bg-slate-50 dark:bg-surface-800/60 rounded-xl border border-slate-200 dark:border-surface-700/60 text-xs">
-              <p className="text-slate-700 dark:text-slate-200">
-                Are you sure you want to permanently delete{' '}
-                <strong className="font-mono text-rose-600 dark:text-rose-400 break-all">
-                  {itemToDelete.name}
-                </strong>
-                ?
-              </p>
-              <p className="text-[11px] text-slate-400 font-mono mt-1 break-all">
-                {itemToDelete.path}
-              </p>
+              {itemsToDelete.length === 1 ? (
+                <>
+                  <p className="text-slate-700 dark:text-slate-200">
+                    Are you sure you want to permanently delete{' '}
+                    <strong className="font-mono text-rose-600 dark:text-rose-400 break-all">
+                      {itemsToDelete[0].name}
+                    </strong>
+                    ?
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-mono mt-1 break-all">
+                    {itemsToDelete[0].path}
+                  </p>
+                </>
+              ) : (
+                <div className="space-y-1.5">
+                  <p className="text-slate-700 dark:text-slate-200 font-semibold">
+                    Are you sure you want to permanently delete these {itemsToDelete.length} items?
+                  </p>
+                  <div className="max-h-36 overflow-y-auto space-y-1 font-mono text-[11px] text-slate-600 dark:text-slate-300 pr-1">
+                    {itemsToDelete.map((item) => (
+                      <div key={item.path} className="truncate flex items-center gap-1.5">
+                        <span className="text-rose-500">•</span>
+                        <span>{item.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {deleteError && (
@@ -1200,10 +1416,16 @@ export default function FileManagerPage() {
                 type="button"
                 onClick={handleDeleteConfirm}
                 disabled={deleting}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{deleting ? 'Deleting...' : 'Delete Permanently'}</span>
+                <span>
+                  {deleting
+                    ? 'Deleting...'
+                    : itemsToDelete.length === 1
+                    ? 'Delete Permanently'
+                    : `Delete (${itemsToDelete.length})`}
+                </span>
               </button>
             </div>
           </div>

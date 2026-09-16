@@ -112,7 +112,8 @@ type CopyRequest struct {
 }
 
 type DeleteRequest struct {
-	Path string `json:"path"`
+	Path  string   `json:"path"`
+	Paths []string `json:"paths"`
 }
 
 type ChmodRequest struct {
@@ -459,42 +460,70 @@ func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Delete removes a file or directory
+// Delete removes a file or directory, or a batch of files/directories
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	var pathsToDelete []string
+
 	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
-	if targetPath == "" && r.Body != nil {
+	if targetPath != "" {
+		pathsToDelete = append(pathsToDelete, targetPath)
+	}
+
+	if r.Body != nil {
 		var req DeleteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
-			targetPath = strings.TrimSpace(req.Path)
+			if len(req.Paths) > 0 {
+				for _, p := range req.Paths {
+					p = strings.TrimSpace(p)
+					if p != "" {
+						pathsToDelete = append(pathsToDelete, p)
+					}
+				}
+			} else if strings.TrimSpace(req.Path) != "" {
+				pathsToDelete = append(pathsToDelete, strings.TrimSpace(req.Path))
+			}
 		}
 	}
 
-	if targetPath == "" {
-		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+	if len(pathsToDelete) == 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path or paths required", nil, "")
 		return
 	}
 
-	targetPath = filepath.Clean(targetPath)
-	if targetPath == "/" || targetPath == "." {
-		response.Error(w, http.StatusForbidden, "ROOT_DELETE_BLOCKED", "Root filesystem directory cannot be deleted", nil, "")
-		return
+	var deletedPaths []string
+	var errorMessages []string
+
+	for _, p := range pathsToDelete {
+		cleanPath := filepath.Clean(p)
+		if cleanPath == "/" || cleanPath == "." {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: Root directory cannot be deleted", p))
+			continue
+		}
+
+		if err := h.checkPathAuthorization(r, cleanPath); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+			continue
+		}
+
+		if err := h.fileMgr.Delete(cleanPath); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+			continue
+		}
+
+		h.audit.Log(r.Context(), r, "file.delete", "file", cleanPath, "success", "", nil)
+		deletedPaths = append(deletedPaths, cleanPath)
 	}
 
-	if err := h.checkPathAuthorization(r, targetPath); err != nil {
-		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+	if len(deletedPaths) == 0 && len(errorMessages) > 0 {
+		response.Error(w, http.StatusBadRequest, "DELETE_ERROR", strings.Join(errorMessages, "; "), nil, "")
 		return
 	}
-
-	if err := h.fileMgr.Delete(targetPath); err != nil {
-		response.Error(w, http.StatusBadRequest, "DELETE_ERROR", err.Error(), nil, "")
-		return
-	}
-
-	h.audit.Log(r.Context(), r, "file.delete", "file", targetPath, "success", "", nil)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"deleted": true,
-		"path":    targetPath,
+		"paths":   deletedPaths,
+		"count":   len(deletedPaths),
+		"errors":  errorMessages,
 	}, nil)
 }
 
