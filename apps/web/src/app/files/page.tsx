@@ -22,6 +22,9 @@ import {
   FileCode,
   Lock,
   Copy,
+  FolderInput,
+  PenLine,
+  Move,
   AlertCircle,
   CheckCircle2,
 } from 'lucide-react';
@@ -83,7 +86,15 @@ export default function FileManagerPage() {
   // Permissions Modal State
   const [permModalOpen, setPermModalOpen] = useState(false);
   const [itemForPerm, setItemForPerm] = useState<FileItem | null>(null);
+  const [permPaths, setPermPaths] = useState<string[]>([]);
   const [permMode, setPermMode] = useState('0755');
+
+  // Copy & Move Modal State
+  const [copyMoveModalOpen, setCopyMoveModalOpen] = useState(false);
+  const [copyMoveMode, setCopyMoveMode] = useState<'copy' | 'move'>('copy');
+  const [copyMoveTargets, setCopyMoveTargets] = useState<string[]>([]);
+  const [targetDestDir, setTargetDestDir] = useState('');
+  const [isProcessingCopyMove, setIsProcessingCopyMove] = useState(false);
 
   // Archive & Extract States
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
@@ -353,16 +364,17 @@ export default function FileManagerPage() {
     }
   };
 
-  // Permissions submit
+  // Permissions submit (single or batch)
   const handlePermSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!itemForPerm) return;
+    const targets = itemForPerm ? [itemForPerm.path] : permPaths;
+    if (targets.length === 0) return;
 
     try {
       const res = await apiFetch('/api/v1/files/permissions', {
         method: 'POST',
         body: JSON.stringify({
-          path: itemForPerm.path,
+          paths: targets,
           mode: permMode,
         }),
       });
@@ -370,12 +382,67 @@ export default function FileManagerPage() {
       if (res.success) {
         setPermModalOpen(false);
         setItemForPerm(null);
+        setPermPaths([]);
         fetchDirectory(currentPath);
       } else {
         alert(res.error?.message || 'Permissions change failed');
       }
     } catch (err: any) {
       alert(err.message || 'Permissions change failed');
+    }
+  };
+
+  // Open Copy / Move Modal
+  const promptCopy = (targets: string[]) => {
+    if (targets.length === 0) return;
+    setCopyMoveMode('copy');
+    setCopyMoveTargets(targets);
+    setTargetDestDir(currentPath);
+    setCopyMoveModalOpen(true);
+  };
+
+  const promptMove = (targets: string[]) => {
+    if (targets.length === 0) return;
+    setCopyMoveMode('move');
+    setCopyMoveTargets(targets);
+    setTargetDestDir(currentPath);
+    setCopyMoveModalOpen(true);
+  };
+
+  // Perform Copy / Move submission
+  const handleCopyMoveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (copyMoveTargets.length === 0 || !targetDestDir.trim()) return;
+
+    setIsProcessingCopyMove(true);
+    const endpoint = copyMoveMode === 'copy' ? '/api/v1/files/copy' : '/api/v1/files/rename';
+    const payload =
+      copyMoveMode === 'copy'
+        ? copyMoveTargets.length === 1
+          ? { src_path: copyMoveTargets[0], dest_path: targetDestDir.trim() }
+          : { src_paths: copyMoveTargets, dest_path: targetDestDir.trim() }
+        : copyMoveTargets.length === 1
+        ? { old_path: copyMoveTargets[0], new_path: targetDestDir.trim() }
+        : { old_paths: copyMoveTargets, new_path: targetDestDir.trim() };
+
+    try {
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      if (res.success) {
+        setCopyMoveModalOpen(false);
+        setCopyMoveTargets([]);
+        setSelectedPaths(new Set());
+        fetchDirectory(currentPath);
+      } else {
+        alert(res.error?.message || `${copyMoveMode === 'copy' ? 'Copy' : 'Move'} operation failed`);
+      }
+    } catch (err: any) {
+      alert(err.message || `${copyMoveMode === 'copy' ? 'Copy' : 'Move'} operation failed`);
+    } finally {
+      setIsProcessingCopyMove(false);
     }
   };
 
@@ -541,13 +608,29 @@ export default function FileManagerPage() {
     setArchiveModalOpen(true);
   };
 
+  const promptPermBulk = () => {
+    const selected = filteredFiles.filter((f) => selectedPaths.has(f.path));
+    if (selected.length === 0) return;
+    setItemForPerm(null);
+    setPermPaths(selected.map((s) => s.path));
+    setPermMode('0755');
+    setPermModalOpen(true);
+  };
+
   const handleExecuteBulkAction = () => {
     if (selectedPaths.size === 0) {
       alert('Please mark at least one file or folder first.');
       return;
     }
+    const paths = Array.from(selectedPaths);
     if (bulkAction === 'delete') {
       promptBulkDelete();
+    } else if (bulkAction === 'copy') {
+      promptCopy(paths);
+    } else if (bulkAction === 'move') {
+      promptMove(paths);
+    } else if (bulkAction === 'chmod') {
+      promptPermBulk();
     } else if (bulkAction === 'compress') {
       promptArchiveBulk();
     }
@@ -696,6 +779,77 @@ export default function FileManagerPage() {
           <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {/* Floating / Sticky Bulk Action Bar when items are marked */}
+        {selectedPaths.size > 0 && (
+          <div className="sticky top-4 z-30 flex flex-wrap items-center justify-between gap-3 p-3 sm:p-3.5 bg-slate-900/95 dark:bg-surface-800/95 text-white rounded-2xl shadow-xl border border-slate-700/80 backdrop-blur-md transition-all animate-fadeIn">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-xs">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{selectedPaths.size} {selectedPaths.size === 1 ? 'item' : 'items'} selected</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPaths(new Set())}
+                className="text-xs text-slate-400 hover:text-white underline cursor-pointer"
+              >
+                Deselect all
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => promptCopy(Array.from(selectedPaths))}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600/60 text-xs font-semibold text-slate-200 hover:text-white transition cursor-pointer shadow-2xs"
+                title="Copy marked items"
+              >
+                <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Copy</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => promptMove(Array.from(selectedPaths))}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600/60 text-xs font-semibold text-slate-200 hover:text-white transition cursor-pointer shadow-2xs"
+                title="Move marked items"
+              >
+                <FolderInput className="w-3.5 h-3.5 text-amber-400" />
+                <span>Move</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={promptPermBulk}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600/60 text-xs font-semibold text-slate-200 hover:text-white transition cursor-pointer shadow-2xs"
+                title="Change permissions for marked items"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Permissions</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={promptArchiveBulk}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600/90 hover:bg-purple-600 text-xs font-semibold text-white transition cursor-pointer shadow-2xs"
+                title="Compress marked items"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>Compress</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={promptBulkDelete}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/90 hover:bg-rose-600 text-xs font-semibold text-white transition cursor-pointer shadow-2xs"
+                title="Delete marked items"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete ({selectedPaths.size})</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -863,6 +1017,46 @@ export default function FileManagerPage() {
                               </button>
                             )}
 
+                            {/* Copy single file/dir */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                promptCopy([file.path]);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
+                              title="Copy to..."
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Move single file/dir */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                promptMove([file.path]);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
+                              title="Move to..."
+                            >
+                              <FolderInput className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Permissions single file/dir */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setItemForPerm(file);
+                                setPermPaths([]);
+                                setPermMode(file.perm_octal || '0755');
+                                setPermModalOpen(true);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
+                              title="Permissions (chmod)"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Compress single file/dir */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -874,6 +1068,7 @@ export default function FileManagerPage() {
                               <Archive className="w-3.5 h-3.5" />
                             </button>
 
+                            {/* Rename single file/dir */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -881,12 +1076,13 @@ export default function FileManagerPage() {
                                 setNewName(file.name);
                                 setRenameModalOpen(true);
                               }}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors cursor-pointer border-0 shadow-none bg-transparent"
                               title="Rename"
                             >
-                              <Copy className="w-3.5 h-3.5" />
+                              <PenLine className="w-3.5 h-3.5" />
                             </button>
 
+                            {/* Delete single file/dir */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -929,6 +1125,9 @@ export default function FileManagerPage() {
                 className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-800 dark:text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer"
               >
                 <option value="delete">Delete marked</option>
+                <option value="copy">Copy marked to...</option>
+                <option value="move">Move marked to...</option>
+                <option value="chmod">Change permissions (chmod)</option>
                 <option value="compress">Compress marked (.zip)</option>
               </select>
 
@@ -1193,12 +1392,12 @@ export default function FileManagerPage() {
       )}
 
       {/* Permissions (chmod) Modal */}
-      {permModalOpen && itemForPerm && (
+      {permModalOpen && (itemForPerm || permPaths.length > 0) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
           <form onSubmit={handlePermSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Lock className="w-4 h-4 text-emerald-500" />
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
                 File Permissions (chmod)
               </h3>
               <button
@@ -1211,7 +1410,7 @@ export default function FileManagerPage() {
             </div>
 
             <p className="text-xs text-slate-500 font-mono truncate">
-              {itemForPerm.path}
+              {itemForPerm ? itemForPerm.path : `${permPaths.length} marked items`}
             </p>
 
             <div className="space-y-1.5">
@@ -1429,6 +1628,101 @@ export default function FileManagerPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Copy & Move Modal */}
+      {copyMoveModalOpen && copyMoveTargets.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
+          <form onSubmit={handleCopyMoveSubmit} className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${copyMoveMode === 'copy' ? 'bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400' : 'bg-amber-50 dark:bg-amber-950/50 text-amber-600 dark:text-amber-400'}`}>
+                  {copyMoveMode === 'copy' ? <Copy className="w-4 h-4" /> : <FolderInput className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    {copyMoveMode === 'copy' ? 'Copy Items' : 'Move Items'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {copyMoveTargets.length} {copyMoveTargets.length === 1 ? 'item' : 'items'} selected
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCopyMoveModalOpen(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-500 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Destination Directory:
+              </label>
+              <input
+                type="text"
+                required
+                value={targetDestDir}
+                onChange={(e) => setTargetDestDir(e.target.value)}
+                placeholder="/var/www/destination"
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-emerald-500"
+              />
+
+              {/* Quick Directory Shortcuts */}
+              <div className="flex flex-wrap gap-1.5 pt-1 text-[10px]">
+                <span className="text-slate-400 self-center mr-1">Quick:</span>
+                {['/var/www', '/var/www/metmco.net', '/home', '/tmp', currentPath].filter((v, i, a) => a.indexOf(v) === i).map((quick) => (
+                  <button
+                    key={quick}
+                    type="button"
+                    onClick={() => setTargetDestDir(quick)}
+                    className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 font-mono transition"
+                  >
+                    {quick === currentPath ? 'Current Folder' : quick}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target Items Preview */}
+            <div className="p-3 bg-slate-50 dark:bg-surface-800/60 rounded-xl border border-slate-200 dark:border-surface-700/60 text-xs">
+              <p className="text-slate-600 dark:text-slate-300 font-medium mb-1.5">
+                {copyMoveMode === 'copy' ? 'Items to copy:' : 'Items to move:'}
+              </p>
+              <div className="max-h-28 overflow-y-auto space-y-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                {copyMoveTargets.map((tgt) => (
+                  <div key={tgt} className="truncate flex items-center gap-1.5">
+                    <span className={copyMoveMode === 'copy' ? 'text-indigo-500' : 'text-amber-500'}>•</span>
+                    <span>{tgt.split('/').pop() || tgt}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCopyMoveModalOpen(false)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-xs font-medium text-slate-600 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isProcessingCopyMove}
+                className={`px-4 py-1.5 rounded-lg text-white text-xs font-bold transition shadow-xs disabled:opacity-50 cursor-pointer ${copyMoveMode === 'copy' ? 'bg-indigo-600 hover:bg-indigo-500' : 'bg-amber-600 hover:bg-amber-500'}`}
+              >
+                {isProcessingCopyMove
+                  ? 'Processing...'
+                  : copyMoveMode === 'copy'
+                  ? `Copy ${copyMoveTargets.length > 1 ? `(${copyMoveTargets.length})` : ''} Here`
+                  : `Move ${copyMoveTargets.length > 1 ? `(${copyMoveTargets.length})` : ''} Here`}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </DashboardShell>

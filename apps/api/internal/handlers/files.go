@@ -102,13 +102,15 @@ type MkdirRequest struct {
 }
 
 type RenameRequest struct {
-	OldPath string `json:"old_path"`
-	NewPath string `json:"new_path"`
+	OldPath  string   `json:"old_path"`
+	OldPaths []string `json:"old_paths"`
+	NewPath  string   `json:"new_path"`
 }
 
 type CopyRequest struct {
-	SrcPath  string `json:"src_path"`
-	DestPath string `json:"dest_path"`
+	SrcPath  string   `json:"src_path"`
+	SrcPaths []string `json:"src_paths"`
+	DestPath string   `json:"dest_path"`
 }
 
 type DeleteRequest struct {
@@ -117,10 +119,11 @@ type DeleteRequest struct {
 }
 
 type ChmodRequest struct {
-	Path string `json:"path"`
-	Mode string `json:"mode"` // e.g. "0755", "0644"
-	UID  int    `json:"uid,omitempty"`
-	GID  int    `json:"gid,omitempty"`
+	Path  string   `json:"path"`
+	Paths []string `json:"paths"`
+	Mode  string   `json:"mode"` // e.g. "0755", "0644"
+	UID   int      `json:"uid,omitempty"`
+	GID   int      `json:"gid,omitempty"`
 }
 
 type ArchiveRequest struct {
@@ -384,11 +387,57 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Rename renames or moves a file
+// Rename renames a file or moves multiple files to a new destination directory
 func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	var req RenameRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	if len(req.OldPaths) > 0 {
+		if req.NewPath == "" {
+			response.Error(w, http.StatusBadRequest, "MISSING_DEST", "Destination directory new_path is required", nil, "")
+			return
+		}
+		if err := h.checkPathAuthorization(r, req.NewPath); err != nil {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+			return
+		}
+
+		var movedPaths []string
+		var errorMessages []string
+		for _, oldP := range req.OldPaths {
+			oldP = strings.TrimSpace(oldP)
+			if oldP == "" {
+				continue
+			}
+			if err := h.checkPathAuthorization(r, oldP); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", oldP, err.Error()))
+				continue
+			}
+			targetDest := filepath.Join(req.NewPath, filepath.Base(oldP))
+			if err := h.fileMgr.Rename(oldP, targetDest); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", oldP, err.Error()))
+				continue
+			}
+			h.audit.Log(r.Context(), r, "file.move", "file", oldP, "success", "", map[string]interface{}{
+				"new_path": targetDest,
+			})
+			movedPaths = append(movedPaths, targetDest)
+		}
+
+		if len(movedPaths) == 0 && len(errorMessages) > 0 {
+			response.Error(w, http.StatusBadRequest, "MOVE_ERROR", strings.Join(errorMessages, "; "), nil, "")
+			return
+		}
+
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"moved":  true,
+			"paths":  movedPaths,
+			"count":  len(movedPaths),
+			"errors": errorMessages,
+		}, nil)
 		return
 	}
 
@@ -406,27 +455,78 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.fileMgr.Rename(req.OldPath, req.NewPath); err != nil {
+	targetNew := req.NewPath
+	if info, err := os.Stat(req.NewPath); err == nil && info.IsDir() {
+		targetNew = filepath.Join(req.NewPath, filepath.Base(req.OldPath))
+	}
+
+	if err := h.fileMgr.Rename(req.OldPath, targetNew); err != nil {
 		response.Error(w, http.StatusBadRequest, "RENAME_ERROR", err.Error(), nil, "")
 		return
 	}
 
 	h.audit.Log(r.Context(), r, "file.rename", "file", req.OldPath, "success", "", map[string]interface{}{
-		"new_path": req.NewPath,
+		"new_path": targetNew,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"renamed":  true,
 		"old_path": req.OldPath,
-		"new_path": req.NewPath,
+		"new_path": targetNew,
 	}, nil)
 }
 
-// Copy copies a file or directory
+// Copy copies a file or directory, or multiple files to a destination directory
 func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 	var req CopyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	if len(req.SrcPaths) > 0 {
+		if req.DestPath == "" {
+			response.Error(w, http.StatusBadRequest, "MISSING_DEST", "Destination dest_path is required", nil, "")
+			return
+		}
+		if err := h.checkPathAuthorization(r, req.DestPath); err != nil {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+			return
+		}
+
+		var copiedPaths []string
+		var errorMessages []string
+		for _, srcP := range req.SrcPaths {
+			srcP = strings.TrimSpace(srcP)
+			if srcP == "" {
+				continue
+			}
+			if err := h.checkPathAuthorization(r, srcP); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", srcP, err.Error()))
+				continue
+			}
+			targetDest := filepath.Join(req.DestPath, filepath.Base(srcP))
+			if err := h.fileMgr.Copy(srcP, targetDest); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", srcP, err.Error()))
+				continue
+			}
+			h.audit.Log(r.Context(), r, "file.copy", "file", srcP, "success", "", map[string]interface{}{
+				"dest_path": targetDest,
+			})
+			copiedPaths = append(copiedPaths, targetDest)
+		}
+
+		if len(copiedPaths) == 0 && len(errorMessages) > 0 {
+			response.Error(w, http.StatusBadRequest, "COPY_ERROR", strings.Join(errorMessages, "; "), nil, "")
+			return
+		}
+
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"copied": true,
+			"paths":  copiedPaths,
+			"count":  len(copiedPaths),
+			"errors": errorMessages,
+		}, nil)
 		return
 	}
 
@@ -444,19 +544,24 @@ func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.fileMgr.Copy(req.SrcPath, req.DestPath); err != nil {
+	targetDest := req.DestPath
+	if info, err := os.Stat(req.DestPath); err == nil && info.IsDir() {
+		targetDest = filepath.Join(req.DestPath, filepath.Base(req.SrcPath))
+	}
+
+	if err := h.fileMgr.Copy(req.SrcPath, targetDest); err != nil {
 		response.Error(w, http.StatusBadRequest, "COPY_ERROR", err.Error(), nil, "")
 		return
 	}
 
 	h.audit.Log(r.Context(), r, "file.copy", "file", req.SrcPath, "success", "", map[string]interface{}{
-		"dest_path": req.DestPath,
+		"dest_path": targetDest,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"copied":    true,
 		"src_path":  req.SrcPath,
-		"dest_path": req.DestPath,
+		"dest_path": targetDest,
 	}, nil)
 }
 
@@ -527,7 +632,7 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Permissions changes chmod and optionally chown
+// Permissions changes chmod and optionally chown (single or batch)
 func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 	var req ChmodRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -535,17 +640,20 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Path == "" {
-		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+	var targetPaths []string
+	if len(req.Paths) > 0 {
+		targetPaths = req.Paths
+	} else if req.Path != "" {
+		targetPaths = []string{req.Path}
+	}
+
+	if len(targetPaths) == 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path or paths required", nil, "")
 		return
 	}
 
-	if err := h.checkPathAuthorization(r, req.Path); err != nil {
-		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
-		return
-	}
-
-	// Parse octal mode e.g. "0755"
+	var parsedMode os.FileMode
+	hasMode := false
 	if req.Mode != "" {
 		cleanMode := strings.TrimPrefix(req.Mode, "0")
 		parsed, err := strconv.ParseUint(cleanMode, 8, 32)
@@ -553,11 +661,8 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusBadRequest, "INVALID_MODE", "Invalid octal permission mode (e.g. 0755 or 0644)", nil, "")
 			return
 		}
-
-		if err := h.fileMgr.Chmod(req.Path, os.FileMode(parsed)); err != nil {
-			response.Error(w, http.StatusBadRequest, "CHMOD_ERROR", err.Error(), nil, "")
-			return
-		}
+		parsedMode = os.FileMode(parsed)
+		hasMode = true
 	}
 
 	if req.UID > 0 || req.GID > 0 {
@@ -566,18 +671,49 @@ func (h *FileHandler) Permissions(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", "Only administrators can change file ownership (chown)", nil, "")
 			return
 		}
-		_ = h.fileMgr.Chown(req.Path, req.UID, req.GID)
 	}
 
-	h.audit.Log(r.Context(), r, "file.permissions", "file", req.Path, "success", "", map[string]interface{}{
-		"mode": req.Mode,
-		"uid":  req.UID,
-		"gid":  req.GID,
-	})
+	var updatedPaths []string
+	var errorMessages []string
+
+	for _, p := range targetPaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if err := h.checkPathAuthorization(r, p); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+			continue
+		}
+
+		if hasMode {
+			if err := h.fileMgr.Chmod(p, parsedMode); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+				continue
+			}
+		}
+
+		if req.UID > 0 || req.GID > 0 {
+			_ = h.fileMgr.Chown(p, req.UID, req.GID)
+		}
+
+		h.audit.Log(r.Context(), r, "file.permissions", "file", p, "success", "", map[string]interface{}{
+			"mode": req.Mode,
+			"uid":  req.UID,
+			"gid":  req.GID,
+		})
+		updatedPaths = append(updatedPaths, p)
+	}
+
+	if len(updatedPaths) == 0 && len(errorMessages) > 0 {
+		response.Error(w, http.StatusBadRequest, "CHMOD_ERROR", strings.Join(errorMessages, "; "), nil, "")
+		return
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"updated": true,
-		"path":    req.Path,
+		"paths":   updatedPaths,
+		"count":   len(updatedPaths),
 		"mode":    req.Mode,
 	}, nil)
 }
