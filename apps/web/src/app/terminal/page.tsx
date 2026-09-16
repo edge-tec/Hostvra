@@ -9,13 +9,9 @@ import {
   Server,
   Folder,
   User,
-  Clock,
   Maximize2,
   Minimize2,
   Sparkles,
-  Layers,
-  Palette,
-  Type,
   X,
   Minus,
   Plus,
@@ -35,46 +31,72 @@ interface TerminalEntry {
   aborted?: boolean;
 }
 
-// Convert ANSI escape codes to styled React elements
-function renderAnsi(text: string): React.ReactNode {
+// Convert ANSI escape codes to styled React elements with light/dark awareness
+function renderAnsi(text: string, isDark: boolean): React.ReactNode {
   if (!text) return null;
 
   // Match ANSI escape codes like \u001b[32m or \033[1;34m
   const parts = text.split(/(\u001b\[[0-9;]*m)/g);
   if (parts.length === 1) return text;
 
-  const colorMap: Record<string, string> = {
-    '0': '', // reset
-    '1': 'font-bold',
-    '2': 'opacity-60',
-    '3': 'italic',
-    '4': 'underline',
-    // Standard Foreground
-    '30': 'text-slate-900 dark:text-black',
-    '31': 'text-rose-500 font-semibold',
-    '32': 'text-emerald-400 font-semibold',
-    '33': 'text-amber-400 font-semibold',
-    '34': 'text-sky-400 font-semibold',
-    '35': 'text-fuchsia-400 font-semibold',
-    '36': 'text-cyan-400 font-semibold',
-    '37': 'text-slate-200',
-    // High Intensity Foreground
-    '90': 'text-slate-500',
-    '91': 'text-red-400 font-bold',
-    '92': 'text-emerald-300 font-bold',
-    '93': 'text-yellow-300 font-bold',
-    '94': 'text-blue-300 font-bold',
-    '95': 'text-pink-400 font-bold',
-    '96': 'text-cyan-300 font-bold',
-    '97': 'text-white font-bold',
-  };
+  const colorMap: Record<string, string> = isDark
+    ? {
+        '0': '', // reset
+        '1': 'font-bold',
+        '2': 'opacity-60',
+        '3': 'italic',
+        '4': 'underline',
+        // Standard Foreground (Dark)
+        '30': 'text-slate-400',
+        '31': 'text-rose-400 font-semibold',
+        '32': 'text-emerald-400 font-semibold',
+        '33': 'text-amber-400 font-semibold',
+        '34': 'text-sky-400 font-semibold',
+        '35': 'text-fuchsia-400 font-semibold',
+        '36': 'text-cyan-400 font-semibold',
+        '37': 'text-slate-200',
+        // High Intensity (Dark)
+        '90': 'text-slate-500',
+        '91': 'text-red-400 font-bold',
+        '92': 'text-emerald-300 font-bold',
+        '93': 'text-yellow-300 font-bold',
+        '94': 'text-blue-300 font-bold',
+        '95': 'text-pink-400 font-bold',
+        '96': 'text-cyan-300 font-bold',
+        '97': 'text-white font-bold',
+      }
+    : {
+        '0': '', // reset
+        '1': 'font-bold',
+        '2': 'opacity-70',
+        '3': 'italic',
+        '4': 'underline',
+        // Standard Foreground (Light/White theme)
+        '30': 'text-slate-900',
+        '31': 'text-rose-700 font-semibold',
+        '32': 'text-emerald-700 font-semibold',
+        '33': 'text-amber-700 font-semibold',
+        '34': 'text-blue-700 font-semibold',
+        '35': 'text-purple-700 font-semibold',
+        '36': 'text-teal-700 font-semibold',
+        '37': 'text-slate-700', // Never pure white on white background!
+        // High Intensity (Light/White theme)
+        '90': 'text-slate-500',
+        '91': 'text-red-700 font-bold',
+        '92': 'text-emerald-700 font-bold',
+        '93': 'text-amber-800 font-bold',
+        '94': 'text-blue-800 font-bold',
+        '95': 'text-purple-800 font-bold',
+        '96': 'text-teal-800 font-bold',
+        '97': 'text-slate-950 font-bold',
+      };
 
   let activeStyles = new Set<string>();
   const elements: React.ReactNode[] = [];
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
-    const match = part.match(/^\u001b\[([0-9;]*)m$/);
+    const match = part.match(/^\u001b\[([0-9;]*m)$/);
     if (match) {
       const codes = (match[1] || '0').split(';');
       for (const code of codes) {
@@ -115,7 +137,41 @@ function formatPath(path: string): string {
   return path;
 }
 
-type TerminalTheme = 'macos' | 'ubuntu' | 'matrix';
+// Robust clipboard copy that works on both HTTPS and plain HTTP IP addresses
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+
+  // Try modern navigator.clipboard first (if available and secure context)
+  if (typeof window !== 'undefined' && window.isSecureContext && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fallback to execCommand below
+    }
+  }
+
+  // Reliable fallback for non-secure HTTP connections (e.g. http://13.140.157.238:3000)
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    textArea.setAttribute('readonly', '');
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return successful;
+  } catch (err) {
+    console.error('Fallback clipboard copy failed:', err);
+    return false;
+  }
+}
+
+type TerminalTheme = 'white' | 'macos' | 'ubuntu' | 'matrix';
 
 export default function TerminalPage() {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
@@ -126,9 +182,11 @@ export default function TerminalPage() {
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [isExecuting, setIsExecuting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [theme, setTheme] = useState<TerminalTheme>('macos');
+  // Default to pure white background + black text as requested!
+  const [theme, setTheme] = useState<TerminalTheme>('white');
   const [fontSize, setFontSize] = useState<number>(13);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -193,35 +251,115 @@ export default function TerminalPage() {
     setCommand('');
   };
 
-  // Execute terminal command
+  // Helper to execute a single command line against the backend
+  const executeSingleCommand = async (rawCmd: string, execCwd: string): Promise<string> => {
+    const startTs = new Date().toLocaleTimeString();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const res = await apiFetch<TerminalExecutionResult>('/api/v1/terminal/execute', {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({
+          command: rawCmd,
+          cwd: execCwd,
+        }),
+      });
+
+      if (res.success && res.data) {
+        const result = res.data;
+        const resultingCwd = result.cwd || execCwd;
+        setHistory((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(),
+            command: rawCmd,
+            cwd: resultingCwd,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            exitCode: result.exit_code,
+            durationMs: result.duration_ms,
+            timestamp: startTs,
+          },
+        ]);
+        return resultingCwd;
+      } else {
+        setHistory((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(),
+            command: rawCmd,
+            cwd: execCwd,
+            stdout: '',
+            stderr: res.error?.message || 'bash: command failed or rejected by server API',
+            exitCode: 1,
+            durationMs: 0,
+            timestamp: startTs,
+          },
+        ]);
+        return execCwd;
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError' || err.message?.includes('aborted')) {
+        return execCwd;
+      }
+      let errMsg = err.message || 'Network communication error';
+      if (
+        errMsg === 'Load failed' ||
+        errMsg.includes('Failed to fetch') ||
+        errMsg.includes('NetworkError')
+      ) {
+        errMsg =
+          'Connection reset or closed by host server. If you executed a service restart (e.g. systemctl restart hostvra-web), the server restarted. Please refresh your browser page.';
+      }
+      setHistory((prev) => [
+        ...prev,
+        {
+          id: Math.random().toString(),
+          command: rawCmd,
+          cwd: execCwd,
+          stdout: '',
+          stderr: errMsg,
+          exitCode: 1,
+          durationMs: 0,
+          timestamp: startTs,
+        },
+      ]);
+      return execCwd;
+    }
+  };
+
+  // Smart execution that seamlessly handles single, sequential, or multi-line pasted commands
   const handleExecute = async (cmdToRun?: string) => {
-    const rawCmd = (cmdToRun !== undefined ? cmdToRun : command).trim();
-    if (!rawCmd || isExecuting) return;
+    const rawInput = (cmdToRun !== undefined ? cmdToRun : command).trim();
+    if (!rawInput || isExecuting) return;
 
     // Built-in client commands
-    if (rawCmd === 'clear') {
+    if (rawInput === 'clear') {
       setHistory([]);
       setCommand('');
       return;
     }
 
-    if (rawCmd === 'help') {
+    if (rawInput === 'help') {
       setHistory((prev) => [
         ...prev,
         {
           id: Math.random().toString(),
           command: 'help',
           cwd,
-          stdout: `Hostvra Cloud OS Shell (x86_64-linux)
+          stdout: `Hostvra Cloud OS Shell (${info?.os || 'linux'} ${info?.arch || 'amd64'})
 ==============================================
 Available commands & features:
   • Any Linux command : git, npm, pm2, systemctl, mariadb, nginx, docker, etc.
   • cd <directory>    : Navigate directories (state is preserved across commands)
+  • Multi-command     : Paste multi-line scripts or separate commands; all execute sequentially!
   • clear / Ctrl+L    : Clear terminal screen
-  • Ctrl+C            : Interrupt running process or cancel line
+  • Ctrl+C            : Interrupt running process or cancel line (copies text if highlighted)
   • Up / Down Arrow   : Browse command history
   • Tab               : Autocomplete shell commands
-  • Quick chips       : Click predefined buttons above to run diagnostic commands`,
+  • Copy All / Copy   : 1-click clipboard copying (compatible with HTTP IP addresses)`,
           stderr: '',
           exitCode: 0,
           durationMs: 0,
@@ -232,7 +370,7 @@ Available commands & features:
       return;
     }
 
-    if (rawCmd === 'history') {
+    if (rawInput === 'history') {
       const historyList = commandHistory
         .map((cmd, idx) => `  ${String(idx + 1).padStart(4, ' ')}  ${cmd}`)
         .join('\n');
@@ -253,88 +391,53 @@ Available commands & features:
       return;
     }
 
+    // Split lines
+    const lines = rawInput
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith('#'));
+
+    // Check if it's a compound script (e.g. heredoc `<< EOF`, unclosed quotes, or control flow)
+    const isCompoundScript =
+      rawInput.includes('<<') ||
+      rawInput.includes('\\') ||
+      (rawInput.match(/"/g) || []).length % 2 !== 0 ||
+      (rawInput.match(/'/g) || []).length % 2 !== 0 ||
+      /^\s*(if|for|while|case)\b/.test(rawInput);
+
     setIsExecuting(true);
-    setCommandHistory((prev) => [...prev, rawCmd]);
+    setCommand('');
     setHistoryIndex(-1);
 
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    const startTs = new Date().toLocaleTimeString();
+    if (isCompoundScript || lines.length <= 1) {
+      // Execute as a single script
+      setCommandHistory((prev) => [...prev, rawInput]);
+      const newCwd = await executeSingleCommand(rawInput, cwd);
+      setCwd(newCwd);
+    } else {
+      // Execute multi-line commands sequentially, maintaining cwd between commands
+      let activeDir = cwd;
+      for (const line of lines) {
+        setCommandHistory((prev) => [...prev, line]);
+        activeDir = await executeSingleCommand(line, activeDir);
+        setCwd(activeDir);
+      }
+    }
 
-    try {
-      const res = await apiFetch<TerminalExecutionResult>('/api/v1/terminal/execute', {
-        method: 'POST',
-        signal: controller.signal,
-        body: JSON.stringify({
-          command: rawCmd,
-          cwd,
-        }),
-      });
+    setIsExecuting(false);
+    abortControllerRef.current = null;
+    setTimeout(() => inputRef.current?.focus(), 30);
+  };
 
-      if (res.success && res.data) {
-        const result = res.data;
-        if (result.cwd) {
-          setCwd(result.cwd);
-        }
-        setHistory((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(),
-            command: rawCmd,
-            cwd: result.cwd || cwd,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: result.exit_code,
-            durationMs: result.duration_ms,
-            timestamp: startTs,
-          },
-        ]);
-      } else {
-        setHistory((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(),
-            command: rawCmd,
-            cwd,
-            stdout: '',
-            stderr: res.error?.message || 'bash: command failed or rejected by server API',
-            exitCode: 1,
-            durationMs: 0,
-            timestamp: startTs,
-          },
-        ]);
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.message?.includes('aborted')) {
-        return;
-      }
-      let errMsg = err.message || 'Network communication error';
-      if (
-        errMsg === 'Load failed' ||
-        errMsg.includes('Failed to fetch') ||
-        errMsg.includes('NetworkError')
-      ) {
-        errMsg =
-          'Connection reset or closed by host server. If you executed a service restart (e.g. systemctl restart hostvra-web), the server restarted. Please refresh your browser page.';
-      }
-      setHistory((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          command: rawCmd,
-          cwd,
-          stdout: '',
-          stderr: errMsg,
-          exitCode: 1,
-          durationMs: 0,
-          timestamp: startTs,
-        },
-      ]);
-    } finally {
-      setIsExecuting(false);
-      abortControllerRef.current = null;
-      setCommand('');
-      setTimeout(() => inputRef.current?.focus(), 30);
+  // Intercept paste to properly handle multi-line commands
+  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData('text');
+    if (!pastedText) return;
+
+    if (pastedText.includes('\n')) {
+      e.preventDefault();
+      // Execute the pasted multi-line commands
+      await handleExecute(pastedText);
     }
   };
 
@@ -365,13 +468,20 @@ Available commands & features:
   ];
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Ctrl + C (cancel command or abort current line)
-    if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+    // Ctrl + C / Cmd + C Handling:
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+      // If user has highlighted/selected text on the page, DO NOT cancel. Allow browser to copy!
+      const selection = window.getSelection();
+      if (selection && selection.toString().trim().length > 0) {
+        return; // Allow native copy
+      }
+
+      // Otherwise, act as terminal interrupt ^C
       e.preventDefault();
       if (isExecuting) {
         handleCancel();
       } else {
-        // Echo ^C and create fresh line
+        // Echo ^C and create a fresh line
         setHistory((prev) => [
           ...prev,
           {
@@ -443,10 +553,30 @@ Available commands & features:
     }
   };
 
-  const handleCopyOutput = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopySingle = async (id: string, text: string) => {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
+  };
+
+  const handleCopyAll = async () => {
+    const allText = history
+      .map((h) => {
+        let block = `${currentUser}@${currentHost}:${h.cwd}# ${h.command}`;
+        if (h.stdout) block += `\n${h.stdout}`;
+        if (h.stderr) block += `\n${h.stderr}`;
+        return block;
+      })
+      .join('\n\n');
+
+    if (!allText) return;
+    const ok = await copyToClipboard(allText);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 2000);
+    }
   };
 
   const quickCommands = [
@@ -460,34 +590,95 @@ Available commands & features:
     { label: 'Docker Containers', cmd: 'docker ps' },
   ];
 
-  // Theme styling configurations
+  // Theme styling configurations (White background + black text as default!)
   const themeStyles = {
+    white: {
+      bg: 'bg-white',
+      border: 'border border-slate-300 shadow-xl',
+      headerBg: 'bg-[#f4f5f7] border-b border-slate-200',
+      titleText: 'text-slate-800',
+      welcomeDate: 'text-slate-500',
+      welcomeOs: 'text-slate-600',
+      welcomeHelp: 'text-slate-500',
+      welcomeHighlight: 'text-amber-700 font-semibold',
+      welcomeDivider: 'border-slate-200',
+      userColor: 'text-emerald-700',
+      pathColor: 'text-blue-700',
+      promptChar: 'text-slate-900',
+      commandText: 'text-slate-950',
+      inputText: 'text-slate-950',
+      stdoutText: 'text-slate-900',
+      stderrText: 'text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded',
+      caretColor: '#000000',
+      selection: 'selection:bg-blue-100 selection:text-slate-950',
+      toolbarBtn: 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/80',
+      isDark: false,
+    },
     macos: {
       bg: 'bg-[#18181b]',
+      border: 'border border-slate-800/90 shadow-2xl',
       headerBg: 'bg-[#27272a]/90 border-b border-[#3f3f46]',
-      text: 'text-slate-100',
+      titleText: 'text-slate-300',
+      welcomeDate: 'text-slate-400',
+      welcomeOs: 'text-slate-500',
+      welcomeHelp: 'text-slate-600',
+      welcomeHighlight: 'text-amber-400 font-semibold',
+      welcomeDivider: 'border-white/5',
       userColor: 'text-emerald-400',
       pathColor: 'text-sky-400',
       promptChar: 'text-slate-300',
+      commandText: 'text-white',
+      inputText: 'text-white',
+      stdoutText: 'text-slate-200',
+      stderrText: 'text-rose-400',
       caretColor: '#34d399',
+      selection: 'selection:bg-emerald-500/40 selection:text-white',
+      toolbarBtn: 'text-slate-400 hover:text-white hover:bg-white/10',
+      isDark: true,
     },
     ubuntu: {
       bg: 'bg-[#300a24]',
+      border: 'border border-[#5a1b47] shadow-2xl',
       headerBg: 'bg-[#3e1130] border-b border-[#5a1b47]',
-      text: 'text-[#f5f5f5]',
+      titleText: 'text-slate-200',
+      welcomeDate: 'text-slate-400',
+      welcomeOs: 'text-slate-400',
+      welcomeHelp: 'text-slate-400',
+      welcomeHighlight: 'text-amber-300 font-semibold',
+      welcomeDivider: 'border-[#5a1b47]',
       userColor: 'text-[#8ae234]',
       pathColor: 'text-[#729fcf]',
       promptChar: 'text-white',
+      commandText: 'text-[#f5f5f5]',
+      inputText: 'text-[#f5f5f5]',
+      stdoutText: 'text-[#f5f5f5]',
+      stderrText: 'text-rose-400',
       caretColor: '#8ae234',
+      selection: 'selection:bg-purple-500/40 selection:text-white',
+      toolbarBtn: 'text-slate-300 hover:text-white hover:bg-white/10',
+      isDark: true,
     },
     matrix: {
       bg: 'bg-[#0a0e14]',
+      border: 'border border-emerald-950/80 shadow-2xl',
       headerBg: 'bg-[#0f141c] border-b border-[#1f2937]',
-      text: 'text-emerald-300',
+      titleText: 'text-emerald-400',
+      welcomeDate: 'text-emerald-600',
+      welcomeOs: 'text-emerald-500',
+      welcomeHelp: 'text-emerald-600',
+      welcomeHighlight: 'text-emerald-300 font-semibold',
+      welcomeDivider: 'border-emerald-950',
       userColor: 'text-emerald-400 font-bold',
       pathColor: 'text-cyan-400 font-bold',
       promptChar: 'text-emerald-500 font-bold',
+      commandText: 'text-emerald-300',
+      inputText: 'text-emerald-300',
+      stdoutText: 'text-emerald-400',
+      stderrText: 'text-rose-400',
       caretColor: '#10b981',
+      selection: 'selection:bg-emerald-900/60 selection:text-emerald-200',
+      toolbarBtn: 'text-emerald-500 hover:text-emerald-300 hover:bg-emerald-950/40',
+      isDark: true,
     },
   }[theme];
 
@@ -498,28 +689,28 @@ Available commands & features:
   return (
     <DashboardShell>
       <div
-        className={`space-y-5 transition-all ${
+        className={`space-y-4 transition-all ${
           isFullscreen
             ? 'fixed inset-0 z-50 bg-slate-950 p-4 sm:p-6 flex flex-col'
             : ''
         }`}
       >
-        {/* Header Title and Quick Badges */}
+        {/* Header Title and Server Environment Badges */}
         {!isFullscreen && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
                 <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 dark:text-indigo-400">
                   <TerminalIcon className="w-5 h-5" />
                 </span>
                 Web Terminal
-                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
+                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   Root Shell
                 </span>
               </h1>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Authentic Unix terminal stream with bash execution, ANSI color rendering, and directory tracking.
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Authentic Unix terminal stream with multi-command execution, sequential directory tracking, and ANSI color rendering.
               </p>
             </div>
 
@@ -563,7 +754,7 @@ Available commands & features:
         {/* Real Mac / Linux Terminal Window */}
         <div
           ref={terminalContainerRef}
-          className={`flex-1 rounded-2xl overflow-hidden shadow-2xl border border-slate-800/90 ${themeStyles.bg} flex flex-col font-mono select-text transition-colors duration-200 ${
+          className={`flex-1 rounded-2xl overflow-hidden ${themeStyles.border} ${themeStyles.bg} flex flex-col font-mono select-text transition-colors duration-150 ${
             isFullscreen ? 'h-full min-h-0' : 'min-h-[580px] max-h-[76vh]'
           }`}
           style={{ fontSize: `${fontSize}px` }}
@@ -575,7 +766,7 @@ Available commands & features:
               <button
                 type="button"
                 onClick={() => setHistory([])}
-                title="Close / Clear Terminal (Ctrl+L)"
+                title="Clear Terminal Output (Ctrl+L)"
                 className="w-3 h-3 rounded-full bg-[#ff5f56] hover:brightness-110 flex items-center justify-center transition cursor-pointer shadow-xs"
               >
                 <X className="w-2 h-2 text-black/70 opacity-0 group-hover/dots:opacity-100 transition-opacity" />
@@ -599,60 +790,89 @@ Available commands & features:
             </div>
 
             {/* Window Title (Center) */}
-            <div className="text-xs text-slate-300 font-mono font-medium flex items-center gap-2 truncate max-w-[280px] sm:max-w-md">
-              <span className="text-emerald-400 font-bold">{currentUser}@{currentHost}</span>
-              <span className="text-slate-500">:</span>
-              <span className="text-sky-400 font-semibold">{formatPath(cwd)}</span>
-              <span className="text-slate-500 hidden sm:inline">— bash — 80×24</span>
+            <div className={`text-xs ${themeStyles.titleText} font-mono font-medium flex items-center gap-2 truncate max-w-[260px] sm:max-w-md`}>
+              <span className={`${themeStyles.userColor} font-bold`}>{currentUser}@{currentHost}</span>
+              <span className="opacity-50">:</span>
+              <span className={`${themeStyles.pathColor} font-semibold`}>{formatPath(cwd)}</span>
+              <span className="opacity-50 hidden sm:inline">— bash — 80×24</span>
             </div>
 
-            {/* Terminal Controls (Right) */}
+            {/* Terminal Controls & Theme Selector (Right) */}
             <div className="flex items-center gap-1.5 text-xs">
               {/* Theme Selector */}
-              <div className="flex items-center bg-black/40 rounded-lg p-0.5 border border-white/10 text-[10px]">
-                {(['macos', 'ubuntu', 'matrix'] as TerminalTheme[]).map((t) => (
+              <div className={`flex items-center rounded-lg p-0.5 border text-[10px] ${
+                theme === 'white'
+                  ? 'bg-slate-200/80 border-slate-300'
+                  : 'bg-black/40 border-white/10'
+              }`}>
+                {(['white', 'macos', 'ubuntu', 'matrix'] as TerminalTheme[]).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setTheme(t)}
                     className={`px-2 py-0.5 rounded capitalize transition cursor-pointer ${
                       theme === t
-                        ? 'bg-white/20 text-white font-bold'
-                        : 'text-slate-400 hover:text-white'
+                        ? theme === 'white'
+                          ? 'bg-white text-slate-900 font-bold shadow-xs'
+                          : 'bg-white/20 text-white font-bold'
+                        : theme === 'white'
+                          ? 'text-slate-600 hover:text-slate-900'
+                          : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    {t === 'macos' ? 'macOS' : t === 'ubuntu' ? 'Linux' : 'Matrix'}
+                    {t === 'white' ? 'White' : t === 'macos' ? 'Dark' : t === 'ubuntu' ? 'Linux' : 'Matrix'}
                   </button>
                 ))}
               </div>
 
               {/* Font Size Adjust */}
-              <div className="hidden sm:flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded-lg border border-white/10 text-[11px] text-slate-300">
+              <div className={`hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-lg border text-[11px] ${
+                theme === 'white'
+                  ? 'bg-slate-200/80 border-slate-300 text-slate-700'
+                  : 'bg-black/40 border-white/10 text-slate-300'
+              }`}>
                 <button
                   type="button"
                   onClick={() => setFontSize((f) => Math.max(11, f - 1))}
-                  className="px-1 hover:text-white cursor-pointer"
+                  className="px-1 cursor-pointer hover:font-bold"
                   title="Smaller Font"
                 >
                   A-
                 </button>
-                <span className="text-[9px] text-slate-500 font-mono">{fontSize}</span>
+                <span className="text-[9px] opacity-70 font-mono">{fontSize}</span>
                 <button
                   type="button"
                   onClick={() => setFontSize((f) => Math.min(18, f + 1))}
-                  className="px-1 hover:text-white cursor-pointer"
+                  className="px-1 cursor-pointer hover:font-bold"
                   title="Larger Font"
                 >
                   A+
                 </button>
               </div>
 
+              {/* Copy All Terminal Output */}
+              <button
+                type="button"
+                onClick={handleCopyAll}
+                title="Copy Terminal History to Clipboard"
+                className={`p-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${themeStyles.toolbarBtn}`}
+              >
+                {copiedAll ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span className="hidden md:inline text-[10px] font-sans font-medium">
+                  {copiedAll ? 'Copied!' : 'Copy'}
+                </span>
+              </button>
+
               {/* Clear Output */}
               <button
                 type="button"
                 onClick={() => setHistory([])}
-                title="Clear Terminal Output (Ctrl+L)"
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                title="Clear Terminal Screen (Ctrl+L)"
+                className={`p-1 rounded-lg transition cursor-pointer ${themeStyles.toolbarBtn}`}
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -662,7 +882,7 @@ Available commands & features:
                 type="button"
                 onClick={() => setIsFullscreen(!isFullscreen)}
                 title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                className={`p-1 rounded-lg transition cursor-pointer ${themeStyles.toolbarBtn}`}
               >
                 {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
               </button>
@@ -671,17 +891,23 @@ Available commands & features:
 
           {/* Terminal Viewport / Screen (Click anywhere to focus) */}
           <div
-            onClick={() => inputRef.current?.focus()}
-            className="flex-1 overflow-y-auto p-4 space-y-2 cursor-text leading-relaxed font-mono selection:bg-emerald-500/40 selection:text-white"
+            onClick={() => {
+              // Don't focus input if user is selecting text
+              const sel = window.getSelection();
+              if (sel && sel.toString().trim().length > 0) return;
+              inputRef.current?.focus();
+            }}
+            className={`flex-1 overflow-y-auto p-4 space-y-2 cursor-text leading-relaxed font-mono ${themeStyles.selection}`}
           >
             {/* Authentic Unix Welcome Header */}
-            <div className="text-xs text-slate-500 space-y-0.5 pb-2 border-b border-white/5 select-text">
-              <p className="text-slate-400">Last login: {new Date().toLocaleDateString()} on pts/0</p>
-              <p className="text-slate-500">
+            <div className={`text-xs space-y-0.5 pb-2 border-b ${themeStyles.welcomeDivider} select-text`}>
+              <p className={themeStyles.welcomeDate}>Last login: {new Date().toLocaleDateString()} on pts/0</p>
+              <p className={themeStyles.welcomeOs}>
                 Hostvra Cloud OS ({info?.os || 'GNU/Linux'} {info?.arch || 'x86_64'}) • {info?.shell || 'bash'}
               </p>
-              <p className="text-slate-600">
-                Type <span className="text-amber-400">help</span> for shortcuts, <span className="text-amber-400">clear</span> (or Ctrl+L) to wipe buffer.
+              <p className={themeStyles.welcomeHelp}>
+                Type <span className={themeStyles.welcomeHighlight}>help</span> for commands,{' '}
+                <span className={themeStyles.welcomeHighlight}>clear</span> (or Ctrl+L) to wipe screen. You can paste multi-line commands.
               </p>
             </div>
 
@@ -691,18 +917,20 @@ Available commands & features:
                 {/* Command Prompt Line */}
                 <div className="flex items-center justify-between flex-wrap gap-x-2">
                   <div className="flex items-baseline flex-wrap">
-                    <span className={`${themeStyles.userColor} font-bold mr-0.5`}>
+                    <span className={`${themeStyles.userColor} font-bold mr-0.5 select-none`}>
                       {currentUser}@{currentHost}
                     </span>
-                    <span className="text-slate-500 mr-0.5">:</span>
-                    <span className={`${themeStyles.pathColor} font-semibold mr-1.5`}>
+                    <span className="opacity-50 mr-0.5 select-none">:</span>
+                    <span className={`${themeStyles.pathColor} font-semibold mr-1.5 select-none`}>
                       {formatPath(entry.cwd)}
                     </span>
-                    <span className={`${themeStyles.promptChar} font-bold mr-2`}>
+                    <span className={`${themeStyles.promptChar} font-bold mr-2 select-none`}>
                       {isRoot ? '#' : '$'}
                     </span>
-                    <span className="text-white font-medium break-all">{entry.command}</span>
-                    {entry.aborted && <span className="text-rose-400 font-bold ml-1">^C</span>}
+                    <span className={`${themeStyles.commandText} font-semibold break-all select-text`}>
+                      {entry.command}
+                    </span>
+                    {entry.aborted && <span className="text-rose-600 font-bold ml-1">^C</span>}
                   </div>
 
                   <div className="opacity-0 group-hover/entry:opacity-100 transition-opacity flex items-center gap-2 text-[10px] text-slate-500">
@@ -711,19 +939,19 @@ Available commands & features:
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleCopyOutput(entry.id, entry.stdout || entry.stderr);
+                        handleCopySingle(entry.id, entry.stdout || entry.stderr);
                       }}
-                      className="text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+                      className="p-0.5 rounded cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-800"
                       title="Copy Output"
                     >
                       {copiedId === entry.id ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
+                        <Check className="w-3 h-3 text-emerald-600" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
                     </button>
                     {entry.exitCode !== 0 && !entry.aborted && (
-                      <span className="text-rose-400 bg-rose-950/40 px-1 rounded border border-rose-800/40 font-mono">
+                      <span className="text-rose-700 bg-rose-100 dark:text-rose-400 dark:bg-rose-950/40 px-1 rounded border border-rose-300 dark:border-rose-800/40 font-mono text-[9px]">
                         [{entry.exitCode}]
                       </span>
                     )}
@@ -732,8 +960,8 @@ Available commands & features:
 
                 {/* Raw Stdout Stream */}
                 {entry.stdout && (
-                  <div className="whitespace-pre-wrap break-all text-slate-200 py-0.5 pl-0 leading-relaxed select-text font-mono">
-                    {renderAnsi(entry.stdout)}
+                  <div className={`whitespace-pre-wrap break-all ${themeStyles.stdoutText} py-0.5 pl-0 leading-relaxed select-text font-mono`}>
+                    {renderAnsi(entry.stdout, themeStyles.isDark)}
                   </div>
                 )}
 
@@ -741,10 +969,10 @@ Available commands & features:
                 {entry.stderr && !entry.aborted && (
                   <div
                     className={`whitespace-pre-wrap break-all py-0.5 pl-0 leading-relaxed select-text font-mono ${
-                      entry.exitCode === 0 ? 'text-slate-300' : 'text-rose-400'
+                      entry.exitCode === 0 ? themeStyles.stdoutText : themeStyles.stderrText
                     }`}
                   >
-                    {renderAnsi(entry.stderr)}
+                    {renderAnsi(entry.stderr, themeStyles.isDark)}
                   </div>
                 )}
               </div>
@@ -752,18 +980,22 @@ Available commands & features:
 
             {/* Currently Executing Spinner Banner */}
             {isExecuting && (
-              <div className="flex items-center justify-between text-xs py-1 px-2.5 rounded-lg bg-emerald-950/30 border border-emerald-800/40 text-emerald-400 my-1">
+              <div className={`flex items-center justify-between text-xs py-1 px-2.5 rounded-lg my-1 ${
+                theme === 'white'
+                  ? 'bg-emerald-50 border border-emerald-300 text-emerald-800'
+                  : 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-400'
+              }`}>
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  <span>Running command on host...</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                  <span className="font-semibold">Running command on host...</span>
                 </div>
                 <button
                   type="button"
                   onClick={handleCancel}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-rose-950 hover:bg-rose-900 border border-rose-800 text-rose-300 font-mono cursor-pointer transition shadow-2xs"
+                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-rose-100 hover:bg-rose-200 border border-rose-300 text-rose-800 dark:bg-rose-950 dark:hover:bg-rose-900 dark:border-rose-800 dark:text-rose-300 font-mono cursor-pointer transition shadow-2xs"
                 >
                   <span>Interrupt</span>
-                  <kbd className="text-[9px] bg-black/40 px-1 rounded">Ctrl+C</kbd>
+                  <kbd className="text-[9px] bg-black/10 dark:bg-black/40 px-1 rounded">Ctrl+C</kbd>
                 </button>
               </div>
             )}
@@ -773,7 +1005,7 @@ Available commands & features:
               <span className={`${themeStyles.userColor} font-bold mr-0.5 select-none`}>
                 {currentUser}@{currentHost}
               </span>
-              <span className="text-slate-500 mr-0.5 select-none">:</span>
+              <span className="opacity-50 mr-0.5 select-none">:</span>
               <span className={`${themeStyles.pathColor} font-semibold mr-1.5 select-none`}>
                 {formatPath(cwd)}
               </span>
@@ -781,16 +1013,17 @@ Available commands & features:
                 {isRoot ? '#' : '$'}
               </span>
 
-              {/* Native Continuous Command Input with Blinking Cursor */}
-              <div className="relative inline-flex items-center flex-1 min-w-[180px]">
+              {/* Native Continuous Command Input with Blinking Cursor and 0 border/outline */}
+              <div className="relative inline-flex items-center flex-1 min-w-[200px]">
                 <input
                   ref={inputRef}
                   type="text"
                   value={command}
                   onChange={(e) => setCommand(e.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
                   disabled={isExecuting}
-                  className="w-full bg-transparent text-white font-mono focus:outline-none border-none p-0 m-0 shadow-none leading-none"
+                  className={`w-full bg-transparent ${themeStyles.inputText} font-mono focus:outline-none focus:ring-0 outline-none border-none ring-0 p-0 m-0 shadow-none leading-none appearance-none`}
                   style={{
                     caretColor: themeStyles.caretColor,
                     fontSize: `${fontSize}px`,
