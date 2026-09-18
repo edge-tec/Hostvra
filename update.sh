@@ -4,22 +4,33 @@
 # ==============================================================================
 set -euo pipefail
 
-if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
-else
+# Ensure standard toolchains are in PATH (Go, Node, system binaries)
+export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+if [[ -d "${HOME:-/root}/.nvm" ]]; then
+    export NVM_DIR="${HOME:-/root}/.nvm"
+    # shellcheck disable=SC1091
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
+fi
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [[ -n "$SCRIPT_SOURCE" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" 2>/dev/null && pwd || echo "")"
+fi
+if [[ -z "$SCRIPT_DIR" ]]; then
     SCRIPT_DIR="$(pwd)"
 fi
 
 # Auto-detect Hostvra repository location
-if [[ -d "${SCRIPT_DIR}/.git" ]]; then
-    HOSTVRA_DIR="${SCRIPT_DIR}"
-elif [[ -d "/root/Hostvra/.git" ]]; then
-    HOSTVRA_DIR="/root/Hostvra"
-elif [[ -d "/opt/hostvra/.git" ]]; then
-    HOSTVRA_DIR="/opt/hostvra"
-elif [[ -d "/var/lib/hostvra/repo/.git" ]]; then
-    HOSTVRA_DIR="/var/lib/hostvra/repo"
-else
+HOSTVRA_DIR=""
+for dir_candidate in "${SCRIPT_DIR}" "$(pwd)" "/root/Hostvra" "/opt/hostvra" "/var/lib/hostvra/repo" "/var/www/hostvra"; do
+    if [[ -d "${dir_candidate}/.git" ]]; then
+        HOSTVRA_DIR="$dir_candidate"
+        break
+    fi
+done
+
+if [[ -z "$HOSTVRA_DIR" ]]; then
     echo "[INFO] Hostvra repository not found locally. Cloning to /root/Hostvra..."
     git clone https://github.com/edge-tec/Hostvra.git /root/Hostvra
     HOSTVRA_DIR="/root/Hostvra"
@@ -60,6 +71,7 @@ for cmd in git go npm curl; do
 done
 
 echo "Pulling latest code from origin/main..."
+git remote set-url origin https://github.com/edge-tec/Hostvra.git 2>/dev/null || true
 git fetch origin main
 git reset --hard origin/main
 

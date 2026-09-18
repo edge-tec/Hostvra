@@ -388,6 +388,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Post("/zones/{zoneID}/records", dnsHandler.CreateRecord)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Delete("/zones/{zoneID}/records/{recordID}", dnsHandler.DeleteRecord)
 				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/zones/{zoneID}/export/bind", dnsHandler.ExportBindZone)
+				r.With(rbac.RequirePermission(rbac.PermDNSManage)).Get("/logs", dnsHandler.GetLogs)
 			})
 
 			// Fleet Alerts & Notifications

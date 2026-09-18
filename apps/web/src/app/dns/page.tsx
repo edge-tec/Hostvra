@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
 import {
   Network,
@@ -117,6 +117,30 @@ export default function DNSPage() {
     setToast({ message, isError });
     setTimeout(() => setToast(null), 3500);
   };
+
+  // DNS Query & Telemetry Logs
+  const [dnsLogs, setDnsLogs] = useState<string[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  const fetchDnsLogs = useCallback(async () => {
+    setIsLoadingLogs(true);
+    try {
+      const res = await apiFetch<string[]>('/api/v1/dns/logs');
+      if (res && Array.isArray(res.data)) {
+        setDnsLogs(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load DNS logs:', err);
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSubTab === 'logs') {
+      fetchDnsLogs();
+    }
+  }, [activeSubTab, fetchDnsLogs]);
 
   // Load zones from real API
   const loadZones = async () => {
@@ -829,19 +853,28 @@ export default function DNSPage() {
                 Authoritative DNS Resolution &amp; Audit Logs
               </h3>
               <button
-                onClick={() => showToast('DNS logs refreshed')}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs font-bold"
+                onClick={() => {
+                  fetchDnsLogs();
+                  showToast('DNS logs refreshed');
+                }}
+                disabled={isLoadingLogs}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs font-bold flex items-center gap-1.5 hover:bg-slate-50 dark:hover:bg-surface-700"
               >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-950 font-mono text-xs text-emerald-400 border border-slate-800 max-h-[380px] overflow-auto space-y-1">
-              <p>[{new Date().toISOString()}] zone 2xbets.net: loaded serial 2026090801</p>
-              <p>[{new Date().toISOString()}] zone 2xbets.net: query A 2xbets.net from 127.0.0.1:53218 (NOERROR)</p>
-              <p>[{new Date().toISOString()}] zone antiprofiles.com: query TXT _dmarc from 66.249.66.1 (NOERROR)</p>
-              <p>[{new Date().toISOString()}] zone affscash.net: query A app.affscash.net from 192.168.1.45 (NOERROR)</p>
-              <p>[{new Date().toISOString()}] named-server: all 3 authoritative zones verified healthy</p>
+              {isLoadingLogs ? (
+                <p className="text-slate-400">Loading live DNS resolution telemetry...</p>
+              ) : dnsLogs.length === 0 ? (
+                <p className="text-slate-400">No DNS logs found on this server.</p>
+              ) : (
+                dnsLogs.map((log, idx) => (
+                  <p key={idx}>{log}</p>
+                ))
+              )}
             </div>
           </div>
         )}

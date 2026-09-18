@@ -46,6 +46,15 @@ import { SiteModificationModal, SiteModalTab } from '@/components/SiteModificati
 
 type ProjectTab = 'php' | 'nodejs' | 'proxy' | 'go' | 'python';
 
+interface WebsiteStats {
+  total_requests: number;
+  unique_visitors: number;
+  bandwidth_gb: number;
+  avg_response_ms: number;
+  status_codes: Record<string, number>;
+  top_domains: Array<{ domain: string; requests: number }>;
+}
+
 export default function WebsitesPage() {
   // Navigation & Tabs State
   const [activeTab, setActiveTab] = useState<ProjectTab>('php');
@@ -76,6 +85,8 @@ export default function WebsitesPage() {
   const [addSiteOpen, setAddSiteOpen] = useState(false);
   const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [statsData, setStatsData] = useState<WebsiteStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [nginxControlOpen, setNginxControlOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [colSettingsOpen, setColSettingsOpen] = useState(false);
@@ -181,6 +192,21 @@ export default function WebsitesPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Fetch website traffic telemetry when statistics modal opens
+  useEffect(() => {
+    if (statsOpen) {
+      setStatsLoading(true);
+      apiFetch<WebsiteStats>('/api/v1/websites/statistics')
+        .then((res) => {
+          if (res.success && res.data) {
+            setStatsData(res.data);
+          }
+        })
+        .catch((err) => console.error('Failed to load website statistics:', err))
+        .finally(() => setStatsLoading(false));
+    }
+  }, [statsOpen]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -1692,43 +1718,62 @@ export default function WebsitesPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mb-5 text-center">
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
-                  <span className="text-xs text-slate-400 block mb-1">Total Requests</span>
-                  <span className="text-xl font-bold text-slate-900 dark:text-white">2,476,825</span>
+              {statsLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <RefreshCw className="w-8 h-8 text-indigo-500 animate-spin" />
+                  <span className="text-xs text-slate-500">Aggregating live web server telemetry...</span>
                 </div>
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
-                  <span className="text-xs text-slate-400 block mb-1">Unique Visitors (UV)</span>
-                  <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">342,109</span>
-                </div>
-                <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
-                  <span className="text-xs text-slate-400 block mb-1">Total Bandwidth</span>
-                  <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">14.8 GB</span>
-                </div>
-              </div>
-
-              <div className="border border-slate-200 dark:border-surface-700 rounded-xl p-4">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-3">Top Accessed Domains</h4>
-                <div className="space-y-2 text-xs">
-                  {[
-                    { domain: 'affscash.net', req: '1,248,852', pct: 50 },
-                    { domain: 'antiprofiles.com', req: '688,999', pct: 28 },
-                    { domain: 'mail.mailsz0.com', req: '244,012', pct: 10 },
-                    { domain: 'eliteall.com', req: '78,158', pct: 4 },
-                    { domain: 'app.affscash.net', req: '56,982', pct: 3 },
-                  ].map((item) => (
-                    <div key={item.domain} className="space-y-1">
-                      <div className="flex justify-between font-semibold">
-                        <span>{item.domain}</span>
-                        <span className="font-mono text-slate-500">{item.req} reqs</span>
-                      </div>
-                      <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-surface-800 overflow-hidden">
-                        <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${item.pct}%` }} />
-                      </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-3 mb-5 text-center">
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                      <span className="text-xs text-slate-400 block mb-1">Total Requests</span>
+                      <span className="text-xl font-bold text-slate-900 dark:text-white">
+                        {statsData?.total_requests?.toLocaleString() ?? 0}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                      <span className="text-xs text-slate-400 block mb-1">Unique Visitors (UV)</span>
+                      <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                        {statsData?.unique_visitors?.toLocaleString() ?? 0}
+                      </span>
+                    </div>
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700">
+                      <span className="text-xs text-slate-400 block mb-1">Total Bandwidth</span>
+                      <span className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
+                        {(statsData?.bandwidth_gb ?? 0).toFixed(2)} GB
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="border border-slate-200 dark:border-surface-700 rounded-xl p-4">
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-3">Top Accessed Domains</h4>
+                    {(!statsData?.top_domains || statsData.top_domains.length === 0) ? (
+                      <p className="text-xs text-slate-400 py-3 text-center">No virtual host traffic recorded yet on this server.</p>
+                    ) : (
+                      <div className="space-y-3 text-xs">
+                        {(() => {
+                          const maxReq = statsData.top_domains[0]?.requests || 1;
+                          return statsData.top_domains.map((item) => {
+                            const pct = maxReq > 0 ? Math.max(5, Math.min(100, Math.round((item.requests / maxReq) * 100))) : 0;
+                            return (
+                              <div key={item.domain} className="space-y-1">
+                                <div className="flex justify-between font-semibold">
+                                  <span className="text-slate-900 dark:text-white">{item.domain}</span>
+                                  <span className="font-mono text-slate-500">{item.requests.toLocaleString()} reqs</span>
+                                </div>
+                                <div className="w-full h-1.5 rounded-full bg-slate-100 dark:bg-surface-800 overflow-hidden">
+                                  <div className="h-full bg-emerald-600 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
