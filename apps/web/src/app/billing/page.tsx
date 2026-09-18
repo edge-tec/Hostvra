@@ -528,41 +528,37 @@ export default function BillingPage() {
         )}
 
         {/* Top Header Banner */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-700 p-8 sm:p-10 text-white shadow-xl shadow-indigo-500/10">
+        <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-slate-900 p-8 sm:p-10 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/20 text-xs font-semibold tracking-wide uppercase">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 text-xs font-semibold tracking-wide uppercase text-blue-700 dark:text-blue-300">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                 <span>Enterprise Hosting & Cloud Billing</span>
               </div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                 Hosting Billing & Cloud Packages Hub
               </h1>
-              <p className="text-blue-100 text-sm sm:text-base max-w-2xl leading-relaxed">
+              <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base max-w-2xl leading-relaxed">
                 High-speed NVMe cloud package subscriptions, local & international payment gateways (bKash, Nagad, SSLCommerz, Stripe), and automated client provisioning.
               </p>
             </div>
 
             {/* Quick Stats Pill */}
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/10 backdrop-blur-md p-2 sm:p-3 rounded-2xl border border-white/20">
-              <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
-                <div className="text-2xl font-black">{plans.length}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Packages</div>
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-slate-50 dark:bg-slate-800/80 p-2 sm:p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-slate-900 dark:text-white">{plans.length}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Packages</div>
               </div>
-              <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
-                <div className="text-2xl font-black text-emerald-300">{activeSubsCount}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Active Subscriptions</div>
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{activeSubsCount}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Active Subscriptions</div>
               </div>
               <div className="px-4 py-2 text-center">
-                <div className="text-2xl font-black text-amber-300">{unpaidInvoicesCount}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Unpaid Invoices</div>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400">{unpaidInvoicesCount}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Unpaid Invoices</div>
               </div>
             </div>
           </div>
-
-          {/* Decorative Background Circles */}
-          <div className="absolute -right-12 -bottom-20 w-80 h-80 rounded-full bg-white/10 blur-2xl pointer-events-none" />
-          <div className="absolute -left-10 -top-10 w-60 h-60 rounded-full bg-purple-500/20 blur-3xl pointer-events-none" />
         </div>
 
         {/* Global Controls & Tabs Bar */}
@@ -864,14 +860,14 @@ export default function BillingPage() {
             </div>
 
             {/* Enterprise Custom Quotas & SLA Callout */}
-            <div className="rounded-3xl p-8 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
+            <div className="rounded-3xl p-8 bg-white dark:bg-slate-900 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 shadow-sm">
               <div className="space-y-2 text-center md:text-left">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-bold uppercase tracking-wider">
-                  <Shield className="w-3.5 h-3.5" />
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-900 text-xs font-bold uppercase tracking-wider">
+                  <Shield className="w-3.5 h-3.5 text-blue-600" />
                   Custom Cluster Solution
                 </div>
-                <h3 className="text-2xl font-black">Need a Custom Dedicated Cloud Node?</h3>
-                <p className="text-slate-400 text-sm max-w-xl">
+                <h3 className="text-2xl font-black text-slate-900 dark:text-white">Need a Custom Dedicated Cloud Node?</h3>
+                <p className="text-slate-600 dark:text-slate-400 text-sm max-w-xl">
                   Our hyper-scale infrastructure provides multi-server clustering, dedicated load balancing, and a 99.99% SLA guarantee.
                 </p>
               </div>
@@ -880,7 +876,7 @@ export default function BillingPage() {
                   const enterprise = plans.find(p => p.tier === 'enterprise') || plans[0];
                   handleOpenCheckout(enterprise);
                 }}
-                className="px-6 py-3 rounded-2xl bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-sm flex-shrink-0 transition-all shadow-lg"
+                className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-extrabold text-sm flex-shrink-0 transition-all shadow-md"
               >
                 Enterprise Support Team
               </button>

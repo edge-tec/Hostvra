@@ -351,44 +351,41 @@ export default function AccountsPage() {
         )}
 
         {/* Top Header Banner */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-700 p-8 sm:p-10 text-white shadow-xl shadow-indigo-500/10">
+        <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-slate-900 p-8 sm:p-10 text-slate-900 dark:text-white border border-slate-200 dark:border-slate-800 shadow-sm">
           <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/20 text-xs font-semibold tracking-wide uppercase">
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-50 dark:bg-purple-950/50 border border-purple-100 dark:border-purple-900 text-xs font-semibold tracking-wide uppercase text-purple-700 dark:text-purple-300">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                 <span>WHM Multi-Tenancy & Client Hosting Suite</span>
               </div>
-              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+              <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                 Client Hosting Accounts (WHM)
               </h1>
-              <p className="text-purple-100 text-sm sm:text-base max-w-2xl leading-relaxed">
+              <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base max-w-2xl leading-relaxed">
                 Isolated Linux system users, dedicated DocumentRoot, real-time disk quotas, and 1-click client panel login control.
               </p>
             </div>
 
             {/* Quick Stats Pill */}
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/10 backdrop-blur-md p-2 sm:p-3 rounded-2xl border border-white/20">
-              <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
-                <div className="text-2xl font-black">{accounts.length}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Total Accounts</div>
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-slate-50 dark:bg-slate-800/80 p-2 sm:p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-slate-900 dark:text-white">{accounts.length}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Total Accounts</div>
               </div>
-              <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
-                <div className="text-2xl font-black text-emerald-300">{activeCount}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Active</div>
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{activeCount}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Active</div>
               </div>
-              <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
-                <div className="text-2xl font-black text-rose-300">{suspendedCount}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Suspended</div>
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-rose-600 dark:text-rose-400">{suspendedCount}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Suspended</div>
               </div>
               <div className="px-4 py-2 text-center">
-                <div className="text-2xl font-black text-amber-300">{totalDiskUsedGB} GB</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Storage Used</div>
+                <div className="text-2xl font-black text-amber-600 dark:text-amber-400">{totalDiskUsedGB} GB</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Storage Used</div>
               </div>
             </div>
           </div>
-
-          <div className="absolute -right-12 -bottom-20 w-80 h-80 rounded-full bg-white/10 blur-2xl pointer-events-none" />
-          <div className="absolute -left-10 -top-10 w-60 h-60 rounded-full bg-blue-500/20 blur-3xl pointer-events-none" />
         </div>
 
         {/* Action Toolbar & Search Bar */}
