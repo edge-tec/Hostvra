@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -59,15 +60,18 @@ type AdvancedConfig struct {
 
 // Manager orchestrates host-level database operations.
 type Manager struct {
-	mu          sync.RWMutex
+	mu           sync.RWMutex
 	rootPassword string
-	autoBackup  bool
-	advConfig   AdvancedConfig
+	autoBackup   bool
+	advConfig    AdvancedConfig
+	pool         *PoolManager
 }
 
 func NewManager() *Manager {
+	p := NewPoolManager("")
 	return &Manager{
 		autoBackup: true,
+		pool:       p,
 		advConfig: AdvancedConfig{
 			MaxConnections:      200,
 			InnoDBBufferPoolMB: 512,
@@ -342,8 +346,89 @@ func (m *Manager) ExecuteQuery(ctx context.Context, dbName, query string) (*Quer
 		Columns: []string{},
 		Rows:    []map[string]string{},
 	}
+
+	trimmedQuery := strings.TrimSpace(query)
+	upperQuery := strings.ToUpper(trimmedQuery)
+
+	// Direct connection via pool
+	if m.pool != nil {
+		targetDB := dbName
+		if targetDB == "" {
+			targetDB = "information_schema"
+		}
+		db, err := m.pool.GetDB(ctx, targetDB)
+		if err == nil {
+			isSelectLike := strings.HasPrefix(upperQuery, "SELECT") ||
+				strings.HasPrefix(upperQuery, "SHOW") ||
+				strings.HasPrefix(upperQuery, "DESCRIBE") ||
+				strings.HasPrefix(upperQuery, "DESC ") ||
+				strings.HasPrefix(upperQuery, "EXPLAIN") ||
+				strings.HasPrefix(upperQuery, "CHECK") ||
+				strings.HasPrefix(upperQuery, "ANALYZE")
+
+			if isSelectLike {
+				rows, err := db.QueryContext(ctx, query)
+				res.ExecutionTime = fmt.Sprintf("%.4f sec", time.Since(start).Seconds())
+				if err != nil {
+					res.Error = err.Error()
+					return res, nil
+				}
+				defer rows.Close()
+
+				cols, err := rows.Columns()
+				if err != nil {
+					res.Error = err.Error()
+					return res, nil
+				}
+				res.Columns = cols
+
+				for rows.Next() {
+					scanArgs := make([]interface{}, len(cols))
+					rawVals := make([]sql.RawBytes, len(cols))
+					for i := range scanArgs {
+						scanArgs[i] = &rawVals[i]
+					}
+					if err := rows.Scan(scanArgs...); err != nil {
+						continue
+					}
+					rowMap := make(map[string]string)
+					for i, col := range cols {
+						if rawVals[i] == nil {
+							rowMap[col] = "NULL"
+						} else {
+							rowMap[col] = string(rawVals[i])
+						}
+					}
+					res.Rows = append(res.Rows, rowMap)
+				}
+				res.RowsAffected = len(res.Rows)
+				return res, nil
+			}
+
+			// DDL / DML commands (INSERT, UPDATE, DELETE, ALTER, CREATE, DROP, etc.)
+			execRes, err := db.ExecContext(ctx, query)
+			res.ExecutionTime = fmt.Sprintf("%.4f sec", time.Since(start).Seconds())
+			if err != nil {
+				res.Error = err.Error()
+				return res, nil
+			}
+			affected, _ := execRes.RowsAffected()
+			res.RowsAffected = int(affected)
+			res.Columns = []string{"status", "rows_affected"}
+			res.Rows = []map[string]string{{
+				"status":        "Query executed successfully",
+				"rows_affected": fmt.Sprintf("%d", affected),
+			}}
+			return res, nil
+		}
+	}
+
+	// CLI fallback
 	if path, err := exec.LookPath("mysql"); err == nil {
-		args := []string{"-B", "-e", query, dbName}
+		args := []string{"-B", "-e", query}
+		if dbName != "" {
+			args = append(args, dbName)
+		}
 		if m.rootPassword != "" {
 			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
 		}
@@ -378,11 +463,10 @@ func (m *Manager) ExecuteQuery(ctx context.Context, dbName, query string) (*Quer
 		res.RowsAffected = len(res.Rows)
 		return res, nil
 	}
+
 	res.ExecutionTime = fmt.Sprintf("%.4f sec", time.Since(start).Seconds())
-	res.Columns = []string{"status", "message"}
-	res.Rows = []map[string]string{{"status": "OK", "message": "Query executed successfully"}}
-	res.RowsAffected = 1
-	return res, nil
+	res.Error = "No connection available to MySQL database engine"
+	return res, fmt.Errorf("no connection available to MySQL database engine")
 }
 
 // ExecuteRealDatabaseCreation attempts to create real database and grant user privileges.
@@ -565,8 +649,11 @@ func (m *Manager) GetRootPassword() string {
 
 func (m *Manager) SetRootPassword(newPassword string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.rootPassword = newPassword
+	if m.pool != nil {
+		m.pool.SetRootPassword(newPassword)
+	}
+	m.mu.Unlock()
 
 	// Attempt live host change if mysql is installed
 	if path, err := exec.LookPath("mysql"); err == nil {

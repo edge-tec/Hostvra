@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -47,7 +47,11 @@ import {
   FolderTree,
   Shield,
   FileText,
-  Workflow
+  Workflow,
+  ArrowUpDown,
+  SortAsc,
+  SortDesc,
+  DatabaseZap
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Database } from '@/lib/api';
@@ -56,63 +60,137 @@ type TabType =
   | 'structure'
   | 'sql'
   | 'search'
-  | 'query'
   | 'export'
   | 'import'
   | 'operations'
   | 'routines'
   | 'events'
   | 'triggers'
-  | 'designer'
+  | 'views'
   | 'privileges'
   | 'browse';
 
-interface TableItem {
+// Types for live schema tree
+interface TableNode {
   name: string;
   rows: number;
-  engine: string;
-  collation: string;
-  size_kb: number;
-  data_length?: string;
-  index_length?: string;
-  comment?: string;
-  isFavorite?: boolean;
 }
 
-interface ColumnItem {
+interface TriggerNode {
+  name: string;
+  table: string;
+}
+
+interface DatabaseTreeNode {
+  name: string;
+  tables: TableNode[];
+  views: string[];
+  procedures: string[];
+  functions: string[];
+  events: string[];
+  triggers: TriggerNode[];
+}
+
+// Table overview detail
+interface TableDetail {
+  name: string;
+  type: string;
+  engine: string;
+  collation: string;
+  rows: number;
+  data_size_kb: number;
+  index_size_kb: number;
+  total_size_kb: number;
+  comment: string;
+}
+
+// Full table column schema
+interface ColumnDetail {
   field: string;
   type: string;
   collation?: string;
   null: string;
   key: string;
-  default: string;
+  default?: string;
   extra: string;
-  privileges?: string;
-  comment?: string;
+  privileges: string;
+  comment: string;
 }
 
+// Table index
+interface IndexDetail {
+  key_name: string;
+  non_unique: number;
+  column_name: string;
+  index_type: string;
+  seq_in_index: number;
+  comment: string;
+}
+
+// Table foreign key
+interface ForeignKeyDetail {
+  constraint_name: string;
+  column_name: string;
+  ref_table: string;
+  ref_column: string;
+  on_update: string;
+  on_delete: string;
+}
+
+// Table structure API response
+interface TableStructureData {
+  table: string;
+  columns: ColumnDetail[];
+  indexes: IndexDetail[];
+  foreign_keys: ForeignKeyDetail[];
+}
+
+// Browse rows result
+interface BrowseRowsData {
+  columns: string[];
+  rows: Record<string, any>[];
+  primary_key: string;
+  page: number;
+  limit: number;
+  total_rows: number;
+  total_pages: number;
+  execution_time: string;
+}
+
+// Routines, Events, Triggers, Views
 interface RoutineItem {
   name: string;
   type: 'PROCEDURE' | 'FUNCTION';
-  return_type?: string;
-  parameters: string;
+  data_type?: string;
+  parameters?: string;
   definition: string;
+  security?: string;
 }
 
 interface EventItem {
   name: string;
-  status: 'ENABLED' | 'DISABLED';
-  event_type: 'RECURRING' | 'ONE TIME';
-  schedule: string;
+  status: string;
+  type: string;
+  interval?: string;
+  starts?: string;
   definition: string;
 }
 
 interface TriggerItem {
   name: string;
   table: string;
-  timing: 'BEFORE' | 'AFTER';
-  event: 'INSERT' | 'UPDATE' | 'DELETE';
+  timing: string;
+  event: string;
+  statement: string;
+  definer?: string;
+}
+
+interface ViewItem {
+  name: string;
   definition: string;
+  check_option: string;
+  is_updatable: string;
+  security_type: string;
 }
 
 interface UserPrivilegeItem {
@@ -123,1562 +201,1773 @@ interface UserPrivilegeItem {
   grant: boolean;
 }
 
-// Initial 32 tables from the user's phpMyAdmin reference screenshot
-const INITIAL_SCREENSHOT_TABLES: TableItem[] = [
-  { name: 'activity_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'admin_copilot_queries', rows: 4, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 32 },
-  { name: 'agriculture_guides', rows: 2, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_answers', rows: 14, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 48 },
-  { name: 'ai_assistant_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_categories', rows: 12, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 32 },
-  { name: 'ai_citizen_sessions', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_conversations', rows: 11, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 64 },
-  { name: 'ai_evaluation_cases', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_failed_queries', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_feedback', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_generated_reports', rows: 1, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 32 },
-  { name: 'ai_governance_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_human_decision_audits', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_knowledge_bases', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_knowledge_chunks', rows: 299, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 512 },
-  { name: 'ai_knowledge_sources', rows: 19, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 96 },
-  { name: 'ai_messages', rows: 58, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 128 },
-  { name: 'ai_model_registries', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_multimodal_queries', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ai_questions', rows: 14, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 48 },
-  { name: 'ai_search_logs', rows: 58, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 80 },
-  { name: 'ai_voice_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'ambulances', rows: 2, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 32 },
-  { name: 'anomaly_events', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'api_gateway_audit_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'application_drafts', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'application_timelines', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'appointment_slots', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'approval_action_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'approval_workflows', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-  { name: 'audit_logs', rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-];
-
 function PhpMyAdminCore() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const dbParam = searchParams.get('db') || 'gafargaon';
+  const dbParam = searchParams.get('db') || '';
 
-  // Navigation & Database State
+  // Core Database & Selection State
   const [currentDb, setCurrentDb] = useState<string>(dbParam);
-  const [databaseList, setDatabaseList] = useState<string[]>(['gafargaon', 'edge', 'hostvra_db', 'mysql']);
-  const [activeTab, setActiveTab] = useState<TabType>('structure');
   const [selectedTable, setSelectedTable] = useState<string>('');
-  const [tables, setTables] = useState<TableItem[]>(INITIAL_SCREENSHOT_TABLES);
-  const [loadingTables, setLoadingTables] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<TabType>('structure');
+
+  // Tree Navigator State
+  const [treeNodes, setTreeNodes] = useState<DatabaseTreeNode[]>([]);
+  const [loadingTree, setLoadingTree] = useState<boolean>(false);
+  const [treeSearch, setTreeSearch] = useState<string>('');
+  const [expandedDbs, setExpandedDbs] = useState<Record<string, boolean>>({});
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+
+  // Database Overview / Tables List State
+  const [tableDetails, setTableDetails] = useState<TableDetail[]>([]);
+  const [loadingTableDetails, setLoadingTableDetails] = useState<boolean>(false);
   const [selectedTableNames, setSelectedTableNames] = useState<string[]>([]);
   const [tableFilterWord, setTableFilterWord] = useState<string>('');
-  const [filtersBoxOpen, setFiltersBoxOpen] = useState<boolean>(true);
 
-  // Left Sidebar Tree State
-  const [sidebarSearch, setSidebarSearch] = useState<string>('');
-  const [sidebarTab, setSidebarTab] = useState<'tree' | 'recent' | 'favorites'>('tree');
-  const [recentTables, setRecentTables] = useState<string[]>(['ai_conversations', 'ai_knowledge_chunks', 'admin_copilot_queries']);
-  const [favoriteTables, setFavoriteTables] = useState<string[]>(['ai_conversations', 'ai_messages', 'agriculture_guides']);
-  const [expandedDatabases, setExpandedDatabases] = useState<{ [db: string]: boolean }>({ [dbParam]: true, gafargaon: true });
-  const [expandedTables, setExpandedTables] = useState<{ [table: string]: boolean }>({});
+  // Table Structure State
+  const [tableStructure, setTableStructure] = useState<TableStructureData | null>(null);
+  const [loadingStructure, setLoadingStructure] = useState<boolean>(false);
 
-  // Table Structure / Columns State
-  const [tableColumns, setTableColumns] = useState<ColumnItem[]>([]);
-  const [loadingColumns, setLoadingColumns] = useState<boolean>(false);
+  // Browse Rows State
+  const [browseData, setBrowseData] = useState<BrowseRowsData | null>(null);
+  const [loadingBrowse, setLoadingBrowse] = useState<boolean>(false);
+  const [browsePage, setBrowsePage] = useState<number>(1);
+  const [browseLimit, setBrowseLimit] = useState<number>(25);
+  const [browseSortCol, setBrowseSortCol] = useState<string>('');
+  const [browseSortOrder, setBrowseSortOrder] = useState<'ASC' | 'DESC'>('ASC');
+  const [browseSearch, setBrowseSearch] = useState<string>('');
 
-  // SQL Query Console State
-  const [sqlQuery, setSqlQuery] = useState<string>(`-- Active Database: ${dbParam}\nSHOW TABLES;`);
-  const [queryResult, setQueryResult] = useState<any[] | null>(null);
-  const [queryColumns, setQueryColumns] = useState<string[]>([]);
-  const [queryExecutionTime, setQueryExecutionTime] = useState<string>('0.0012 sec');
-  const [queryRowsAffected, setQueryRowsAffected] = useState<number>(0);
-  const [queryError, setQueryError] = useState<string | null>(null);
+  // Interactive SQL Query State
+  const [sqlQuery, setSqlQuery] = useState<string>('');
   const [runningQuery, setRunningQuery] = useState<boolean>(false);
-  const [retainQuery, setRetainQuery] = useState<boolean>(true);
+  const [queryResult, setQueryResult] = useState<{
+    columns: string[];
+    rows: Record<string, any>[];
+    rows_affected: number;
+    execution_time: string;
+    error?: string;
+  } | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
-  // Floating Query Window Modal
-  const [floatingQueryOpen, setFloatingQueryOpen] = useState<boolean>(false);
-  const [floatingQuerySql, setFloatingQuerySql] = useState<string>(`SELECT * FROM \`ai_conversations\` LIMIT 10;`);
-  const [floatingResult, setFloatingResult] = useState<any[] | null>(null);
-  const [floatingColumns, setFloatingColumns] = useState<string[]>([]);
-  const [runningFloatingQuery, setRunningFloatingQuery] = useState<boolean>(false);
+  // Routines, Events, Triggers, Views State
+  const [routines, setRoutines] = useState<RoutineItem[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [triggers, setTriggers] = useState<TriggerItem[]>([]);
+  const [views, setViews] = useState<ViewItem[]>([]);
+  const [loadingEntities, setLoadingEntities] = useState<boolean>(false);
 
-  // Search Tab State
-  const [searchWord, setSearchWord] = useState<string>('');
-  const [searchMode, setSearchMode] = useState<'any' | 'all' | 'exact' | 'regex'>('any');
-  const [selectedSearchTables, setSelectedSearchTables] = useState<string[]>([]);
-  const [searchResults, setSearchResults] = useState<{ table: string; count: number }[]>([]);
-  const [hasSearched, setHasSearched] = useState<boolean>(false);
+  // Privileges State
+  const [privileges, setPrivileges] = useState<UserPrivilegeItem[]>([]);
+  const [loadingPrivileges, setLoadingPrivileges] = useState<boolean>(false);
 
-  // Query by Example (QBE) State
-  const [qbeTable, setQbeTable] = useState<string>('ai_conversations');
-  const [qbeFields, setQbeFields] = useState<string[]>(['id', 'title', 'status', 'created_at']);
-  const [qbeCriteria, setQbeCriteria] = useState<{ [col: string]: string }>({ status: "= 'active'" });
+  // Export State
+  const [exportFormat, setExportFormat] = useState<'sql' | 'csv' | 'json'>('sql');
+  const [exportSelectedTables, setExportSelectedTables] = useState<string[]>([]);
 
-  // Export / Import State
-  const [exportMethod, setExportMethod] = useState<'quick' | 'custom'>('quick');
-  const [exportFormat, setExportFormat] = useState<'sql' | 'csv' | 'json' | 'xml'>('sql');
-  const [importEncoding, setImportEncoding] = useState<string>('utf8mb4');
+  // Import State
+  const [importing, setImporting] = useState<boolean>(false);
+  const [importResult, setImportResult] = useState<{
+    successful: number;
+    failed: number;
+    total: number;
+  } | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [importSqlText, setImportSqlText] = useState<string>('');
 
   // Operations State
-  const [newDbCollation, setNewDbCollation] = useState<string>('utf8mb4_unicode_ci');
-  const [renameDbName, setRenameDbName] = useState<string>('');
-  const [copyDbName, setCopyDbName] = useState<string>('');
+  const [opCollation, setOpCollation] = useState<string>('utf8mb4_unicode_ci');
+  const [opRenameTable, setOpRenameTable] = useState<string>('');
+  const [opCopyTable, setOpCopyTable] = useState<string>('');
+  const [opCopyData, setOpCopyData] = useState<boolean>(true);
+  const [opMaintenanceMsg, setOpMaintenanceMsg] = useState<string | null>(null);
+  const [opRunning, setOpRunning] = useState<boolean>(false);
 
-  // Routines, Events, Triggers
-  const [routines, setRoutines] = useState<RoutineItem[]>([
-    {
-      name: 'cleanup_stale_sessions',
-      type: 'PROCEDURE',
-      parameters: 'IN p_hours INT',
-      definition: 'DELETE FROM ai_citizen_sessions WHERE created_at < NOW() - INTERVAL p_hours HOUR;',
-    },
-    {
-      name: 'get_unanswered_count',
-      type: 'FUNCTION',
-      return_type: 'INT',
-      parameters: 'IN p_category_id INT',
-      definition: 'DECLARE cnt INT; SELECT COUNT(*) INTO cnt FROM ai_questions WHERE category_id = p_category_id AND status = "pending"; RETURN cnt;',
-    },
-  ]);
-  const [events, setEvents] = useState<EventItem[]>([
-    {
-      name: 'daily_aggregate_metrics',
-      status: 'ENABLED',
-      event_type: 'RECURRING',
-      schedule: 'EVERY 1 DAY STARTS "2026-01-01 00:00:00"',
-      definition: 'CALL cleanup_stale_sessions(24);',
-    },
-  ]);
-  const [triggers, setTriggers] = useState<TriggerItem[]>([
-    {
-      name: 'trg_ai_conversations_audit',
-      table: 'ai_conversations',
-      timing: 'AFTER',
-      event: 'INSERT',
-      definition: 'INSERT INTO activity_logs (action, table_name, record_id) VALUES ("INSERT", "ai_conversations", NEW.id);',
-    },
-  ]);
-
-  // Privileges
-  const [privileges, setPrivileges] = useState<UserPrivilegeItem[]>([
-    { user: 'root', host: 'localhost', type: 'global', privileges: 'ALL PRIVILEGES', grant: true },
-    { user: 'gafargaon', host: 'localhost', type: 'database', privileges: 'ALL PRIVILEGES', grant: true },
-    { user: 'hostvra_agent', host: '127.0.0.1', type: 'database', privileges: 'SELECT, INSERT, UPDATE, DELETE', grant: false },
-  ]);
-
-  // Modals
-  const [createTableModalOpen, setCreateTableModalOpen] = useState(false);
-  const [newTableName, setNewTableName] = useState('');
-  const [newTableCols, setNewTableCols] = useState(4);
+  // Modals State
   const [createDbModalOpen, setCreateDbModalOpen] = useState(false);
   const [newDbName, setNewDbName] = useState('');
+  const [newDbCollation, setNewDbCollation] = useState('utf8mb4_unicode_ci');
+
+  const [createTableModalOpen, setCreateTableModalOpen] = useState(false);
+  const [newTableName, setNewTableName] = useState('');
+  const [newTableColsCount, setNewTableColsCount] = useState(4);
+
+  const [insertRowModalOpen, setInsertRowModalOpen] = useState(false);
+  const [insertRowValues, setInsertRowValues] = useState<Record<string, string>>({});
+
+  const [editRowModalOpen, setEditRowModalOpen] = useState(false);
+  const [editRowOriginal, setEditRowOriginal] = useState<Record<string, any> | null>(null);
+  const [editRowValues, setEditRowValues] = useState<Record<string, string>>({});
+
+  const [addColumnModalOpen, setAddColumnModalOpen] = useState(false);
+  const [newColName, setNewColName] = useState('');
+  const [newColType, setNewColType] = useState('varchar(255)');
+  const [newColCollation, setNewColCollation] = useState('utf8mb4_unicode_ci');
+  const [newColNull, setNewColNull] = useState('YES');
+  const [newColDefault, setNewColDefault] = useState('');
+  const [newColExtra, setNewColExtra] = useState('');
+  const [newColAfter, setNewColAfter] = useState('');
+
+  const [modifyColModalOpen, setModifyColModalOpen] = useState(false);
+  const [modColTarget, setModColTarget] = useState<ColumnDetail | null>(null);
+  const [modColName, setModColName] = useState('');
+  const [modColType, setModColType] = useState('');
+  const [modColCollation, setModColCollation] = useState('');
+  const [modColNull, setModColNull] = useState('YES');
+  const [modColDefault, setModColDefault] = useState('');
+  const [modColExtra, setModColExtra] = useState('');
+
+  const [addIndexModalOpen, setAddIndexModalOpen] = useState(false);
+  const [newIndexName, setNewIndexName] = useState('');
+  const [newIndexType, setNewIndexType] = useState<'PRIMARY' | 'INDEX' | 'UNIQUE' | 'FULLTEXT'>('INDEX');
+  const [newIndexColumns, setNewIndexColumns] = useState<string[]>([]);
+
   const [addRoutineModalOpen, setAddRoutineModalOpen] = useState(false);
+  const [routineName, setRoutineName] = useState('');
+  const [routineType, setRoutineType] = useState<'PROCEDURE' | 'FUNCTION'>('PROCEDURE');
+  const [routineParams, setRoutineParams] = useState('');
+  const [routineReturns, setRoutineReturns] = useState('');
+  const [routineBody, setRoutineBody] = useState('BEGIN\n  -- routine SQL body\nEND');
+
   const [addEventModalOpen, setAddEventModalOpen] = useState(false);
+  const [eventName, setEventName] = useState('');
+  const [eventSchedule, setEventSchedule] = useState('EVERY 1 DAY');
+  const [eventBody, setEventBody] = useState('DO BEGIN\n  -- scheduled SQL\nEND');
+
   const [addTriggerModalOpen, setAddTriggerModalOpen] = useState(false);
+  const [triggerName, setTriggerName] = useState('');
+  const [triggerTable, setTriggerTable] = useState('');
+  const [triggerTiming, setTriggerTiming] = useState<'BEFORE' | 'AFTER'>('AFTER');
+  const [triggerEvent, setTriggerEvent] = useState<'INSERT' | 'UPDATE' | 'DELETE'>('INSERT');
+  const [triggerBody, setTriggerBody] = useState('BEGIN\n  -- trigger logic\nEND');
+
   const [addUserModalOpen, setAddUserModalOpen] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newUserHost, setNewUserHost] = useState('localhost');
+  const [newUserPassword, setNewUserPassword] = useState('');
 
-  // Standalone phpMyAdmin Port Settings
-  const [pmaPort, setPmaPort] = useState<string>('888');
-  const [pmaHost, setPmaHost] = useState<string>('127.0.0.1');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Sync hostname on mount
+  // 1. Fetch Real Database Hierarchy Tree
+  const fetchTree = useCallback(async () => {
+    setLoadingTree(true);
+    try {
+      const res = await apiFetch<DatabaseTreeNode[]>('/api/v1/databases/tree');
+      if (res && res.success && Array.isArray(res.data)) {
+        setTreeNodes(res.data);
+        // If currentDb is empty or invalid, default to first non-system database
+        if (!currentDb && res.data.length > 0) {
+          const first = res.data.find(
+            (d) => d.name !== 'information_schema' && d.name !== 'mysql' && d.name !== 'performance_schema' && d.name !== 'sys'
+          ) || res.data[0];
+          setCurrentDb(first.name);
+          setExpandedDbs((prev) => ({ ...prev, [first.name]: true }));
+        } else if (currentDb) {
+          setExpandedDbs((prev) => ({ ...prev, [currentDb]: true }));
+        }
+      }
+    } catch {
+      // Tree network error
+    } finally {
+      setLoadingTree(false);
+    }
+  }, [currentDb]);
+
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setPmaHost(window.location.hostname || '127.0.0.1');
+    fetchTree();
+  }, [fetchTree]);
+
+  // 2. Fetch Live Tables / Overview for Active Database
+  const fetchTableDetails = useCallback(async (db: string) => {
+    if (!db) return;
+    setLoadingTableDetails(true);
+    try {
+      const res = await apiFetch<{ database: string; tables: TableDetail[] }>(
+        `/api/v1/databases/tables/details?db=${encodeURIComponent(db)}`
+      );
+      if (res && res.success && res.data && Array.isArray(res.data.tables)) {
+        setTableDetails(res.data.tables);
+        setExportSelectedTables(res.data.tables.map((t) => t.name));
+      } else {
+        setTableDetails([]);
+      }
+    } catch {
+      setTableDetails([]);
+    } finally {
+      setLoadingTableDetails(false);
     }
   }, []);
 
-  // Fetch live databases
-  useEffect(() => {
-    async function loadDatabases() {
-      try {
-        const res = await apiFetch<Database[]>('/api/v1/databases');
-        if (res && res.data && res.data.length > 0) {
-          const names = Array.from(new Set([dbParam, 'gafargaon', ...res.data.map((d) => d.name)]));
-          setDatabaseList(names);
-        } else {
-          setDatabaseList(['gafargaon', 'edge', 'hostvra_db', 'mysql']);
-        }
-      } catch {
-        setDatabaseList(['gafargaon', 'edge', 'hostvra_db', 'mysql']);
-      }
-    }
-    loadDatabases();
-  }, [dbParam]);
-
-  // Fetch live tables for active database
-  const fetchLiveTables = useCallback(
-    async (targetDb: string) => {
-      setLoadingTables(true);
-      try {
-        const res = await apiFetch<{ database: string; tables: TableItem[] }>(
-          `/api/v1/databases/tables?db=${encodeURIComponent(targetDb)}`
-        );
-        if (res && res.success && res.data && Array.isArray(res.data.tables) && res.data.tables.length > 0) {
-          setTables(res.data.tables);
-          setSelectedTable(res.data.tables[0].name);
-        } else {
-          // If live call returned empty but database is gafargaon, use the screenshot tables
-          if (targetDb.toLowerCase() === 'gafargaon') {
-            setTables(INITIAL_SCREENSHOT_TABLES);
-            setSelectedTable(INITIAL_SCREENSHOT_TABLES[0].name);
-          } else {
-            setTables([]);
-            setSelectedTable('');
-          }
-        }
-      } catch {
-        if (targetDb.toLowerCase() === 'gafargaon') {
-          setTables(INITIAL_SCREENSHOT_TABLES);
-          setSelectedTable(INITIAL_SCREENSHOT_TABLES[0].name);
-        } else {
-          setTables([]);
-          setSelectedTable('');
-        }
-      } finally {
-        setLoadingTables(false);
-      }
-    },
-    []
-  );
-
-  // When dbParam changes
-  useEffect(() => {
-    setCurrentDb(dbParam);
-    fetchLiveTables(dbParam);
-  }, [dbParam, fetchLiveTables]);
-
-  // Fetch columns for a specific table
-  const fetchTableColumns = useCallback(
-    async (tableName: string) => {
-      if (!tableName) return;
-      setLoadingColumns(true);
-      try {
-        const res = await apiFetch<{ database: string; table: string; columns: ColumnItem[] }>(
-          `/api/v1/databases/columns?db=${encodeURIComponent(currentDb)}&table=${encodeURIComponent(tableName)}`
-        );
-        if (res && res.success && res.data && Array.isArray(res.data.columns) && res.data.columns.length > 0) {
-          setTableColumns(res.data.columns);
-        } else {
-          // Realistic fallback schema
-          setTableColumns([
-            { field: 'id', type: 'bigint(20) unsigned', null: 'NO', key: 'PRI', default: 'NULL', extra: 'auto_increment' },
-            { field: 'title', type: 'varchar(255)', collation: 'utf8mb4_unicode_ci', null: 'NO', key: '', default: 'NULL', extra: '' },
-            { field: 'description', type: 'text', collation: 'utf8mb4_unicode_ci', null: 'YES', key: '', default: 'NULL', extra: '' },
-            { field: 'status', type: 'varchar(50)', collation: 'utf8mb4_unicode_ci', null: 'NO', key: 'MUL', default: 'active', extra: '' },
-            { field: 'metadata', type: 'json', null: 'YES', key: '', default: 'NULL', extra: '' },
-            { field: 'created_at', type: 'timestamp', null: 'YES', key: '', default: 'CURRENT_TIMESTAMP', extra: '' },
-            { field: 'updated_at', type: 'timestamp', null: 'YES', key: '', default: 'CURRENT_TIMESTAMP', extra: 'on update CURRENT_TIMESTAMP' },
-          ]);
-        }
-      } catch {
-        setTableColumns([
-          { field: 'id', type: 'bigint(20) unsigned', null: 'NO', key: 'PRI', default: 'NULL', extra: 'auto_increment' },
-          { field: 'title', type: 'varchar(255)', collation: 'utf8mb4_unicode_ci', null: 'NO', key: '', default: 'NULL', extra: '' },
-          { field: 'status', type: 'varchar(50)', collation: 'utf8mb4_unicode_ci', null: 'NO', key: '', default: 'active', extra: '' },
-          { field: 'created_at', type: 'timestamp', null: 'YES', key: '', default: 'CURRENT_TIMESTAMP', extra: '' },
-        ]);
-      } finally {
-        setLoadingColumns(false);
-      }
-    },
-    [currentDb]
-  );
-
-  // Switch database
-  const handleSwitchDatabase = (newDb: string) => {
-    setCurrentDb(newDb);
-    setSelectedTableNames([]);
-    router.push(`/phpmyadmin?db=${encodeURIComponent(newDb)}`);
-    showToast(`Switched database: ${newDb}`);
-  };
-
-  // Browse Table
-  const handleBrowseTable = async (tableName: string) => {
-    setSelectedTable(tableName);
-    setActiveTab('browse');
-    setRecentTables((prev) => [tableName, ...prev.filter((t) => t !== tableName)].slice(0, 8));
-
-    const query = `SELECT * FROM \`${tableName}\` LIMIT 50;`;
-    setSqlQuery(query);
-    setRunningQuery(true);
-
+  // 3. Fetch Full Table Structure (Columns, Indexes, Foreign Keys)
+  const fetchTableStructure = useCallback(async (db: string, tbl: string) => {
+    if (!db || !tbl) return;
+    setLoadingStructure(true);
     try {
-      const res = await apiFetch<any>('/api/v1/databases/query', {
-        method: 'POST',
-        body: JSON.stringify({ database: currentDb, query }),
-      });
-      if (res && res.data && !res.data.error) {
-        setQueryColumns(res.data.columns || ['id', 'name', 'status', 'created_at']);
-        setQueryResult(res.data.rows || []);
-        setQueryRowsAffected(res.data.rows_affected || (res.data.rows ? res.data.rows.length : 0));
-        setQueryExecutionTime(res.data.execution_time || '0.0011 sec');
+      const res = await apiFetch<TableStructureData>(
+        `/api/v1/databases/tables/structure?db=${encodeURIComponent(db)}&table=${encodeURIComponent(tbl)}`
+      );
+      if (res && res.success && res.data) {
+        setTableStructure(res.data);
       } else {
-        // Fallback demo rows
-        generateMockRows(tableName);
+        setTableStructure(null);
       }
     } catch {
-      generateMockRows(tableName);
+      setTableStructure(null);
     } finally {
-      setRunningQuery(false);
+      setLoadingStructure(false);
     }
-  };
+  }, []);
 
-  // Helper: Generate realistic sample rows for browse tab
-  const generateMockRows = (tableName: string) => {
-    const cols = ['id', 'title', 'status', 'created_at', 'updated_at'];
-    const mockRows: any[] = [];
-    const count = Math.min(12, tables.find((t) => t.name === tableName)?.rows || 5);
-    for (let i = 1; i <= (count === 0 ? 3 : count); i++) {
-      mockRows.push({
-        id: i,
-        title: `${tableName.replace(/_/g, ' ')} entry #${i}`,
-        status: i % 2 === 0 ? 'active' : 'completed',
-        created_at: `2026-09-18 10:0${i}:00`,
-        updated_at: `2026-09-18 10:1${i}:00`,
+  // 4. Fetch Paginated Rows for Browse Tab
+  const fetchBrowseRows = useCallback(async (db: string, tbl: string, page = 1, limit = 25, sortCol = '', sortOrder = 'ASC', search = '') => {
+    if (!db || !tbl) return;
+    setLoadingBrowse(true);
+    try {
+      const q = new URLSearchParams({
+        db,
+        table: tbl,
+        page: String(page),
+        limit: String(limit),
+        sort_column: sortCol,
+        sort_order: sortOrder,
+        search,
       });
+      const res = await apiFetch<BrowseRowsData>(`/api/v1/databases/tables/rows?${q.toString()}`);
+      if (res && res.success && res.data) {
+        setBrowseData(res.data);
+        setBrowsePage(res.data.page);
+        setBrowseLimit(res.data.limit);
+      } else {
+        setBrowseData(null);
+      }
+    } catch {
+      setBrowseData(null);
+    } finally {
+      setLoadingBrowse(false);
     }
-    setQueryColumns(cols);
-    setQueryResult(mockRows);
-    setQueryRowsAffected(mockRows.length);
-    setQueryExecutionTime('0.0014 sec');
+  }, []);
+
+  // 5. Fetch Routines, Events, Triggers, Views
+  const fetchAuxEntities = useCallback(async (db: string) => {
+    if (!db) return;
+    setLoadingEntities(true);
+    try {
+      const [rRes, eRes, tRes, vRes] = await Promise.all([
+        apiFetch<RoutineItem[]>(`/api/v1/databases/routines?db=${encodeURIComponent(db)}`),
+        apiFetch<EventItem[]>(`/api/v1/databases/events?db=${encodeURIComponent(db)}`),
+        apiFetch<TriggerItem[]>(`/api/v1/databases/triggers?db=${encodeURIComponent(db)}`),
+        apiFetch<ViewItem[]>(`/api/v1/databases/views?db=${encodeURIComponent(db)}`),
+      ]);
+      if (rRes && rRes.data) setRoutines(rRes.data);
+      if (eRes && eRes.data) setEvents(eRes.data);
+      if (tRes && tRes.data) setTriggers(tRes.data);
+      if (vRes && vRes.data) setViews(vRes.data);
+    } catch {
+      // Ignored
+    } finally {
+      setLoadingEntities(false);
+    }
+  }, []);
+
+  // 6. Fetch User Privileges
+  const fetchPrivileges = useCallback(async (db: string) => {
+    setLoadingPrivileges(true);
+    try {
+      const res = await apiFetch<{ columns: string[]; rows: Record<string, string>[] }>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: 'mysql',
+          query: 'SELECT User as user, Host as host, Select_priv, Insert_priv, Update_priv, Delete_priv, Create_priv, Drop_priv, Grant_priv FROM mysql.user ORDER BY User ASC;',
+        }),
+      });
+      if (res && res.data && Array.isArray(res.data.rows)) {
+        const mapped: UserPrivilegeItem[] = res.data.rows.map((r) => {
+          const privs: string[] = [];
+          if (r.Select_priv === 'Y') privs.push('SELECT');
+          if (r.Insert_priv === 'Y') privs.push('INSERT');
+          if (r.Update_priv === 'Y') privs.push('UPDATE');
+          if (r.Delete_priv === 'Y') privs.push('DELETE');
+          if (r.Create_priv === 'Y') privs.push('CREATE');
+          if (r.Drop_priv === 'Y') privs.push('DROP');
+          return {
+            user: r.user,
+            host: r.host,
+            type: 'global',
+            privileges: privs.length === 6 ? 'ALL PRIVILEGES' : privs.join(', ') || 'USAGE',
+            grant: r.Grant_priv === 'Y',
+          };
+        });
+        setPrivileges(mapped);
+      }
+    } catch {
+      setPrivileges([]);
+    } finally {
+      setLoadingPrivileges(false);
+    }
+  }, []);
+
+  // Synchronize on currentDb change
+  useEffect(() => {
+    if (currentDb) {
+      fetchTableDetails(currentDb);
+      fetchAuxEntities(currentDb);
+      if (activeTab === 'privileges') fetchPrivileges(currentDb);
+    }
+  }, [currentDb, fetchTableDetails, fetchAuxEntities, fetchPrivileges, activeTab]);
+
+  // Synchronize on selectedTable change
+  useEffect(() => {
+    if (currentDb && selectedTable) {
+      if (activeTab === 'structure') {
+        fetchTableStructure(currentDb, selectedTable);
+      } else if (activeTab === 'browse') {
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+      }
+    }
+  }, [currentDb, selectedTable, activeTab, fetchTableStructure, fetchBrowseRows, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch]);
+
+  // Switch Active Database
+  const handleSwitchDb = (db: string) => {
+    setCurrentDb(db);
+    setSelectedTable('');
+    setSelectedTableNames([]);
+    router.replace(`/phpmyadmin?db=${encodeURIComponent(db)}`);
+    setExpandedDbs((prev) => ({ ...prev, [db]: true }));
   };
 
-  // Open Table Structure
-  const handleOpenTableStructure = (tableName: string) => {
-    setSelectedTable(tableName);
+  // Open Table in Browse Tab
+  const handleOpenTableBrowse = (tbl: string) => {
+    setSelectedTable(tbl);
+    setActiveTab('browse');
+    setBrowsePage(1);
+    setBrowseSearch('');
+    setBrowseSortCol('');
+  };
+
+  // Open Table in Structure Tab
+  const handleOpenTableStructure = (tbl: string) => {
+    setSelectedTable(tbl);
     setActiveTab('structure');
-    fetchTableColumns(tableName);
-    showToast(`Viewing structure of table: \`${tableName}\``);
   };
 
-  // Execute Main SQL Query
-  const handleRunQuery = async () => {
-    setQueryError(null);
-    const trimmed = sqlQuery.trim();
-    if (!trimmed) {
+  // Run SQL Statement
+  const handleExecuteSql = async (overrideQuery?: string) => {
+    const q = (overrideQuery !== undefined ? overrideQuery : sqlQuery).trim();
+    if (!q) {
       setQueryError('Please enter a SQL statement to execute.');
       return;
     }
-
+    setQueryError(null);
     setRunningQuery(true);
     try {
       const res = await apiFetch<any>('/api/v1/databases/query', {
         method: 'POST',
-        body: JSON.stringify({ database: currentDb, query: trimmed }),
+        body: JSON.stringify({
+          database: currentDb,
+          query: q,
+        }),
       });
-
       if (res && res.data) {
         if (res.data.error) {
           setQueryError(res.data.error);
+          setQueryResult(null);
         } else {
-          setQueryColumns(res.data.columns || ['id', 'status']);
-          setQueryResult(res.data.rows || []);
-          setQueryRowsAffected(res.data.rows_affected || 0);
-          setQueryExecutionTime(res.data.execution_time || '0.0009 sec');
-          showToast('Query executed successfully.');
+          setQueryResult(res.data);
+          showToast(`Query executed in ${res.data.execution_time || '0.001s'}`);
+          // Refresh schema tree and tables if DDL/DML
+          const upper = q.toUpperCase();
+          if (
+            upper.includes('CREATE') ||
+            upper.includes('DROP') ||
+            upper.includes('ALTER') ||
+            upper.includes('TRUNCATE') ||
+            upper.includes('INSERT') ||
+            upper.includes('UPDATE') ||
+            upper.includes('DELETE')
+          ) {
+            fetchTree();
+            fetchTableDetails(currentDb);
+            if (selectedTable) {
+              fetchTableStructure(currentDb, selectedTable);
+              fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+            }
+          }
         }
       } else {
-        setQueryError('Failed to execute query.');
+        setQueryError('Database query execution failed.');
       }
     } catch (err: any) {
-      setQueryError(err.message || 'Execution error');
+      setQueryError(err?.message || 'Database query error');
     } finally {
       setRunningQuery(false);
     }
   };
 
-  // Floating Query Runner
-  const handleRunFloatingQuery = async () => {
-    setRunningFloatingQuery(true);
+  // Row Delete in Browse Tab
+  const handleDeleteRow = async (row: Record<string, any>) => {
+    if (!browseData || !browseData.primary_key) {
+      showToast('Cannot delete: No primary key detected for table.');
+      return;
+    }
+    const pk = browseData.primary_key;
+    const pkVal = row[pk];
+    if (pkVal === undefined) return;
+
+    if (!confirm(`Do you really want to DELETE row where ${pk} = ${pkVal}?`)) return;
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/tables/rows', {
+        method: 'DELETE',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          primary_key_col: pk,
+          primary_key_vals: [pkVal],
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Row deleted successfully.`);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+        fetchTableDetails(currentDb);
+      } else {
+        showToast(res?.error?.message || 'Failed to delete row.');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Delete error');
+    }
+  };
+
+  // Open Edit Modal for a Row
+  const handleOpenEditRow = (row: Record<string, any>) => {
+    setEditRowOriginal(row);
+    const initialVals: Record<string, string> = {};
+    for (const col of browseData?.columns || []) {
+      initialVals[col] = row[col] !== undefined && row[col] !== null ? String(row[col]) : '';
+    }
+    setEditRowValues(initialVals);
+    setEditRowModalOpen(true);
+  };
+
+  // Submit Row Edit
+  const handleSubmitEditRow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!browseData || !browseData.primary_key || !editRowOriginal) return;
+
+    const pk = browseData.primary_key;
+    const pkVal = editRowOriginal[pk];
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/tables/rows', {
+        method: 'PUT',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          primary_key_col: pk,
+          primary_key_val: pkVal,
+          values: editRowValues,
+        }),
+      });
+      if (res && res.success) {
+        showToast('Row updated successfully.');
+        setEditRowModalOpen(false);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+      } else {
+        showToast(res?.error?.message || 'Failed to update row.');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Update row error');
+    }
+  };
+
+  // Open Insert Row Modal
+  const handleOpenInsertRow = () => {
+    const initialVals: Record<string, string> = {};
+    for (const col of browseData?.columns || tableStructure?.columns.map((c) => c.field) || []) {
+      initialVals[col] = '';
+    }
+    setInsertRowValues(initialVals);
+    setInsertRowModalOpen(true);
+  };
+
+  // Submit Row Insert
+  const handleSubmitInsertRow = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/tables/rows', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          values: insertRowValues,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Row inserted successfully. Insert ID: ${res.data?.last_insert_id || 'OK'}`);
+        setInsertRowModalOpen(false);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+        fetchTableDetails(currentDb);
+      } else {
+        showToast(res?.error?.message || 'Failed to insert row.');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Insert row error');
+    }
+  };
+
+  // Drop Column
+  const handleDropColumn = async (colName: string) => {
+    if (!confirm(`Do you really want to DROP column \`${colName}\` from table \`${selectedTable}\`? All data in this column will be lost!`)) return;
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/columns/modify', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action: 'drop',
+          column: colName,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Column \`${colName}\` dropped.`);
+        fetchTableStructure(currentDb, selectedTable);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+      } else {
+        showToast(res?.error?.message || 'Failed to drop column');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Drop column error');
+    }
+  };
+
+  // Submit Add Column
+  const handleAddColumnSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newColName.trim()) return;
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/columns/modify', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action: 'add',
+          column: newColName.trim(),
+          type_def: newColType,
+          collation: newColCollation,
+          null: newColNull,
+          default: newColDefault,
+          extra: newColExtra,
+          after_col: newColAfter,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Column \`${newColName}\` added successfully.`);
+        setAddColumnModalOpen(false);
+        setNewColName('');
+        fetchTableStructure(currentDb, selectedTable);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+      } else {
+        showToast(res?.error?.message || 'Failed to add column');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Add column error');
+    }
+  };
+
+  // Open Modify Column Modal
+  const handleOpenModifyCol = (col: ColumnDetail) => {
+    setModColTarget(col);
+    setModColName(col.field);
+    setModColType(col.type);
+    setModColCollation(col.collation || 'utf8mb4_unicode_ci');
+    setModColNull(col.null);
+    setModColDefault(col.default || '');
+    setModColExtra(col.extra || '');
+    setModifyColModalOpen(true);
+  };
+
+  // Submit Modify Column
+  const handleModifyColumnSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modColTarget) return;
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/columns/modify', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action: 'modify',
+          column: modColTarget.field,
+          new_name: modColName.trim(),
+          type_def: modColType,
+          collation: modColCollation,
+          null: modColNull,
+          default: modColDefault,
+          extra: modColExtra,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Column \`${modColName}\` modified successfully.`);
+        setModifyColModalOpen(false);
+        fetchTableStructure(currentDb, selectedTable);
+        fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+      } else {
+        showToast(res?.error?.message || 'Failed to modify column');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Modify column error');
+    }
+  };
+
+  // Drop Index
+  const handleDropIndex = async (idxName: string) => {
+    if (!confirm(`Do you really want to DROP index \`${idxName}\` from table \`${selectedTable}\`?`)) return;
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/indexes/modify', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action: 'drop',
+          index_name: idxName,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Index \`${idxName}\` dropped.`);
+        fetchTableStructure(currentDb, selectedTable);
+      } else {
+        showToast(res?.error?.message || 'Failed to drop index');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Drop index error');
+    }
+  };
+
+  // Submit Add Index
+  const handleAddIndexSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newIndexName.trim() && newIndexType !== 'PRIMARY') return;
+    if (newIndexColumns.length === 0) {
+      showToast('Select at least one column for index');
+      return;
+    }
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/indexes/modify', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action: 'add',
+          index_name: newIndexName.trim(),
+          index_type: newIndexType,
+          columns: newIndexColumns,
+        }),
+      });
+      if (res && res.success) {
+        showToast(`Index created successfully.`);
+        setAddIndexModalOpen(false);
+        setNewIndexName('');
+        setNewIndexColumns([]);
+        fetchTableStructure(currentDb, selectedTable);
+      } else {
+        showToast(res?.error?.message || 'Failed to add index');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Add index error');
+    }
+  };
+
+  // Table Operations: Rename, Copy, Truncate, Drop, Maintenance
+  const handleTableOperation = async (action: string) => {
+    if (!selectedTable && action !== 'collation') {
+      showToast('Please select a table first.');
+      return;
+    }
+
+    if (action === 'truncate' && !confirm(`TRUNCATE table \`${selectedTable}\`? All rows will be permanently deleted!`)) return;
+    if (action === 'drop' && !confirm(`DROP table \`${selectedTable}\`? The table and all data will be permanently removed!`)) return;
+
+    setOpRunning(true);
+    setOpMaintenanceMsg(null);
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/tables/operations', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          table: selectedTable,
+          action,
+          new_name: action === 'rename' ? opRenameTable : action === 'copy' ? opCopyTable : '',
+          copy_data: opCopyData,
+          collation: opCollation,
+        }),
+      });
+      if (res && res.success) {
+        if (res.data?.maintenance) {
+          setOpMaintenanceMsg(res.data.maintenance);
+        }
+        showToast(`Operation ${action.toUpperCase()} completed successfully.`);
+
+        if (action === 'rename') {
+          setSelectedTable(opRenameTable);
+          setOpRenameTable('');
+        } else if (action === 'drop') {
+          setSelectedTable('');
+          setActiveTab('structure');
+        }
+        fetchTree();
+        fetchTableDetails(currentDb);
+        if (selectedTable && action !== 'drop') {
+          fetchTableStructure(currentDb, selectedTable);
+          fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+        }
+      } else {
+        showToast(res?.error?.message || `Operation failed.`);
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Operation error');
+    } finally {
+      setOpRunning(false);
+    }
+  };
+
+  // Export File Download
+  const handleTriggerExport = () => {
+    const tblParam = exportSelectedTables.length > 0 ? exportSelectedTables.join(',') : '';
+    const url = `/api/v1/databases/export?db=${encodeURIComponent(currentDb)}&format=${exportFormat}&tables=${encodeURIComponent(tblParam)}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${currentDb}_export.${exportFormat}`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(`Export started for ${currentDb} (${exportFormat.toUpperCase()})`);
+  };
+
+  // Import SQL via Multipart or Raw Query
+  const handleStartImport = async () => {
+    if (!importFile && !importSqlText.trim()) {
+      showToast('Please select a .sql file or enter SQL commands.');
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+    try {
+      if (importFile) {
+        const formData = new FormData();
+        formData.append('file', importFile);
+        const res = await apiFetch<any>(`/api/v1/databases/import?db=${encodeURIComponent(currentDb)}`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (res && res.success) {
+          setImportResult(res.data);
+          showToast(`Import finished: ${res.data?.successful || 0} executed, ${res.data?.failed || 0} failed.`);
+          fetchTree();
+          fetchTableDetails(currentDb);
+        } else {
+          showToast(res?.error?.message || 'Import failed.');
+        }
+      } else if (importSqlText.trim()) {
+        const res = await apiFetch<any>('/api/v1/databases/query', {
+          method: 'POST',
+          body: JSON.stringify({
+            database: currentDb,
+            query: importSqlText,
+          }),
+        });
+        if (res && res.data && !res.data.error) {
+          showToast('SQL script executed successfully.');
+          fetchTree();
+          fetchTableDetails(currentDb);
+        } else {
+          showToast(res?.data?.error || 'SQL execution failed.');
+        }
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Import error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Create Database
+  const handleCreateDatabase = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDbName.trim()) return;
+    const clean = newDbName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
     try {
       const res = await apiFetch<any>('/api/v1/databases/query', {
         method: 'POST',
-        body: JSON.stringify({ database: currentDb, query: floatingQuerySql }),
+        body: JSON.stringify({
+          database: 'information_schema',
+          query: `CREATE DATABASE \`${clean}\` CHARACTER SET utf8mb4 COLLATE ${newDbCollation};`,
+        }),
       });
       if (res && res.data && !res.data.error) {
-        setFloatingColumns(res.data.columns || []);
-        setFloatingResult(res.data.rows || []);
+        showToast(`Database \`${clean}\` created successfully.`);
+        setCreateDbModalOpen(false);
+        setNewDbName('');
+        await fetchTree();
+        handleSwitchDb(clean);
+      } else {
+        showToast(res?.data?.error || 'Failed to create database');
       }
-    } catch {
-      // Fallback
-    } finally {
-      setRunningFloatingQuery(false);
+    } catch (e: any) {
+      showToast(e?.message || 'Database creation error');
     }
   };
 
-  // Truncate Table
-  const handleEmptyTable = async (tableName: string) => {
-    if (confirm(`Do you really want to TRUNCATE (empty) table \`${tableName}\` in \`${currentDb}\`? All rows will be permanently deleted.`)) {
-      await apiFetch('/api/v1/databases/query', {
-        method: 'POST',
-        body: JSON.stringify({ database: currentDb, query: `TRUNCATE TABLE \`${tableName}\`;` }),
-      });
-      showToast(`Table \`${tableName}\` emptied successfully.`);
-      fetchLiveTables(currentDb);
-    }
-  };
-
-  // Drop Table
-  const handleDropTable = async (tableName: string) => {
-    if (confirm(`Do you really want to DROP table \`${tableName}\` from database \`${currentDb}\`? This action cannot be undone.`)) {
-      await apiFetch('/api/v1/databases/query', {
-        method: 'POST',
-        body: JSON.stringify({ database: currentDb, query: `DROP TABLE IF EXISTS \`${tableName}\`;` }),
-      });
-      showToast(`Table \`${tableName}\` dropped.`);
-      setTables((prev) => prev.filter((t) => t.name !== tableName));
-      if (selectedTable === tableName) setSelectedTable('');
-    }
-  };
-
-  // Create Table Handler
-  const handleCreateTableSubmit = async (e: React.FormEvent) => {
+  // Create Table
+  const handleCreateTable = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTableName.trim()) return;
-    const cleanName = newTableName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-    const sql = `CREATE TABLE \`${cleanName}\` (
-  \`id\` BIGINT(20) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  \`name\` VARCHAR(255) NOT NULL,
-  \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`;
+    const clean = newTableName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+    try {
+      const query = `CREATE TABLE \`${clean}\` (
+        \`id\` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+        \`name\` varchar(255) NOT NULL,
+        \`created_at\` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+        \`updated_at\` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`;
 
-    await apiFetch('/api/v1/databases/query', {
-      method: 'POST',
-      body: JSON.stringify({ database: currentDb, query: sql }),
-    });
-
-    setCreateTableModalOpen(false);
-    setNewTableName('');
-    showToast(`Table \`${cleanName}\` created successfully.`);
-    setTables((prev) => [
-      { name: cleanName, rows: 0, engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', size_kb: 16 },
-      ...prev,
-    ]);
-  };
-
-  // Toggle Favorite Table
-  const toggleFavorite = (tableName: string) => {
-    setFavoriteTables((prev) => {
-      const exists = prev.includes(tableName);
-      if (exists) {
-        showToast(`Removed \`${tableName}\` from favorites.`);
-        return prev.filter((t) => t !== tableName);
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: currentDb,
+          query,
+        }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Table \`${clean}\` created.`);
+        setCreateTableModalOpen(false);
+        setNewTableName('');
+        await fetchTree();
+        fetchTableDetails(currentDb);
+        handleOpenTableStructure(clean);
       } else {
-        showToast(`Added \`${tableName}\` to favorites.`);
-        return [...prev, tableName];
+        showToast(res?.data?.error || 'Failed to create table');
       }
-    });
+    } catch (e: any) {
+      showToast(e?.message || 'Table creation error');
+    }
   };
 
-  // Database-wide Search
-  const handleExecuteSearch = async () => {
-    if (!searchWord.trim()) {
-      showToast('Please provide a search term');
-      return;
-    }
-    setHasSearched(true);
-    const targetTables = selectedSearchTables.length > 0 ? selectedSearchTables : tables.map((t) => t.name);
-    const matched: { table: string; count: number }[] = [];
-
-    for (const tbl of targetTables.slice(0, 15)) {
-      // Simulate/execute search query
-      const count = Math.floor(Math.random() * 4);
-      if (count > 0) {
-        matched.push({ table: tbl, count });
+  // Create Stored Routine
+  const handleCreateRoutine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!routineName.trim()) return;
+    try {
+      let q = '';
+      if (routineType === 'PROCEDURE') {
+        q = `CREATE PROCEDURE \`${routineName.trim()}\`(${routineParams}) \n${routineBody};`;
+      } else {
+        q = `CREATE FUNCTION \`${routineName.trim()}\`(${routineParams}) RETURNS ${routineReturns || 'INT'} \n${routineBody};`;
       }
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Routine \`${routineName}\` created.`);
+        setAddRoutineModalOpen(false);
+        setRoutineName('');
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      } else {
+        showToast(res?.data?.error || 'Failed to create routine');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Create routine error');
     }
-    setSearchResults(matched);
-    showToast(`Search completed across ${targetTables.length} tables.`);
   };
 
-  // Filtered Tables for Structure Table List
-  const filteredTables = useMemo(() => {
-    return tables.filter((t) => t.name.toLowerCase().includes(tableFilterWord.toLowerCase()));
-  }, [tables, tableFilterWord]);
+  // Drop Routine
+  const handleDropRoutine = async (r: RoutineItem) => {
+    if (!confirm(`Do you really want to DROP ${r.type} \`${r.name}\`?`)) return;
+    try {
+      const q = `DROP ${r.type} IF EXISTS \`${r.name}\`;`;
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`${r.type} \`${r.name}\` dropped.`);
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      } else {
+        showToast(res?.data?.error || 'Failed to drop routine');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Drop routine error');
+    }
+  };
 
-  const totalRows = useMemo(() => tables.reduce((acc, cur) => acc + (cur.rows || 0), 0), [tables]);
-  const totalSizeKb = useMemo(() => tables.reduce((acc, cur) => acc + (cur.size_kb || 0), 0), [tables]);
+  // Create Event
+  const handleCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventName.trim()) return;
+    try {
+      const q = `CREATE EVENT \`${eventName.trim()}\` ON SCHEDULE ${eventSchedule} ${eventBody};`;
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Event \`${eventName}\` created.`);
+        setAddEventModalOpen(false);
+        setEventName('');
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      } else {
+        showToast(res?.data?.error || 'Failed to create event');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Create event error');
+    }
+  };
 
-  const standalonePmaUrl = `http://${pmaHost}:${pmaPort}`;
+  // Drop Event
+  const handleDropEvent = async (evName: string) => {
+    if (!confirm(`Drop event \`${evName}\`?`)) return;
+    try {
+      const q = `DROP EVENT IF EXISTS \`${evName}\`;`;
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Event \`${evName}\` dropped.`);
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Drop event error');
+    }
+  };
+
+  // Create Trigger
+  const handleCreateTrigger = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!triggerName.trim() || !triggerTable.trim()) return;
+    try {
+      const q = `CREATE TRIGGER \`${triggerName.trim()}\` ${triggerTiming} ${triggerEvent} ON \`${triggerTable.trim()}\` FOR EACH ROW \n${triggerBody};`;
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Trigger \`${triggerName}\` created.`);
+        setAddTriggerModalOpen(false);
+        setTriggerName('');
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      } else {
+        showToast(res?.data?.error || 'Failed to create trigger');
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Create trigger error');
+    }
+  };
+
+  // Drop Trigger
+  const handleDropTrigger = async (trgName: string) => {
+    if (!confirm(`Drop trigger \`${trgName}\`?`)) return;
+    try {
+      const q = `DROP TRIGGER IF EXISTS \`${trgName}\`;`;
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({ database: currentDb, query: q }),
+      });
+      if (res && res.data && !res.data.error) {
+        showToast(`Trigger \`${trgName}\` dropped.`);
+        fetchAuxEntities(currentDb);
+        fetchTree();
+      }
+    } catch (e: any) {
+      showToast(e?.message || 'Drop trigger error');
+    }
+  };
+
+  // Filtered tree nodes
+  const filteredTreeNodes = useMemo(() => {
+    if (!treeSearch.trim()) return treeNodes;
+    const term = treeSearch.toLowerCase();
+    return treeNodes
+      .map((node) => {
+        const matchDb = node.name.toLowerCase().includes(term);
+        const matchTables = (node.tables || []).filter((t) => t.name.toLowerCase().includes(term));
+        const matchViews = (node.views || []).filter((v) => v.toLowerCase().includes(term));
+        const matchProcs = (node.procedures || []).filter((p) => p.toLowerCase().includes(term));
+        const matchFuncs = (node.functions || []).filter((f) => f.toLowerCase().includes(term));
+        const matchEvents = (node.events || []).filter((e) => e.toLowerCase().includes(term));
+        const matchTriggers = (node.triggers || []).filter((tr) => tr.name.toLowerCase().includes(term));
+
+        if (
+          matchDb ||
+          matchTables.length > 0 ||
+          matchViews.length > 0 ||
+          matchProcs.length > 0 ||
+          matchFuncs.length > 0 ||
+          matchEvents.length > 0 ||
+          matchTriggers.length > 0
+        ) {
+          return {
+            ...node,
+            tables: matchTables,
+            views: matchViews,
+            procedures: matchProcs,
+            functions: matchFuncs,
+            events: matchEvents,
+            triggers: matchTriggers,
+          };
+        }
+        return null;
+      })
+      .filter((n): n is DatabaseTreeNode => n !== null);
+  }, [treeNodes, treeSearch]);
 
   return (
     <DashboardShell>
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold shadow-2xl animate-slideDown">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-3 animate-fadeIn text-xs">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* phpMyAdmin Top Brand Bar & Global Tools */}
-      <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-3 shadow-2xs mb-3">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-          {/* Brand & Breadcrumbs */}
-          <div className="flex items-center gap-3">
-            <Link
-              href="/databases"
-              className="p-2 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300 transition cursor-pointer"
-              title="Return to Hostvra Databases"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </Link>
-
-            {/* Authentic phpMyAdmin Brand Logo */}
-            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-xl">
-              <span className="font-extrabold text-amber-600 dark:text-amber-400 font-mono tracking-tight text-base">php</span>
-              <span className="font-bold text-slate-800 dark:text-white text-base">MyAdmin</span>
-              <span className="text-[10px] font-mono font-bold bg-amber-500 text-white px-1.5 py-0.2 rounded-md ml-1">v5.2</span>
-            </div>
-
-            {/* Breadcrumb Path Matching Reference Screenshot */}
-            <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 font-medium">
-              <span className="flex items-center gap-1">
-                <Server className="w-3.5 h-3.5 text-slate-400" />
-                <span>Server: <strong className="text-slate-900 dark:text-white font-mono">localhost</strong></span>
-              </span>
-              <span className="text-slate-400">»</span>
-              <span className="flex items-center gap-1">
-                <DatabaseIcon className="w-3.5 h-3.5 text-amber-500" />
-                <span>Database: <strong className="text-slate-900 dark:text-white font-mono">{currentDb}</strong></span>
-              </span>
-              {selectedTable && (
-                <>
-                  <span className="text-slate-400">»</span>
-                  <span className="flex items-center gap-1">
-                    <Table className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>Table: <strong className="text-slate-900 dark:text-white font-mono">{selectedTable}</strong></span>
-                  </span>
-                </>
-              )}
-            </div>
+      {/* phpMyAdmin Top Navigation Header */}
+      <div className="mb-4 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-3.5 shadow-2xs">
+          {/* Breadcrumb Path */}
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
+            <Server className="w-4 h-4 text-amber-500" />
+            <span>localhost</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            <DatabaseIcon className="w-4 h-4 text-emerald-500" />
+            <span className="font-mono font-bold text-slate-900 dark:text-white">
+              {currentDb || 'No Database Selected'}
+            </span>
+            {selectedTable && (
+              <>
+                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                <Table className="w-4 h-4 text-blue-500" />
+                <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedTable}</span>
+              </>
+            )}
           </div>
 
-          {/* Quick Database Selector, Standalone PMA Link & Floating Query Console */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 rounded-xl px-2.5 py-1 text-xs">
-              <span className="font-semibold text-slate-500">Database:</span>
-              <select
-                value={currentDb}
-                onChange={(e) => handleSwitchDatabase(e.target.value)}
-                className="bg-transparent font-mono font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
-              >
-                {databaseList.map((db) => (
-                  <option key={db} value={db} className="bg-white dark:bg-surface-900 text-slate-900 dark:text-white">
-                    {db}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Quick Floating SQL Console Trigger */}
-            <button
-              onClick={() => setFloatingQueryOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold text-xs shadow-2xs transition cursor-pointer"
-              title="Open Floating SQL Query Console"
-            >
-              <Terminal className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Query Window</span>
-            </button>
-
-            {/* Standalone PMA Service Access */}
+          {/* Quick Actions */}
+          <div className="flex items-center gap-2">
             <button
               onClick={() => {
-                window.open(standalonePmaUrl, '_blank');
-                showToast(`Opening standalone phpMyAdmin on port ${pmaPort}...`);
+                fetchTree();
+                if (currentDb) {
+                  fetchTableDetails(currentDb);
+                  if (selectedTable) {
+                    fetchTableStructure(currentDb, selectedTable);
+                    fetchBrowseRows(currentDb, selectedTable, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch);
+                  }
+                }
+                showToast('Refreshed database metadata from host.');
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold text-xs shadow-2xs transition cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer transition"
+              title="Refresh Schema"
             >
-              <ExternalLink className="w-3.5 h-3.5 text-amber-500" />
-              <span>PMA Port {pmaPort}</span>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Refresh</span>
             </button>
-
-            <button
-              onClick={() => setCreateTableModalOpen(true)}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition cursor-pointer"
+            <Link
+              href="/databases"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Table</span>
-            </button>
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Hostvra Databases</span>
+            </Link>
           </div>
         </div>
 
-        {/* phpMyAdmin Exact 12 Navigation Tabs Bar Matching Screenshot */}
-        <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100/90 dark:bg-slate-800/80 rounded-xl mt-3 text-xs font-semibold overflow-x-auto">
-          {[
-            { id: 'structure', label: `Structure (${tables.length})`, icon: Table },
-            { id: 'sql', label: 'SQL', icon: Play },
-            { id: 'search', label: 'Search', icon: Search },
-            { id: 'query', label: 'Query', icon: Sliders },
-            { id: 'export', label: 'Export', icon: Download },
-            { id: 'import', label: 'Import', icon: Upload },
-            { id: 'operations', label: 'Operations', icon: Settings },
-            { id: 'routines', label: `Routines (${routines.length})`, icon: Code2 },
-            { id: 'events', label: `Events (${events.length})`, icon: Clock },
-            { id: 'triggers', label: `Triggers (${triggers.length})`, icon: Zap },
-            { id: 'designer', label: 'Designer', icon: Workflow },
-            { id: 'privileges', label: 'Privileges', icon: Shield },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                role="tab"
-                onClick={() => {
-                  setActiveTab(tab.id as TabType);
-                  if (tab.id === 'structure' && selectedTable) {
-                    fetchTableColumns(selectedTable);
-                  }
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
-                  isActive
-                    ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 font-bold shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
-                }`}
-              >
-                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-amber-500' : 'text-slate-400'}`} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+        {/* phpMyAdmin Main Tabs */}
+        <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-surface-950 p-1.5 rounded-2xl border border-slate-200 dark:border-surface-800 text-xs font-semibold">
+          {selectedTable && (
+            <button
+              onClick={() => setActiveTab('browse')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+                activeTab === 'browse'
+                  ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Eye className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Browse</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => setActiveTab('structure')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'structure'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Columns className="w-3.5 h-3.5 text-blue-500" />
+            <span>Structure</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('sql')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'sql'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Terminal className="w-3.5 h-3.5 text-amber-500" />
+            <span>SQL</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('export')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'export'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Download className="w-3.5 h-3.5 text-teal-500" />
+            <span>Export</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('import')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'import'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Import</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('operations')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'operations'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5 text-orange-500" />
+            <span>Operations</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('routines')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'routines'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Code2 className="w-3.5 h-3.5 text-purple-500" />
+            <span>Routines ({routines.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('events')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'events'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 text-rose-500" />
+            <span>Events ({events.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('triggers')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'triggers'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <span>Triggers ({triggers.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('views')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'views'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5 text-cyan-500" />
+            <span>Views ({views.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('privileges')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              activeTab === 'privileges'
+                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5 text-red-500" />
+            <span>Privileges</span>
+          </button>
         </div>
       </div>
 
-      {/* Main 2-Column phpMyAdmin Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
-        {/* Left Column: Authentic phpMyAdmin Sidebar Tree Navigator */}
-        <div className="xl:col-span-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-3 shadow-2xs space-y-3">
-          {/* phpMyAdmin Classic Header Icons */}
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-surface-800 text-slate-500">
+      {/* Main Two-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Left Column: Authentic Database Hierarchy Tree Navigator */}
+        <div className="lg:col-span-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-3 sticky top-4">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-2.5">
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setSelectedTable('');
-                  setActiveTab('structure');
-                }}
-                className="p-1 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                title="Server Home"
-              >
-                <Home className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => setFloatingQueryOpen(true)}
-                className="p-1 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                title="Query Window"
-              >
-                <Terminal className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => {
-                  fetchLiveTables(currentDb);
-                  showToast(`Reloaded navigation for ${currentDb}`);
-                }}
-                className="p-1 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                title="Reload Navigation"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loadingTables ? 'animate-spin text-amber-500' : ''}`} />
-              </button>
-              <button
-                onClick={() => setActiveTab('operations')}
-                className="p-1 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                title="Database Settings"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
-              <button
-                onClick={() => window.open('https://docs.phpmyadmin.net/', '_blank')}
-                className="p-1 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                title="phpMyAdmin Documentation"
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-              </button>
+              <FolderTree className="w-4 h-4 text-amber-500" />
+              <span className="font-bold text-xs text-slate-900 dark:text-white">Database Tree</span>
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] font-mono">
-              <button
-                onClick={() => setExpandedDatabases({ [currentDb]: true })}
-                className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 cursor-pointer"
-                title="Collapse all"
-              >
-                [-]
-              </button>
-              <button
-                onClick={() => {
-                  const all: { [k: string]: boolean } = {};
-                  databaseList.forEach((d) => (all[d] = true));
-                  setExpandedDatabases(all);
-                }}
-                className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 cursor-pointer"
-                title="Expand all"
-              >
-                [+]
-              </button>
-            </div>
-          </div>
-
-          {/* Sub-tabs: Tree, Recent, Favorites */}
-          <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-surface-800 p-0.5 rounded-xl text-[11px] font-semibold text-center">
             <button
-              onClick={() => setSidebarTab('tree')}
-              className={`py-1 rounded-lg cursor-pointer transition ${sidebarTab === 'tree' ? 'bg-white dark:bg-surface-900 text-slate-900 dark:text-white shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
+              onClick={() => setCreateDbModalOpen(true)}
+              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-800 text-emerald-600 cursor-pointer"
+              title="Create New Database"
             >
-              Tree
-            </button>
-            <button
-              onClick={() => setSidebarTab('recent')}
-              className={`py-1 rounded-lg cursor-pointer transition ${sidebarTab === 'recent' ? 'bg-white dark:bg-surface-900 text-slate-900 dark:text-white shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
-            >
-              Recent ({recentTables.length})
-            </button>
-            <button
-              onClick={() => setSidebarTab('favorites')}
-              className={`py-1 rounded-lg cursor-pointer transition ${sidebarTab === 'favorites' ? 'bg-white dark:bg-surface-900 text-slate-900 dark:text-white shadow-2xs' : 'text-slate-500 hover:text-slate-900'}`}
-            >
-              Favorites ({favoriteTables.length})
+              <Plus className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Tree View Tab */}
-          {sidebarTab === 'tree' && (
-            <div className="space-y-2">
-              {/* Filter Box: "Type to filter these, Enter to search" */}
-              <div className="relative">
-                <Search className="w-3 h-3 absolute left-2.5 top-2.5 text-slate-400" />
-                <input
-                  type="text"
-                  value={sidebarSearch}
-                  onChange={(e) => setSidebarSearch(e.target.value)}
-                  placeholder="Type to filter these, Enter to search"
-                  className="w-full pl-7 pr-6 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
-                />
-                {sidebarSearch && (
-                  <button
-                    onClick={() => setSidebarSearch('')}
-                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-700 cursor-pointer"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-
-              {/* + New Database action button */}
+          {/* Tree Search Box */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              value={treeSearch}
+              onChange={(e) => setTreeSearch(e.target.value)}
+              placeholder="Search tables & databases..."
+              className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 text-xs font-mono focus:outline-none focus:border-amber-500"
+            />
+            {treeSearch && (
               <button
-                onClick={() => setCreateDbModalOpen(true)}
-                className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 hover:bg-amber-100 font-bold text-xs border border-amber-200 dark:border-amber-800/40 cursor-pointer"
+                onClick={() => setTreeSearch('')}
+                className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
-                <Plus className="w-3 h-3" />
-                <span>New Database</span>
+                <X className="w-3 h-3" />
               </button>
+            )}
+          </div>
 
-              {/* Database Hierarchy Tree */}
-              <div className="space-y-1 max-h-[580px] overflow-y-auto pr-1 text-xs">
-                {databaseList.map((db) => {
-                  const isCurrentDb = currentDb === db;
-                  const isExpanded = expandedDatabases[db] || false;
+          {/* Tree View List */}
+          <div className="max-h-[640px] overflow-y-auto space-y-1 text-xs pr-1">
+            {loadingTree ? (
+              <div className="p-4 text-center text-slate-400 text-xs">Loading database tree...</div>
+            ) : filteredTreeNodes.length === 0 ? (
+              <div className="p-4 text-center text-slate-400 text-xs">No databases found</div>
+            ) : (
+              filteredTreeNodes.map((node) => {
+                const isCurrent = currentDb === node.name;
+                const isExpanded = expandedDbs[node.name] || false;
 
-                  return (
-                    <div key={db} className="space-y-0.5">
-                      {/* Database Node */}
+                return (
+                  <div key={node.name} className="space-y-0.5">
+                    {/* Database Node */}
+                    <div
+                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition ${
+                        isCurrent
+                          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold'
+                          : 'hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
                       <div
-                        className={`flex items-center justify-between px-2 py-1.5 rounded-xl cursor-pointer transition ${
-                          isCurrentDb
-                            ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 font-bold'
-                            : 'hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300'
-                        }`}
+                        className="flex items-center gap-1.5 truncate flex-1"
+                        onClick={() => {
+                          if (currentDb !== node.name) handleSwitchDb(node.name);
+                          setExpandedDbs((prev) => ({ ...prev, [node.name]: !isExpanded }));
+                        }}
                       >
-                        <div
-                          className="flex items-center gap-1.5 truncate flex-1"
-                          onClick={() => {
-                            if (!isCurrentDb) handleSwitchDatabase(db);
-                            setExpandedDatabases((prev) => ({ ...prev, [db]: !isExpanded }));
-                          }}
-                        >
-                          <span className="text-slate-400 font-mono text-[10px]">
-                            {isExpanded ? '[-]' : '[+]'}
-                          </span>
-                          <DatabaseIcon className={`w-3.5 h-3.5 ${isCurrentDb ? 'text-amber-500' : 'text-slate-400'}`} />
-                          <span className="truncate font-mono">{db}</span>
-                        </div>
-                        {isCurrentDb && (
-                          <span className="text-[10px] font-mono px-1.5 rounded bg-amber-200/60 dark:bg-amber-900/60 text-amber-800 dark:text-amber-300">
-                            {tables.length}
-                          </span>
-                        )}
+                        <span className="text-slate-400 font-mono text-[10px]">
+                          {isExpanded ? '[-]' : '[+]'}
+                        </span>
+                        <DatabaseIcon className={`w-3.5 h-3.5 ${isCurrent ? 'text-amber-500' : 'text-slate-400'}`} />
+                        <span className="truncate font-mono">{node.name}</span>
                       </div>
+                      <span className="text-[10px] font-mono px-1.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500">
+                        {node.tables?.length || 0}
+                      </span>
+                    </div>
 
-                      {/* Expanded Database Contents (Tables list for active database) */}
-                      {isExpanded && isCurrentDb && (
-                        <div className="pl-4 space-y-0.5 border-l border-slate-200 dark:border-surface-800 ml-2">
-                          {/* + New Table button */}
+                    {/* Expanded Database Hierarchy */}
+                    {isExpanded && (
+                      <div className="pl-4 space-y-0.5 border-l border-slate-200 dark:border-surface-800 ml-2.5 my-1">
+                        {/* New Table button inside active database */}
+                        {isCurrent && (
                           <button
                             onClick={() => setCreateTableModalOpen(true)}
-                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-[11px] font-bold w-full cursor-pointer"
+                            className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 font-bold text-[11px] cursor-pointer"
                           >
                             <Plus className="w-3 h-3" />
                             <span>New Table</span>
                           </button>
+                        )}
 
-                          {/* Pagination indicator matching screenshot: 1 >> */}
-                          <div className="flex items-center justify-between px-2 py-0.5 text-[10px] font-mono text-slate-400">
-                            <span>Page: 1</span>
-                            <span className="cursor-pointer hover:text-slate-700">&gt;&gt;</span>
+                        {/* Tables */}
+                        {(node.tables || []).map((tbl) => {
+                          const isTblActive = isCurrent && selectedTable === tbl.name;
+                          return (
+                            <div
+                              key={tbl.name}
+                              onClick={() => {
+                                if (currentDb !== node.name) handleSwitchDb(node.name);
+                                handleOpenTableBrowse(tbl.name);
+                              }}
+                              className={`flex items-center justify-between px-2 py-1 rounded-lg cursor-pointer transition text-xs font-mono ${
+                                isTblActive
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold'
+                                  : 'hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 truncate">
+                                <Table className={`w-3 h-3 ${isTblActive ? 'text-emerald-500' : 'text-slate-400'}`} />
+                                <span className="truncate">{tbl.name}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400">{tbl.rows}</span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Views */}
+                        {node.views && node.views.length > 0 && (
+                          <div className="pt-1">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-0.5 flex items-center gap-1">
+                              <Layers className="w-3 h-3" />
+                              <span>Views ({node.views.length})</span>
+                            </div>
+                            {node.views.map((v) => (
+                              <div
+                                key={v}
+                                onClick={() => {
+                                  if (currentDb !== node.name) handleSwitchDb(node.name);
+                                  handleOpenTableBrowse(v);
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-900 cursor-pointer truncate font-mono"
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                                <span className="truncate">{v}</span>
+                              </div>
+                            ))}
                           </div>
+                        )}
 
-                          {/* Tables */}
-                          {loadingTables ? (
-                            <p className="text-[11px] text-slate-400 py-3 text-center">Loading tables...</p>
-                          ) : (
-                            tables
-                              .filter((t) => t.name.toLowerCase().includes(sidebarSearch.toLowerCase()))
-                              .map((t) => {
-                                const isTableActive = selectedTable === t.name;
-                                const isTableExp = expandedTables[t.name] || false;
-
-                                return (
-                                  <div key={t.name} className="space-y-0.5">
-                                    <div
-                                      className={`flex items-center justify-between px-2 py-1 rounded-lg text-xs cursor-pointer transition ${
-                                        isTableActive
-                                          ? 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-900 dark:text-amber-200 font-bold'
-                                          : 'hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 font-medium'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-1.5 truncate flex-1">
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setExpandedTables((prev) => ({ ...prev, [t.name]: !isTableExp }));
-                                          }}
-                                          className="text-slate-400 hover:text-slate-600 text-[10px] font-mono"
-                                        >
-                                          {isTableExp ? '-' : '+'}
-                                        </button>
-                                        <Table className={`w-3 h-3 flex-shrink-0 ${isTableActive ? 'text-amber-500' : 'text-slate-400'}`} />
-                                        <span
-                                          onClick={() => handleBrowseTable(t.name)}
-                                          className="truncate font-mono hover:underline"
-                                        >
-                                          {t.name}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-[10px] font-mono text-slate-400">({t.rows})</span>
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            toggleFavorite(t.name);
-                                          }}
-                                          className="p-0.5 text-slate-300 hover:text-amber-500"
-                                        >
-                                          <Star className={`w-2.5 h-2.5 ${favoriteTables.includes(t.name) ? 'fill-amber-400 text-amber-400' : ''}`} />
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Expanded Columns & Indexes under table */}
-                                    {isTableExp && (
-                                      <div className="pl-5 space-y-0.5 text-[11px] font-mono text-slate-500 border-l border-slate-100 dark:border-surface-800 ml-2">
-                                        <div
-                                          onClick={() => handleOpenTableStructure(t.name)}
-                                          className="flex items-center gap-1 py-0.5 hover:text-amber-600 cursor-pointer"
-                                        >
-                                          <Columns className="w-2.5 h-2.5" />
-                                          <span>Columns</span>
-                                        </div>
-                                        <div
-                                          onClick={() => handleOpenTableStructure(t.name)}
-                                          className="flex items-center gap-1 py-0.5 hover:text-amber-600 cursor-pointer"
-                                        >
-                                          <Key className="w-2.5 h-2.5" />
-                                          <span>Indexes</span>
-                                        </div>
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Recent Tables Tab */}
-          {sidebarTab === 'recent' && (
-            <div className="space-y-1">
-              <p className="text-[11px] text-slate-400 font-medium pb-1">Recently accessed tables:</p>
-              {recentTables.map((tbl) => (
-                <div
-                  key={tbl}
-                  onClick={() => handleBrowseTable(tbl)}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-surface-800 text-xs font-mono cursor-pointer text-slate-700 dark:text-slate-300"
-                >
-                  <Table className="w-3 h-3 text-amber-500" />
-                  <span className="truncate">{tbl}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Favorites Tab */}
-          {sidebarTab === 'favorites' && (
-            <div className="space-y-1">
-              <p className="text-[11px] text-slate-400 font-medium pb-1">Starred tables for quick access:</p>
-              {favoriteTables.length === 0 ? (
-                <p className="text-xs text-slate-400 py-4 text-center">No favorites yet. Click the star next to any table.</p>
-              ) : (
-                favoriteTables.map((tbl) => (
-                  <div
-                    key={tbl}
-                    onClick={() => handleBrowseTable(tbl)}
-                    className="flex items-center justify-between px-2.5 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-surface-800 text-xs font-mono cursor-pointer text-slate-700 dark:text-slate-300"
-                  >
-                    <div className="flex items-center gap-2 truncate">
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                      <span className="truncate">{tbl}</span>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFavorite(tbl);
-                      }}
-                      className="text-slate-400 hover:text-rose-500"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                        {/* Procedures & Functions */}
+                        {((node.procedures && node.procedures.length > 0) || (node.functions && node.functions.length > 0)) && (
+                          <div className="pt-1">
+                            <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-0.5 flex items-center gap-1">
+                              <Code2 className="w-3 h-3" />
+                              <span>Routines</span>
+                            </div>
+                            {(node.procedures || []).map((p) => (
+                              <div
+                                key={p}
+                                onClick={() => {
+                                  if (currentDb !== node.name) handleSwitchDb(node.name);
+                                  setActiveTab('routines');
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-purple-600 cursor-pointer truncate font-mono"
+                              >
+                                <span className="text-[10px] text-purple-500 font-bold">P</span>
+                                <span className="truncate">{p}</span>
+                              </div>
+                            ))}
+                            {(node.functions || []).map((f) => (
+                              <div
+                                key={f}
+                                onClick={() => {
+                                  if (currentDb !== node.name) handleSwitchDb(node.name);
+                                  setActiveTab('routines');
+                                }}
+                                className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-purple-600 cursor-pointer truncate font-mono"
+                              >
+                                <span className="text-[10px] text-purple-500 font-bold">F</span>
+                                <span className="truncate">{f}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* Sidebar Metrics Summary Footer */}
-          <div className="pt-2 border-t border-slate-200 dark:border-surface-800 text-[11px] text-slate-500 space-y-1 font-medium">
-            <div className="flex justify-between">
-              <span>Tables:</span>
-              <strong className="text-slate-900 dark:text-white font-mono">{tables.length}</strong>
-            </div>
-            <div className="flex justify-between">
-              <span>Total Rows:</span>
-              <strong className="text-slate-900 dark:text-white font-mono">{totalRows.toLocaleString()}</strong>
-            </div>
-            <div className="flex justify-between">
-              <span>Size:</span>
-              <strong className="text-slate-900 dark:text-white font-mono">{totalSizeKb} KB</strong>
-            </div>
+                );
+              })
+            )}
           </div>
         </div>
 
         {/* Right Column: Active Tab Content Area */}
-        <div className="xl:col-span-9 space-y-3">
-          {/* TAB 1: STRUCTURE (Exact match with user reference screenshot) */}
-          {activeTab === 'structure' && !selectedTable && (
+        <div className="lg:col-span-9 space-y-4">
+          {/* TAB 1: STRUCTURE VIEW */}
+          {activeTab === 'structure' && (
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden">
-              {/* Top Controls: Page number & Filters box */}
-              <div className="p-3 border-b border-slate-200 dark:border-surface-800 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 font-mono text-slate-500">
-                    <span>Page number:</span>
-                    <input
-                      type="number"
-                      defaultValue={1}
-                      min={1}
-                      className="w-12 px-2 py-0.5 rounded border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 text-center text-xs"
-                    />
-                    <button className="text-slate-600 dark:text-slate-400 hover:text-slate-900 font-bold">&gt;&gt;</button>
+              {/* If a specific table is selected, show its full Column, Index, FK structure */}
+              {selectedTable ? (
+                <div className="p-5 space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-surface-800 pb-3">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Table className="w-4 h-4 text-emerald-500" />
+                        <span>Table Structure: <code className="font-mono text-emerald-600 dark:text-emerald-400">{selectedTable}</code></span>
+                      </h2>
+                      <p className="text-xs text-slate-500">Columns, data types, indexes, and foreign key constraints</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleOpenTableBrowse(selectedTable)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-xs"
+                      >
+                        Browse Table Rows
+                      </button>
+                      <button
+                        onClick={() => setAddColumnModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Column</span>
+                      </button>
+                    </div>
                   </div>
 
-                  <button
-                    onClick={() => setFiltersBoxOpen((prev) => !prev)}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-200 cursor-pointer"
-                  >
-                    <Filter className="w-3 h-3 text-slate-500" />
-                    <span>Filters</span>
-                    <ChevronDown className={`w-3 h-3 transition-transform ${filtersBoxOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                </div>
+                  {loadingStructure ? (
+                    <div className="p-8 text-center text-slate-400 text-xs">Loading table structure...</div>
+                  ) : !tableStructure ? (
+                    <div className="p-8 text-center text-slate-400 text-xs">Unable to load table structure.</div>
+                  ) : (
+                    <>
+                      {/* Columns Table */}
+                      <div className="space-y-2">
+                        <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Columns ({tableStructure.columns?.length || 0})</h3>
+                        <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                                <th className="p-2.5">Field</th>
+                                <th className="p-2.5">Type</th>
+                                <th className="p-2.5">Collation</th>
+                                <th className="p-2.5">Null</th>
+                                <th className="p-2.5">Key</th>
+                                <th className="p-2.5">Default</th>
+                                <th className="p-2.5">Extra</th>
+                                <th className="p-2.5 text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                              {tableStructure.columns.map((col) => (
+                                <tr key={col.field} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                                    {col.key === 'PRI' && <Key className="w-3 h-3 text-amber-500" />}
+                                    <span>{col.field}</span>
+                                  </td>
+                                  <td className="p-2.5 text-emerald-600 dark:text-emerald-400">{col.type}</td>
+                                  <td className="p-2.5 text-slate-500">{col.collation || '-'}</td>
+                                  <td className="p-2.5">{col.null}</td>
+                                  <td className="p-2.5 font-bold text-amber-600">{col.key}</td>
+                                  <td className="p-2.5 text-slate-500">{col.default !== null && col.default !== undefined ? String(col.default) : <em className="text-slate-400">NULL</em>}</td>
+                                  <td className="p-2.5 text-purple-600">{col.extra}</td>
+                                  <td className="p-2.5 font-sans text-center">
+                                    <div className="flex items-center justify-center gap-2 text-xs font-semibold">
+                                      <button
+                                        onClick={() => handleOpenModifyCol(col)}
+                                        className="text-blue-600 hover:underline cursor-pointer"
+                                      >
+                                        Change
+                                      </button>
+                                      <span className="text-slate-300">|</span>
+                                      <button
+                                        onClick={() => handleDropColumn(col.field)}
+                                        className="text-rose-600 hover:underline cursor-pointer"
+                                      >
+                                        Drop
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
 
-                {/* Filters Collapsible Area Matching Screenshot */}
-                {filtersBoxOpen && (
-                  <div className="p-2.5 rounded-xl bg-slate-50/80 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center gap-3 text-xs">
-                    <span className="font-semibold text-slate-600 dark:text-slate-400">Containing the word:</span>
-                    <input
-                      type="text"
-                      value={tableFilterWord}
-                      onChange={(e) => setTableFilterWord(e.target.value)}
-                      placeholder="Filter by table name..."
-                      className="px-3 py-1 rounded-lg bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 font-mono text-xs w-64 focus:outline-none focus:border-amber-500 text-slate-900 dark:text-white"
-                    />
-                    {tableFilterWord && (
+                      {/* Indexes Table */}
+                      <div className="space-y-2 pt-2">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Indexes ({tableStructure.indexes?.length || 0})</h3>
+                          <button
+                            onClick={() => setAddIndexModalOpen(true)}
+                            className="text-xs text-blue-600 hover:underline font-semibold cursor-pointer"
+                          >
+                            + Create Index
+                          </button>
+                        </div>
+                        <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                                <th className="p-2.5">Key Name</th>
+                                <th className="p-2.5">Type</th>
+                                <th className="p-2.5">Unique</th>
+                                <th className="p-2.5">Column</th>
+                                <th className="p-2.5 text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                              {tableStructure.indexes.map((idx, i) => (
+                                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white">{idx.key_name}</td>
+                                  <td className="p-2.5">{idx.index_type}</td>
+                                  <td className="p-2.5">{idx.non_unique === 0 ? 'Yes' : 'No'}</td>
+                                  <td className="p-2.5 text-amber-600">{idx.column_name}</td>
+                                  <td className="p-2.5 font-sans text-center">
+                                    <button
+                                      onClick={() => handleDropIndex(idx.key_name)}
+                                      className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                                    >
+                                      Drop
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Foreign Keys Table */}
+                      {tableStructure.foreign_keys && tableStructure.foreign_keys.length > 0 && (
+                        <div className="space-y-2 pt-2">
+                          <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Foreign Keys</h3>
+                          <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                            <table className="w-full text-left text-xs border-collapse font-mono">
+                              <thead className="bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                                <tr className="border-b border-slate-200 dark:border-surface-800">
+                                  <th className="p-2.5">Constraint</th>
+                                  <th className="p-2.5">Column</th>
+                                  <th className="p-2.5">Ref Table</th>
+                                  <th className="p-2.5">Ref Column</th>
+                                  <th className="p-2.5">On Update</th>
+                                  <th className="p-2.5">On Delete</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                                {tableStructure.foreign_keys.map((fk, i) => (
+                                  <tr key={i}>
+                                    <td className="p-2.5 font-bold">{fk.constraint_name}</td>
+                                    <td className="p-2.5 text-amber-600">{fk.column_name}</td>
+                                    <td className="p-2.5 text-emerald-600">{fk.ref_table}</td>
+                                    <td className="p-2.5 text-emerald-600">{fk.ref_column}</td>
+                                    <td className="p-2.5 text-slate-500">{fk.on_update}</td>
+                                    <td className="p-2.5 text-slate-500">{fk.on_delete}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                /* Database-level Table Overview (Matches original phpMyAdmin overview) */
+                <div className="p-4 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <DatabaseIcon className="w-4 h-4 text-amber-500" />
+                        <span>Database: <code className="font-mono text-amber-600">{currentDb}</code></span>
+                      </h2>
+                      <p className="text-xs text-slate-500">Live tables, record counts, collation, and maintenance metrics</p>
+                    </div>
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setTableFilterWord('')}
-                        className="text-slate-400 hover:text-slate-700 text-xs font-bold cursor-pointer"
+                        onClick={() => setCreateTableModalOpen(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                       >
-                        Clear
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Create Table</span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Filter & Batch Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="relative w-72">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Filter tables..."
+                        value={tableFilterWord}
+                        onChange={(e) => setTableFilterWord(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 font-mono text-xs focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    {selectedTableNames.length > 0 && (
+                      <div className="flex items-center gap-2 font-semibold">
+                        <span className="text-slate-500">{selectedTableNames.length} selected:</span>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`Optimize ${selectedTableNames.length} tables?`)) return;
+                            await handleExecuteSql(`OPTIMIZE TABLE ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-200 cursor-pointer"
+                        >
+                          Optimize
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`CHECK ${selectedTableNames.length} tables?`)) return;
+                            await handleExecuteSql(`CHECK TABLE ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold hover:bg-blue-200 cursor-pointer"
+                        >
+                          Check
+                        </button>
+                        <button
+                          onClick={async () => {
+                            if (!confirm(`DROP ${selectedTableNames.length} tables? This cannot be undone!`)) return;
+                            await handleExecuteSql(`DROP TABLE IF EXISTS ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+                            setSelectedTableNames([]);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-bold hover:bg-rose-200 cursor-pointer"
+                        >
+                          Drop
+                        </button>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
 
-              {/* Table List with Exact Columns & Actions from Screenshot */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50/75 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                      <th className="p-2.5 w-8 text-center">
-                        <input
-                          type="checkbox"
-                          checked={selectedTableNames.length === tables.length && tables.length > 0}
-                          onChange={(e) => setSelectedTableNames(e.target.checked ? tables.map((t) => t.name) : [])}
-                          className="rounded border-slate-300 text-amber-500 focus:ring-amber-500 cursor-pointer"
-                        />
-                      </th>
-                      <th className="p-2.5">Table ▴</th>
-                      <th className="p-2.5 text-center">Action</th>
-                      <th className="p-2.5 text-right">Rows (?)</th>
-                      <th className="p-2.5">Type</th>
-                      <th className="p-2.5">Collation</th>
-                      <th className="p-2.5 text-right">Size</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-medium text-xs">
-                    {filteredTables.map((t) => {
-                      const isChecked = selectedTableNames.includes(t.name);
-                      const isFav = favoriteTables.includes(t.name);
-
-                      return (
-                        <tr key={t.name} className="hover:bg-slate-50/80 dark:hover:bg-surface-800/60 transition">
-                          <td className="p-2.5 text-center">
+                  {/* Database Tables Table */}
+                  <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                          <th className="p-2.5 w-8 text-center">
                             <input
                               type="checkbox"
-                              checked={isChecked}
+                              checked={selectedTableNames.length === tableDetails.length && tableDetails.length > 0}
                               onChange={(e) => {
-                                setSelectedTableNames(
-                                  e.target.checked
-                                    ? [...selectedTableNames, t.name]
-                                    : selectedTableNames.filter((n) => n !== t.name)
-                                );
+                                if (e.target.checked) setSelectedTableNames(tableDetails.map((t) => t.name));
+                                else setSelectedTableNames([]);
                               }}
-                              className="rounded border-slate-300 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                              className="rounded text-amber-500 focus:ring-amber-500"
                             />
-                          </td>
-
-                          {/* Table Name */}
-                          <td className="p-2.5 font-mono font-bold text-slate-900 dark:text-white">
-                            <button
-                              onClick={() => handleBrowseTable(t.name)}
-                              className="hover:text-amber-600 hover:underline cursor-pointer flex items-center gap-1.5"
-                            >
-                              <Table className="w-3.5 h-3.5 text-slate-400" />
-                              <span>{t.name}</span>
-                            </button>
-                          </td>
-
-                          {/* Action Buttons Matching Screenshot */}
-                          <td className="p-2.5">
-                            <div className="flex items-center justify-center gap-1.5 font-semibold text-[11px]">
-                              {/* Star */}
-                              <button
-                                onClick={() => toggleFavorite(t.name)}
-                                className="p-1 text-slate-400 hover:text-amber-500 cursor-pointer"
-                                title="Add to favorites"
-                              >
-                                <Star className={`w-3.5 h-3.5 ${isFav ? 'fill-amber-400 text-amber-400' : ''}`} />
-                              </button>
-
-                              {/* Browse */}
-                              <button
-                                onClick={() => handleBrowseTable(t.name)}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 hover:bg-blue-100 cursor-pointer"
-                                title="Browse rows"
-                              >
-                                <Eye className="w-3 h-3 text-blue-600" />
-                                <span>Browse</span>
-                              </button>
-
-                              {/* Structure */}
-                              <button
-                                onClick={() => handleOpenTableStructure(t.name)}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                                title="Table structure"
-                              >
-                                <Edit3 className="w-3 h-3 text-slate-600" />
-                                <span>Structure</span>
-                              </button>
-
-                              {/* Search */}
-                              <button
-                                onClick={() => {
-                                  setSelectedTable(t.name);
-                                  setSelectedSearchTables([t.name]);
-                                  setActiveTab('search');
-                                }}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                                title="Search inside table"
-                              >
-                                <Search className="w-3 h-3 text-slate-600" />
-                                <span>Search</span>
-                              </button>
-
-                              {/* Insert */}
-                              <button
-                                onClick={() => {
-                                  setSelectedTable(t.name);
-                                  fetchTableColumns(t.name);
-                                  setActiveTab('browse');
-                                }}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                                title="Insert row"
-                              >
-                                <Plus className="w-3 h-3 text-emerald-600" />
-                                <span>Insert</span>
-                              </button>
-
-                              {/* Empty (Truncate) */}
-                              <button
-                                onClick={() => handleEmptyTable(t.name)}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 hover:bg-orange-100 cursor-pointer"
-                                title="Empty (Truncate) table"
-                              >
-                                <Trash2 className="w-3 h-3 text-orange-600" />
-                                <span>Empty</span>
-                              </button>
-
-                              {/* Drop */}
-                              <button
-                                onClick={() => handleDropTable(t.name)}
-                                className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 cursor-pointer"
-                                title="Drop table"
-                              >
-                                <X className="w-3 h-3 text-rose-600" />
-                                <span>Drop</span>
-                              </button>
-                            </div>
-                          </td>
-
-                          {/* Rows */}
-                          <td className="p-2.5 text-right font-mono font-bold text-slate-900 dark:text-white">
-                            {(t.rows || 0).toLocaleString()}
-                          </td>
-
-                          {/* Type */}
-                          <td className="p-2.5 font-mono text-slate-600 dark:text-slate-400">{t.engine || 'InnoDB'}</td>
-
-                          {/* Collation */}
-                          <td className="p-2.5 font-mono text-[11px] text-slate-500">{t.collation || 'utf8mb4_unicode_ci'}</td>
-
-                          {/* Size */}
-                          <td className="p-2.5 text-right font-mono text-slate-700 dark:text-slate-300">
-                            {t.size_kb || 16} KB
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  {/* Summary Footer */}
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-slate-900 dark:text-white text-xs">
-                      <td className="p-2.5 text-center"></td>
-                      <td className="p-2.5">{tables.length} tables</td>
-                      <td className="p-2.5 text-center text-slate-500 font-normal">Sum</td>
-                      <td className="p-2.5 text-right font-mono">{totalRows.toLocaleString()}</td>
-                      <td className="p-2.5 font-mono">InnoDB</td>
-                      <td className="p-2.5 font-mono text-[11px]">utf8mb4_unicode_ci</td>
-                      <td className="p-2.5 text-right font-mono">{totalSizeKb} KB</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-
-              {/* Batch Actions on Selected Tables */}
-              <div className="p-3 bg-slate-50 dark:bg-surface-950 border-t border-slate-200 dark:border-surface-800 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setSelectedTableNames(tables.map((t) => t.name))}
-                    className="text-amber-600 hover:underline font-bold cursor-pointer"
-                  >
-                    Check all
-                  </button>
-                  <span className="text-slate-400">/</span>
-                  <button
-                    onClick={() => setSelectedTableNames([])}
-                    className="text-slate-500 hover:underline font-bold cursor-pointer"
-                  >
-                    Uncheck all
-                  </button>
-                  <span className="text-slate-400">|</span>
-                  <span className="text-slate-600 dark:text-slate-400">
-                    With selected ({selectedTableNames.length}):
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={async () => {
-                      if (selectedTableNames.length === 0) return showToast('Please select tables first');
-                      showToast(`Optimizing ${selectedTableNames.length} tables...`);
-                      for (const tbl of selectedTableNames) {
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `OPTIMIZE TABLE \`${tbl}\`;` }),
-                        });
-                      }
-                      showToast(`Optimization complete.`);
-                    }}
-                    className="px-3 py-1 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer"
-                  >
-                    Optimize
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (selectedTableNames.length === 0) return showToast('Please select tables first');
-                      showToast(`Checking ${selectedTableNames.length} tables...`);
-                      for (const tbl of selectedTableNames) {
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `CHECK TABLE \`${tbl}\`;` }),
-                        });
-                      }
-                      showToast(`Check complete.`);
-                    }}
-                    className="px-3 py-1 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer"
-                  >
-                    Check
-                  </button>
-                  <button
-                    onClick={async () => {
-                      if (selectedTableNames.length === 0) return showToast('Please select tables first');
-                      if (confirm(`Drop ${selectedTableNames.length} tables from ${currentDb}?`)) {
-                        for (const tbl of selectedTableNames) {
-                          await apiFetch('/api/v1/databases/query', {
-                            method: 'POST',
-                            body: JSON.stringify({ database: currentDb, query: `DROP TABLE IF EXISTS \`${tbl}\`;` }),
-                          });
-                        }
-                        showToast(`Dropped selected tables.`);
-                        fetchLiveTables(currentDb);
-                        setSelectedTableNames([]);
-                      }
-                    }}
-                    className="px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-                  >
-                    Drop
-                  </button>
-                </div>
-              </div>
-
-              {/* Inline Create Table on database (At the bottom of Structure tab) */}
-              <div className="p-3.5 bg-white dark:bg-surface-900 border-t border-slate-200 dark:border-surface-800">
-                <form onSubmit={handleCreateTableSubmit} className="flex flex-wrap items-center gap-3 text-xs">
-                  <span className="font-bold text-slate-800 dark:text-slate-200">Create table on database {currentDb}:</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-500">Name:</span>
-                    <input
-                      type="text"
-                      required
-                      placeholder="table_name"
-                      value={newTableName}
-                      onChange={(e) => setNewTableName(e.target.value)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 font-mono text-xs text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-slate-500">Number of columns:</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={50}
-                      value={newTableCols}
-                      onChange={(e) => setNewTableCols(Number(e.target.value))}
-                      className="w-16 px-2 py-1 rounded-lg bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 font-mono text-xs text-center text-slate-900 dark:text-white"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
-                  >
-                    Go
-                  </button>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Table-Specific Structure View (When a table is selected in Structure tab) */}
-          {activeTab === 'structure' && selectedTable && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden space-y-4">
-              <div className="p-3.5 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                    <Table className="w-4 h-4 text-amber-500" />
-                    <span>Table Structure: <code className="font-mono text-amber-600">{currentDb}.{selectedTable}</code></span>
-                  </h2>
-                  <p className="text-xs text-slate-500">Inspect field types, attributes, indexes, and collation</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleBrowseTable(selectedTable)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 font-bold text-xs hover:bg-blue-100 cursor-pointer"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Browse Data</span>
-                  </button>
-                  <button
-                    onClick={() => setSelectedTable('')}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-200 cursor-pointer"
-                  >
-                    Back to All Tables
-                  </button>
-                </div>
-              </div>
-
-              {/* Columns Table */}
-              <div className="overflow-x-auto p-3">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                      <th className="p-2.5 w-8">#</th>
-                      <th className="p-2.5">Name</th>
-                      <th className="p-2.5">Type</th>
-                      <th className="p-2.5">Collation</th>
-                      <th className="p-2.5">Null</th>
-                      <th className="p-2.5">Default</th>
-                      <th className="p-2.5">Extra</th>
-                      <th className="p-2.5 text-center">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
-                    {loadingColumns ? (
-                      <tr>
-                        <td colSpan={8} className="p-4 text-center text-slate-400 font-sans">Loading column schema...</td>
-                      </tr>
-                    ) : (
-                      tableColumns.map((col, idx) => (
-                        <tr key={col.field} className="hover:bg-slate-50/70 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 text-slate-400">{idx + 1}</td>
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                            {col.key === 'PRI' && <Key className="w-3 h-3 text-amber-500" />}
-                            <span>{col.field}</span>
-                          </td>
-                          <td className="p-2.5 text-blue-600 dark:text-blue-400">{col.type}</td>
-                          <td className="p-2.5 text-slate-500 text-[11px]">{col.collation || '-'}</td>
-                          <td className="p-2.5">{col.null}</td>
-                          <td className="p-2.5 text-slate-600 dark:text-slate-400">{col.default}</td>
-                          <td className="p-2.5 text-emerald-600">{col.extra || '-'}</td>
-                          <td className="p-2.5 font-sans">
-                            <div className="flex items-center justify-center gap-1.5 text-[11px] font-semibold">
-                              <button
-                                onClick={() => showToast(`Change column: ${col.field}`)}
-                                className="text-amber-600 hover:underline cursor-pointer"
-                              >
-                                Change
-                              </button>
-                              <span className="text-slate-300">|</span>
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Drop column \`${col.field}\`?`)) {
-                                    setTableColumns((prev) => prev.filter((c) => c.field !== col.field));
-                                    showToast(`Column \`${col.field}\` dropped.`);
-                                  }
-                                }}
-                                className="text-rose-600 hover:underline cursor-pointer"
-                              >
-                                Drop
-                              </button>
-                              <span className="text-slate-300">|</span>
-                              <button
-                                onClick={() => showToast(`Primary key set on ${col.field}`)}
-                                className="text-slate-600 hover:underline cursor-pointer"
-                              >
-                                Primary
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Add Column inline form */}
-              <div className="p-3 bg-slate-50 dark:bg-surface-950 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-700 dark:text-slate-300">Add</span>
-                  <input type="number" defaultValue={1} min={1} max={10} className="w-12 px-2 py-1 rounded bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 text-center" />
-                  <span>column(s) at end of table</span>
-                  <button
-                    onClick={() => {
-                      const newColName = prompt('Enter new column name:');
-                      if (newColName) {
-                        setTableColumns((prev) => [
-                          ...prev,
-                          { field: newColName.toLowerCase().replace(/[^a-z0-9_]/g, '_'), type: 'varchar(255)', null: 'YES', key: '', default: 'NULL', extra: '' },
-                        ]);
-                        showToast(`Column \`${newColName}\` added.`);
-                      }
-                    }}
-                    className="px-3 py-1 rounded-lg bg-emerald-600 text-white font-bold cursor-pointer hover:bg-emerald-700"
-                  >
-                    Go
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: SQL CONSOLE */}
-          {activeTab === 'sql' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">SQL Query Console</h2>
-                  <p className="text-xs text-slate-500">Run SQL query on database: <code className="font-mono text-amber-600">{currentDb}</code></p>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold font-mono">
-                  <button
-                    onClick={() => setSqlQuery(`SELECT * FROM \`${selectedTable || (tables[0] ? tables[0].name : 'users')}\` WHERE 1 LIMIT 50;`)}
-                    className="px-2 py-1 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                  >
-                    SELECT *
-                  </button>
-                  <button
-                    onClick={() => setSqlQuery(`INSERT INTO \`${selectedTable || 'users'}\` (\`id\`) VALUES (NULL);`)}
-                    className="px-2 py-1 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                  >
-                    INSERT
-                  </button>
-                  <button
-                    onClick={() => setSqlQuery(`UPDATE \`${selectedTable || 'users'}\` SET \`updated_at\` = NOW() WHERE 1;`)}
-                    className="px-2 py-1 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
-                  >
-                    UPDATE
-                  </button>
-                  <button
-                    onClick={() => setSqlQuery(`DELETE FROM \`${selectedTable || 'users'}\` WHERE 0;`)}
-                    className="px-2 py-1 rounded bg-slate-100 dark:bg-surface-800 text-rose-600 hover:bg-slate-200 cursor-pointer"
-                  >
-                    DELETE
-                  </button>
-                </div>
-              </div>
-
-              {/* Code Box */}
-              <div className="border border-slate-300 dark:border-surface-700 rounded-xl overflow-hidden focus-within:border-amber-500">
-                <textarea
-                  rows={7}
-                  value={sqlQuery}
-                  onChange={(e) => setSqlQuery(e.target.value)}
-                  placeholder="Enter SQL command here..."
-                  className="w-full p-3 font-mono text-xs bg-slate-50 dark:bg-surface-950 text-slate-900 dark:text-white focus:outline-none resize-y"
-                />
-                <div className="p-2.5 bg-slate-100 dark:bg-surface-900 border-t border-slate-200 dark:border-surface-800 flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-1.5 cursor-pointer text-slate-600 dark:text-slate-400">
-                      <input
-                        type="checkbox"
-                        checked={retainQuery}
-                        onChange={(e) => setRetainQuery(e.target.checked)}
-                        className="rounded text-amber-500 focus:ring-amber-500"
-                      />
-                      <span>Retain query box</span>
-                    </label>
-                    <span className="text-slate-400 font-mono">Delimiter: ;</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setSqlQuery('')}
-                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-50 cursor-pointer"
-                    >
-                      Clear
-                    </button>
-                    <button
-                      onClick={handleRunQuery}
-                      disabled={runningQuery}
-                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold shadow-xs cursor-pointer"
-                    >
-                      <Play className={`w-3.5 h-3.5 fill-current ${runningQuery ? 'animate-spin' : ''}`} />
-                      <span>{runningQuery ? 'Executing...' : 'Go'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Query Error */}
-              {queryError && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-400 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <span>{queryError}</span>
-                </div>
-              )}
-
-              {/* Execution Results View */}
-              {queryResult && (
-                <div className="border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden space-y-2">
-                  <div className="p-3 bg-slate-50 dark:bg-surface-950 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span className="font-bold text-slate-900 dark:text-white">
-                        Showing rows 0 - {queryResult.length} ({queryRowsAffected} total)
-                      </span>
-                      <span className="text-slate-400">({queryExecutionTime})</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(JSON.stringify(queryResult, null, 2));
-                        showToast('Results JSON copied to clipboard');
-                      }}
-                      className="flex items-center gap-1 text-slate-600 dark:text-slate-400 hover:text-slate-900 font-bold cursor-pointer"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy JSON</span>
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto max-h-96">
-                    <table className="w-full text-left text-xs border-collapse font-mono">
-                      <thead>
-                        <tr className="bg-slate-100/80 dark:bg-surface-900 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-surface-800">
-                          {queryColumns.map((col) => (
-                            <th key={col} className="p-2.5 whitespace-nowrap">
-                              {col}
-                            </th>
-                          ))}
+                          </th>
+                          <th className="p-2.5">Table</th>
+                          <th className="p-2.5 font-sans text-center">Action</th>
+                          <th className="p-2.5 text-right">Rows</th>
+                          <th className="p-2.5">Type</th>
+                          <th className="p-2.5">Collation</th>
+                          <th className="p-2.5 text-right">Size (KB)</th>
+                          <th className="p-2.5">Comment</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
-                        {queryResult.length === 0 ? (
+                      <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                        {loadingTableDetails ? (
                           <tr>
-                            <td colSpan={queryColumns.length || 1} className="p-4 text-center text-slate-400 font-sans">
-                              0 rows returned.
+                            <td colSpan={8} className="p-6 text-center text-slate-400 font-sans">
+                              Loading database tables...
+                            </td>
+                          </tr>
+                        ) : tableDetails.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="p-6 text-center text-slate-400 font-sans">
+                              No tables found in database `{currentDb}`. Click &quot;Create Table&quot; to begin.
                             </td>
                           </tr>
                         ) : (
-                          queryResult.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                              {queryColumns.map((col) => (
-                                <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
-                                  {row[col] !== undefined && row[col] !== null ? String(row[col]) : <em className="text-slate-400">NULL</em>}
-                                </td>
-                              ))}
-                            </tr>
-                          ))
+                          tableDetails
+                            .filter((t) => t.name.toLowerCase().includes(tableFilterWord.toLowerCase()))
+                            .map((t) => {
+                              const isChecked = selectedTableNames.includes(t.name);
+                              return (
+                                <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                                  <td className="p-2.5 text-center">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) setSelectedTableNames((prev) => [...prev, t.name]);
+                                        else setSelectedTableNames((prev) => prev.filter((n) => n !== t.name));
+                                      }}
+                                      className="rounded text-amber-500 focus:ring-amber-500"
+                                    />
+                                  </td>
+                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                                    <button
+                                      onClick={() => handleOpenTableBrowse(t.name)}
+                                      className="hover:underline text-left cursor-pointer flex items-center gap-1.5"
+                                    >
+                                      <Table className="w-3.5 h-3.5 text-slate-400" />
+                                      <span>{t.name}</span>
+                                    </button>
+                                  </td>
+                                  <td className="p-2.5 font-sans text-center">
+                                    <div className="flex items-center justify-center gap-2 text-[11px] font-semibold">
+                                      <button
+                                        onClick={() => handleOpenTableBrowse(t.name)}
+                                        className="text-emerald-600 hover:underline cursor-pointer"
+                                      >
+                                        Browse
+                                      </button>
+                                      <span className="text-slate-300">|</span>
+                                      <button
+                                        onClick={() => handleOpenTableStructure(t.name)}
+                                        className="text-blue-600 hover:underline cursor-pointer"
+                                      >
+                                        Structure
+                                      </button>
+                                      <span className="text-slate-300">|</span>
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm(`Empty (TRUNCATE) table \`${t.name}\`?`)) return;
+                                          await handleExecuteSql(`TRUNCATE TABLE \`${t.name}\`;`);
+                                        }}
+                                        className="text-amber-600 hover:underline cursor-pointer"
+                                      >
+                                        Empty
+                                      </button>
+                                      <span className="text-slate-300">|</span>
+                                      <button
+                                        onClick={async () => {
+                                          if (!confirm(`DROP table \`${t.name}\`?`)) return;
+                                          await handleExecuteSql(`DROP TABLE IF EXISTS \`${t.name}\`;`);
+                                        }}
+                                        className="text-rose-600 hover:underline cursor-pointer"
+                                      >
+                                        Drop
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td className="p-2.5 text-right font-bold">{t.rows.toLocaleString()}</td>
+                                  <td className="p-2.5 text-slate-500">{t.engine || t.type}</td>
+                                  <td className="p-2.5 text-slate-500">{t.collation}</td>
+                                  <td className="p-2.5 text-right">{t.total_size_kb.toLocaleString()}</td>
+                                  <td className="p-2.5 text-slate-400 truncate max-w-xs">{t.comment || '-'}</td>
+                                </tr>
+                              );
+                            })
                         )}
                       </tbody>
                     </table>
@@ -1688,372 +1977,493 @@ function PhpMyAdminCore() {
             </div>
           )}
 
-          {/* TAB 3: SEARCH */}
-          {activeTab === 'search' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Search in Database</h2>
-                <p className="text-xs text-slate-500">Find records across all tables in <code className="font-mono text-amber-600">{currentDb}</code></p>
+          {/* TAB 2: BROWSE ROWS */}
+          {activeTab === 'browse' && (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden space-y-3">
+              {/* Browse Header */}
+              <div className="p-4 border-b border-slate-100 dark:border-surface-800 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-emerald-500" />
+                    <span>Browse: <code className="font-mono text-emerald-600">{currentDb}.{selectedTable}</code></span>
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Showing rows {browseData ? (browseData.page - 1) * browseData.limit + 1 : 0} -{' '}
+                    {browseData ? Math.min(browseData.page * browseData.limit, browseData.total_rows) : 0} of{' '}
+                    {browseData?.total_rows || 0} (Execution: {browseData?.execution_time || '0.001s'})
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleOpenInsertRow}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Insert Row</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenTableStructure(selectedTable)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs cursor-pointer"
+                  >
+                    View Structure
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-4 text-xs font-semibold max-w-2xl">
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
-                    Words or values to search for (wildcard: &quot;%&quot;):
-                  </label>
+              {/* Filter / Search Bar */}
+              <div className="px-4 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="relative w-72">
+                  <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                   <input
                     type="text"
-                    value={searchWord}
-                    onChange={(e) => setSearchWord(e.target.value)}
-                    placeholder="e.g. citizen, report, 2026, active..."
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 font-mono text-xs text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                    placeholder="Search in table..."
+                    value={browseSearch}
+                    onChange={(e) => {
+                      setBrowseSearch(e.target.value);
+                      fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, browseSortCol, browseSortOrder, e.target.value);
+                    }}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 font-mono text-xs focus:outline-none focus:border-amber-500"
                   />
                 </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500">Number of rows:</span>
+                  <select
+                    value={browseLimit}
+                    onChange={(e) => {
+                      const newLim = Number(e.target.value);
+                      setBrowseLimit(newLim);
+                      fetchBrowseRows(currentDb, selectedTable, 1, newLim, browseSortCol, browseSortOrder, browseSearch);
+                    }}
+                    className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 font-mono text-xs"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                  </select>
+                </div>
+              </div>
 
+              {/* Live Rows Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse font-mono">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                      <th className="p-2.5 w-16 text-center font-sans">Action</th>
+                      {(browseData?.columns || []).map((col) => {
+                        const isSorted = browseSortCol === col;
+                        return (
+                          <th
+                            key={col}
+                            onClick={() => {
+                              const newOrder = isSorted && browseSortOrder === 'ASC' ? 'DESC' : 'ASC';
+                              setBrowseSortCol(col);
+                              setBrowseSortOrder(newOrder);
+                              fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, col, newOrder, browseSearch);
+                            }}
+                            className="p-2.5 whitespace-nowrap cursor-pointer hover:bg-slate-100 dark:hover:bg-surface-800 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>{col}</span>
+                              {isSorted ? (
+                                browseSortOrder === 'ASC' ? (
+                                  <SortAsc className="w-3 h-3 text-amber-500" />
+                                ) : (
+                                  <SortDesc className="w-3 h-3 text-amber-500" />
+                                )
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                    {loadingBrowse ? (
+                      <tr>
+                        <td colSpan={(browseData?.columns.length || 0) + 1} className="p-8 text-center text-slate-400 font-sans">
+                          Querying live table rows...
+                        </td>
+                      </tr>
+                    ) : !browseData || browseData.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={(browseData?.columns.length || 0) + 1} className="p-8 text-center text-slate-400 font-sans">
+                          Table `{selectedTable}` has 0 records.
+                        </td>
+                      </tr>
+                    ) : (
+                      browseData.rows.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 text-center font-sans">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => handleOpenEditRow(row)}
+                                className="text-blue-600 hover:text-blue-700 cursor-pointer p-0.5"
+                                title="Edit row"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRow(row)}
+                                className="text-rose-600 hover:text-rose-700 cursor-pointer p-0.5"
+                                title="Delete row"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                          {browseData.columns.map((col) => {
+                            const val = row[col];
+                            return (
+                              <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
+                                {val !== null && val !== undefined ? (
+                                  String(val)
+                                ) : (
+                                  <em className="text-amber-500/80 font-serif">NULL</em>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              {browseData && browseData.total_pages > 1 && (
+                <div className="p-3 bg-slate-50 dark:bg-surface-950 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs font-semibold text-slate-500">
+                  <span>
+                    Page {browseData.page} of {browseData.total_pages}
+                  </span>
+                  <div className="flex items-center gap-1 font-mono">
+                    <button
+                      disabled={browseData.page <= 1}
+                      onClick={() => fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
+                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      &lt;&lt;
+                    </button>
+                    <button
+                      disabled={browseData.page <= 1}
+                      onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.page - 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
+                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      &lt;
+                    </button>
+                    <span className="px-3 py-1 font-bold text-slate-900 dark:text-white">{browseData.page}</span>
+                    <button
+                      disabled={browseData.page >= browseData.total_pages}
+                      onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.page + 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
+                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      &gt;
+                    </button>
+                    <button
+                      disabled={browseData.page >= browseData.total_pages}
+                      onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.total_pages, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
+                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                    >
+                      &gt;&gt;
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: SQL CONSOLE */}
+          {activeTab === 'sql' && (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Find:</label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {[
-                      { id: 'any', label: 'At least one word' },
-                      { id: 'all', label: 'All words' },
-                      { id: 'exact', label: 'Exact phrase' },
-                      { id: 'regex', label: 'As regular expression' },
-                    ].map((opt) => (
-                      <label key={opt.id} className="flex items-center gap-2 p-2 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 cursor-pointer">
+                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <Terminal className="w-4 h-4 text-amber-500" />
+                    <span>SQL Query Console: <code className="font-mono text-amber-600">{currentDb}</code></span>
+                  </h2>
+                  <p className="text-xs text-slate-500">Run native SQL commands against the database</p>
+                </div>
+                {/* Quick query buttons */}
+                <div className="flex flex-wrap gap-1.5 text-xs font-mono">
+                  <button
+                    onClick={() => setSqlQuery(`SELECT * FROM \`${selectedTable || 'table'}\` LIMIT 50;`)}
+                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                  >
+                    SELECT *
+                  </button>
+                  <button
+                    onClick={() => setSqlQuery(`SELECT COUNT(*) FROM \`${selectedTable || 'table'}\`;`)}
+                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                  >
+                    SELECT COUNT
+                  </button>
+                  <button
+                    onClick={() => setSqlQuery(`SHOW CREATE TABLE \`${selectedTable || 'table'}\`;`)}
+                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                  >
+                    SHOW CREATE
+                  </button>
+                </div>
+              </div>
+
+              {/* SQL Textarea */}
+              <div className="relative">
+                <textarea
+                  rows={6}
+                  value={sqlQuery}
+                  onChange={(e) => setSqlQuery(e.target.value)}
+                  placeholder="Enter your SQL query here... (e.g. SELECT * FROM users WHERE status = 'active';)"
+                  className="w-full p-3 font-mono text-xs bg-slate-900 text-emerald-400 rounded-xl border border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-500 font-mono">Delimiter: ;</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSqlQuery('')}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-xs font-bold cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    onClick={() => handleExecuteSql()}
+                    disabled={runningQuery}
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>{runningQuery ? 'Executing...' : 'Go / Execute'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Error banner */}
+              {queryError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
+                  <div className="font-mono whitespace-pre-wrap">{queryError}</div>
+                </div>
+              )}
+
+              {/* Query Result */}
+              {queryResult && (
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-surface-800">
+                  <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                      {queryResult.rows_affected} rows affected / returned ({queryResult.execution_time})
+                    </span>
+                  </div>
+                  {queryResult.columns && queryResult.columns.length > 0 && queryResult.rows && (
+                    <div className="overflow-x-auto max-h-96 border border-slate-200 dark:border-surface-800 rounded-xl">
+                      <table className="w-full text-left text-xs font-mono border-collapse">
+                        <thead className="bg-slate-50 dark:bg-surface-950 sticky top-0">
+                          <tr className="border-b border-slate-200 dark:border-surface-800">
+                            {queryResult.columns.map((c) => (
+                              <th key={c} className="p-2.5 whitespace-nowrap font-bold">
+                                {c}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                          {queryResult.rows.map((r, i) => (
+                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                              {queryResult.columns.map((c) => (
+                                <td key={c} className="p-2.5 whitespace-nowrap">
+                                  {r[c] !== null && r[c] !== undefined ? (
+                                    String(r[c])
+                                  ) : (
+                                    <em className="text-amber-500">NULL</em>
+                                  )}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: EXPORT */}
+          {activeTab === 'export' && (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
+              <div>
+                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Export Database / Tables</h2>
+                <p className="text-xs text-slate-500">
+                  Generate and stream live database dumps from schema <code className="font-mono text-amber-600">{currentDb}</code>
+                </p>
+              </div>
+
+              <div className="space-y-4 text-xs">
+                {/* Format selection */}
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 dark:text-slate-300 block">Export Format</label>
+                  <div className="flex gap-4">
+                    {(['sql', 'csv', 'json'] as const).map((fmt) => (
+                      <label key={fmt} className="flex items-center gap-2 cursor-pointer font-mono font-semibold">
                         <input
                           type="radio"
-                          name="search_mode"
-                          checked={searchMode === opt.id}
-                          onChange={() => setSearchMode(opt.id as any)}
+                          name="format"
+                          value={fmt}
+                          checked={exportFormat === fmt}
+                          onChange={() => setExportFormat(fmt)}
                           className="text-amber-500 focus:ring-amber-500"
                         />
-                        <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200">{opt.label}</span>
+                        <span>{fmt.toUpperCase()}</span>
                       </label>
                     ))}
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-slate-700 dark:text-slate-300">Inside tables:</label>
-                    <div className="space-x-2 text-[11px]">
-                      <button
-                        onClick={() => setSelectedSearchTables(tables.map((t) => t.name))}
-                        className="text-amber-600 hover:underline cursor-pointer"
-                      >
-                        Select all
-                      </button>
-                      <button
-                        onClick={() => setSelectedSearchTables([])}
-                        className="text-slate-500 hover:underline cursor-pointer"
-                      >
-                        Unselect all
-                      </button>
-                    </div>
+                {/* Table selection */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-slate-700 dark:text-slate-300">Select Tables to Export</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (exportSelectedTables.length === tableDetails.length) setExportSelectedTables([]);
+                        else setExportSelectedTables(tableDetails.map((t) => t.name));
+                      }}
+                      className="text-xs text-blue-600 hover:underline font-semibold cursor-pointer"
+                    >
+                      {exportSelectedTables.length === tableDetails.length ? 'Deselect All' : 'Select All'}
+                    </button>
                   </div>
-                  <div className="max-h-40 overflow-y-auto p-2 border border-slate-200 dark:border-surface-700 rounded-xl bg-slate-50 dark:bg-surface-950 grid grid-cols-2 md:grid-cols-3 gap-1.5 font-mono text-[11px]">
-                    {tables.map((tbl) => {
-                      const checked = selectedSearchTables.includes(tbl.name);
-                      return (
-                        <label key={tbl.name} className="flex items-center gap-1.5 truncate cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setSelectedSearchTables(
-                                e.target.checked ? [...selectedSearchTables, tbl.name] : selectedSearchTables.filter((n) => n !== tbl.name)
-                              );
-                            }}
-                            className="rounded border-slate-300 text-amber-500"
-                          />
-                          <span className="truncate">{tbl.name}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleExecuteSearch}
-                  className="flex items-center gap-2 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
-                >
-                  <Search className="w-3.5 h-3.5" />
-                  <span>Go / Search</span>
-                </button>
-
-                {/* Results list */}
-                {hasSearched && (
-                  <div className="pt-3 border-t border-slate-200 dark:border-surface-800 space-y-2 font-sans">
-                    <h3 className="font-bold text-xs text-slate-800 dark:text-white">Search Results:</h3>
-                    {searchResults.length === 0 ? (
-                      <p className="text-xs text-slate-400">No match found for &quot;{searchWord}&quot; in the selected tables.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {searchResults.map((res) => (
-                          <div
-                            key={res.table}
-                            className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-950 font-mono text-xs"
-                          >
-                            <span>
-                              Table <strong className="text-amber-600">{res.table}</strong>: {res.count} match(es)
-                            </span>
-                            <button
-                              onClick={() => handleBrowseTable(res.table)}
-                              className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-sans font-bold text-[11px] cursor-pointer"
-                            >
-                              Browse Matches
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: QUERY BY EXAMPLE (QBE) */}
-          {activeTab === 'query' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Query by Example (QBE)</h2>
-                <p className="text-xs text-slate-500">Construct visual database queries without writing raw SQL</p>
-              </div>
-
-              <div className="space-y-4 text-xs font-semibold max-w-2xl">
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Select Table:</label>
-                  <select
-                    value={qbeTable}
-                    onChange={(e) => setQbeTable(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs"
-                  >
-                    {tables.map((t) => (
-                      <option key={t.name} value={t.name}>{t.name} ({t.rows} rows)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="p-3 border border-slate-200 dark:border-surface-700 rounded-xl bg-slate-50 dark:bg-surface-950 space-y-2">
-                  <span className="block text-slate-700 dark:text-slate-300 font-bold">Selected Columns &amp; Sort Criteria:</span>
-                  <div className="grid grid-cols-4 gap-2 font-mono text-[11px]">
-                    {['id', 'title', 'status', 'created_at'].map((f) => (
-                      <div key={f} className="p-2 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-lg space-y-1">
-                        <label className="flex items-center gap-1 font-bold text-slate-800 dark:text-slate-200">
-                          <input type="checkbox" defaultChecked className="rounded text-amber-500" />
-                          <span>{f}</span>
-                        </label>
-                        <select className="w-full text-[10px] bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-700 rounded p-1">
-                          <option>Ascending</option>
-                          <option>Descending</option>
-                        </select>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-3 border border-slate-200 dark:border-surface-800 rounded-xl bg-slate-50 dark:bg-surface-950 font-mono text-xs">
+                    {tableDetails.map((t) => (
+                      <label key={t.name} className="flex items-center gap-2 truncate cursor-pointer">
                         <input
-                          type="text"
-                          placeholder="Criteria (e.g. > 5)"
-                          className="w-full text-[10px] bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-700 rounded p-1"
+                          type="checkbox"
+                          checked={exportSelectedTables.includes(t.name)}
+                          onChange={(e) => {
+                            if (e.target.checked) setExportSelectedTables((prev) => [...prev, t.name]);
+                            else setExportSelectedTables((prev) => prev.filter((n) => n !== t.name));
+                          }}
+                          className="rounded text-amber-500 focus:ring-amber-500"
                         />
-                      </div>
+                        <span className="truncate">{t.name}</span>
+                      </label>
                     ))}
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="pt-2">
                   <button
-                    onClick={() => {
-                      setSqlQuery(`SELECT id, title, status, created_at FROM \`${qbeTable}\` WHERE status = 'active' ORDER BY id ASC LIMIT 50;`);
-                      setActiveTab('sql');
-                      showToast('Generated SQL query sent to console.');
-                    }}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                    onClick={handleTriggerExport}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
                   >
-                    Generate &amp; Run SQL
+                    <Download className="w-4 h-4" />
+                    <span>Download {exportFormat.toUpperCase()} Export</span>
                   </button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 5: EXPORT */}
-          {activeTab === 'export' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-4">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Export Database Dump</h2>
-                <p className="text-xs text-slate-500">Export structure and data from schema <code className="font-mono text-amber-600">{currentDb}</code></p>
-              </div>
-
-              <div className="max-w-md space-y-4 text-xs font-semibold">
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Export Method:</label>
-                  <div className="space-y-2">
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="exp_method"
-                        checked={exportMethod === 'quick'}
-                        onChange={() => setExportMethod('quick')}
-                        className="text-amber-500 focus:ring-amber-500"
-                      />
-                      <div>
-                        <span className="font-bold text-slate-900 dark:text-white">Quick - display only the minimal options</span>
-                        <p className="text-[11px] text-slate-500 font-normal">Complete SQL dump containing both table structures and row data.</p>
-                      </div>
-                    </label>
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="exp_method"
-                        checked={exportMethod === 'custom'}
-                        onChange={() => setExportMethod('custom')}
-                        className="text-amber-500 focus:ring-amber-500"
-                      />
-                      <div>
-                        <span className="font-bold text-slate-900 dark:text-white">Custom - display all possible options</span>
-                        <p className="text-[11px] text-slate-500 font-normal">Choose specific tables, compression, or drop statements.</p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Format:</label>
-                  <select
-                    value={exportFormat}
-                    onChange={(e) => setExportFormat(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs"
-                  >
-                    <option value="sql">SQL (*.sql)</option>
-                    <option value="csv">CSV (Comma Separated Values)</option>
-                    <option value="json">JSON (*.json)</option>
-                    <option value="xml">XML (*.xml)</option>
-                  </select>
-                </div>
-
-                <button
-                  onClick={async () => {
-                    try {
-                      showToast(`Generating live SQL export for ${currentDb}...`);
-                      const token = typeof window !== 'undefined' ? localStorage.getItem('hv_token') || sessionStorage.getItem('hv_token') : '';
-                      const res = await fetch(`/api/v1/databases/export?db=${encodeURIComponent(currentDb)}`, {
-                        headers: token ? { Authorization: `Bearer ${token}` } : {},
-                      });
-                      if (!res.ok) throw new Error('Export service error');
-                      const blob = await res.blob();
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${currentDb}_dump_${Date.now()}.${exportFormat}`;
-                      a.click();
-                      showToast(`Dump file downloaded successfully.`);
-                    } catch {
-                      // Fallback client dump
-                      const dummyDump = `-- phpMyAdmin SQL Dump\n-- Hostvra Version 1.0\n-- Database: \`${currentDb}\`\n\nSET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";\nSTART TRANSACTION;\nSET time_zone = "+00:00";\n\n${tables
-                        .map((t) => `-- Table structure for \`${t.name}\`\nDROP TABLE IF EXISTS \`${t.name}\`;\nCREATE TABLE \`${t.name}\` (\`id\` bigint(20) unsigned AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB;\n`)
-                        .join('\n')}`;
-                      const blob = new Blob([dummyDump], { type: 'text/sql' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = `${currentDb}_dump_${Date.now()}.sql`;
-                      a.click();
-                      showToast(`Dump file exported.`);
-                    }
-                  }}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Go / Download Export</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 6: IMPORT */}
+          {/* TAB 5: IMPORT */}
           {activeTab === 'import' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
               <div>
                 <h2 className="font-bold text-sm text-slate-900 dark:text-white">Import into Database</h2>
-                <p className="text-xs text-slate-500">Restore or execute SQL dump file into schema <code className="font-mono text-amber-600">{currentDb}</code></p>
+                <p className="text-xs text-slate-500">
+                  Restore SQL statements directly into schema <code className="font-mono text-amber-600">{currentDb}</code>
+                </p>
               </div>
 
-              <div className="max-w-lg space-y-4 text-xs font-semibold">
-                {/* File Upload Box */}
-                <div className="border-2 border-dashed border-slate-300 dark:border-surface-700 rounded-2xl p-6 text-center hover:border-amber-500 transition cursor-pointer bg-slate-50/50 dark:bg-surface-950">
+              <div className="space-y-4 text-xs">
+                {/* File Upload Area */}
+                <div className="border-2 border-dashed border-slate-300 dark:border-surface-700 rounded-2xl p-6 text-center hover:border-amber-500 transition bg-slate-50/50 dark:bg-surface-950">
                   <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                  <p className="font-bold text-slate-900 dark:text-white">Click or drag `.sql`, `.sql.gz`, or `.zip` file here</p>
-                  <p className="text-[11px] text-slate-500 font-normal mt-1">Maximum upload size: 1024 MB</p>
+                  <p className="font-bold text-slate-900 dark:text-white">Select `.sql` or `.txt` dump file</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB</p>
                   <input
                     type="file"
-                    accept=".sql,.gz,.zip"
-                    className="hidden"
+                    accept=".sql,.txt"
                     id="sql-file-input"
+                    className="hidden"
                     onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        showToast(`File selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+                      if (e.target.files && e.target.files[0]) {
+                        setImportFile(e.target.files[0]);
                       }
                     }}
                   />
                   <label
                     htmlFor="sql-file-input"
-                    className="mt-3 inline-block px-4 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200"
+                    className="mt-3 inline-block px-4 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200"
                   >
-                    Browse from Computer
+                    {importFile ? `Selected: ${importFile.name} (${(importFile.size / 1024).toFixed(1)} KB)` : 'Browse File'}
                   </label>
                 </div>
 
-                <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Character set of the file:</label>
-                  <select
-                    value={importEncoding}
-                    onChange={(e) => setImportEncoding(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs"
+                {/* Or paste SQL */}
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Or Paste Raw SQL Statements:</label>
+                  <textarea
+                    rows={6}
+                    value={importSqlText}
+                    onChange={(e) => setImportSqlText(e.target.value)}
+                    placeholder="CREATE TABLE ...; INSERT INTO ...;"
+                    className="w-full p-3 font-mono text-xs bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 rounded-xl focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                {importResult && (
+                  <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 space-y-1">
+                    <p className="font-bold">Import Completed:</p>
+                    <p>Total Statements: {importResult.total}</p>
+                    <p>Executed Successfully: {importResult.successful}</p>
+                    <p>Failed Statements: {importResult.failed}</p>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    onClick={handleStartImport}
+                    disabled={importing}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs disabled:opacity-50"
                   >
-                    <option value="utf8mb4">utf8mb4 (Unicode)</option>
-                    <option value="utf8">utf8</option>
-                    <option value="latin1">latin1</option>
-                  </select>
+                    <Upload className="w-4 h-4" />
+                    <span>{importing ? 'Importing Statements...' : 'Go / Start Import'}</span>
+                  </button>
                 </div>
-
-                <div className="flex items-center gap-2">
-                  <input type="checkbox" id="partial-import" defaultChecked className="rounded text-amber-500 focus:ring-amber-500" />
-                  <label htmlFor="partial-import" className="text-slate-700 dark:text-slate-300 text-xs">
-                    Allow the interruption of an import in case the script detects errors
-                  </label>
-                </div>
-
-                <button
-                  onClick={() => {
-                    showToast(`Import completed successfully into ${currentDb}`);
-                    fetchLiveTables(currentDb);
-                  }}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
-                >
-                  <Upload className="w-4 h-4" />
-                  <span>Go / Start Import</span>
-                </button>
               </div>
             </div>
           )}
 
-          {/* TAB 7: OPERATIONS */}
+          {/* TAB 6: OPERATIONS */}
           {activeTab === 'operations' && (
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
               <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Operations</h2>
-                <p className="text-xs text-slate-500">Manage collation, maintenance, renaming, and lifecycle of <code className="font-mono text-amber-600">{currentDb}</code></p>
+                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database &amp; Table Operations</h2>
+                <p className="text-xs text-slate-500">
+                  Maintenance, collation alteration, table rename, copy, and optimization
+                </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
-                {/* Collation Alteration */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-2">
-                  <h3 className="font-bold text-slate-900 dark:text-white">Collation &amp; Character Set</h3>
-                  <p className="text-slate-500 text-[11px] font-normal">Change default character collation for {currentDb}.</p>
+              {opMaintenanceMsg && (
+                <div className="p-4 rounded-xl bg-slate-900 text-emerald-400 font-mono text-xs whitespace-pre-wrap">
+                  {opMaintenanceMsg}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                {/* Database Collation */}
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
+                  <h3 className="font-bold text-slate-900 dark:text-white">Database Collation</h3>
+                  <p className="text-slate-500 text-[11px]">Alter default character collation for {currentDb}</p>
                   <div className="flex gap-2">
                     <select
-                      value={newDbCollation}
-                      onChange={(e) => setNewDbCollation(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
+                      value={opCollation}
+                      onChange={(e) => setOpCollation(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
                     >
                       <option value="utf8mb4_unicode_ci">utf8mb4_unicode_ci</option>
                       <option value="utf8mb4_general_ci">utf8mb4_general_ci</option>
@@ -2061,14 +2471,9 @@ function PhpMyAdminCore() {
                       <option value="latin1_swedish_ci">latin1_swedish_ci</option>
                     </select>
                     <button
-                      onClick={async () => {
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `ALTER DATABASE \`${currentDb}\` COLLATE ${newDbCollation};` }),
-                        });
-                        showToast(`Collation updated to ${newDbCollation}`);
-                      }}
-                      className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                      onClick={() => handleTableOperation('collation')}
+                      disabled={opRunning}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
                     >
                       Save
                     </button>
@@ -2076,120 +2481,131 @@ function PhpMyAdminCore() {
                 </div>
 
                 {/* Table Maintenance */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-2">
-                  <h3 className="font-bold text-slate-900 dark:text-white">Table Maintenance &amp; Optimization</h3>
-                  <p className="text-slate-500 text-[11px] font-normal">Defragment indices and repair tables.</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={async () => {
-                        showToast(`Optimizing ${tables.length} tables in ${currentDb}...`);
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `OPTIMIZE TABLE ${tables.map((t) => '`' + t.name + '`').join(',') || '`test`'};` }),
-                        });
-                        showToast(`Database optimization finished.`);
-                      }}
-                      className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
-                    >
-                      Optimize Tables
-                    </button>
-                    <button
-                      onClick={async () => {
-                        showToast(`Running integrity check...`);
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `CHECK TABLE ${tables.map((t) => '`' + t.name + '`').join(',') || '`test`'};` }),
-                        });
-                        showToast(`Check finished: OK.`);
-                      }}
-                      className="px-3.5 py-1.5 rounded-lg bg-slate-200 dark:bg-surface-800 hover:bg-slate-300 text-slate-800 dark:text-slate-200 font-bold cursor-pointer"
-                    >
-                      Check &amp; Repair
-                    </button>
+                {selectedTable && (
+                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
+                    <h3 className="font-bold text-slate-900 dark:text-white">Table Maintenance: `{selectedTable}`</h3>
+                    <p className="text-slate-500 text-[11px]">Defragment indexes and verify storage consistency</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => handleTableOperation('optimize')}
+                        disabled={opRunning}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                      >
+                        Optimize Table
+                      </button>
+                      <button
+                        onClick={() => handleTableOperation('check')}
+                        disabled={opRunning}
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer"
+                      >
+                        Check Table
+                      </button>
+                      <button
+                        onClick={() => handleTableOperation('analyze')}
+                        disabled={opRunning}
+                        className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold cursor-pointer"
+                      >
+                        Analyze Table
+                      </button>
+                      <button
+                        onClick={() => handleTableOperation('repair')}
+                        disabled={opRunning}
+                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                      >
+                        Repair Table
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Rename Database */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-2">
-                  <h3 className="font-bold text-slate-900 dark:text-white">Rename Database to:</h3>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="new_db_name"
-                      value={renameDbName}
-                      onChange={(e) => setRenameDbName(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!renameDbName) return;
-                        showToast(`Database renamed to ${renameDbName}`);
-                        handleSwitchDatabase(renameDbName);
-                      }}
-                      className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
-                    >
-                      Go
-                    </button>
+                {/* Table Rename */}
+                {selectedTable && (
+                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
+                    <h3 className="font-bold text-slate-900 dark:text-white">Rename Table to:</h3>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="new_table_name"
+                        value={opRenameTable}
+                        onChange={(e) => setOpRenameTable(e.target.value)}
+                        className="px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
+                      />
+                      <button
+                        onClick={() => handleTableOperation('rename')}
+                        disabled={opRunning || !opRenameTable.trim()}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        Rename
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Copy Database */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-2">
-                  <h3 className="font-bold text-slate-900 dark:text-white">Copy Database to:</h3>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="copied_db_name"
-                      value={copyDbName}
-                      onChange={(e) => setCopyDbName(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!copyDbName) return;
-                        showToast(`Copied ${currentDb} to ${copyDbName}`);
-                        setDatabaseList((prev) => [...prev, copyDbName]);
-                      }}
-                      className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
-                    >
-                      Copy
-                    </button>
+                {/* Table Copy */}
+                {selectedTable && (
+                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
+                    <h3 className="font-bold text-slate-900 dark:text-white">Copy Table to:</h3>
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        placeholder="copy_table_name"
+                        value={opCopyTable}
+                        onChange={(e) => setOpCopyTable(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs"
+                      />
+                      <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                        <input
+                          type="checkbox"
+                          checked={opCopyData}
+                          onChange={(e) => setOpCopyData(e.target.checked)}
+                          className="rounded text-amber-500 focus:ring-amber-500"
+                        />
+                        <span>Copy table data and rows</span>
+                      </label>
+                      <button
+                        onClick={() => handleTableOperation('copy')}
+                        disabled={opRunning || !opCopyTable.trim()}
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        Copy Table
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* Dangerous: Drop Database */}
-                <div className="md:col-span-2 p-4 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/40 dark:bg-rose-950/20 space-y-2">
-                  <h3 className="font-bold text-rose-700 dark:text-rose-400">Drop the Database (DROP)</h3>
-                  <p className="text-rose-600/80 dark:text-rose-400/80 text-[11px] font-normal">
-                    Permanently destroy schema `{currentDb}` and all {tables.length} tables inside.
-                  </p>
-                  <button
-                    onClick={async () => {
-                      if (confirm(`CRITICAL: Drop database \`${currentDb}\` permanently? All records will be erased.`)) {
-                        await apiFetch('/api/v1/databases/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ database: currentDb, query: `DROP DATABASE IF EXISTS \`${currentDb}\`;` }),
-                        });
-                        showToast(`Database \`${currentDb}\` dropped.`);
-                        router.push('/databases');
-                      }
-                    }}
-                    className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-                  >
-                    Drop the database (DROP DATABASE)
-                  </button>
-                </div>
+                {/* Truncate / Drop Table */}
+                {selectedTable && (
+                  <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 space-y-3 md:col-span-2">
+                    <h3 className="font-bold text-rose-800 dark:text-rose-300">Danger Zone: `{selectedTable}`</h3>
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        onClick={() => handleTableOperation('truncate')}
+                        disabled={opRunning}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                      >
+                        Empty Table (TRUNCATE)
+                      </button>
+                      <button
+                        onClick={() => handleTableOperation('drop')}
+                        disabled={opRunning}
+                        className="px-4 py-2 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold cursor-pointer"
+                      >
+                        Delete Table (DROP)
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* TAB 8: ROUTINES (Stored Procedures & Functions) */}
+          {/* TAB 7: ROUTINES */}
           {activeTab === 'routines' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-sm text-slate-900 dark:text-white">Stored Procedures &amp; Functions</h2>
-                  <p className="text-xs text-slate-500">Routines belonging to database <code className="font-mono text-amber-600">{currentDb}</code></p>
+                  <p className="text-xs text-slate-500">Manage database routines for {currentDb}</p>
                 </div>
                 <button
                   onClick={() => setAddRoutineModalOpen(true)}
@@ -2200,68 +2616,77 @@ function PhpMyAdminCore() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
                       <th className="p-2.5">Name</th>
                       <th className="p-2.5">Type</th>
-                      <th className="p-2.5">Parameters</th>
-                      <th className="p-2.5">Return Type</th>
+                      <th className="p-2.5">Data Type</th>
+                      <th className="p-2.5">Security</th>
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
-                    {routines.map((r) => (
-                      <tr key={r.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">{r.name}</td>
-                        <td className="p-2.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.type === 'PROCEDURE' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300' : 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300'}`}>
-                            {r.type}
-                          </span>
-                        </td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{r.parameters || 'none'}</td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{r.return_type || '-'}</td>
-                        <td className="p-2.5 font-sans text-center">
-                          <div className="flex items-center justify-center gap-2 text-xs font-semibold">
-                            <button
-                              onClick={() => {
-                                setSqlQuery(`CALL \`${r.name}\`();`);
-                                setActiveTab('sql');
-                              }}
-                              className="text-emerald-600 hover:underline cursor-pointer"
-                            >
-                              Execute
-                            </button>
-                            <span className="text-slate-300">|</span>
-                            <button
-                              onClick={() => {
-                                if (confirm(`Drop routine \`${r.name}\`?`)) {
-                                  setRoutines((prev) => prev.filter((item) => item.name !== r.name));
-                                  showToast(`Routine \`${r.name}\` dropped.`);
-                                }
-                              }}
-                              className="text-rose-600 hover:underline cursor-pointer"
-                            >
-                              Drop
-                            </button>
-                          </div>
+                    {loadingEntities ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          Loading routines...
                         </td>
                       </tr>
-                    ))}
+                    ) : routines.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          No stored procedures or functions found in `{currentDb}`.
+                        </td>
+                      </tr>
+                    ) : (
+                      routines.map((r) => (
+                        <tr key={r.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{r.name}</td>
+                          <td className="p-2.5">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+                              {r.type}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-slate-500">{r.data_type || '-'}</td>
+                          <td className="p-2.5 text-slate-500">{r.security || 'DEFINER'}</td>
+                          <td className="p-2.5 font-sans text-center">
+                            <div className="flex items-center justify-center gap-2 font-semibold">
+                              <button
+                                onClick={() => {
+                                  setSqlQuery(`CALL \`${r.name}\`();`);
+                                  setActiveTab('sql');
+                                }}
+                                className="text-emerald-600 hover:underline cursor-pointer"
+                              >
+                                Execute
+                              </button>
+                              <span className="text-slate-300">|</span>
+                              <button
+                                onClick={() => handleDropRoutine(r)}
+                                className="text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Drop
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* TAB 9: EVENTS */}
+          {/* TAB 8: EVENTS */}
           {activeTab === 'events' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-sm text-slate-900 dark:text-white">Scheduled MySQL Events</h2>
-                  <p className="text-xs text-slate-500">Cron-like background schedules executed by the MySQL server</p>
+                  <p className="text-xs text-slate-500">Cron-like background schedules executed by MySQL</p>
                 </div>
                 <button
                   onClick={() => setAddEventModalOpen(true)}
@@ -2272,59 +2697,71 @@ function PhpMyAdminCore() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                      <th className="p-2.5">Event Name</th>
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                      <th className="p-2.5">Name</th>
                       <th className="p-2.5">Status</th>
                       <th className="p-2.5">Type</th>
-                      <th className="p-2.5">Schedule</th>
+                      <th className="p-2.5">Interval / Schedule</th>
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
-                    {events.map((ev) => (
-                      <tr key={ev.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">{ev.name}</td>
-                        <td className="p-2.5">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
-                            {ev.status}
-                          </span>
-                        </td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{ev.event_type}</td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{ev.schedule}</td>
-                        <td className="p-2.5 font-sans text-center">
-                          <button
-                            onClick={() => {
-                              if (confirm(`Drop event \`${ev.name}\`?`)) {
-                                setEvents((prev) => prev.filter((item) => item.name !== ev.name));
-                                showToast(`Event \`${ev.name}\` dropped.`);
-                              }
-                            }}
-                            className="text-rose-600 hover:underline font-semibold cursor-pointer"
-                          >
-                            Drop
-                          </button>
+                    {loadingEntities ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          Loading events...
                         </td>
                       </tr>
-                    ))}
+                    ) : events.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          No scheduled events found in `{currentDb}`.
+                        </td>
+                      </tr>
+                    ) : (
+                      events.map((ev) => (
+                        <tr key={ev.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{ev.name}</td>
+                          <td className="p-2.5">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                              {ev.status}
+                            </span>
+                          </td>
+                          <td className="p-2.5">{ev.type}</td>
+                          <td className="p-2.5 text-slate-500">{ev.interval || ev.starts || '-'}</td>
+                          <td className="p-2.5 font-sans text-center">
+                            <button
+                              onClick={() => handleDropEvent(ev.name)}
+                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                            >
+                              Drop
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* TAB 10: TRIGGERS */}
+          {/* TAB 9: TRIGGERS */}
           {activeTab === 'triggers' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Triggers</h2>
-                  <p className="text-xs text-slate-500">Automated hooks triggered before or after INSERT, UPDATE, or DELETE operations</p>
+                  <p className="text-xs text-slate-500">Automated triggers on INSERT, UPDATE, or DELETE</p>
                 </div>
                 <button
-                  onClick={() => setAddTriggerModalOpen(true)}
+                  onClick={() => {
+                    setTriggerTable(selectedTable || (tableDetails[0] ? tableDetails[0].name : ''));
+                    setAddTriggerModalOpen(true);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
@@ -2332,11 +2769,11 @@ function PhpMyAdminCore() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                      <th className="p-2.5">Trigger</th>
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                      <th className="p-2.5">Name</th>
                       <th className="p-2.5">Table</th>
                       <th className="p-2.5">Timing</th>
                       <th className="p-2.5">Event</th>
@@ -2344,115 +2781,131 @@ function PhpMyAdminCore() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
-                    {triggers.map((trg) => (
-                      <tr key={trg.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">{trg.name}</td>
-                        <td className="p-2.5 text-amber-600">{trg.table}</td>
-                        <td className="p-2.5">{trg.timing}</td>
-                        <td className="p-2.5 text-emerald-600">{trg.event}</td>
-                        <td className="p-2.5 font-sans text-center">
-                          <button
-                            onClick={() => {
-                              if (confirm(`Drop trigger \`${trg.name}\`?`)) {
-                                setTriggers((prev) => prev.filter((item) => item.name !== trg.name));
-                                showToast(`Trigger \`${trg.name}\` dropped.`);
-                              }
-                            }}
-                            className="text-rose-600 hover:underline font-semibold cursor-pointer"
-                          >
-                            Drop
-                          </button>
+                    {loadingEntities ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          Loading triggers...
                         </td>
                       </tr>
-                    ))}
+                    ) : triggers.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
+                          No triggers found in `{currentDb}`.
+                        </td>
+                      </tr>
+                    ) : (
+                      triggers.map((trg) => (
+                        <tr key={trg.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{trg.name}</td>
+                          <td className="p-2.5 text-amber-600">{trg.table}</td>
+                          <td className="p-2.5">{trg.timing}</td>
+                          <td className="p-2.5">{trg.event}</td>
+                          <td className="p-2.5 font-sans text-center">
+                            <button
+                              onClick={() => handleDropTrigger(trg.name)}
+                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                            >
+                              Drop
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* TAB 11: DESIGNER (Visual Schema Diagram) */}
-          {activeTab === 'designer' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
+          {/* TAB 10: VIEWS */}
+          {activeTab === 'views' && (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Designer (ER Diagram)</h2>
-                  <p className="text-xs text-slate-500">Visual schema relationships and entity diagram for <code className="font-mono text-amber-600">{currentDb}</code></p>
-                </div>
-                <div className="flex items-center gap-2 text-xs font-bold">
-                  <button
-                    onClick={() => showToast('Designer layout saved')}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-xs"
-                  >
-                    Save Canvas Layout
-                  </button>
+                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Views</h2>
+                  <p className="text-xs text-slate-500">Virtual tables defined by stored queries</p>
                 </div>
               </div>
 
-              {/* Designer Canvas Simulation */}
-              <div className="border border-slate-300 dark:border-surface-700 rounded-2xl bg-slate-50/50 dark:bg-surface-950 p-6 min-h-[500px] overflow-auto relative">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {tables.slice(0, 6).map((t, idx) => (
-                    <div
-                      key={t.name}
-                      className="border border-slate-200 dark:border-surface-700 bg-white dark:bg-surface-900 rounded-xl shadow-sm overflow-hidden text-xs"
-                    >
-                      <div className="p-2.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between font-bold text-slate-900 dark:text-white">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <Table className="w-3.5 h-3.5 text-amber-500" />
-                          <span className="truncate font-mono">{t.name}</span>
-                        </div>
-                        <span className="text-[10px] font-mono text-slate-400">{t.rows} rows</span>
-                      </div>
-                      <div className="p-2.5 space-y-1 font-mono text-[11px] text-slate-600 dark:text-slate-300">
-                        <div className="flex items-center justify-between text-amber-600 font-bold">
-                          <span className="flex items-center gap-1">
-                            <Key className="w-2.5 h-2.5" />
-                            <span>id</span>
-                          </span>
-                          <span className="text-[10px] text-slate-400">bigint(20)</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>title / name</span>
-                          <span className="text-[10px] text-slate-400">varchar(255)</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>status</span>
-                          <span className="text-[10px] text-slate-400">varchar(50)</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>created_at</span>
-                          <span className="text-[10px] text-slate-400">timestamp</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                      <th className="p-2.5">View Name</th>
+                      <th className="p-2.5">Updatable</th>
+                      <th className="p-2.5">Security</th>
+                      <th className="p-2.5 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                    {loadingEntities ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-slate-400 font-sans">
+                          Loading views...
+                        </td>
+                      </tr>
+                    ) : views.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-6 text-center text-slate-400 font-sans">
+                          No views found in `{currentDb}`.
+                        </td>
+                      </tr>
+                    ) : (
+                      views.map((v) => (
+                        <tr key={v.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{v.name}</td>
+                          <td className="p-2.5">{v.is_updatable}</td>
+                          <td className="p-2.5 text-slate-500">{v.security_type}</td>
+                          <td className="p-2.5 font-sans text-center">
+                            <div className="flex items-center justify-center gap-2 font-semibold">
+                              <button
+                                onClick={() => handleOpenTableBrowse(v.name)}
+                                className="text-emerald-600 hover:underline cursor-pointer"
+                              >
+                                Browse
+                              </button>
+                              <span className="text-slate-300">|</span>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`DROP view \`${v.name}\`?`)) return;
+                                  await handleExecuteSql(`DROP VIEW IF EXISTS \`${v.name}\`;`);
+                                }}
+                                className="text-rose-600 hover:underline cursor-pointer"
+                              >
+                                Drop
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* TAB 12: PRIVILEGES */}
+          {/* TAB 11: PRIVILEGES */}
           {activeTab === 'privileges' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-sm text-slate-900 dark:text-white">User Accounts &amp; Privileges</h2>
-                  <p className="text-xs text-slate-500">Database user credentials and grant tables for <code className="font-mono text-amber-600">{currentDb}</code></p>
+                  <p className="text-xs text-slate-500">MySQL user accounts and permissions</p>
                 </div>
                 <button
                   onClick={() => setAddUserModalOpen(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add User Account</span>
+                  <span>Add User</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
                       <th className="p-2.5">User</th>
                       <th className="p-2.5">Host</th>
                       <th className="p-2.5">Type</th>
@@ -2462,249 +2915,79 @@ function PhpMyAdminCore() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
-                    {privileges.map((u) => (
-                      <tr key={u.user + u.host} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                        <td className="p-2.5 font-bold text-slate-900 dark:text-white">{u.user}</td>
-                        <td className="p-2.5 text-slate-500">{u.host}</td>
-                        <td className="p-2.5 text-slate-600 dark:text-slate-400">{u.type}</td>
-                        <td className="p-2.5 text-emerald-600">{u.privileges}</td>
-                        <td className="p-2.5">{u.grant ? 'Yes' : 'No'}</td>
-                        <td className="p-2.5 font-sans text-center">
-                          <button
-                            onClick={() => showToast(`Editing privileges for ${u.user}@${u.host}`)}
-                            className="text-amber-600 hover:underline font-semibold cursor-pointer"
-                          >
-                            Edit Privileges
-                          </button>
+                    {loadingPrivileges ? (
+                      <tr>
+                        <td colSpan={6} className="p-6 text-center text-slate-400 font-sans">
+                          Loading user accounts...
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* BROWSE TABLE TAB (When user clicks 'Browse') */}
-          {activeTab === 'browse' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden space-y-2">
-              <div className="p-3.5 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                    <Table className="w-4 h-4 text-emerald-600" />
-                    <span>Browse: <code className="font-mono">{currentDb}.{selectedTable || 'table'}</code></span>
-                  </h2>
-                  <p className="text-xs text-slate-500">Showing live rows ({queryRowsAffected} total, query took {queryExecutionTime})</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleOpenTableStructure(selectedTable)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs hover:bg-slate-200 cursor-pointer"
-                  >
-                    View Structure
-                  </button>
-                  <button
-                    onClick={() => {
-                      const newRow = { id: (queryResult?.length || 0) + 1, title: 'New inserted row', status: 'active', created_at: '2026-09-18 12:00:00' };
-                      setQueryResult((prev) => (prev ? [newRow, ...prev] : [newRow]));
-                      showToast('New row inserted into view.');
-                    }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-700 cursor-pointer shadow-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Insert Row</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Data Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse font-mono">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold">
-                      <th className="p-2.5 w-16 text-center font-sans">Action</th>
-                      {queryColumns.map((col) => (
-                        <th key={col} className="p-2.5 whitespace-nowrap">
-                          {col}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
-                    {(!queryResult || queryResult.length === 0) ? (
+                    ) : privileges.length === 0 ? (
                       <tr>
-                        <td colSpan={(queryColumns.length || 0) + 1} className="p-6 text-center text-slate-400 font-sans">
-                          Table `{selectedTable}` has 0 rows.
+                        <td colSpan={6} className="p-6 text-center text-slate-400 font-sans">
+                          No users retrieved.
                         </td>
                       </tr>
                     ) : (
-                      queryResult.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 text-center font-sans">
-                            <div className="flex items-center justify-center gap-1.5 text-slate-400">
-                              <button
-                                onClick={() => showToast(`Edit row #${idx + 1}`)}
-                                className="hover:text-amber-500 cursor-pointer p-0.5"
-                                title="Edit row"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                onClick={() => {
-                                  if (confirm(`Delete this row?`)) {
-                                    setQueryResult((prev) => (prev ? prev.filter((_, i) => i !== idx) : []));
-                                    showToast('Row removed from view.');
-                                  }
-                                }}
-                                className="hover:text-rose-500 cursor-pointer p-0.5"
-                                title="Delete row"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                      privileges.map((p, i) => (
+                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{p.user}</td>
+                          <td className="p-2.5 text-amber-600">{p.host}</td>
+                          <td className="p-2.5">{p.type}</td>
+                          <td className="p-2.5 text-slate-500">{p.privileges}</td>
+                          <td className="p-2.5">{p.grant ? 'Yes' : 'No'}</td>
+                          <td className="p-2.5 font-sans text-center">
+                            <button
+                              onClick={async () => {
+                                if (!confirm(`DROP user '${p.user}'@'${p.host}'?`)) return;
+                                await handleExecuteSql(`DROP USER '${p.user}'@'${p.host}';`);
+                                fetchPrivileges(currentDb);
+                              }}
+                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                            >
+                              Drop
+                            </button>
                           </td>
-                          {queryColumns.map((col) => (
-                            <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
-                              {row[col] !== undefined && row[col] !== null ? String(row[col]) : <em className="text-slate-400">NULL</em>}
-                            </td>
-                          ))}
                         </tr>
                       ))
                     )}
                   </tbody>
                 </table>
               </div>
-
-              {queryResult && queryResult.length > 0 && (
-                <div className="p-3 bg-slate-50 dark:bg-surface-950 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs text-slate-500 font-medium">
-                  <span>Showing rows 1 - {queryResult.length}</span>
-                  <div className="flex items-center gap-1 font-mono">
-                    <button className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 cursor-pointer">
-                      &lt;
-                    </button>
-                    <span className="px-2.5 py-1 font-bold text-slate-900 dark:text-white">Page 1</span>
-                    <button className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 cursor-pointer">
-                      &gt;
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </div>
       </div>
 
-      {/* FLOATING QUERY WINDOW MODAL (Triggered by terminal icon in sidebar or top bar) */}
-      {floatingQueryOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl overflow-hidden text-xs">
-            <div className="p-3 bg-slate-900 text-white flex items-center justify-between font-bold">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-emerald-400" />
-                <span>phpMyAdmin Query Window — {currentDb}</span>
-              </div>
-              <button onClick={() => setFloatingQueryOpen(false)} className="hover:text-slate-300 cursor-pointer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <textarea
-                rows={5}
-                value={floatingQuerySql}
-                onChange={(e) => setFloatingQuerySql(e.target.value)}
-                className="w-full p-2.5 font-mono text-xs bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 rounded-xl focus:outline-none focus:border-amber-500"
-              />
-              <div className="flex justify-between items-center">
-                <span className="text-[11px] text-slate-500">Database: <strong className="font-mono text-slate-800 dark:text-slate-200">{currentDb}</strong></span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setFloatingQueryOpen(false)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-bold"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={handleRunFloatingQuery}
-                    disabled={runningFloatingQuery}
-                    className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
-                  >
-                    {runningFloatingQuery ? 'Running...' : 'Execute SQL'}
-                  </button>
-                </div>
-              </div>
-
-              {floatingResult && (
-                <div className="max-h-48 overflow-auto border border-slate-200 dark:border-surface-700 rounded-xl">
-                  <table className="w-full text-left font-mono text-xs">
-                    <thead className="bg-slate-100 dark:bg-surface-800">
-                      <tr>
-                        {floatingColumns.map((c) => (
-                          <th key={c} className="p-2">{c}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {floatingResult.map((r, i) => (
-                        <tr key={i} className="border-t border-slate-100 dark:border-surface-800">
-                          {floatingColumns.map((c) => (
-                            <td key={c} className="p-2">{r[c]}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CREATE DATABASE MODAL */}
+      {/* MODAL 1: CREATE DATABASE */}
       {createDbModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Database</h3>
-            <p className="text-slate-500">Add a new MySQL schema with full privileges</p>
-
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                if (!newDbName.trim()) return;
-                const clean = newDbName.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
-                await apiFetch('/api/v1/databases/query', {
-                  method: 'POST',
-                  body: JSON.stringify({ database: 'mysql', query: `CREATE DATABASE \`${clean}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;` }),
-                });
-                setDatabaseList((prev) => [...prev, clean]);
-                handleSwitchDatabase(clean);
-                setCreateDbModalOpen(false);
-                setNewDbName('');
-                showToast(`Database \`${clean}\` created successfully.`);
-              }}
-              className="space-y-4"
-            >
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create New Database</h3>
+            <p className="text-slate-500">Execute real `CREATE DATABASE` on MySQL engine</p>
+            <form onSubmit={handleCreateDatabase} className="space-y-4">
               <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Database Name</label>
+                <label className="block font-semibold mb-1">Database Name</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. gafargaon, blog_db, portal"
+                  placeholder="new_db_name"
                   value={newDbName}
                   onChange={(e) => setNewDbName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none focus:border-amber-500"
+                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
                 />
               </div>
-
               <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Collation</label>
-                <select className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono">
+                <label className="block font-semibold mb-1">Collation</label>
+                <select
+                  value={newDbCollation}
+                  onChange={(e) => setNewDbCollation(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                >
                   <option value="utf8mb4_unicode_ci">utf8mb4_unicode_ci</option>
                   <option value="utf8mb4_general_ci">utf8mb4_general_ci</option>
                   <option value="utf8_general_ci">utf8_general_ci</option>
                 </select>
               </div>
-
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -2713,11 +2996,8 @@ function PhpMyAdminCore() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                >
-                  Create
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Create Database
                 </button>
               </div>
             </form>
@@ -2725,47 +3005,23 @@ function PhpMyAdminCore() {
         </div>
       )}
 
-      {/* CREATE TABLE MODAL */}
+      {/* MODAL 2: CREATE TABLE */}
       {createTableModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create New Table</h3>
-            <p className="text-slate-500">Add a new table to schema <code className="font-mono text-amber-600">{currentDb}</code></p>
-
-            <form onSubmit={handleCreateTableSubmit} className="space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Table in `{currentDb}`</h3>
+            <form onSubmit={handleCreateTable} className="space-y-4">
               <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Table Name</label>
+                <label className="block font-semibold mb-1">Table Name</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. users, products, orders"
+                  placeholder="table_name"
                   value={newTableName}
                   onChange={(e) => setNewTableName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 font-mono text-slate-900 dark:text-white focus:outline-none focus:border-amber-500"
+                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
                 />
               </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Number of Columns</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={newTableCols}
-                  onChange={(e) => setNewTableCols(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 font-mono text-slate-900 dark:text-white text-center"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Storage Engine</label>
-                <select className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono">
-                  <option value="InnoDB">InnoDB (Transactions, Row-level locking)</option>
-                  <option value="MyISAM">MyISAM</option>
-                  <option value="MEMORY">MEMORY</option>
-                </select>
-              </div>
-
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -2774,10 +3030,7 @@ function PhpMyAdminCore() {
                 >
                   Cancel
                 </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                >
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
                   Create Table
                 </button>
               </div>
@@ -2786,148 +3039,583 @@ function PhpMyAdminCore() {
         </div>
       )}
 
-      {/* ADD ROUTINE MODAL */}
-      {addRoutineModalOpen && (
+      {/* MODAL 3: INSERT ROW */}
+      {insertRowModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Stored Routine</h3>
-            <p className="text-slate-500">Create a Procedure or Function in {currentDb}</p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setRoutines((prev) => [
-                  ...prev,
-                  { name: 'custom_procedure', type: 'PROCEDURE', parameters: 'IN param1 INT', definition: 'SELECT 1;' },
-                ]);
-                setAddRoutineModalOpen(false);
-                showToast('Routine created successfully.');
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <label className="block font-semibold mb-1">Routine Name</label>
-                <input type="text" required placeholder="routine_name" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Routine Type</label>
-                <select className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700">
-                  <option value="PROCEDURE">PROCEDURE</option>
-                  <option value="FUNCTION">FUNCTION</option>
-                </select>
-              </div>
+          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Insert Row into `{selectedTable}`</h3>
+            <form onSubmit={handleSubmitInsertRow} className="space-y-3">
+              {(browseData?.columns || []).map((col) => (
+                <div key={col}>
+                  <label className="block font-mono font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    {col}
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Value or leave blank for NULL/DEFAULT"
+                    value={insertRowValues[col] || ''}
+                    onChange={(e) => setInsertRowValues({ ...insertRowValues, [col]: e.target.value })}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  />
+                </div>
+              ))}
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setAddRoutineModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">Save Routine</button>
+                <button
+                  type="button"
+                  onClick={() => setInsertRowModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Save Row
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ADD EVENT MODAL */}
-      {addEventModalOpen && (
+      {/* MODAL 4: EDIT ROW */}
+      {editRowModalOpen && editRowOriginal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Scheduled Event</h3>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setEvents((prev) => [
-                  ...prev,
-                  { name: 'daily_cleanup', status: 'ENABLED', event_type: 'RECURRING', schedule: 'EVERY 1 DAY', definition: 'SELECT 1;' },
-                ]);
-                setAddEventModalOpen(false);
-                showToast('Scheduled event added.');
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <label className="block font-semibold mb-1">Event Name</label>
-                <input type="text" required placeholder="event_name" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700" />
-              </div>
-              <div>
-                <label className="block font-semibold mb-1">Schedule</label>
-                <input type="text" required defaultValue="EVERY 1 DAY" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700" />
-              </div>
+          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Row in `{selectedTable}`</h3>
+            <form onSubmit={handleSubmitEditRow} className="space-y-3">
+              {(browseData?.columns || []).map((col) => {
+                const isPk = browseData?.primary_key === col;
+                return (
+                  <div key={col}>
+                    <label className="block font-mono font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                      {isPk && <Key className="w-3 h-3 text-amber-500" />}
+                      <span>{col}</span>
+                      {isPk && <span className="text-[10px] text-amber-500 font-sans">(Primary Key)</span>}
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isPk}
+                      value={editRowValues[col] !== undefined ? editRowValues[col] : ''}
+                      onChange={(e) => setEditRowValues({ ...editRowValues, [col]: e.target.value })}
+                      className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono disabled:opacity-60"
+                    />
+                  </div>
+                );
+              })}
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setAddEventModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">Create Event</button>
+                <button
+                  type="button"
+                  onClick={() => setEditRowModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
+                  Update Row
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ADD TRIGGER MODAL */}
-      {addTriggerModalOpen && (
+      {/* MODAL 5: ADD COLUMN */}
+      {addColumnModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Database Trigger</h3>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                setTriggers((prev) => [
-                  ...prev,
-                  { name: 'trg_on_insert', table: selectedTable || 'users', timing: 'AFTER', event: 'INSERT', definition: 'SELECT 1;' },
-                ]);
-                setAddTriggerModalOpen(false);
-                showToast('Trigger added successfully.');
-              }}
-              className="space-y-3"
-            >
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Column to `{selectedTable}`</h3>
+            <form onSubmit={handleAddColumnSubmit} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Trigger Name</label>
-                <input type="text" required placeholder="trg_audit" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700" />
+                <label className="block font-semibold mb-1">Column Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="column_name"
+                  value={newColName}
+                  onChange={(e) => setNewColName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Table</label>
-                <select className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono">
-                  {tables.map((t) => (
-                    <option key={t.name} value={t.name}>{t.name}</option>
+                <label className="block font-semibold mb-1">Type</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="varchar(255), int(11), text..."
+                  value={newColType}
+                  onChange={(e) => setNewColType(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold mb-1">Null</label>
+                  <select
+                    value={newColNull}
+                    onChange={(e) => setNewColNull(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  >
+                    <option value="YES">NULL</option>
+                    <option value="NO">NOT NULL</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Default</label>
+                  <input
+                    type="text"
+                    placeholder="NULL or default value"
+                    value={newColDefault}
+                    onChange={(e) => setNewColDefault(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">After Column</label>
+                <select
+                  value={newColAfter}
+                  onChange={(e) => setNewColAfter(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                >
+                  <option value="">At End of Table</option>
+                  {(tableStructure?.columns || []).map((c) => (
+                    <option key={c.field} value={c.field}>After {c.field}</option>
                   ))}
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setAddTriggerModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">Save Trigger</button>
+                <button
+                  type="button"
+                  onClick={() => setAddColumnModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Add Column
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ADD USER MODAL */}
+      {/* MODAL 6: MODIFY COLUMN */}
+      {modifyColModalOpen && modColTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Modify Column: `{modColTarget.field}`</h3>
+            <form onSubmit={handleModifyColumnSubmit} className="space-y-3">
+              <div>
+                <label className="block font-semibold mb-1">Column Name</label>
+                <input
+                  type="text"
+                  required
+                  value={modColName}
+                  onChange={(e) => setModColName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Type</label>
+                <input
+                  type="text"
+                  required
+                  value={modColType}
+                  onChange={(e) => setModColType(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold mb-1">Null</label>
+                  <select
+                    value={modColNull}
+                    onChange={(e) => setModColNull(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  >
+                    <option value="YES">NULL</option>
+                    <option value="NO">NOT NULL</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Default</label>
+                  <input
+                    type="text"
+                    value={modColDefault}
+                    onChange={(e) => setModColDefault(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setModifyColModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: ADD INDEX */}
+      {addIndexModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Index to `{selectedTable}`</h3>
+            <form onSubmit={handleAddIndexSubmit} className="space-y-3">
+              <div>
+                <label className="block font-semibold mb-1">Index Name</label>
+                <input
+                  type="text"
+                  placeholder="idx_column_name"
+                  value={newIndexName}
+                  onChange={(e) => setNewIndexName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Index Type</label>
+                <select
+                  value={newIndexType}
+                  onChange={(e: any) => setNewIndexType(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                >
+                  <option value="INDEX">INDEX</option>
+                  <option value="UNIQUE">UNIQUE</option>
+                  <option value="PRIMARY">PRIMARY</option>
+                  <option value="FULLTEXT">FULLTEXT</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Columns</label>
+                <div className="max-h-36 overflow-y-auto border border-slate-300 dark:border-surface-700 rounded-xl p-2 space-y-1 bg-slate-50 dark:bg-surface-950 font-mono">
+                  {(tableStructure?.columns || []).map((c) => (
+                    <label key={c.field} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newIndexColumns.includes(c.field)}
+                        onChange={(e) => {
+                          if (e.target.checked) setNewIndexColumns((prev) => [...prev, c.field]);
+                          else setNewIndexColumns((prev) => prev.filter((col) => col !== c.field));
+                        }}
+                        className="rounded text-amber-500 focus:ring-amber-500"
+                      />
+                      <span>{c.field}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAddIndexModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Create Index
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 8: ADD ROUTINE */}
+      {addRoutineModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Stored Routine</h3>
+            <form onSubmit={handleCreateRoutine} className="space-y-3">
+              <div>
+                <label className="block font-semibold mb-1">Routine Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="routine_name"
+                  value={routineName}
+                  onChange={(e) => setRoutineName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold mb-1">Type</label>
+                  <select
+                    value={routineType}
+                    onChange={(e: any) => setRoutineType(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  >
+                    <option value="PROCEDURE">PROCEDURE</option>
+                    <option value="FUNCTION">FUNCTION</option>
+                  </select>
+                </div>
+                {routineType === 'FUNCTION' && (
+                  <div>
+                    <label className="block font-semibold mb-1">Return Type</label>
+                    <input
+                      type="text"
+                      placeholder="INT, VARCHAR(255)..."
+                      value={routineReturns}
+                      onChange={(e) => setRoutineReturns(e.target.value)}
+                      className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Parameters (e.g. IN p_id INT, OUT p_cnt INT)</label>
+                <input
+                  type="text"
+                  placeholder="param list"
+                  value={routineParams}
+                  onChange={(e) => setRoutineParams(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Routine Body (SQL)</label>
+                <textarea
+                  rows={6}
+                  value={routineBody}
+                  onChange={(e) => setRoutineBody(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAddRoutineModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Save Routine
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 9: ADD EVENT */}
+      {addEventModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Scheduled Event</h3>
+            <form onSubmit={handleCreateEvent} className="space-y-3">
+              <div>
+                <label className="block font-semibold mb-1">Event Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="event_name"
+                  value={eventName}
+                  onChange={(e) => setEventName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Schedule Expression</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="EVERY 1 DAY"
+                  value={eventSchedule}
+                  onChange={(e) => setEventSchedule(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">SQL Body</label>
+                <textarea
+                  rows={4}
+                  value={eventBody}
+                  onChange={(e) => setEventBody(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAddEventModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Create Event
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10: ADD TRIGGER */}
+      {addTriggerModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Trigger</h3>
+            <form onSubmit={handleCreateTrigger} className="space-y-3">
+              <div>
+                <label className="block font-semibold mb-1">Trigger Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="trigger_name"
+                  value={triggerName}
+                  onChange={(e) => setTriggerName(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Table</label>
+                <select
+                  value={triggerTable}
+                  onChange={(e) => setTriggerTable(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                >
+                  {tableDetails.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-semibold mb-1">Timing</label>
+                  <select
+                    value={triggerTiming}
+                    onChange={(e: any) => setTriggerTiming(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  >
+                    <option value="BEFORE">BEFORE</option>
+                    <option value="AFTER">AFTER</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Event</label>
+                  <select
+                    value={triggerEvent}
+                    onChange={(e: any) => setTriggerEvent(e.target.value)}
+                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  >
+                    <option value="INSERT">INSERT</option>
+                    <option value="UPDATE">UPDATE</option>
+                    <option value="DELETE">DELETE</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block font-semibold mb-1">Trigger SQL Body</label>
+                <textarea
+                  rows={4}
+                  value={triggerBody}
+                  onChange={(e) => setTriggerBody(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAddTriggerModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Create Trigger
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 11: ADD USER ACCOUNT */}
       {addUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
           <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Database User Account</h3>
+            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Database User</h3>
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                setPrivileges((prev) => [
-                  ...prev,
-                  { user: 'app_user', host: 'localhost', type: 'database', privileges: 'ALL PRIVILEGES', grant: true },
-                ]);
-                setAddUserModalOpen(false);
-                showToast('Database user account created.');
+                if (!newUsername.trim() || !newUserPassword.trim()) return;
+                try {
+                  const q = `CREATE USER '${newUsername.trim()}'@'${newUserHost.trim()}' IDENTIFIED BY '${newUserPassword}'; GRANT ALL PRIVILEGES ON \`${currentDb}\`.* TO '${newUsername.trim()}'@'${newUserHost.trim()}'; FLUSH PRIVILEGES;`;
+                  const res = await apiFetch<any>('/api/v1/databases/query', {
+                    method: 'POST',
+                    body: JSON.stringify({ database: 'mysql', query: q }),
+                  });
+                  if (res && res.data && !res.data.error) {
+                    showToast(`User '${newUsername}' created with privileges on ${currentDb}.`);
+                    setAddUserModalOpen(false);
+                    setNewUsername('');
+                    setNewUserPassword('');
+                    fetchPrivileges(currentDb);
+                  } else {
+                    showToast(res?.data?.error || 'Failed to create database user');
+                  }
+                } catch (err: any) {
+                  showToast(err?.message || 'Create user error');
+                }
               }}
               className="space-y-3"
             >
               <div>
                 <label className="block font-semibold mb-1">Username</label>
-                <input type="text" required placeholder="username" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono" />
+                <input
+                  type="text"
+                  required
+                  placeholder="username"
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
               </div>
               <div>
                 <label className="block font-semibold mb-1">Host</label>
-                <input type="text" defaultValue="localhost" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono" />
+                <input
+                  type="text"
+                  required
+                  value={newUserHost}
+                  onChange={(e) => setNewUserHost(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
               </div>
               <div>
                 <label className="block font-semibold mb-1">Password</label>
-                <input type="password" required placeholder="••••••••" className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono" />
+                <input
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                />
               </div>
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setAddUserModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">Add User</button>
+                <button
+                  type="button"
+                  onClick={() => setAddUserModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                  Create User
+                </button>
               </div>
             </form>
           </div>

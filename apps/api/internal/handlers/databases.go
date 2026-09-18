@@ -404,48 +404,88 @@ func (h *DatabaseHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dump, err := h.dbMgr.DumpDatabase(r.Context(), dbName)
-	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "DUMP_ERROR", "Failed to dump database: "+err.Error(), nil, "")
-		return
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "sql"
 	}
 
-	w.Header().Set("Content-Type", "application/sql")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_dump_%d.sql\"", dbName, time.Now().Unix()))
-	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(dump)))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(dump)
+	var tables []string
+	if tblsStr := r.URL.Query().Get("tables"); tblsStr != "" {
+		for _, t := range strings.Split(tblsStr, ",") {
+			trimmed := strings.TrimSpace(t)
+			if trimmed != "" {
+				tables = append(tables, trimmed)
+			}
+		}
+	}
+
+	timestamp := time.Now().Format("20060102_150405")
+	switch format {
+	case "csv":
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		tableName := "table"
+		if len(tables) > 0 {
+			tableName = tables[0]
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s_%s.csv\"", dbName, tableName, timestamp))
+	case "json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s.json\"", dbName, timestamp))
+	default:
+		w.Header().Set("Content-Type", "application/sql; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s.sql\"", dbName, timestamp))
+	}
+
+	if err := h.dbMgr.StreamExport(r.Context(), dbName, format, tables, true, true, w); err != nil {
+		return
+	}
 }
 
-// Import restores a SQL dump
+// Import restores a SQL dump with buffered parsing and real statement execution metrics
 func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
-	dbID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid database UUID", nil, "")
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		idStr := chi.URLParam(r, "id")
+		if id, err := uuid.Parse(idStr); err == nil {
+			if db, err := h.store.GetDatabaseByID(r.Context(), id); err == nil && db != nil {
+				dbName = db.Name
+			}
+		}
+	}
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_NAME", "Database name is required", nil, "")
 		return
 	}
 
-	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
-	if err != nil {
-		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
-		return
+	var reader io.Reader
+	// Check for multipart form file first
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		err := r.ParseMultipartForm(128 << 20) // 128 MB max memory
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "FORM_ERROR", "Failed to parse form: "+err.Error(), nil, "")
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "FILE_ERROR", "File upload missing 'file' key", nil, "")
+			return
+		}
+		defer file.Close()
+		reader = file
+	} else {
+		reader = r.Body
 	}
 
-	sqlBytes, err := io.ReadAll(r.Body)
+	successCount, failCount, err := h.dbMgr.ImportSQL(r.Context(), dbName, reader)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Failed to read SQL payload", nil, "")
-		return
-	}
-
-	if err := h.dbMgr.ImportDatabase(r.Context(), db.Name, sqlBytes); err != nil {
 		response.Error(w, http.StatusInternalServerError, "IMPORT_ERROR", err.Error(), nil, "")
 		return
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"database": db.Name,
-		"imported": true,
-		"bytes":    len(sqlBytes),
+		"successful": successCount,
+		"failed":     failCount,
+		"total":      successCount + failCount,
 	}, nil)
 }
 
@@ -692,3 +732,367 @@ func (h *DatabaseHandler) GetColumns(w http.ResponseWriter, r *http.Request) {
 		"columns":  cols,
 	}, nil)
 }
+
+// GetTree returns real-time database schema tree with tables, views, procedures, functions, events, triggers
+func (h *DatabaseHandler) GetTree(w http.ResponseWriter, r *http.Request) {
+	tree, err := h.dbMgr.GetDatabaseTree(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "TREE_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, tree, nil)
+}
+
+// GetTableDetails returns live metrics for tables in a database
+func (h *DatabaseHandler) GetTableDetails(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		idStr := chi.URLParam(r, "id")
+		if id, err := uuid.Parse(idStr); err == nil {
+			if db, err := h.store.GetDatabaseByID(r.Context(), id); err == nil && db != nil {
+				dbName = db.Name
+			}
+		}
+	}
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name or ID required", nil, "")
+		return
+	}
+
+	details, err := h.dbMgr.GetLiveTablesDetails(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DETAILS_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"database": dbName,
+		"tables":   details,
+	}, nil)
+}
+
+// GetTableStructure returns columns, indexes, and foreign keys
+func (h *DatabaseHandler) GetTableStructure(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	tableName := strings.TrimSpace(r.URL.Query().Get("table"))
+	if dbName == "" || tableName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database and table name required", nil, "")
+		return
+	}
+
+	structure, err := h.dbMgr.GetLiveTableStructure(r.Context(), dbName, tableName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STRUCTURE_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, structure, nil)
+}
+
+// BrowseRows returns paginated table rows with primary key detection
+func (h *DatabaseHandler) BrowseRows(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	tableName := strings.TrimSpace(r.URL.Query().Get("table"))
+	if dbName == "" || tableName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database and table name required", nil, "")
+		return
+	}
+
+	page := 1
+	if pStr := r.URL.Query().Get("page"); pStr != "" {
+		fmt.Sscanf(pStr, "%d", &page)
+	}
+	limit := 25
+	if lStr := r.URL.Query().Get("limit"); lStr != "" {
+		fmt.Sscanf(lStr, "%d", &limit)
+	}
+
+	sortCol := r.URL.Query().Get("sort_column")
+	sortOrder := r.URL.Query().Get("sort_order")
+	search := r.URL.Query().Get("search")
+
+	res, err := h.dbMgr.BrowseTableRows(r.Context(), database.BrowseRowsParams{
+		Database:   dbName,
+		Table:      tableName,
+		Page:       page,
+		Limit:      limit,
+		SortColumn: sortCol,
+		SortOrder:  sortOrder,
+		SearchWord: search,
+	})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "BROWSE_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, res, nil)
+}
+
+// InsertRow inserts a new row into the specified table
+func (h *DatabaseHandler) InsertRow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database string                 `json:"database"`
+		Table    string                 `json:"table"`
+		Values   map[string]interface{} `json:"values"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, and values required", nil, "")
+		return
+	}
+
+	insertID, err := h.dbMgr.InsertTableRow(r.Context(), req.Database, req.Table, req.Values)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INSERT_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":        true,
+		"last_insert_id": insertID,
+	}, nil)
+}
+
+// UpdateRow updates a row matching the primary key
+func (h *DatabaseHandler) UpdateRow(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database      string                 `json:"database"`
+		Table         string                 `json:"table"`
+		PrimaryKeyCol string                 `json:"primary_key_col"`
+		PrimaryVal    interface{}            `json:"primary_key_val"`
+		Values        map[string]interface{} `json:"values"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.PrimaryKeyCol == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, primary_key_col and values required", nil, "")
+		return
+	}
+
+	affected, err := h.dbMgr.UpdateTableRow(r.Context(), req.Database, req.Table, req.PrimaryKeyCol, req.PrimaryVal, req.Values)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":       true,
+		"rows_affected": affected,
+	}, nil)
+}
+
+// DeleteRows deletes rows matching given primary key values
+func (h *DatabaseHandler) DeleteRows(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database      string        `json:"database"`
+		Table         string        `json:"table"`
+		PrimaryKeyCol string        `json:"primary_key_col"`
+		PrimaryVals   []interface{} `json:"primary_key_vals"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.PrimaryKeyCol == "" || len(req.PrimaryVals) == 0 {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, primary_key_col, and primary_key_vals required", nil, "")
+		return
+	}
+
+	affected, err := h.dbMgr.DeleteTableRows(r.Context(), req.Database, req.Table, req.PrimaryKeyCol, req.PrimaryVals)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DELETE_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":       true,
+		"rows_affected": affected,
+	}, nil)
+}
+
+// ModifyColumn performs ADD, MODIFY, or DROP column
+func (h *DatabaseHandler) ModifyColumn(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database  string `json:"database"`
+		Table     string `json:"table"`
+		Action    string `json:"action"` // add, modify, drop
+		Column    string `json:"column"`
+		NewName   string `json:"new_name"`
+		TypeDef   string `json:"type_def"`
+		Collation string `json:"collation"`
+		Null      string `json:"null"`
+		Default   string `json:"default"`
+		Extra     string `json:"extra"`
+		Comment   string `json:"comment"`
+		AfterCol  string `json:"after_col"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.Action == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, and action required", nil, "")
+		return
+	}
+
+	var err error
+	switch req.Action {
+	case "add":
+		err = h.dbMgr.AddColumn(r.Context(), req.Database, req.Table, req.Column, req.TypeDef, req.Collation, req.Null, req.Default, req.Extra, req.AfterCol)
+	case "modify":
+		err = h.dbMgr.ModifyColumn(r.Context(), req.Database, req.Table, req.Column, req.NewName, req.TypeDef, req.Collation, req.Null, req.Default, req.Extra)
+	case "drop":
+		err = h.dbMgr.DropColumn(r.Context(), req.Database, req.Table, req.Column)
+	default:
+		response.Error(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be add, modify, or drop", nil, "")
+		return
+	}
+
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "COLUMN_OPERATION_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true}, nil)
+}
+
+// ModifyIndex performs ADD or DROP index
+func (h *DatabaseHandler) ModifyIndex(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database  string   `json:"database"`
+		Table     string   `json:"table"`
+		Action    string   `json:"action"` // add, drop
+		IndexName string   `json:"index_name"`
+		IndexType string   `json:"index_type"` // PRIMARY, UNIQUE, INDEX, FULLTEXT
+		Columns   []string `json:"columns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.Action == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, and action required", nil, "")
+		return
+	}
+
+	var err error
+	switch req.Action {
+	case "add":
+		err = h.dbMgr.AddIndex(r.Context(), req.Database, req.Table, req.IndexName, req.IndexType, req.Columns)
+	case "drop":
+		err = h.dbMgr.DropIndex(r.Context(), req.Database, req.Table, req.IndexName)
+	default:
+		response.Error(w, http.StatusBadRequest, "INVALID_ACTION", "Action must be add or drop", nil, "")
+		return
+	}
+
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INDEX_OPERATION_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{"success": true}, nil)
+}
+
+// TableOperations performs rename, copy, truncate, drop, maintenance, or collation update
+func (h *DatabaseHandler) TableOperations(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Database  string `json:"database"`
+		Table     string `json:"table"`
+		Action    string `json:"action"` // rename, copy, truncate, drop, optimize, check, analyze, repair, collation
+		NewName   string `json:"new_name"`
+		CopyData  bool   `json:"copy_data"`
+		Collation string `json:"collation"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Action == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database and action required", nil, "")
+		return
+	}
+
+	var err error
+	var maintMessage string
+	switch req.Action {
+	case "rename":
+		if req.Table == "" || req.NewName == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Table and new_name required", nil, "")
+			return
+		}
+		err = h.dbMgr.RenameTable(r.Context(), req.Database, req.Table, req.NewName)
+	case "copy":
+		if req.Table == "" || req.NewName == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Table and new_name required", nil, "")
+			return
+		}
+		err = h.dbMgr.CopyTable(r.Context(), req.Database, req.Table, req.NewName, req.CopyData)
+	case "truncate":
+		if req.Table == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Table required", nil, "")
+			return
+		}
+		err = h.dbMgr.TruncateTable(r.Context(), req.Database, req.Table)
+	case "drop":
+		if req.Table == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Table required", nil, "")
+			return
+		}
+		err = h.dbMgr.DropTable(r.Context(), req.Database, req.Table)
+	case "optimize", "check", "analyze", "repair":
+		if req.Table == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Table required", nil, "")
+			return
+		}
+		maintMessage, err = h.dbMgr.RunTableMaintenance(r.Context(), req.Database, req.Table, req.Action)
+	case "collation":
+		if req.Collation == "" {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Collation required", nil, "")
+			return
+		}
+		err = h.dbMgr.AlterDatabaseCollation(r.Context(), req.Database, req.Collation)
+	default:
+		response.Error(w, http.StatusBadRequest, "INVALID_ACTION", "Unknown table operation", nil, "")
+		return
+	}
+
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "OPERATION_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":     true,
+		"maintenance": maintMessage,
+	}, nil)
+}
+
+func (h *DatabaseHandler) ListViews(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
+		return
+	}
+	views, err := h.dbMgr.GetViews(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "VIEWS_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, views, nil)
+}
+
+func (h *DatabaseHandler) ListRoutines(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
+		return
+	}
+	routines, err := h.dbMgr.GetRoutines(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "ROUTINES_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, routines, nil)
+}
+
+func (h *DatabaseHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
+		return
+	}
+	events, err := h.dbMgr.GetEvents(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "EVENTS_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, events, nil)
+}
+
+func (h *DatabaseHandler) ListTriggers(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	if dbName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
+		return
+	}
+	triggers, err := h.dbMgr.GetTriggers(r.Context(), dbName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "TRIGGERS_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, triggers, nil)
+}
+
