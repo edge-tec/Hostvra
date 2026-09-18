@@ -137,6 +137,8 @@ export default function WebsitesPage() {
   const [rewriteText, setRewriteText] = useState('location / {\n    try_files $uri $uri/ /index.php?$args;\n}');
 
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [activeDropdownSite, setActiveDropdownSite] = useState<Website | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; openUp?: boolean } | null>(null);
 
   // Existing Hostvra modules
   const [isolationModalSite, setIsolationModalSite] = useState<Website | null>(null);
@@ -208,11 +210,29 @@ export default function WebsitesPage() {
     }
   }, [statsOpen]);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click, scroll, or window resize
   useEffect(() => {
-    const handleDocClick = () => setOpenDropdownId(null);
-    document.addEventListener('click', handleDocClick);
-    return () => document.removeEventListener('click', handleDocClick);
+    const handleDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[data-dropdown-trigger]') || target?.closest?.('[data-dropdown-menu]')) {
+        return;
+      }
+      setOpenDropdownId(null);
+      setActiveDropdownSite(null);
+    };
+    const handleDismiss = () => {
+      setOpenDropdownId(null);
+      setActiveDropdownSite(null);
+    };
+
+    window.addEventListener('click', handleDocClick);
+    window.addEventListener('scroll', handleDismiss, true);
+    window.addEventListener('resize', handleDismiss);
+    return () => {
+      window.removeEventListener('click', handleDocClick);
+      window.removeEventListener('scroll', handleDismiss, true);
+      window.removeEventListener('resize', handleDismiss);
+    };
   }, []);
 
   // Filtered Websites
@@ -1007,115 +1027,36 @@ export default function WebsitesPage() {
                                 Log
                               </button>
 
-                              {/* 3-dots Dropdown Menu */}
-                              <div className="relative inline-block text-left">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setOpenDropdownId(openDropdownId === site.id ? null : site.id);
-                                  }}
-                                  className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
-                                >
-                                  <MoreVertical className="w-3.5 h-3.5" />
-                                </button>
-
-                                {openDropdownId === site.id && (
-                                  <div
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="absolute right-0 top-full mt-1 w-44 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold text-slate-700 dark:text-slate-200 text-left animate-fadeIn"
-                                  >
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openSiteModal(site, 'domain');
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-bold"
-                                    >
-                                      <Settings className="w-3.5 h-3.5" />
-                                      <span>Site modification</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openSiteModal(site, 'rewrite');
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <Code2 className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>Rewrite rules</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openSiteModal(site, 'ssl');
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <Lock className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>SSL Certificate</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openSiteModal(site, 'php');
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>PHP Version</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openSiteModal(site, 'limit');
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <Shield className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>Limit access & WAF</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        openIsolationModal(site);
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400"
-                                    >
-                                      <Cpu className="w-3.5 h-3.5" />
-                                      <span>cgroups v2 limits</span>
-                                    </button>
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        setAppModalSite(site);
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400"
-                                    >
-                                      <Zap className="w-3.5 h-3.5" />
-                                      <span>1-Click App Installer</span>
-                                    </button>
-
-                                    <div className="border-t border-slate-100 dark:border-surface-800 my-1" />
-
-                                    <button
-                                      onClick={() => {
-                                        setOpenDropdownId(null);
-                                        handleDeleteWebsite(site);
-                                      }}
-                                      className="w-full px-3.5 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 flex items-center gap-2 cursor-pointer"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                      <span>Delete</span>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+                              {/* 3-dots Dropdown Menu Trigger */}
+                              <button
+                                data-dropdown-trigger
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (openDropdownId === site.id) {
+                                    setOpenDropdownId(null);
+                                    setActiveDropdownSite(null);
+                                  } else {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    const spaceBelow = window.innerHeight - rect.bottom;
+                                    const openUp = spaceBelow < 320;
+                                    setDropdownPos({
+                                      top: openUp ? rect.top - 6 : rect.bottom + 6,
+                                      left: Math.max(10, rect.right - 192),
+                                      openUp,
+                                    });
+                                    setOpenDropdownId(site.id);
+                                    setActiveDropdownSite(site);
+                                  }
+                                }}
+                                className={`p-1 rounded transition cursor-pointer ${
+                                  openDropdownId === site.id
+                                    ? 'bg-slate-200 dark:bg-surface-700 text-slate-900 dark:text-white'
+                                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800'
+                                }`}
+                                title="More operations"
+                              >
+                                <MoreVertical className="w-3.5 h-3.5 pointer-events-none" />
+                              </button>
                             </div>
                           </td>
                         )}
@@ -2241,6 +2182,129 @@ export default function WebsitesPage() {
             }}
             showToast={showToast}
           />
+        )}
+
+        {/* 17. Floating 3-Dots Action Menu (Fixed-position, never clipped by table overflow) */}
+        {openDropdownId && activeDropdownSite && dropdownPos && (
+          <div
+            data-dropdown-menu
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              ...(dropdownPos.openUp
+                ? { bottom: `${window.innerHeight - dropdownPos.top}px` }
+                : { top: `${dropdownPos.top}px` }),
+              left: `${dropdownPos.left}px`,
+              zIndex: 99999,
+            }}
+            className="w-52 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-2xl py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 text-left animate-fadeIn select-none ring-1 ring-black/5"
+          >
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openSiteModal(s, 'domain');
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-bold"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Site modification</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openSiteModal(s, 'rewrite');
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+            >
+              <Code2 className="w-3.5 h-3.5 text-slate-400" />
+              <span>Rewrite rules</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openSiteModal(s, 'ssl');
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+            >
+              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              <span>SSL Certificate</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openSiteModal(s, 'php');
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+              <span>PHP Version</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openSiteModal(s, 'limit');
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+            >
+              <Shield className="w-3.5 h-3.5 text-slate-400" />
+              <span>Limit access & WAF</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                openIsolationModal(s);
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>cgroups v2 limits</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                setAppModalSite(s);
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400 font-semibold"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>1-Click App Installer</span>
+            </button>
+
+            <div className="border-t border-slate-100 dark:border-surface-800 my-1" />
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                handleDeleteWebsite(s);
+              }}
+              className="w-full px-3.5 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 flex items-center gap-2 cursor-pointer font-semibold"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete</span>
+            </button>
+          </div>
         )}
       </div>
     </DashboardShell>
