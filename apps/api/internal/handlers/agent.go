@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -134,6 +135,13 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rawToken := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if rawToken == "" {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Empty agent bearer token", nil, "")
+		return
+	}
+	tokenHash := auth.HashOpaqueToken(rawToken)
+
 	// Agent communicates with Bearer hv_agt_...
 	var req AgentHeartbeatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -146,6 +154,15 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_SERVER_ID", "Invalid X-Server-ID header", nil, "")
 		return
+	}
+
+	// Validate agent token against registered server record
+	server, err := h.store.GetServerByID(r.Context(), serverID)
+	if err == nil && server != nil {
+		if server.AgentTokenHash != "" && server.AgentTokenHash != tokenHash {
+			response.Error(w, http.StatusUnauthorized, "INVALID_AGENT_TOKEN", "Agent token does not match registered server key", nil, "")
+			return
+		}
 	}
 
 	err = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
@@ -176,6 +193,7 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:       now,
 			LastHeartbeatAt: &now,
 			UptimeSeconds:   req.UptimeSeconds,
+			AgentTokenHash:  tokenHash,
 		}
 		_ = h.store.CreateServer(r.Context(), recoveredServer)
 		_ = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)

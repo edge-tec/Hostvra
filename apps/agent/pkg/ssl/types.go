@@ -43,15 +43,16 @@ type ChallengeInfo struct {
 
 // IssueRequest specifies the parameters for certificate issuance
 type IssueRequest struct {
-	WebsiteID     string   `json:"website_id,omitempty"`
-	PrimaryDomain string   `json:"primary_domain"`
-	SANs          []string `json:"sans,omitempty"`
-	Wildcard      bool     `json:"wildcard"`
-	Provider      string   `json:"provider"` // manual, cloudflare, digitalocean, local, http01
-	Email         string   `json:"email,omitempty"`
-	ProviderToken string   `json:"provider_token,omitempty"`
-	ZoneID        string   `json:"zone_id,omitempty"`
-	Webroot       string   `json:"webroot,omitempty"`
+	WebsiteID               string   `json:"website_id,omitempty"`
+	PrimaryDomain           string   `json:"primary_domain"`
+	SANs                    []string `json:"sans,omitempty"`
+	Wildcard                bool     `json:"wildcard"`
+	Provider                string   `json:"provider"` // manual, cloudflare, digitalocean, local, http01
+	Email                   string   `json:"email,omitempty"`
+	ProviderToken           string   `json:"provider_token,omitempty"`
+	ZoneID                  string   `json:"zone_id,omitempty"`
+	Webroot                 string   `json:"webroot,omitempty"`
+	AllowSelfSignedFallback bool     `json:"allow_self_signed_fallback,omitempty"`
 }
 
 // CustomCertRequest contains user-provided PEM files

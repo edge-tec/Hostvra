@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -225,36 +227,258 @@ func (m *MemoryStore) DeleteHostingAccount(ctx context.Context, id uuid.UUID) er
 // ============================================================================
 
 func (p *PostgresStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID, serverID *uuid.UUID) ([]*HostingAccount, error) {
-	m := NewMemoryStore()
-	return m.ListHostingAccounts(ctx, orgID, serverID)
+	query := `
+		SELECT id, organization_id, user_id, subscription_id, server_id, server_name,
+		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
+		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
+		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
+		       ssl_active, suspended_at, created_at, updated_at
+		FROM hosting_accounts
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1)
+		  AND ($2::uuid IS NULL OR server_id = $2)
+		ORDER BY created_at DESC
+	`
+	var srvIDParam *uuid.UUID
+	if serverID != nil && *serverID != uuid.Nil {
+		srvIDParam = serverID
+	}
+
+	rows, err := p.db.QueryContext(ctx, query, orgID, srvIDParam)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListHostingAccounts(ctx, orgID, serverID)
+	}
+	defer rows.Close()
+
+	var accounts []*HostingAccount
+	for rows.Next() {
+		acc := &HostingAccount{}
+		var srvName, suspReason, ipAddr, phpVer sql.NullString
+		err := rows.Scan(
+			&acc.ID, &acc.OrganizationID, &acc.UserID, &acc.SubscriptionID, &acc.ServerID, &srvName,
+			&acc.Domain, &acc.Username, &acc.DocumentRoot, &acc.PlanID, &acc.PlanName, &acc.Status, &suspReason,
+			&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
+			&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
+			&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if srvName.Valid {
+			acc.ServerName = srvName.String
+		}
+		if suspReason.Valid {
+			acc.SuspendReason = suspReason.String
+		}
+		if ipAddr.Valid {
+			acc.IPAddress = ipAddr.String
+		}
+		if phpVer.Valid {
+			acc.PHPVersion = phpVer.String
+		}
+		accounts = append(accounts, acc)
+	}
+	return accounts, nil
 }
 
 func (p *PostgresStore) GetHostingAccountByID(ctx context.Context, id uuid.UUID) (*HostingAccount, error) {
-	m := NewMemoryStore()
-	return m.GetHostingAccountByID(ctx, id)
+	query := `
+		SELECT id, organization_id, user_id, subscription_id, server_id, server_name,
+		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
+		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
+		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
+		       ssl_active, suspended_at, created_at, updated_at
+		FROM hosting_accounts
+		WHERE id = $1
+	`
+	acc := &HostingAccount{}
+	var srvName, suspReason, ipAddr, phpVer sql.NullString
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&acc.ID, &acc.OrganizationID, &acc.UserID, &acc.SubscriptionID, &acc.ServerID, &srvName,
+		&acc.Domain, &acc.Username, &acc.DocumentRoot, &acc.PlanID, &acc.PlanName, &acc.Status, &suspReason,
+		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
+		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
+		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetHostingAccountByID(ctx, id)
+	}
+	if srvName.Valid {
+		acc.ServerName = srvName.String
+	}
+	if suspReason.Valid {
+		acc.SuspendReason = suspReason.String
+	}
+	if ipAddr.Valid {
+		acc.IPAddress = ipAddr.String
+	}
+	if phpVer.Valid {
+		acc.PHPVersion = phpVer.String
+	}
+	return acc, nil
 }
 
 func (p *PostgresStore) GetHostingAccountByUsername(ctx context.Context, username string) (*HostingAccount, error) {
-	m := NewMemoryStore()
-	return m.GetHostingAccountByUsername(ctx, username)
+	query := `
+		SELECT id, organization_id, user_id, subscription_id, server_id, server_name,
+		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
+		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
+		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
+		       ssl_active, suspended_at, created_at, updated_at
+		FROM hosting_accounts
+		WHERE LOWER(username) = LOWER($1)
+	`
+	acc := &HostingAccount{}
+	var srvName, suspReason, ipAddr, phpVer sql.NullString
+	err := p.db.QueryRowContext(ctx, query, username).Scan(
+		&acc.ID, &acc.OrganizationID, &acc.UserID, &acc.SubscriptionID, &acc.ServerID, &srvName,
+		&acc.Domain, &acc.Username, &acc.DocumentRoot, &acc.PlanID, &acc.PlanName, &acc.Status, &suspReason,
+		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
+		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
+		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetHostingAccountByUsername(ctx, username)
+	}
+	if srvName.Valid {
+		acc.ServerName = srvName.String
+	}
+	if suspReason.Valid {
+		acc.SuspendReason = suspReason.String
+	}
+	if ipAddr.Valid {
+		acc.IPAddress = ipAddr.String
+	}
+	if phpVer.Valid {
+		acc.PHPVersion = phpVer.String
+	}
+	return acc, nil
 }
 
 func (p *PostgresStore) GetHostingAccountByDomain(ctx context.Context, domain string) (*HostingAccount, error) {
-	m := NewMemoryStore()
-	return m.GetHostingAccountByDomain(ctx, domain)
+	query := `
+		SELECT id, organization_id, user_id, subscription_id, server_id, server_name,
+		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
+		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
+		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
+		       ssl_active, suspended_at, created_at, updated_at
+		FROM hosting_accounts
+		WHERE LOWER(domain) = LOWER($1)
+	`
+	acc := &HostingAccount{}
+	var srvName, suspReason, ipAddr, phpVer sql.NullString
+	err := p.db.QueryRowContext(ctx, query, domain).Scan(
+		&acc.ID, &acc.OrganizationID, &acc.UserID, &acc.SubscriptionID, &acc.ServerID, &srvName,
+		&acc.Domain, &acc.Username, &acc.DocumentRoot, &acc.PlanID, &acc.PlanName, &acc.Status, &suspReason,
+		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
+		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
+		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetHostingAccountByDomain(ctx, domain)
+	}
+	if srvName.Valid {
+		acc.ServerName = srvName.String
+	}
+	if suspReason.Valid {
+		acc.SuspendReason = suspReason.String
+	}
+	if ipAddr.Valid {
+		acc.IPAddress = ipAddr.String
+	}
+	if phpVer.Valid {
+		acc.PHPVersion = phpVer.String
+	}
+	return acc, nil
 }
 
 func (p *PostgresStore) CreateHostingAccount(ctx context.Context, acc *HostingAccount) error {
-	m := NewMemoryStore()
-	return m.CreateHostingAccount(ctx, acc)
+	if acc.ID == uuid.Nil {
+		acc.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	acc.CreatedAt = now
+	acc.UpdatedAt = now
+	if acc.Status == "" {
+		acc.Status = AccountStatusActive
+	}
+	if acc.DocumentRoot == "" {
+		acc.DocumentRoot = fmt.Sprintf("/home/%s/public_html", acc.Username)
+	}
+
+	query := `
+		INSERT INTO hosting_accounts (
+			id, organization_id, user_id, subscription_id, server_id, server_name,
+			domain, username, document_root, plan_id, plan_name, status, suspend_reason,
+			disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
+			websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
+			ssl_active, suspended_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		acc.ID, acc.OrganizationID, acc.UserID, acc.SubscriptionID, acc.ServerID, acc.ServerName,
+		acc.Domain, acc.Username, acc.DocumentRoot, acc.PlanID, acc.PlanName, acc.Status, acc.SuspendReason,
+		acc.DiskLimitMB, acc.DiskUsedMB, acc.BandwidthLimitMB, acc.BandwidthUsedMB,
+		acc.WebsitesLimit, acc.DatabasesLimit, acc.MailboxesLimit, acc.IPAddress, acc.PHPVersion,
+		acc.SSLActive, acc.SuspendedAt, acc.CreatedAt, acc.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.CreateHostingAccount(ctx, acc)
+	}
+	return nil
 }
 
 func (p *PostgresStore) UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error {
-	m := NewMemoryStore()
-	return m.UpdateHostingAccount(ctx, acc)
+	acc.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE hosting_accounts SET
+			plan_id = $2, plan_name = $3, status = $4, suspend_reason = $5,
+			disk_limit_mb = $6, disk_used_mb = $7, bandwidth_limit_mb = $8,
+			bandwidth_used_mb = $9, websites_limit = $10, databases_limit = $11,
+			mailboxes_limit = $12, ip_address = $13, php_version = $14,
+			ssl_active = $15, suspended_at = $16, updated_at = $17
+		WHERE id = $1
+	`
+	res, err := p.db.ExecContext(ctx, query,
+		acc.ID, acc.PlanID, acc.PlanName, acc.Status, acc.SuspendReason,
+		acc.DiskLimitMB, acc.DiskUsedMB, acc.BandwidthLimitMB,
+		acc.BandwidthUsedMB, acc.WebsitesLimit, acc.DatabasesLimit,
+		acc.MailboxesLimit, acc.IPAddress, acc.PHPVersion,
+		acc.SSLActive, acc.SuspendedAt, acc.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.UpdateHostingAccount(ctx, acc)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) DeleteHostingAccount(ctx context.Context, id uuid.UUID) error {
-	m := NewMemoryStore()
-	return m.DeleteHostingAccount(ctx, id)
+	res, err := p.db.ExecContext(ctx, `DELETE FROM hosting_accounts WHERE id = $1`, id)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.DeleteHostingAccount(ctx, id)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

@@ -2,12 +2,15 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // ============================================================================
@@ -535,81 +538,457 @@ func (p *PostgresStore) ListPlans(ctx context.Context) ([]*HostingPlan, error) {
 }
 
 func (p *PostgresStore) GetPlanByID(ctx context.Context, id uuid.UUID) (*HostingPlan, error) {
-	m := NewMemoryStore()
-	return m.GetPlanByID(ctx, id)
+	query := `
+		SELECT id, name, slug, description, tier, price_monthly, price_yearly, currency,
+		       disk_space_mb, bandwidth_mb, max_websites, max_databases, max_mailboxes,
+		       max_ftp, dedicated_ip, free_ssl, features, is_active, sort_order, created_at, updated_at
+		FROM hosting_plans
+		WHERE id = $1
+	`
+	plan := &HostingPlan{}
+	var features []string
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&plan.ID, &plan.Name, &plan.Slug, &plan.Description, &plan.Tier,
+		&plan.PriceMonthly, &plan.PriceYearly, &plan.Currency,
+		&plan.DiskSpaceMB, &plan.BandwidthMB, &plan.MaxWebsites, &plan.MaxDatabases,
+		&plan.MaxMailboxes, &plan.MaxFTP, &plan.DedicatedIP, &plan.FreeSSL,
+		pq.Array(&features), &plan.IsActive, &plan.SortOrder, &plan.CreatedAt, &plan.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetPlanByID(ctx, id)
+	}
+	plan.Features = features
+	return plan, nil
 }
 
 func (p *PostgresStore) GetPlanBySlug(ctx context.Context, slug string) (*HostingPlan, error) {
-	m := NewMemoryStore()
-	return m.GetPlanBySlug(ctx, slug)
+	query := `
+		SELECT id, name, slug, description, tier, price_monthly, price_yearly, currency,
+		       disk_space_mb, bandwidth_mb, max_websites, max_databases, max_mailboxes,
+		       max_ftp, dedicated_ip, free_ssl, features, is_active, sort_order, created_at, updated_at
+		FROM hosting_plans
+		WHERE slug = $1
+	`
+	plan := &HostingPlan{}
+	var features []string
+	err := p.db.QueryRowContext(ctx, query, slug).Scan(
+		&plan.ID, &plan.Name, &plan.Slug, &plan.Description, &plan.Tier,
+		&plan.PriceMonthly, &plan.PriceYearly, &plan.Currency,
+		&plan.DiskSpaceMB, &plan.BandwidthMB, &plan.MaxWebsites, &plan.MaxDatabases,
+		&plan.MaxMailboxes, &plan.MaxFTP, &plan.DedicatedIP, &plan.FreeSSL,
+		pq.Array(&features), &plan.IsActive, &plan.SortOrder, &plan.CreatedAt, &plan.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetPlanBySlug(ctx, slug)
+	}
+	plan.Features = features
+	return plan, nil
 }
 
 func (p *PostgresStore) CreatePlan(ctx context.Context, plan *HostingPlan) error {
-	m := NewMemoryStore()
-	return m.CreatePlan(ctx, plan)
+	if plan.ID == uuid.Nil {
+		plan.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	plan.CreatedAt = now
+	plan.UpdatedAt = now
+
+	query := `
+		INSERT INTO hosting_plans (
+			id, name, slug, description, tier, price_monthly, price_yearly, currency,
+			disk_space_mb, bandwidth_mb, max_websites, max_databases, max_mailboxes,
+			max_ftp, dedicated_ip, free_ssl, features, is_active, sort_order, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		plan.ID, plan.Name, plan.Slug, plan.Description, plan.Tier,
+		plan.PriceMonthly, plan.PriceYearly, plan.Currency,
+		plan.DiskSpaceMB, plan.BandwidthMB, plan.MaxWebsites, plan.MaxDatabases,
+		plan.MaxMailboxes, plan.MaxFTP, plan.DedicatedIP, plan.FreeSSL,
+		pq.Array(plan.Features), plan.IsActive, plan.SortOrder, plan.CreatedAt, plan.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.CreatePlan(ctx, plan)
+	}
+	return nil
 }
 
 func (p *PostgresStore) UpdatePlan(ctx context.Context, plan *HostingPlan) error {
-	m := NewMemoryStore()
-	return m.UpdatePlan(ctx, plan)
+	plan.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE hosting_plans SET
+			name = $2, slug = $3, description = $4, tier = $5,
+			price_monthly = $6, price_yearly = $7, currency = $8,
+			disk_space_mb = $9, bandwidth_mb = $10, max_websites = $11,
+			max_databases = $12, max_mailboxes = $13, max_ftp = $14,
+			dedicated_ip = $15, free_ssl = $16, features = $17,
+			is_active = $18, sort_order = $19, updated_at = $20
+		WHERE id = $1
+	`
+	res, err := p.db.ExecContext(ctx, query,
+		plan.ID, plan.Name, plan.Slug, plan.Description, plan.Tier,
+		plan.PriceMonthly, plan.PriceYearly, plan.Currency,
+		plan.DiskSpaceMB, plan.BandwidthMB, plan.MaxWebsites,
+		plan.MaxDatabases, plan.MaxMailboxes, plan.MaxFTP,
+		plan.DedicatedIP, plan.FreeSSL, pq.Array(plan.Features),
+		plan.IsActive, plan.SortOrder, plan.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.UpdatePlan(ctx, plan)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) DeletePlan(ctx context.Context, id uuid.UUID) error {
-	m := NewMemoryStore()
-	return m.DeletePlan(ctx, id)
+	res, err := p.db.ExecContext(ctx, `DELETE FROM hosting_plans WHERE id = $1`, id)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.DeletePlan(ctx, id)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) ListSubscriptions(ctx context.Context, orgID uuid.UUID) ([]*Subscription, error) {
-	m := NewMemoryStore()
-	return m.ListSubscriptions(ctx, orgID)
+	query := `
+		SELECT id, user_id, organization_id, plan_id, plan_name, server_id,
+		       status, billing_cycle, amount, currency, disk_used_mb,
+		       bandwidth_used_mb, websites_count, next_billing_date, auto_renew,
+		       created_at, updated_at
+		FROM subscriptions
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1)
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListSubscriptions(ctx, orgID)
+	}
+	defer rows.Close()
+
+	var subs []*Subscription
+	for rows.Next() {
+		sub := &Subscription{}
+		err := rows.Scan(
+			&sub.ID, &sub.UserID, &sub.OrganizationID, &sub.PlanID, &sub.PlanName, &sub.ServerID,
+			&sub.Status, &sub.BillingCycle, &sub.Amount, &sub.Currency, &sub.DiskUsedMB,
+			&sub.BandwidthUsedMB, &sub.WebsitesCount, &sub.NextBillingDate, &sub.AutoRenew,
+			&sub.CreatedAt, &sub.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	return subs, nil
 }
 
 func (p *PostgresStore) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (*Subscription, error) {
-	m := NewMemoryStore()
-	return m.GetSubscriptionByID(ctx, id)
+	query := `
+		SELECT id, user_id, organization_id, plan_id, plan_name, server_id,
+		       status, billing_cycle, amount, currency, disk_used_mb,
+		       bandwidth_used_mb, websites_count, next_billing_date, auto_renew,
+		       created_at, updated_at
+		FROM subscriptions
+		WHERE id = $1
+	`
+	sub := &Subscription{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&sub.ID, &sub.UserID, &sub.OrganizationID, &sub.PlanID, &sub.PlanName, &sub.ServerID,
+		&sub.Status, &sub.BillingCycle, &sub.Amount, &sub.Currency, &sub.DiskUsedMB,
+		&sub.BandwidthUsedMB, &sub.WebsitesCount, &sub.NextBillingDate, &sub.AutoRenew,
+		&sub.CreatedAt, &sub.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetSubscriptionByID(ctx, id)
+	}
+	return sub, nil
 }
 
 func (p *PostgresStore) CreateSubscription(ctx context.Context, sub *Subscription) error {
-	m := NewMemoryStore()
-	return m.CreateSubscription(ctx, sub)
+	if sub.ID == uuid.Nil {
+		sub.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	sub.CreatedAt = now
+	sub.UpdatedAt = now
+
+	query := `
+		INSERT INTO subscriptions (
+			id, user_id, organization_id, plan_id, plan_name, server_id,
+			status, billing_cycle, amount, currency, disk_used_mb,
+			bandwidth_used_mb, websites_count, next_billing_date, auto_renew,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		sub.ID, sub.UserID, sub.OrganizationID, sub.PlanID, sub.PlanName, sub.ServerID,
+		sub.Status, sub.BillingCycle, sub.Amount, sub.Currency, sub.DiskUsedMB,
+		sub.BandwidthUsedMB, sub.WebsitesCount, sub.NextBillingDate, sub.AutoRenew,
+		sub.CreatedAt, sub.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.CreateSubscription(ctx, sub)
+	}
+	return nil
 }
 
 func (p *PostgresStore) UpdateSubscription(ctx context.Context, sub *Subscription) error {
-	m := NewMemoryStore()
-	return m.UpdateSubscription(ctx, sub)
+	sub.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE subscriptions SET
+			status = $2, billing_cycle = $3, amount = $4, currency = $5,
+			disk_used_mb = $6, bandwidth_used_mb = $7, websites_count = $8,
+			next_billing_date = $9, auto_renew = $10, updated_at = $11
+		WHERE id = $1
+	`
+	res, err := p.db.ExecContext(ctx, query,
+		sub.ID, sub.Status, sub.BillingCycle, sub.Amount, sub.Currency,
+		sub.DiskUsedMB, sub.BandwidthUsedMB, sub.WebsitesCount,
+		sub.NextBillingDate, sub.AutoRenew, sub.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.UpdateSubscription(ctx, sub)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) ListInvoices(ctx context.Context, orgID uuid.UUID) ([]*Invoice, error) {
-	m := NewMemoryStore()
-	return m.ListInvoices(ctx, orgID)
+	query := `
+		SELECT id, invoice_number, user_id, subscription_id, plan_id,
+		       description, subtotal, tax, discount, total, currency,
+		       status, payment_method, transaction_id, due_date, paid_at, created_at
+		FROM invoices
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR user_id = $1)
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListInvoices(ctx, orgID)
+	}
+	defer rows.Close()
+
+	var invoices []*Invoice
+	for rows.Next() {
+		inv := &Invoice{}
+		var pm, tid sql.NullString
+		err := rows.Scan(
+			&inv.ID, &inv.InvoiceNumber, &inv.UserID, &inv.SubscriptionID, &inv.PlanID,
+			&inv.Description, &inv.Subtotal, &inv.Tax, &inv.Discount, &inv.Total, &inv.Currency,
+			&inv.Status, &pm, &tid, &inv.DueDate, &inv.PaidAt, &inv.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if pm.Valid {
+			inv.PaymentMethod = pm.String
+		}
+		if tid.Valid {
+			inv.TransactionID = tid.String
+		}
+		invoices = append(invoices, inv)
+	}
+	return invoices, nil
 }
 
 func (p *PostgresStore) GetInvoiceByID(ctx context.Context, id uuid.UUID) (*Invoice, error) {
-	m := NewMemoryStore()
-	return m.GetInvoiceByID(ctx, id)
+	query := `
+		SELECT id, invoice_number, user_id, subscription_id, plan_id,
+		       description, subtotal, tax, discount, total, currency,
+		       status, payment_method, transaction_id, due_date, paid_at, created_at
+		FROM invoices
+		WHERE id = $1
+	`
+	inv := &Invoice{}
+	var pm, tid sql.NullString
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&inv.ID, &inv.InvoiceNumber, &inv.UserID, &inv.SubscriptionID, &inv.PlanID,
+		&inv.Description, &inv.Subtotal, &inv.Tax, &inv.Discount, &inv.Total, &inv.Currency,
+		&inv.Status, &pm, &tid, &inv.DueDate, &inv.PaidAt, &inv.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetInvoiceByID(ctx, id)
+	}
+	if pm.Valid {
+		inv.PaymentMethod = pm.String
+	}
+	if tid.Valid {
+		inv.TransactionID = tid.String
+	}
+	return inv, nil
 }
 
 func (p *PostgresStore) CreateInvoice(ctx context.Context, inv *Invoice) error {
-	m := NewMemoryStore()
-	return m.CreateInvoice(ctx, inv)
+	if inv.ID == uuid.Nil {
+		inv.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	inv.CreatedAt = now
+
+	query := `
+		INSERT INTO invoices (
+			id, invoice_number, user_id, subscription_id, plan_id,
+			description, subtotal, tax, discount, total, currency,
+			status, payment_method, transaction_id, due_date, paid_at, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		inv.ID, inv.InvoiceNumber, inv.UserID, inv.SubscriptionID, inv.PlanID,
+		inv.Description, inv.Subtotal, inv.Tax, inv.Discount, inv.Total, inv.Currency,
+		inv.Status, inv.PaymentMethod, inv.TransactionID, inv.DueDate, inv.PaidAt, inv.CreatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.CreateInvoice(ctx, inv)
+	}
+	return nil
 }
 
 func (p *PostgresStore) UpdateInvoice(ctx context.Context, inv *Invoice) error {
-	m := NewMemoryStore()
-	return m.UpdateInvoice(ctx, inv)
+	query := `
+		UPDATE invoices SET
+			status = $2, payment_method = $3, transaction_id = $4, paid_at = $5
+		WHERE id = $1
+	`
+	res, err := p.db.ExecContext(ctx, query,
+		inv.ID, inv.Status, inv.PaymentMethod, inv.TransactionID, inv.PaidAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.UpdateInvoice(ctx, inv)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) ListGateways(ctx context.Context) ([]*PaymentGatewayConfig, error) {
-	m := NewMemoryStore()
-	return m.ListGateways(ctx)
+	query := `
+		SELECT gateway, display_name, enabled, test_mode, api_key, secret_key, merchant_id, updated_at
+		FROM payment_gateway_configs
+		ORDER BY gateway ASC
+	`
+	rows, err := p.db.QueryContext(ctx, query)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListGateways(ctx)
+	}
+	defer rows.Close()
+
+	var gateways []*PaymentGatewayConfig
+	for rows.Next() {
+		cfg := &PaymentGatewayConfig{}
+		var apiKey, secKey, merchID sql.NullString
+		err := rows.Scan(
+			&cfg.Gateway, &cfg.DisplayName, &cfg.Enabled, &cfg.TestMode,
+			&apiKey, &secKey, &merchID, &cfg.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if apiKey.Valid {
+			cfg.ApiKey = apiKey.String
+		}
+		if secKey.Valid {
+			cfg.SecretKey = secKey.String
+		}
+		if merchID.Valid {
+			cfg.MerchantID = merchID.String
+		}
+		gateways = append(gateways, cfg)
+	}
+	return gateways, nil
 }
 
 func (p *PostgresStore) GetGatewayConfig(ctx context.Context, gateway string) (*PaymentGatewayConfig, error) {
-	m := NewMemoryStore()
-	return m.GetGatewayConfig(ctx, gateway)
+	query := `
+		SELECT gateway, display_name, enabled, test_mode, api_key, secret_key, merchant_id, updated_at
+		FROM payment_gateway_configs
+		WHERE LOWER(gateway) = LOWER($1)
+	`
+	cfg := &PaymentGatewayConfig{}
+	var apiKey, secKey, merchID sql.NullString
+	err := p.db.QueryRowContext(ctx, query, gateway).Scan(
+		&cfg.Gateway, &cfg.DisplayName, &cfg.Enabled, &cfg.TestMode,
+		&apiKey, &secKey, &merchID, &cfg.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetGatewayConfig(ctx, gateway)
+	}
+	if apiKey.Valid {
+		cfg.ApiKey = apiKey.String
+	}
+	if secKey.Valid {
+		cfg.SecretKey = secKey.String
+	}
+	if merchID.Valid {
+		cfg.MerchantID = merchID.String
+	}
+	return cfg, nil
 }
 
 func (p *PostgresStore) SaveGatewayConfig(ctx context.Context, config *PaymentGatewayConfig) error {
-	m := NewMemoryStore()
-	return m.SaveGatewayConfig(ctx, config)
+	config.Gateway = strings.ToLower(config.Gateway)
+	config.UpdatedAt = time.Now().UTC()
+
+	query := `
+		INSERT INTO payment_gateway_configs (
+			gateway, display_name, enabled, test_mode, api_key, secret_key, merchant_id, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (gateway) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			enabled = EXCLUDED.enabled,
+			test_mode = EXCLUDED.test_mode,
+			api_key = EXCLUDED.api_key,
+			secret_key = EXCLUDED.secret_key,
+			merchant_id = EXCLUDED.merchant_id,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		config.Gateway, config.DisplayName, config.Enabled, config.TestMode,
+		config.ApiKey, config.SecretKey, config.MerchantID, config.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.SaveGatewayConfig(ctx, config)
+	}
+	return nil
 }

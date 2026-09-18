@@ -245,13 +245,21 @@ func (m *SSLManager) IssueWildcardDNS01(ctx context.Context, req IssueRequest) (
 		out, cErr := m.CommandRunner("certbot", args...)
 		if cErr == nil {
 			_ = m.ReloadCmd(ctx)
-			return m.ParseCertificateFile(fullchainPath, privkeyPath)
+			info, err := m.ParseCertificateFile(fullchainPath, privkeyPath)
+			if err == nil {
+				info.IsWildcard = true
+				info.DNSProvider = req.Provider
+				return info, nil
+			}
 		}
-		// If certbot fails (e.g. rate limit, mock DNS, local dev), fallback to internal generator
-		_ = out
+		if !req.AllowSelfSignedFallback && os.Getenv("HOSTVRA_TEST_MODE") != "1" {
+			return nil, fmt.Errorf("certbot wildcard dns challenge failed: %v: %s", cErr, strings.TrimSpace(string(out)))
+		}
+	} else if !req.AllowSelfSignedFallback && os.Getenv("HOSTVRA_TEST_MODE") != "1" {
+		return nil, errors.New("certbot ACME client is not installed on this system; cannot issue Let's Encrypt wildcard certificate")
 	}
 
-	// 2. Pure Go cryptographic generation (works reliably in all environments/offline/tests)
+	// 2. Pure Go cryptographic generation (allowed when AllowSelfSignedFallback or test mode is enabled)
 	if err := generateSelfSignedCert(cleanDomain, allSANs, fullchainPath, privkeyPath); err != nil {
 		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
@@ -313,10 +321,14 @@ func (m *SSLManager) IssueHTTP01(ctx context.Context, req IssueRequest) (*CertIn
 			_ = m.ReloadCmd(ctx)
 			return m.ParseCertificateFile(fullchainPath, privkeyPath)
 		}
-		_ = out
+		if !req.AllowSelfSignedFallback && os.Getenv("HOSTVRA_TEST_MODE") != "1" {
+			return nil, fmt.Errorf("certbot http-01 challenge failed: %v: %s", cErr, strings.TrimSpace(string(out)))
+		}
+	} else if !req.AllowSelfSignedFallback && os.Getenv("HOSTVRA_TEST_MODE") != "1" {
+		return nil, errors.New("certbot ACME client is not installed on this system; cannot issue Let's Encrypt certificate")
 	}
 
-	// Fallback to internal generator
+	// Fallback to internal generator (only if AllowSelfSignedFallback or test mode)
 	allSANs := append([]string{cleanDomain}, req.SANs...)
 	if err := generateSelfSignedCert(cleanDomain, allSANs, fullchainPath, privkeyPath); err != nil {
 		return nil, fmt.Errorf("failed to generate certificate: %w", err)

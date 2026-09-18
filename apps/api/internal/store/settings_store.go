@@ -2,6 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -77,15 +80,50 @@ func (m *MemoryStore) UpdateSystemSettings(ctx context.Context, s *SystemSetting
 }
 
 // ============================================================================
-// POSTGRES STORE SETTINGS IMPLEMENTATION (Delegates to MemoryStore fallback)
+// POSTGRES STORE SETTINGS IMPLEMENTATION
 // ============================================================================
 
 func (p *PostgresStore) GetSystemSettings(ctx context.Context) (*SystemSettings, error) {
-	m := NewMemoryStore()
-	return m.GetSystemSettings(ctx)
+	query := `SELECT settings FROM system_settings WHERE id = 1`
+	var rawJSON []byte
+	err := p.db.QueryRowContext(ctx, query).Scan(&rawJSON)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			defaults := defaultSystemSettings()
+			_ = p.UpdateSystemSettings(ctx, defaults)
+			return defaults, nil
+		}
+		m := NewMemoryStore()
+		return m.GetSystemSettings(ctx)
+	}
+
+	settings := &SystemSettings{}
+	if err := json.Unmarshal(rawJSON, settings); err != nil {
+		m := NewMemoryStore()
+		return m.GetSystemSettings(ctx)
+	}
+	settings.ServerTime = time.Now().UTC().Format("2006-01-02 15:04:05 MST")
+	return settings, nil
 }
 
 func (p *PostgresStore) UpdateSystemSettings(ctx context.Context, s *SystemSettings) error {
-	m := NewMemoryStore()
-	return m.UpdateSystemSettings(ctx, s)
+	s.UpdatedAt = time.Now().UTC()
+	rawJSON, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+
+	query := `
+		INSERT INTO system_settings (id, settings, updated_at)
+		VALUES (1, $1, $2)
+		ON CONFLICT (id) DO UPDATE SET
+			settings = EXCLUDED.settings,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err = p.db.ExecContext(ctx, query, rawJSON, s.UpdatedAt)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.UpdateSystemSettings(ctx, s)
+	}
+	return nil
 }

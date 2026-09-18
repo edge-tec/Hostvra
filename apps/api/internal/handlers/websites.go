@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"hostvra/agent/pkg/isolation"
+	"hostvra/agent/pkg/security"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -584,6 +585,72 @@ func (h *WebsiteHandler) ToggleWAF(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"waf_status": site.WAFStatus,
+	}, nil)
+}
+
+// ScanMalware performs a real-time ClamAV and heuristic webshell scan on website's document root
+func (h *WebsiteHandler) ScanMalware(w http.ResponseWriter, r *http.Request) {
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	targetDir := site.DocumentRoot
+	if targetDir == "" {
+		targetDir = filepath.Join("/var/www", site.PrimaryDomain, "public_html")
+	}
+
+	// Check if directory exists on host; if not, check base domain directory
+	if fi, err := os.Stat(targetDir); err != nil || !fi.IsDir() {
+		altDir := filepath.Join("/var/www", site.PrimaryDomain)
+		if fiAlt, err := os.Stat(altDir); err == nil && fiAlt.IsDir() {
+			targetDir = altDir
+		} else {
+			response.JSON(w, http.StatusOK, map[string]interface{}{
+				"website_id":     site.ID,
+				"domain":         site.PrimaryDomain,
+				"target_path":    targetDir,
+				"scanned_files":  0,
+				"infected_files": 0,
+				"scanner_engine": "heuristic",
+				"threats":        []interface{}{},
+				"message":        "Directory not found on host filesystem or empty",
+				"scanned_at":     time.Now().UTC(),
+			}, nil)
+			return
+		}
+	}
+
+	scanner := security.NewScanner()
+	report, err := scanner.ScanDirectory(r.Context(), targetDir)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "SCAN_FAILED", "Failed to scan website directory: "+err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "website.malware_scan", "website", site.ID.String(), "success", "", map[string]interface{}{
+		"domain":         site.PrimaryDomain,
+		"infected_files": report.InfectedFiles,
+		"scanned_files":  report.ScannedFiles,
+		"engine":         report.ScannerEngine,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"website_id":     site.ID,
+		"domain":         site.PrimaryDomain,
+		"target_path":    report.TargetPath,
+		"scanned_files":  report.ScannedFiles,
+		"infected_files": report.InfectedFiles,
+		"duration_ms":    report.DurationMs,
+		"scanner_engine": report.ScannerEngine,
+		"threats":        report.Threats,
+		"scanned_at":     report.Timestamp,
 	}, nil)
 }
 

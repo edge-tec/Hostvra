@@ -82,9 +82,10 @@ func TestIssueWildcardDNS01(t *testing.T) {
 	)
 
 	req := IssueRequest{
-		PrimaryDomain: "mycorp.com",
-		Wildcard:      true,
-		Provider:      "local",
+		PrimaryDomain:           "mycorp.com",
+		Wildcard:                true,
+		Provider:                "local",
+		AllowSelfSignedFallback: true,
 	}
 
 	cert, err := mgr.IssueWildcardDNS01(context.Background(), req)
@@ -180,11 +181,11 @@ func TestListInstalledCertificatesAndRevoke(t *testing.T) {
 	mgr := NewSSLManager(WithCertDir(tempDir))
 
 	// Issue 2 certificates
-	_, err := mgr.IssueHTTP01(context.Background(), IssueRequest{PrimaryDomain: "site1.com"})
+	_, err := mgr.IssueHTTP01(context.Background(), IssueRequest{PrimaryDomain: "site1.com", AllowSelfSignedFallback: true})
 	if err != nil {
 		t.Fatalf("issue site1 failed: %v", err)
 	}
-	_, err = mgr.IssueWildcardDNS01(context.Background(), IssueRequest{PrimaryDomain: "site2.com", Wildcard: true})
+	_, err = mgr.IssueWildcardDNS01(context.Background(), IssueRequest{PrimaryDomain: "site2.com", Wildcard: true, AllowSelfSignedFallback: true})
 	if err != nil {
 		t.Fatalf("issue site2 failed: %v", err)
 	}
@@ -328,3 +329,40 @@ func TestDigitalOceanProvider_MockHTTP(t *testing.T) {
 		t.Fatalf("DigitalOcean DeleteTXTRecord failed: %v", err)
 	}
 }
+
+func TestIssueHTTP01_MissingCertbotWithoutFallback(t *testing.T) {
+	tempDir := t.TempDir()
+	mgr := NewSSLManager(WithCertDir(tempDir))
+
+	_, err := mgr.IssueHTTP01(context.Background(), IssueRequest{
+		PrimaryDomain:           "prod-site.com",
+		AllowSelfSignedFallback: false,
+	})
+	if err == nil {
+		t.Fatalf("expected error when certbot is missing and AllowSelfSignedFallback is false, got nil")
+	}
+	if !strings.Contains(err.Error(), "certbot ACME client is not installed") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+func TestIssueHTTP01_CertbotFailureReported(t *testing.T) {
+	tempDir := t.TempDir()
+	mgr := NewSSLManager(
+		WithCertDir(tempDir),
+		WithCommandRunner(func(name string, args ...string) ([]byte, error) {
+			return []byte("Error: Challenge failed for domain acme-test.com (HTTP-01)"), os.ErrInvalid
+		}),
+	)
+
+	// Even if certbot binary lookup is tested, simulate when CommandRunner is invoked
+	// Here we test with AllowSelfSignedFallback = false
+	_, err := mgr.IssueHTTP01(context.Background(), IssueRequest{
+		PrimaryDomain:           "acme-test.com",
+		AllowSelfSignedFallback: false,
+	})
+	if err == nil {
+		t.Fatalf("expected error when certbot fails, got nil")
+	}
+}
+

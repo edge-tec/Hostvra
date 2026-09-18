@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/rand"
@@ -386,17 +387,25 @@ func (m *Manager) packDatabase(dbName string, targetArchive string) (string, int
 	tmpSQL := targetArchive + ".sql"
 	defer os.Remove(tmpSQL)
 
-	// Try mysqldump first
 	dumped := false
+	var dumpErrors []string
+
+	// Try mysqldump first
 	if _, err := exec.LookPath("mysqldump"); err == nil {
 		cmd := exec.Command("mysqldump", "--single-transaction", "--quick", dbName)
 		outFile, err := os.Create(tmpSQL)
 		if err == nil {
+			var errBuf bytes.Buffer
 			cmd.Stdout = outFile
+			cmd.Stderr = &errBuf
 			if err := cmd.Run(); err == nil {
 				dumped = true
+			} else {
+				dumpErrors = append(dumpErrors, fmt.Sprintf("mysqldump failed: %v (%s)", err, strings.TrimSpace(errBuf.String())))
 			}
 			outFile.Close()
+		} else {
+			dumpErrors = append(dumpErrors, fmt.Sprintf("failed to create temporary sql file: %v", err))
 		}
 	}
 
@@ -406,21 +415,35 @@ func (m *Manager) packDatabase(dbName string, targetArchive string) (string, int
 			cmd := exec.Command("pg_dump", "-Fc", dbName)
 			outFile, err := os.Create(tmpSQL)
 			if err == nil {
+				var errBuf bytes.Buffer
 				cmd.Stdout = outFile
+				cmd.Stderr = &errBuf
 				if err := cmd.Run(); err == nil {
 					dumped = true
+				} else {
+					dumpErrors = append(dumpErrors, fmt.Sprintf("pg_dump failed: %v (%s)", err, strings.TrimSpace(errBuf.String())))
 				}
 				outFile.Close()
+			} else {
+				dumpErrors = append(dumpErrors, fmt.Sprintf("failed to create temporary sql file: %v", err))
 			}
 		}
 	}
 
-	// If neither tool is installed or command failed, produce standardized database export manifest
+	// If neither tool succeeded:
 	if !dumped {
-		sqlHeader := fmt.Sprintf("-- Hostvra Database Backup Archive\n-- Database: %s\n-- Timestamp: %s\n-- Target: Verified dump snapshot\n",
-			dbName, time.Now().UTC().Format(time.RFC3339))
-		if err := os.WriteFile(tmpSQL, []byte(sqlHeader), 0600); err != nil {
-			return "", 0, 0, fmt.Errorf("failed to create sql dump file: %w", err)
+		if len(dumpErrors) > 0 {
+			return "", 0, 0, fmt.Errorf("database backup failed for %q: %s", dbName, strings.Join(dumpErrors, "; "))
+		}
+		// When no database tools are found, allow synthetic stub ONLY if running in explicit test mode
+		if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+			sqlHeader := fmt.Sprintf("-- Hostvra Database Backup Archive (Test Mode)\n-- Database: %s\n-- Timestamp: %s\n",
+				dbName, time.Now().UTC().Format(time.RFC3339))
+			if err := os.WriteFile(tmpSQL, []byte(sqlHeader), 0600); err != nil {
+				return "", 0, 0, fmt.Errorf("failed to create test sql dump file: %w", err)
+			}
+		} else {
+			return "", 0, 0, fmt.Errorf("database dump failed for %q: neither mysqldump nor pg_dump utility is available on this system", dbName)
 		}
 	}
 
@@ -612,15 +635,45 @@ func (m *Manager) restoreDatabase(archivePath, dbName string) error {
 
 	sqlPath := filepath.Join(stageDir, entries[0].Name())
 
+	restored := false
+	var restoreErrors []string
+
 	// Execute mysql if present
 	if _, err := exec.LookPath("mysql"); err == nil {
 		cmd := exec.Command("mysql", dbName)
 		inFile, err := os.Open(sqlPath)
-		if err == nil {
-			cmd.Stdin = inFile
-			_ = cmd.Run()
-			inFile.Close()
+		if err != nil {
+			return fmt.Errorf("failed to open extracted sql file: %w", err)
 		}
+		defer inFile.Close()
+
+		var errBuf bytes.Buffer
+		cmd.Stdin = inFile
+		cmd.Stderr = &errBuf
+		if err := cmd.Run(); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("mysql restore failed: %v (%s)", err, strings.TrimSpace(errBuf.String())))
+		} else {
+			restored = true
+		}
+	} else if _, err := exec.LookPath("psql"); err == nil {
+		cmd := exec.Command("psql", "-d", dbName, "-f", sqlPath)
+		var errBuf bytes.Buffer
+		cmd.Stderr = &errBuf
+		if err := cmd.Run(); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("psql restore failed: %v (%s)", err, strings.TrimSpace(errBuf.String())))
+		} else {
+			restored = true
+		}
+	}
+
+	if !restored {
+		if len(restoreErrors) > 0 {
+			return fmt.Errorf("database restore failed for %q: %s", dbName, strings.Join(restoreErrors, "; "))
+		}
+		if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+			return nil
+		}
+		return fmt.Errorf("database restore failed for %q: neither mysql nor psql utility is available on this system", dbName)
 	}
 
 	return nil

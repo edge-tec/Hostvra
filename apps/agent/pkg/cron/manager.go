@@ -448,11 +448,38 @@ func (cm *CronManager) saveJobsUnlocked(jobs []CronJob) error {
 	}
 
 	tmpFile := cm.filePath + ".tmp"
-	if err := os.WriteFile(tmpFile, []byte(sb.String()), 0644); err != nil {
+	content := sb.String()
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+
+	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
 		return err
 	}
 
-	return os.Rename(tmpFile, cm.filePath)
+	if err := os.Rename(tmpFile, cm.filePath); err != nil {
+		return err
+	}
+
+	// Ensure system cron daemon picks up the schedule if running on a Linux system with /etc/cron.d
+	cm.syncSystemCrontab(content)
+
+	return nil
+}
+
+func (cm *CronManager) syncSystemCrontab(content string) {
+	const systemCronD = "/etc/cron.d"
+	systemTarget := filepath.Join(systemCronD, "hostvra")
+	if cm.filePath == systemTarget {
+		return
+	}
+
+	if fi, err := os.Stat(systemCronD); err == nil && fi.IsDir() {
+		tmpSystem := filepath.Join(systemCronD, ".hostvra_tmp")
+		if err := os.WriteFile(tmpSystem, []byte(content), 0644); err == nil {
+			_ = os.Rename(tmpSystem, systemTarget)
+		}
+	}
 }
 
 func (cm *CronManager) parseCrontab(content string) []CronJob {

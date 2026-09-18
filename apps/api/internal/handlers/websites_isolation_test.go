@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -72,6 +73,7 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		r.Delete("/{id}", h.Delete)
 		r.Get("/{id}/isolation", h.GetIsolation)
 		r.Put("/{id}/isolation", h.UpdateIsolation)
+		r.Post("/{id}/scan", h.ScanMalware)
 	})
 
 	// 1. Create Website with user isolation
@@ -79,6 +81,7 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		ServerID:      serverID.String(),
 		PrimaryDomain: "superapp.dev",
 		AppType:       "php",
+		DocumentRoot:  filepath.Join(tempDir, "www", "superapp.dev", "public_html"),
 	}
 	body, _ := json.Marshal(createReq)
 	req := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(body))
@@ -157,7 +160,32 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		t.Errorf("expected CPUQuota 200, got %d", updatedIsoRes.Data.Limits.CPUQuota)
 	}
 
-	// 4. Delete Website and verify cleanup
+	// 4. Test Malware Scan Endpoint
+	docRoot := res.Data.DocumentRoot
+	_ = os.MkdirAll(docRoot, 0755)
+	_ = os.WriteFile(filepath.Join(docRoot, "backdoor.php"), []byte("<?php eval(base64_decode('payload')); ?>"), 0644)
+
+	scanReq := httptest.NewRequest("POST", "/api/v1/websites/"+siteID+"/scan", nil)
+	scanRec := httptest.NewRecorder()
+	r.ServeHTTP(scanRec, scanReq)
+
+	if scanRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on scan website, got %d: %s", scanRec.Code, scanRec.Body.String())
+	}
+
+	var scanRes struct {
+		Success bool `json:"success"`
+		Data    struct {
+			InfectedFiles int `json:"infected_files"`
+			ScannedFiles  int `json:"scanned_files"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(scanRec.Body).Decode(&scanRes)
+	if scanRes.Data.InfectedFiles < 1 {
+		t.Errorf("expected at least 1 infected file detected, got %d (body: %s)", scanRes.Data.InfectedFiles, scanRec.Body.String())
+	}
+
+	// 5. Delete Website and verify cleanup
 	req = httptest.NewRequest("DELETE", "/api/v1/websites/"+siteID, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

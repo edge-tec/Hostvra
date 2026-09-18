@@ -34,6 +34,7 @@ func TestSSLHandler_API(t *testing.T) {
 	tempDir := t.TempDir()
 	certDir := filepath.Join(tempDir, "certs")
 	t.Setenv("HOSTVRA_SSL_CERT_DIR", certDir)
+	t.Setenv("HOSTVRA_TEST_MODE", "1")
 
 	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
 	s := store.NewMemoryStore()

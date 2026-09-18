@@ -305,6 +305,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/logs", websiteHandler.GetLogs)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/backup", websiteHandler.Backup)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/waf", websiteHandler.ToggleWAF)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/scan", websiteHandler.ScanMalware)
 
 				// Per-Website PHP Integration
 				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{id}/php", phpHandler.GetWebsitePHP)

@@ -479,13 +479,29 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin")
+
 	var req PayInvoiceRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.PaymentMethod == "" {
-		req.PaymentMethod = "stripe"
-	}
-	if req.TransactionID == "" {
-		req.TransactionID = fmt.Sprintf("txn_%s_%d", req.PaymentMethod, time.Now().Unix())
+
+	if !isAdmin {
+		// Non-admins must provide an external verified transaction ID from the payment gateway
+		cleanTxn := strings.TrimSpace(req.TransactionID)
+		if cleanTxn == "" {
+			response.Error(w, http.StatusPaymentRequired, "PAYMENT_REQUIRED", "Manual payment confirmation requires administrator authorization or a verified gateway transaction ID", nil, "")
+			return
+		}
+		if req.PaymentMethod == "" {
+			req.PaymentMethod = "gateway"
+		}
+	} else {
+		if req.PaymentMethod == "" {
+			req.PaymentMethod = "manual_admin"
+		}
+		if req.TransactionID == "" {
+			req.TransactionID = fmt.Sprintf("txn_admin_%d", time.Now().Unix())
+		}
 	}
 
 	now := time.Now().UTC()
@@ -507,7 +523,25 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.audit.Log(r.Context(), r, "billing.invoice.pay", "invoice", inv.ID.String(), "success", fmt.Sprintf("Paid invoice %s via %s", inv.InvoiceNumber, inv.PaymentMethod), nil)
+	// If linked to domain order, provision it
+	if h.domainSvc != nil {
+		if domainOrder, err := h.store.GetDomainOrderByInvoiceID(r.Context(), inv.ID); err == nil && domainOrder != nil {
+			if domainOrder.PaymentStatus != "paid" {
+				domainOrder.PaymentStatus = "paid"
+				_ = h.store.UpdateDomainOrder(r.Context(), domainOrder)
+				go func(orderID uuid.UUID) {
+					_ = h.domainSvc.Provisioning.ProcessPaidOrder(context.Background(), orderID, nil, nil)
+				}(domainOrder.ID)
+			}
+		}
+	}
+
+	h.audit.Log(r.Context(), r, "billing.invoice.pay", "invoice", inv.ID.String(), "success", fmt.Sprintf("Paid invoice %s via %s (txn: %s)", inv.InvoiceNumber, inv.PaymentMethod, inv.TransactionID), map[string]interface{}{
+		"invoice_number": inv.InvoiceNumber,
+		"payment_method": inv.PaymentMethod,
+		"transaction_id": inv.TransactionID,
+		"is_admin":       isAdmin,
+	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Invoice paid successfully",
@@ -754,11 +788,28 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Activate associated subscription if present
+		// Activate associated subscription if present and advance billing period
 		if inv.SubscriptionID != nil {
 			if sub, err := h.store.GetSubscriptionByID(r.Context(), *inv.SubscriptionID); err == nil {
 				sub.Status = store.SubStatusActive
+				if sub.NextBillingDate.Before(now) {
+					if sub.BillingCycle == "yearly" {
+						sub.NextBillingDate = now.AddDate(1, 0, 0)
+					} else {
+						sub.NextBillingDate = now.AddDate(0, 1, 0)
+					}
+				}
 				_ = h.store.UpdateSubscription(r.Context(), sub)
+
+				// Automatically unsuspend user's hosting accounts if suspended for billing
+				if accounts, err := h.store.ListHostingAccounts(r.Context(), sub.OrganizationID, nil); err == nil {
+					for _, acc := range accounts {
+						if acc.UserID == inv.UserID && acc.Status == "suspended" {
+							acc.Status = "active"
+							_ = h.store.UpdateHostingAccount(r.Context(), acc)
+						}
+					}
+				}
 			}
 		}
 

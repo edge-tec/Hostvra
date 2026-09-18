@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha512"
@@ -10,6 +11,9 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -375,6 +379,8 @@ func (h *EmailHandler) CreateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.syncDovecotUserDB(r.Context(), mb.ServerID)
+
 	h.audit.Log(r.Context(), r, "email.mailbox.create", "email_mailbox", mb.ID.String(), "success", "", map[string]interface{}{
 		"email": mb.Email,
 	})
@@ -436,6 +442,8 @@ func (h *EmailHandler) UpdateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.syncDovecotUserDB(r.Context(), mb.ServerID)
+
 	h.audit.Log(r.Context(), r, "email.mailbox.update", "email_mailbox", mb.ID.String(), "success", "", map[string]interface{}{
 		"email": mb.Email,
 	})
@@ -475,6 +483,8 @@ func (h *EmailHandler) ChangeMailboxPassword(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	h.syncDovecotUserDB(r.Context(), mb.ServerID)
+
 	h.audit.Log(r.Context(), r, "email.mailbox.password_change", "email_mailbox", mb.ID.String(), "success", "", map[string]interface{}{
 		"email": mb.Email,
 	})
@@ -499,6 +509,8 @@ func (h *EmailHandler) DeleteMailbox(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete mailbox", nil, "")
 		return
 	}
+
+	h.syncDovecotUserDB(r.Context(), mb.ServerID)
 
 	h.audit.Log(r.Context(), r, "email.mailbox.delete", "email_mailbox", mb.ID.String(), "success", "", map[string]interface{}{
 		"email": mb.Email,
@@ -632,3 +644,65 @@ func (h *EmailHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, logs, &response.Meta{Total: len(logs)})
 }
+
+// ----------------------------------------------------------------------------
+// DOVECOT USERDB SYNCHRONIZATION
+// ----------------------------------------------------------------------------
+
+func (h *EmailHandler) syncDovecotUserDB(ctx context.Context, serverID uuid.UUID) {
+	usersPath := os.Getenv("DOVECOT_USERS_FILE")
+	if usersPath == "" {
+		usersPath = "/etc/dovecot/users"
+	}
+
+	dir := filepath.Dir(usersPath)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		// Dovecot directory not available on this host environment
+		return
+	}
+
+	mailboxes, err := h.store.ListEmailMailboxesByServer(ctx, serverID)
+	if err != nil {
+		return
+	}
+
+	var sb strings.Builder
+	for _, mb := range mailboxes {
+		if !mb.IsActive || mb.IsSuspended {
+			continue
+		}
+		hash := mb.PasswordHash
+		if !strings.HasPrefix(hash, "{") {
+			hash = "{SHA512-CRYPT}" + hash
+		}
+		quotaMB := mb.QuotaBytes / (1024 * 1024)
+		if quotaMB <= 0 {
+			quotaMB = 5120 // 5GB default
+		}
+		parts := strings.SplitN(mb.Email, "@", 2)
+		domain := ""
+		localPart := mb.LocalPart
+		if len(parts) == 2 {
+			domain = parts[1]
+			if localPart == "" {
+				localPart = parts[0]
+			}
+		}
+		homeDir := fmt.Sprintf("/var/mail/vhosts/%s/%s", domain, localPart)
+
+		// Standard Dovecot passwd-file virtual format:
+		// email:hash:uid:gid::home::userdb_quota_rule=*:storage=Xm
+		sb.WriteString(fmt.Sprintf("%s:%s:5000:5000::%s::userdb_quota_rule=*:storage=%dM\n",
+			mb.Email, hash, homeDir, quotaMB))
+	}
+
+	tmpFile := usersPath + ".tmp"
+	if err := os.WriteFile(tmpFile, []byte(sb.String()), 0640); err == nil {
+		if err := os.Rename(tmpFile, usersPath); err == nil {
+			if _, lookErr := exec.LookPath("doveadm"); lookErr == nil {
+				_ = exec.Command("doveadm", "reload").Run()
+			}
+		}
+	}
+}
+

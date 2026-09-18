@@ -12,6 +12,7 @@ import (
 )
 
 func TestBackupManager_Lifecycle(t *testing.T) {
+	t.Setenv("HOSTVRA_TEST_MODE", "1")
 	tempDir := t.TempDir()
 	backupDir := filepath.Join(tempDir, "backups")
 	configDir := filepath.Join(tempDir, "config")
@@ -368,4 +369,27 @@ func TestS3SigV4Signing(t *testing.T) {
 
 func headersContain(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || filepath.Base(s) != "" && (len(s) > 0))
+}
+
+func TestBackupManager_DatabaseFailureWithoutTools(t *testing.T) {
+	tempDir := t.TempDir()
+	backupDir := filepath.Join(tempDir, "backups")
+	configDir := filepath.Join(tempDir, "config")
+	webRootDir := filepath.Join(tempDir, "www")
+
+	mgr, err := NewManager(backupDir, configDir, webRootDir)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	// Without HOSTVRA_TEST_MODE and without mysqldump/pg_dump, database backup should fail
+	_, err = mgr.CreateBackup(context.Background(), CreateBackupRequest{
+		ServerID:   "srv-prod-01",
+		Type:       "database",
+		TargetName: "prod_db",
+		Storage:    "local",
+	})
+	if err == nil {
+		t.Errorf("expected error when dumping database without mysqldump/pg_dump, got nil")
+	}
 }

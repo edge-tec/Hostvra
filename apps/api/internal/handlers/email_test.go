@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -141,3 +142,62 @@ func TestEmailHandler_FullLifecycle(t *testing.T) {
 		t.Fatalf("DeleteDomain failed with code %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestEmailHandler_DovecotSync(t *testing.T) {
+	tempDir := t.TempDir()
+	usersFile := tempDir + "/users"
+	t.Setenv("DOVECOT_USERS_FILE", usersFile)
+
+	handler, _, _, orgID, userID, serverID := setupEmailTestEnv(t)
+	claims := &auth.Claims{
+		UserID:         userID,
+		OrganizationID: orgID,
+		Role:           "owner",
+	}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
+
+	// Create Domain
+	reqBody, _ := json.Marshal(CreateEmailDomainRequest{
+		ServerID: serverID.String(),
+		Domain:   "sync-test.com",
+	})
+	req := httptest.NewRequest("POST", "/api/v1/email/domains", bytes.NewReader(reqBody)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.CreateDomain(w, req)
+
+	var createdDomainResp struct {
+		Data store.EmailDomain `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &createdDomainResp)
+	domainID := createdDomainResp.Data.ID
+
+	// Create Mailbox
+	mbBody, _ := json.Marshal(CreateMailboxRequest{
+		DomainID:   domainID.String(),
+		LocalPart:  "billing",
+		Password:   "MyPass123!@#",
+		Name:       "Billing Team",
+		QuotaBytes: 1073741824, // 1GB
+	})
+	req = httptest.NewRequest("POST", "/api/v1/email/mailboxes", bytes.NewReader(mbBody)).WithContext(ctx)
+	w = httptest.NewRecorder()
+	handler.CreateMailbox(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateMailbox failed: %s", w.Body.String())
+	}
+
+	// Verify users file was written and contains formatted user entry
+	data, err := os.ReadFile(usersFile)
+	if err != nil {
+		t.Fatalf("expected dovecot users file to exist: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "billing@sync-test.com:") {
+		t.Errorf("expected mailbox billing@sync-test.com in users file, got: %s", content)
+	}
+	if !strings.Contains(content, ":storage=1024M") {
+		t.Errorf("expected quota rule :storage=1024M in users file, got: %s", content)
+	}
+}
+
