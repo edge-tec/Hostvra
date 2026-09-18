@@ -4,8 +4,29 @@
 # ==============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ "${BASH_SOURCE[0]}" != "" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+else
+    SCRIPT_DIR="$(pwd)"
+fi
+
+# Auto-detect Hostvra repository location
+if [[ -d "${SCRIPT_DIR}/.git" ]]; then
+    HOSTVRA_DIR="${SCRIPT_DIR}"
+elif [[ -d "/root/Hostvra/.git" ]]; then
+    HOSTVRA_DIR="/root/Hostvra"
+elif [[ -d "/opt/hostvra/.git" ]]; then
+    HOSTVRA_DIR="/opt/hostvra"
+elif [[ -d "/var/lib/hostvra/repo/.git" ]]; then
+    HOSTVRA_DIR="/var/lib/hostvra/repo"
+else
+    echo "[INFO] Hostvra repository not found locally. Cloning to /root/Hostvra..."
+    git clone https://github.com/edge-tec/Hostvra.git /root/Hostvra
+    HOSTVRA_DIR="/root/Hostvra"
+fi
+
+cd "$HOSTVRA_DIR"
+echo "[INFO] Working directory: $(pwd)"
 
 # 1. Concurrent Update Lock Protection
 LOCK_FILE="/tmp/hostvra-update.lock"
@@ -25,7 +46,7 @@ trap cleanup_lock EXIT
 echo "=== [1/6] Validating Prerequisites & Environment ==="
 
 # Check free disk space (minimum 500MB required)
-FREE_KB=$(df -k "$SCRIPT_DIR" | awk 'NR==2 {print $4}')
+FREE_KB=$(df -k "$HOSTVRA_DIR" | awk 'NR==2 {print $4}')
 if [[ -n "$FREE_KB" ]] && [[ "$FREE_KB" -lt 512000 ]]; then
     echo "[ERROR] Insufficient disk space for update build: ${FREE_KB}KB available, 500MB required." >&2
     exit 1
@@ -39,7 +60,8 @@ for cmd in git go npm curl; do
 done
 
 echo "Pulling latest code from origin/main..."
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 
 # Prepare backup directory for atomic rollback
 TIMESTAMP=$(date +%s)
@@ -96,7 +118,7 @@ if [[ -d "apps/agent" ]]; then
 fi
 
 echo "=== [4/6] Building Next.js Web UI Production Bundle ==="
-(cd apps/web && npm run build)
+(cd apps/web && npm install --no-audit && npm run build)
 # Ensure root .next symlink exists for universal CWD static asset resolution
 ln -sfn apps/web/.next .next 2>/dev/null || true
 
