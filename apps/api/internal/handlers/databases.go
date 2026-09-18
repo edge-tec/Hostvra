@@ -670,3 +670,25 @@ func (h *DatabaseHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, res, nil)
 }
+
+// GetColumns returns column schema metadata for a database table
+func (h *DatabaseHandler) GetColumns(w http.ResponseWriter, r *http.Request) {
+	dbName := strings.TrimSpace(r.URL.Query().Get("db"))
+	tableName := strings.TrimSpace(r.URL.Query().Get("table"))
+	if dbName == "" || tableName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name and table name required", nil, "")
+		return
+	}
+
+	cols, err := h.dbMgr.GetDatabaseColumns(r.Context(), dbName, tableName)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "COLUMNS_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"database": dbName,
+		"table":    tableName,
+		"columns":  cols,
+	}, nil)
+}

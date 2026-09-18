@@ -352,6 +352,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/recycle-bin/{id}/restore", databaseHandler.RestoreRecycleBin)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/batch", databaseHandler.Batch)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/tables", databaseHandler.GetTables)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/columns", databaseHandler.GetColumns)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/query", databaseHandler.ExecuteQuery)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/export", databaseHandler.Export)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/{id}/export", databaseHandler.Export)
