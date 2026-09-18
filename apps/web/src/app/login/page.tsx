@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Flame, Lock, Mail, ArrowRight, AlertCircle, ShieldCheck } from 'lucide-react';
-import { apiFetch, setStoredToken } from '@/lib/api';
+import { apiFetch, setStoredToken, getStoredToken } from '@/lib/api';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +12,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = getStoredToken();
+    if (token) {
+      if (typeof document !== 'undefined' && !document.cookie.includes('hostvra_token=')) {
+        document.cookie = `hostvra_token=${encodeURIComponent(token)}; path=/; max-age=604800; SameSite=Lax`;
+      }
+      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      const redirectParam = urlParams?.get('redirect');
+      const destination = redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//') ? redirectParam : '/dashboard';
+      router.replace(destination);
+    }
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,10 +39,10 @@ export default function LoginPage() {
 
       if (res.success && res.data) {
         setStoredToken(res.data.tokens.access_token);
-        if (typeof document !== 'undefined') {
-          document.cookie = `hostvra_token=${res.data.tokens.access_token}; path=/; max-age=604800; SameSite=Lax`;
-        }
-        window.location.href = '/dashboard';
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const redirectParam = urlParams?.get('redirect');
+        const destination = redirectParam && redirectParam.startsWith('/') && !redirectParam.startsWith('//') ? redirectParam : '/dashboard';
+        window.location.href = destination;
         return;
       } else {
         setError(res.error?.message || 'Invalid email or password');

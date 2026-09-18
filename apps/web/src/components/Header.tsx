@@ -59,6 +59,10 @@ export function Header() {
         if (meRes.success && meRes.data) {
           setUser(meRes.data.user);
           setOrg(meRes.data.org);
+        } else if (!meRes.success) {
+          clearStoredAuth();
+          router.replace('/login');
+          return;
         }
         if (telRes.success && telRes.data?.telemetry?.os_name) {
           const raw = telRes.data.telemetry.os_name;
@@ -69,13 +73,14 @@ export function Header() {
           setHasAlerts(true);
         }
       } catch (e) {
-        // Fallback gracefully
+        clearStoredAuth();
+        router.replace('/login');
       } finally {
         setAuthChecked(true);
       }
     }
     loadMe();
-  }, []);
+  }, [router]);
 
   const triggerMobileSidebar = () => {
     window.dispatchEvent(new CustomEvent('hostvra_toggle_mobile_sidebar'));
@@ -325,15 +330,9 @@ export function Header() {
                 </div>
               )}
             </div>
-          ) : authChecked ? (
-            <button
-              onClick={() => router.push('/login')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm cursor-pointer"
-            >
-              <UserIcon className="w-3.5 h-3.5" />
-              <span>Sign In</span>
-            </button>
-          ) : null}
+          ) : (
+            <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse" />
+          )}
 
         </div>
       </header>
