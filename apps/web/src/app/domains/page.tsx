@@ -255,7 +255,7 @@ export default function DomainsPage() {
 
   const formatPrice = (priceUSD: number) => {
     if (currency === 'BDT') {
-      return `৳ ${(priceUSD * USD_TO_BDT_RATE).toLocaleString()}`;
+      return `BDT ${(priceUSD * USD_TO_BDT_RATE).toLocaleString()}`;
     }
     return `$${priceUSD.toFixed(2)}`;
   };
@@ -935,7 +935,7 @@ export default function DomainsPage() {
                   onClick={() => setCurrency('BDT')}
                   className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${currency === 'BDT' ? 'bg-emerald-600 text-white' : 'text-slate-500'}`}
                 >
-                  BDT (৳)
+                  BDT
                 </button>
               </div>
             </div>

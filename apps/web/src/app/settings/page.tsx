@@ -1196,8 +1196,8 @@ export default function SettingsPage() {
                       className="w-44 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-semibold focus:outline-none"
                     >
                       <option value="English">English</option>
-                      <option value="Bengali">বাংলা (Bengali)</option>
-                      <option value="Chinese">中文 (Chinese)</option>
+                      <option value="Bengali">Bengali</option>
+                      <option value="Chinese">Chinese</option>
                     </select>
                     <button
                       onClick={() => showToast('Feedback form opened')}

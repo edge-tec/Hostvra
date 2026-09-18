@@ -134,7 +134,7 @@ export default function AccountsPage() {
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDomain) {
-      showNotify('error', 'ডোমেইন নাম প্রদান করুন');
+      showNotify('error', 'Please provide a domain name');
       return;
     }
 
@@ -153,15 +153,15 @@ export default function AccountsPage() {
       });
 
       if (res.data) {
-        showNotify('success', `ক্লায়েন্ট অ্যাকাউন্ট ${res.data.username} (${res.data.domain}) সফলভাবে প্রোভিশন হয়েছে!`);
+        showNotify('success', `Client account ${res.data.username} (${res.data.domain}) provisioned successfully!`);
         setCreateModalOpen(false);
         resetForm();
         loadData();
       } else {
-        showNotify('error', res.error?.message || 'অ্যাকাউন্ট তৈরি করতে ব্যর্থ হয়েছে');
+        showNotify('error', res.error?.message || 'Failed to create client account');
       }
     } catch (err: any) {
-      showNotify('error', err.message || 'অ্যাকাউন্ট তৈরি করতে সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে');
+      showNotify('error', err.message || 'Server connection failed while creating account');
     } finally {
       setActionLoading(null);
     }
@@ -183,7 +183,7 @@ export default function AccountsPage() {
         body: JSON.stringify({ reason: suspendReason }),
       });
       if (res.data) {
-        showNotify('success', `${selectedAccount.domain} অ্যাকাউন্টটি সফলভাবে সাসপেন্ড করা হয়েছে।`);
+        showNotify('success', `Account ${selectedAccount.domain} suspended successfully.`);
         setSuspendModalOpen(false);
         loadData();
       }
@@ -195,7 +195,7 @@ export default function AccountsPage() {
             : a
         )
       );
-      showNotify('success', `${selectedAccount.domain} অ্যাকাউন্টটি সাসপেন্ড করা হয়েছে।`);
+      showNotify('success', `Account ${selectedAccount.domain} suspended.`);
       setSuspendModalOpen(false);
     } finally {
       setActionLoading(null);
@@ -210,14 +210,14 @@ export default function AccountsPage() {
         method: 'POST',
       });
       if (res.data) {
-        showNotify('success', `${acc.domain} অ্যাকাউন্টটি পুনরায় সক্রিয় করা হয়েছে!`);
+        showNotify('success', `Account ${acc.domain} reactivated successfully!`);
         loadData();
       }
     } catch {
       setAccounts(prev =>
         prev.map(a => (a.id === acc.id ? { ...a, status: 'active', suspend_reason: undefined, suspended_at: undefined } : a))
       );
-      showNotify('success', `${acc.domain} অ্যাকাউন্ট পুনরায় সক্রিয় করা হয়েছে!`);
+      showNotify('success', `Account ${acc.domain} reactivated!`);
     } finally {
       setActionLoading(null);
     }
@@ -233,7 +233,7 @@ export default function AccountsPage() {
         body: JSON.stringify({ plan_id: targetPlanId }),
       });
       if (res.data) {
-        showNotify('success', `${selectedAccount.domain} এর হোস্টিং প্যাকেজ সফলভাবে আপডেট করা হয়েছে!`);
+        showNotify('success', `Hosting package for ${selectedAccount.domain} updated successfully!`);
         setChangePlanModalOpen(false);
         loadData();
       }
@@ -255,7 +255,7 @@ export default function AccountsPage() {
           )
         );
       }
-      showNotify('success', 'হোস্টিং প্যাকেজ আপডেট করা হয়েছে।');
+      showNotify('success', 'Hosting package updated successfully.');
       setChangePlanModalOpen(false);
     } finally {
       setActionLoading(null);
@@ -290,17 +290,17 @@ export default function AccountsPage() {
 
   // Terminate / Delete Account
   const handleDeleteAccount = async (acc: HostingAccount) => {
-    if (!confirm(`সতর্কতা: আপনি কি নিশ্চিত যে "${acc.domain}" (${acc.username}) অ্যাকাউন্টটি এবং এর সকল ফাইল/ডাটাবেস চিরতরে মুছে ফেলতে চান?`)) {
+    if (!confirm(`Warning: Are you sure you want to permanently delete account "${acc.domain}" (${acc.username}) and all its files and databases?`)) {
       return;
     }
     setActionLoading(`del-${acc.id}`);
     try {
       await apiFetch(`/api/v1/accounts/${acc.id}`, { method: 'DELETE' });
-      showNotify('success', `অ্যাকাউন্ট ${acc.username} টার্মিনেট করা হয়েছে।`);
+      showNotify('success', `Account ${acc.username} terminated successfully.`);
       loadData();
     } catch {
       setAccounts(prev => prev.filter(a => a.id !== acc.id));
-      showNotify('success', `অ্যাকাউন্ট ${acc.username} টার্মিনেট করা হয়েছে।`);
+      showNotify('success', `Account ${acc.username} terminated successfully.`);
     } finally {
       setActionLoading(null);
     }
@@ -359,10 +359,10 @@ export default function AccountsPage() {
                 <span>WHM Multi-Tenancy & Client Hosting Suite</span>
               </div>
               <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-                ক্লায়েন্ট হোস্টিং অ্যাকাউন্টস (WHM)
+                Client Hosting Accounts (WHM)
               </h1>
               <p className="text-purple-100 text-sm sm:text-base max-w-2xl leading-relaxed">
-                আইসোলেটেড লিনাক্স সিস্টেম ইউজার, ডেডিকেটেড DocumentRoot, রিয়েল-টাইম ডিস্ক কোটা ও ১-ক্লিক ক্লায়েন্ট প্যানেল লগইন নিয়ন্ত্রণ।
+                Isolated Linux system users, dedicated DocumentRoot, real-time disk quotas, and 1-click client panel login control.
               </p>
             </div>
 
@@ -370,19 +370,19 @@ export default function AccountsPage() {
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/10 backdrop-blur-md p-2 sm:p-3 rounded-2xl border border-white/20">
               <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
                 <div className="text-2xl font-black">{accounts.length}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">মোট অ্যাকাউন্ট</div>
+                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Total Accounts</div>
               </div>
               <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
                 <div className="text-2xl font-black text-emerald-300">{activeCount}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">সক্রিয়</div>
+                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Active</div>
               </div>
               <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
                 <div className="text-2xl font-black text-rose-300">{suspendedCount}</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">সাসপেন্ডেড</div>
+                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Suspended</div>
               </div>
               <div className="px-4 py-2 text-center">
                 <div className="text-2xl font-black text-amber-300">{totalDiskUsedGB} GB</div>
-                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">স্টোরেজ দখল</div>
+                <div className="text-[11px] text-purple-100 uppercase tracking-wider font-medium">Storage Used</div>
               </div>
             </div>
           </div>
@@ -401,7 +401,7 @@ export default function AccountsPage() {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="ডোমেইন বা ইউজারনেম খুঁজুন..."
+                placeholder="Search domain or username..."
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
@@ -416,7 +416,7 @@ export default function AccountsPage() {
                     : 'text-slate-500'
                 }`}
               >
-                সকল ({accounts.length})
+                All ({accounts.length})
               </button>
               <button
                 onClick={() => setStatusFilter('active')}
@@ -426,7 +426,7 @@ export default function AccountsPage() {
                     : 'text-slate-500'
                 }`}
               >
-                সক্রিয় ({activeCount})
+                Active ({activeCount})
               </button>
               <button
                 onClick={() => setStatusFilter('suspended')}
@@ -436,7 +436,7 @@ export default function AccountsPage() {
                     : 'text-slate-500'
                 }`}
               >
-                সাসপেন্ডেড ({suspendedCount})
+                Suspended ({suspendedCount})
               </button>
             </div>
           </div>
@@ -446,7 +446,7 @@ export default function AccountsPage() {
               onClick={loadData}
               disabled={loading}
               className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white shadow-sm"
-              title="রিফ্রেশ করুন"
+              title="Refresh"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-purple-500' : ''}`} />
             </button>
@@ -459,7 +459,7 @@ export default function AccountsPage() {
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-purple-500/20 transition-all"
             >
               <Plus className="w-4 h-4" />
-              <span>নতুন ক্লায়েন্ট অ্যাকাউন্ট</span>
+              <span>New Client Account</span>
             </button>
           </div>
         </div>
@@ -470,20 +470,20 @@ export default function AccountsPage() {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                 <tr>
-                  <th className="py-4 px-6">ডোমেইন ও ইউজারনেম</th>
-                  <th className="py-4 px-6">হোস্টিং প্যাকেজ</th>
-                  <th className="py-4 px-6">স্টোরেজ কোটা</th>
-                  <th className="py-4 px-6">ব্যান্ডউইথ কোটা</th>
-                  <th className="py-4 px-6">আইপি ও নোড</th>
-                  <th className="py-4 px-6">স্ট্যাটাস</th>
-                  <th className="py-4 px-6 text-right">অ্যাকশন</th>
+                  <th className="py-4 px-6">Domain & Username</th>
+                  <th className="py-4 px-6">Hosting Package</th>
+                  <th className="py-4 px-6">Storage Quota</th>
+                  <th className="py-4 px-6">Bandwidth Quota</th>
+                  <th className="py-4 px-6">IP & Node</th>
+                  <th className="py-4 px-6">Status</th>
+                  <th className="py-4 px-6 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                 {filteredAccounts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="text-center py-16 text-slate-400">
-                      কোন ক্লায়েন্ট অ্যাকাউন্ট পাওয়া যায়নি।
+                      No client accounts found.
                     </td>
                   </tr>
                 ) : (
@@ -516,7 +516,7 @@ export default function AccountsPage() {
                             <button
                               onClick={() => handleCopy(acc.username, acc.id)}
                               className="hover:text-slate-600 dark:hover:text-slate-200"
-                              title="ইউজারনেম কপি করুন"
+                              title="Copy username"
                             >
                               {copiedUser === acc.id ? (
                                 <Check className="w-3 h-3 text-emerald-500" />
@@ -590,12 +590,12 @@ export default function AccountsPage() {
                             {acc.status === 'active' ? (
                               <>
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                <span>সক্রিয়</span>
+                                <span>Active</span>
                               </>
                             ) : (
                               <>
                                 <AlertCircle className="w-3 h-3" />
-                                <span>সাসপেন্ডেড</span>
+                                <span>Suspended</span>
                               </>
                             )}
                           </span>
@@ -614,10 +614,10 @@ export default function AccountsPage() {
                               onClick={() => handleLoginAsClient(acc)}
                               disabled={actionLoading === `login-${acc.id}`}
                               className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 transition-colors flex items-center gap-1"
-                              title="ক্লায়েন্ট সিপ্যানেলে ১-ক্লিক লগইন"
+                              title="1-Click Client Panel Login"
                             >
                               <LogIn className="w-3.5 h-3.5" />
-                              <span className="hidden xl:inline">লগইন</span>
+                              <span className="hidden xl:inline">Login</span>
                             </button>
 
                             {/* Suspend / Unsuspend */}
@@ -629,9 +629,9 @@ export default function AccountsPage() {
                                   setSuspendModalOpen(true);
                                 }}
                                 className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-600 dark:bg-slate-800 dark:hover:bg-rose-950/50 transition-colors"
-                                title="অ্যাকাউন্ট সাসপেন্ড করুন"
+                                title="Suspend account"
                               >
-                                সাসপেন্ড
+                                Suspend
                               </button>
                             ) : (
                               <button
@@ -639,7 +639,7 @@ export default function AccountsPage() {
                                 disabled={actionLoading === `unsuspend-${acc.id}`}
                                 className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
                               >
-                                সচল করুন
+                                Unsuspend
                               </button>
                             )}
 
@@ -651,7 +651,7 @@ export default function AccountsPage() {
                                 setChangePlanModalOpen(true);
                               }}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                              title="প্যাকেজ / কোটা পরিবর্তন"
+                              title="Change Package / Quota"
                             >
                               <Sliders className="w-3.5 h-3.5" />
                             </button>
@@ -660,7 +660,7 @@ export default function AccountsPage() {
                             <button
                               onClick={() => handleDeleteAccount(acc)}
                               className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
-                              title="টার্মিনেট করুন"
+                              title="Terminate account"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -686,9 +686,9 @@ export default function AccountsPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      নতুন ক্লায়েন্ট অ্যাকাউন্ট প্রোভিশনিং
+                      Provision New Client Account
                     </h3>
-                    <p className="text-xs text-slate-400">WHM স্টাইলে আইসোলেটেড লিনাক্স অ্যাকাউন্ট তৈরি করুন</p>
+                    <p className="text-xs text-slate-400">Create WHM-style isolated Linux hosting account</p>
                   </div>
                 </div>
 
@@ -704,7 +704,7 @@ export default function AccountsPage() {
                 {/* Domain Name */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 dark:text-slate-300">
-                    প্রাইমারি ডোমেইন নাম *
+                    Primary Domain Name *
                   </label>
                   <input
                     type="text"
@@ -719,7 +719,7 @@ export default function AccountsPage() {
                 {/* System Username */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700 dark:text-slate-300">
-                    লিনাক্স সিস্টেম ইউজারনেম *
+                    Linux System Username *
                   </label>
                   <input
                     type="text"
@@ -734,13 +734,13 @@ export default function AccountsPage() {
                 {/* Password Generator */}
                 <div className="space-y-1">
                   <div className="flex justify-between items-center">
-                    <label className="font-bold text-slate-700 dark:text-slate-300">পাসওয়ার্ড *</label>
+                    <label className="font-bold text-slate-700 dark:text-slate-300">Password *</label>
                     <button
                       type="button"
                       onClick={generatePassword}
                       className="text-[11px] font-bold text-purple-600 hover:underline"
                     >
-                      পাসওয়ার্ড জেনারেট করুন
+                      Generate Password
                     </button>
                   </div>
                   <input
@@ -755,7 +755,7 @@ export default function AccountsPage() {
 
                 {/* Plan Selection */}
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">হোস্টিং প্যাকেজ</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Hosting Package</label>
                   <select
                     value={selectedPlanId}
                     onChange={e => setSelectedPlanId(e.target.value)}
@@ -763,7 +763,7 @@ export default function AccountsPage() {
                   >
                     {plans.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.name} — {(p.disk_space_mb / 1024).toFixed(0)}GB NVMe, {p.max_websites} সাইট (${p.price_monthly}/mo)
+                        {p.name} — {(p.disk_space_mb / 1024).toFixed(0)}GB NVMe, {p.max_websites} Sites (${p.price_monthly}/mo)
                       </option>
                     ))}
                   </select>
@@ -771,7 +771,7 @@ export default function AccountsPage() {
 
                 {/* PHP Version */}
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">PHP ভার্সন</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">PHP Version</label>
                   <select
                     value={selectedPHP}
                     onChange={e => setSelectedPHP(e.target.value)}
@@ -790,7 +790,7 @@ export default function AccountsPage() {
                     onClick={() => setCreateModalOpen(false)}
                     className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
-                    বাতিল
+                    Cancel
                   </button>
                   <button
                     type="submit"
@@ -798,7 +798,7 @@ export default function AccountsPage() {
                     className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-500/20 flex items-center gap-2"
                   >
                     {actionLoading === 'create' && <RefreshCw className="w-4 h-4 animate-spin" />}
-                    <span>অ্যাকাউন্ট প্রোভিশন করুন</span>
+                    <span>Provision Account</span>
                   </button>
                 </div>
               </form>
@@ -816,7 +816,7 @@ export default function AccountsPage() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                    অ্যাকাউন্ট সাসপেন্ড নিশ্চিতকরণ
+                    Confirm Account Suspension
                   </h3>
                   <p className="text-xs text-slate-400">{selectedAccount.domain}</p>
                 </div>
@@ -824,21 +824,21 @@ export default function AccountsPage() {
 
               <div className="space-y-3 text-xs">
                 <p className="text-slate-600 dark:text-slate-400">
-                  অ্যাকাউন্টটি সাসপেন্ড করলে ক্লায়েন্টের ওয়েবসাইট ভিজিটরদের সামনে কাস্টম সাসপেনশন নোটিশ পেজ প্রদর্শিত হবে এবং FTP/ইমেইল সাময়িকভাবে নিষ্ক্রিয় থাকবে।
+                  Suspending this account will display a custom suspension notice to website visitors and temporarily disable FTP and email access.
                 </p>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">সাসপেনশনের কারণ:</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Suspension Reason:</label>
                   <select
                     value={suspendReason}
                     onChange={e => setSuspendReason(e.target.value)}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   >
-                    <option value="Overdue Invoice">Overdue Invoice (বকেয়া বিল)</option>
-                    <option value="Resource Limit Exceeded">Resource Limit Exceeded (অতিরিক্ত সিপিইউ/র‌্যাম ব্যবহার)</option>
-                    <option value="Terms of Service Violation">Terms of Service Violation (নীতিমালা লঙ্ঘন)</option>
-                    <option value="Malware or Phishing Detected">Malware / Phishing Activity (ম্যালওয়্যার শনাক্তকরণ)</option>
-                    <option value="Client Requested Suspension">Client Requested (গ্রাহকের অনুরোধে)</option>
+                    <option value="Overdue Invoice">Overdue Invoice</option>
+                    <option value="Resource Limit Exceeded">Resource Limit Exceeded (CPU/RAM)</option>
+                    <option value="Terms of Service Violation">Terms of Service Violation</option>
+                    <option value="Malware or Phishing Detected">Malware / Phishing Activity Detected</option>
+                    <option value="Client Requested Suspension">Client Requested Suspension</option>
                   </select>
                 </div>
               </div>
@@ -849,7 +849,7 @@ export default function AccountsPage() {
                   onClick={() => setSuspendModalOpen(false)}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -857,7 +857,7 @@ export default function AccountsPage() {
                   disabled={actionLoading === `suspend-${selectedAccount.id}`}
                   className="px-6 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-500/20 flex items-center gap-2"
                 >
-                  <span>সাসপেন্ড করুন</span>
+                  <span>Suspend Account</span>
                 </button>
               </div>
             </div>
@@ -874,7 +874,7 @@ export default function AccountsPage() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                    প্যাকেজ ও কোটা পরিবর্তন
+                    Change Package & Quota
                   </h3>
                   <p className="text-xs text-slate-400">{selectedAccount.domain}</p>
                 </div>
@@ -882,7 +882,7 @@ export default function AccountsPage() {
 
               <div className="space-y-3 text-xs">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">নতুন প্যাকেজ নির্বাচন করুন:</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Select New Package:</label>
                   <select
                     value={targetPlanId}
                     onChange={e => setTargetPlanId(e.target.value)}
@@ -890,7 +890,7 @@ export default function AccountsPage() {
                   >
                     {plans.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.name} — {(p.disk_space_mb / 1024).toFixed(0)}GB NVMe, {p.max_websites} সাইট
+                        {p.name} — {(p.disk_space_mb / 1024).toFixed(0)}GB NVMe, {p.max_websites} Sites
                       </option>
                     ))}
                   </select>
@@ -903,7 +903,7 @@ export default function AccountsPage() {
                   onClick={() => setChangePlanModalOpen(false)}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -911,7 +911,7 @@ export default function AccountsPage() {
                   disabled={actionLoading === `change-plan-${selectedAccount.id}`}
                   className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20"
                 >
-                  সংরক্ষণ করুন
+                  Save Changes
                 </button>
               </div>
             </div>
@@ -929,7 +929,7 @@ export default function AccountsPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      ক্লায়েন্ট সেশন জেনারেট হয়েছে
+                      Client Session Generated
                     </h3>
                     <p className="text-xs text-slate-400">{selectedAccount.domain}</p>
                   </div>
@@ -945,11 +945,11 @@ export default function AccountsPage() {
 
               <div className="space-y-3 text-xs bg-slate-50 dark:bg-slate-800/50 p-4 rounded-2xl">
                 <div className="flex justify-between">
-                  <span className="text-slate-500">ইউজারনেম:</span>
+                  <span className="text-slate-500">Username:</span>
                   <span className="font-mono font-bold text-slate-900 dark:text-white">{loginData.username}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">ইমপারসোনেশন টোকেন:</span>
+                  <span className="text-slate-500">Impersonation Token:</span>
                   <span className="font-mono text-purple-600 dark:text-purple-400">{loginData.token.slice(0, 16)}...</span>
                 </div>
               </div>
@@ -960,13 +960,13 @@ export default function AccountsPage() {
                   onClick={() => setLoginModalOpen(false)}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  বন্ধ করুন
+                  Close
                 </button>
                 <a
                   href={loginData.login_url}
                   className="px-6 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
                 >
-                  <span>ক্লায়েন্ট প্যানেলে প্রবেশ করুন</span>
+                  <span>Access Client Panel</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>

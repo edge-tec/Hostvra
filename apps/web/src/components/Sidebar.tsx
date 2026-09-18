@@ -278,7 +278,7 @@ export function Sidebar() {
         </div>
 
         {/* Bottom Core API Status & Collapse Footer */}
-        <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120] flex-shrink-0 space-y-2">
+        <div className="p-2.5 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] flex-shrink-0 space-y-2">
           {!collapsed && (
             <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-white dark:bg-[#162033] border border-slate-200 dark:border-slate-700/50 text-[11px]">
               <div className="flex items-center gap-1.5 min-w-0">

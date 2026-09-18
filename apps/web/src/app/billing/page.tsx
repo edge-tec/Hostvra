@@ -249,7 +249,7 @@ export default function BillingPage() {
   const formatPrice = (usdAmount: number) => {
     if (currency === 'BDT') {
       const bdt = Math.round(usdAmount * BDT_RATE);
-      return `৳${bdt.toLocaleString('en-US')}`;
+      return `BDT ${bdt.toLocaleString('en-US')}`;
     }
     return `$${usdAmount.toFixed(2)}`;
   };
@@ -323,15 +323,15 @@ export default function BillingPage() {
       });
 
       if (res.data) {
-        showNotify('success', `ধন্যবাদ! ${selectedPlanForOrder.name} প্যাকেজটি সফলভাবে সক্রিয় হয়েছে!`);
+        showNotify('success', `Thank you! The ${selectedPlanForOrder.name} package has been successfully activated!`);
         setCheckoutModalOpen(false);
         loadData();
         setActiveTab('subscriptions');
       } else {
-        showNotify('error', res.error?.message || 'প্যাকেজ অর্ডার করতে ব্যর্থ হয়েছে');
+        showNotify('error', res.error?.message || 'Failed to order package');
       }
     } catch (err: any) {
-      showNotify('error', err.message || 'প্যাকেজ অর্ডার করতে সার্ভারের সাথে সংযোগ ব্যর্থ হয়েছে');
+      showNotify('error', err.message || 'Failed to connect to server to order package');
     } finally {
       setActionLoading(null);
     }
@@ -349,7 +349,7 @@ export default function BillingPage() {
         }),
       });
       if (res.data) {
-        showNotify('success', `ইনভয়েস #${invoice.invoice_number} সফলভাবে পরিশোধ করা হয়েছে!`);
+        showNotify('success', `Invoice #${invoice.invoice_number} has been successfully paid!`);
         loadData();
         if (receiptModalOpen && selectedInvoice?.id === invoice.id) {
           setSelectedInvoice({
@@ -364,7 +364,7 @@ export default function BillingPage() {
       setInvoices(prev =>
         prev.map(i => (i.id === invoice.id ? { ...i, status: 'paid', paid_at: new Date().toISOString(), payment_method: paymentMethod } : i))
       );
-      showNotify('success', `ইনভয়েস #${invoice.invoice_number} পরিশোধ সম্পন্ন হয়েছে!`);
+      showNotify('success', `Invoice #${invoice.invoice_number} payment completed!`);
     } finally {
       setActionLoading(null);
     }
@@ -372,15 +372,15 @@ export default function BillingPage() {
 
   // Handle Cancel Subscription
   const handleCancelSubscription = async (sub: Subscription) => {
-    if (!confirm(`আপনি কি সত্যিই ${sub.plan_name} সাবস্ক্রিপশনটি বাতিল করতে চান?`)) return;
+    if (!confirm(`Are you sure you want to cancel the ${sub.plan_name} subscription?`)) return;
     setActionLoading(`cancel-${sub.id}`);
     try {
       await apiFetch(`/api/v1/billing/subscriptions/${sub.id}/cancel`, { method: 'POST' });
-      showNotify('success', 'সাবস্ক্রিপশন সফলভাবে বাতিল করা হয়েছে।');
+      showNotify('success', 'Subscription cancelled successfully.');
       loadData();
     } catch {
       setSubscriptions(prev => prev.map(s => (s.id === sub.id ? { ...s, status: 'cancelled', auto_renew: false } : s)));
-      showNotify('success', 'সাবস্ক্রিপশন বাতিল করা হয়েছে।');
+      showNotify('success', 'Subscription cancelled.');
     } finally {
       setActionLoading(null);
     }
@@ -391,13 +391,13 @@ export default function BillingPage() {
     setActionLoading(`renew-${sub.id}`);
     try {
       await apiFetch(`/api/v1/billing/subscriptions/${sub.id}/renew`, { method: 'POST' });
-      showNotify('success', `${sub.plan_name} সাবস্ক্রিপশন সফলভাবে রিনিউ করা হয়েছে!`);
+      showNotify('success', `${sub.plan_name} subscription renewed successfully!`);
       loadData();
     } catch {
       setSubscriptions(prev =>
         prev.map(s => (s.id === sub.id ? { ...s, status: 'active', auto_renew: true } : s))
       );
-      showNotify('success', 'সাবস্ক্রিপশন রিনিউ সম্পন্ন হয়েছে।');
+      showNotify('success', 'Subscription renewal completed.');
     } finally {
       setActionLoading(null);
     }
@@ -413,13 +413,13 @@ export default function BillingPage() {
         body: JSON.stringify(editingGateway),
       });
       if (res.data) {
-        showNotify('success', `${editingGateway.display_name} কনফিগারেশন সংরক্ষিত হয়েছে!`);
+        showNotify('success', `${editingGateway.display_name} configuration saved successfully!`);
         setGatewayModalOpen(false);
         loadData();
       }
     } catch {
       setGateways(prev => prev.map(g => (g.gateway === editingGateway.gateway ? editingGateway : g)));
-      showNotify('success', `${editingGateway.display_name} সংরক্ষিত হয়েছে!`);
+      showNotify('success', `${editingGateway.display_name} saved!`);
       setGatewayModalOpen(false);
     } finally {
       setActionLoading(null);
@@ -429,7 +429,7 @@ export default function BillingPage() {
   // Save / Create Plan (Admin)
   const handleSavePlan = async () => {
     if (!editingPlan || !editingPlan.name) {
-      alert('অনুগ্রহ করে প্যাকেজের নাম প্রদান করুন');
+      alert('Please provide a package name');
       return;
     }
     setActionLoading('save-plan');
@@ -439,13 +439,13 @@ export default function BillingPage() {
           method: 'PUT',
           body: JSON.stringify(editingPlan),
         });
-        showNotify('success', 'প্যাকেজ সফলভাবে আপডেট করা হয়েছে!');
+        showNotify('success', 'Package updated successfully!');
       } else {
         await apiFetch('/api/v1/billing/plans', {
           method: 'POST',
           body: JSON.stringify(editingPlan),
         });
-        showNotify('success', 'নতুন হোস্টিং প্যাকেজ তৈরি করা হয়েছে!');
+        showNotify('success', 'New hosting package created successfully!');
       }
       setPlanModalOpen(false);
       loadData();
@@ -476,7 +476,7 @@ export default function BillingPage() {
         };
         setPlans(prev => [...prev, newP]);
       }
-      showNotify('success', 'প্যাকেজ সংরক্ষিত হয়েছে!');
+      showNotify('success', 'Package saved successfully!');
       setPlanModalOpen(false);
     } finally {
       setActionLoading(null);
@@ -485,14 +485,14 @@ export default function BillingPage() {
 
   // Delete Plan (Admin)
   const handleDeletePlan = async (planId: string) => {
-    if (!confirm('আপনি কি সত্যিই এই প্যাকেজটি ডিলিট করতে চান?')) return;
+    if (!confirm('Are you sure you want to delete this package?')) return;
     try {
       await apiFetch(`/api/v1/billing/plans/${planId}`, { method: 'DELETE' });
-      showNotify('success', 'প্যাকেজ সফলভাবে ডিলিট হয়েছে।');
+      showNotify('success', 'Package deleted successfully.');
       loadData();
     } catch {
       setPlans(prev => prev.filter(p => p.id !== planId));
-      showNotify('success', 'প্যাকেজ ডিলিট করা হয়েছে।');
+      showNotify('success', 'Package deleted.');
     }
   };
 
@@ -536,10 +536,10 @@ export default function BillingPage() {
                 <span>Enterprise Hosting & Cloud Billing</span>
               </div>
               <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
-                হোস্টিং বিলিং ও ক্লাউড প্যাকেজ হাব
+                Hosting Billing & Cloud Packages Hub
               </h1>
               <p className="text-blue-100 text-sm sm:text-base max-w-2xl leading-relaxed">
-                উচ্চগতির এনভিএমই ক্লাউড প্যাকেজ সাবস্ক্রিপশন, লোকাল ও আন্তর্জাতিক গেটওয়ে (bKash, Nagad, SSLCommerz, Stripe) এবং অটোমেটেড ক্লায়েন্ট প্রোভিশনিং।
+                High-speed NVMe cloud package subscriptions, local & international payment gateways (bKash, Nagad, SSLCommerz, Stripe), and automated client provisioning.
               </p>
             </div>
 
@@ -547,15 +547,15 @@ export default function BillingPage() {
             <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 bg-white/10 backdrop-blur-md p-2 sm:p-3 rounded-2xl border border-white/20">
               <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
                 <div className="text-2xl font-black">{plans.length}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">প্যাকেজ</div>
+                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Packages</div>
               </div>
               <div className="px-4 py-2 text-center border-r border-white/15 last:border-0">
                 <div className="text-2xl font-black text-emerald-300">{activeSubsCount}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">সক্রিয় সাবস্ক্রিপশন</div>
+                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Active Subscriptions</div>
               </div>
               <div className="px-4 py-2 text-center">
                 <div className="text-2xl font-black text-amber-300">{unpaidInvoicesCount}</div>
-                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">বকেয়া ইনভয়েস</div>
+                <div className="text-[11px] text-blue-100 uppercase tracking-wider font-medium">Unpaid Invoices</div>
               </div>
             </div>
           </div>
@@ -578,7 +578,7 @@ export default function BillingPage() {
               }`}
             >
               <Zap className="w-4 h-4" />
-              <span>হোস্টিং প্যাকেজসমূহ</span>
+              <span>Hosting Packages</span>
             </button>
 
             <button
@@ -590,7 +590,7 @@ export default function BillingPage() {
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>আমার সাবস্ক্রিপশন</span>
+              <span>My Subscriptions</span>
               {activeSubsCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                   {activeSubsCount}
@@ -607,7 +607,7 @@ export default function BillingPage() {
               }`}
             >
               <FileText className="w-4 h-4" />
-              <span>ইনভয়েস ও রসিদ</span>
+              <span>Invoices & Receipts</span>
               {unpaidInvoicesCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white animate-pulse">
                   {unpaidInvoicesCount}
@@ -624,7 +624,7 @@ export default function BillingPage() {
               }`}
             >
               <CreditCard className="w-4 h-4" />
-              <span>পেমেন্ট গেটওয়ে</span>
+              <span>Payment Gateways</span>
             </button>
 
             <button
@@ -636,7 +636,7 @@ export default function BillingPage() {
               }`}
             >
               <Sliders className="w-4 h-4" />
-              <span>প্যাকেজ ম্যানেজার</span>
+              <span>Package Manager</span>
             </button>
           </div>
 
@@ -662,7 +662,7 @@ export default function BillingPage() {
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                BDT (৳)
+                BDT
               </button>
             </div>
 
@@ -671,7 +671,7 @@ export default function BillingPage() {
               onClick={loadData}
               disabled={loading}
               className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-sm"
-              title="রিফ্রেশ করুন"
+              title="Refresh"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-blue-500' : ''}`} />
             </button>
@@ -692,7 +692,7 @@ export default function BillingPage() {
                       : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  মাসিক বিলিং
+                  Monthly Billing
                 </button>
                 <button
                   onClick={() => setBillingCycle('yearly')}
@@ -702,9 +702,9 @@ export default function BillingPage() {
                       : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
-                  <span>বার্ষিক বিলিং</span>
+                  <span>Annual Billing</span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500 text-white uppercase tracking-wider">
-                    ২০% ছাড়
+                    20% OFF
                   </span>
                 </button>
               </div>
@@ -732,12 +732,12 @@ export default function BillingPage() {
                     {/* Featured Badge */}
                     {isFeatured && (
                       <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[11px] font-extrabold uppercase tracking-widest shadow-md">
-                        সর্বাধিক জনপ্রিয়
+                        Most Popular
                       </div>
                     )}
                     {isReseller && (
                       <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-extrabold uppercase tracking-widest shadow-md">
-                        হোস্টিং এজেন্সি
+                        Hosting Agency
                       </div>
                     )}
 
@@ -773,13 +773,13 @@ export default function BillingPage() {
                             {formatPrice(monthlyEquiv)}
                           </span>
                           <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                            /মাস
+                            /mo
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 font-medium">
                           {billingCycle === 'yearly'
-                            ? `বার্ষিক বিলিং মোট ${formatPrice(price)} /বছর`
-                            : 'প্রতি মাসে অটোমেটিক রিনিউয়াল'}
+                            ? `Billed annually at ${formatPrice(price)} /yr`
+                            : 'Renews automatically every month'}
                         </div>
                       </div>
 
@@ -788,7 +788,7 @@ export default function BillingPage() {
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                           <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
                             <HardDrive className="w-3 h-3 text-blue-500" />
-                            স্টোরেজ
+                            Storage
                           </div>
                           <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-0.5">
                             {plan.disk_space_mb >= 1024
@@ -800,7 +800,7 @@ export default function BillingPage() {
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                           <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
                             <Network className="w-3 h-3 text-emerald-500" />
-                            ব্যান্ডউইথ
+                            Bandwidth
                           </div>
                           <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-0.5">
                             {plan.bandwidth_mb >= 1024
@@ -812,20 +812,20 @@ export default function BillingPage() {
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                           <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
                             <Globe className="w-3 h-3 text-purple-500" />
-                            ওয়েবসাইট
+                            Websites
                           </div>
                           <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-0.5">
-                            {plan.max_websites >= 100 ? 'আনলিমিটেড' : `${plan.max_websites} টি ডোমেইন`}
+                            {plan.max_websites >= 100 ? 'Unlimited' : `${plan.max_websites} Domains`}
                           </div>
                         </div>
 
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800">
                           <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider flex items-center gap-1">
                             <Mail className="w-3 h-3 text-amber-500" />
-                            ইমেইল
+                            Email
                           </div>
                           <div className="text-sm font-bold text-slate-800 dark:text-slate-200 mt-0.5">
-                            {plan.max_mailboxes >= 100 ? 'আনলিমিটেড' : `${plan.max_mailboxes} টি ইনবক্স`}
+                            {plan.max_mailboxes >= 100 ? 'Unlimited' : `${plan.max_mailboxes} Inboxes`}
                           </div>
                         </div>
                       </div>
@@ -833,7 +833,7 @@ export default function BillingPage() {
                       {/* Included Features Checklist */}
                       <div className="space-y-2.5 mb-8">
                         <div className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                          অন্তর্ভুক্ত সুবিধাসমূহ:
+                          Included Features:
                         </div>
                         {plan.features.map((feature, idx) => (
                           <div key={idx} className="flex items-start gap-2.5 text-xs text-slate-600 dark:text-slate-300">
@@ -855,7 +855,7 @@ export default function BillingPage() {
                           : 'bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900'
                       }`}
                     >
-                      <span>এখনই শুরু করুন</span>
+                      <span>Get Started</span>
                       <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
@@ -868,11 +868,11 @@ export default function BillingPage() {
               <div className="space-y-2 text-center md:text-left">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 text-xs font-bold uppercase tracking-wider">
                   <Shield className="w-3.5 h-3.5" />
-                  কাস্টম ক্লাস্টার সলিউশন
+                  Custom Cluster Solution
                 </div>
-                <h3 className="text-2xl font-black">আপনার কি কাস্টম ডেডিকেটেড ক্লাউড নোড প্রয়োজন?</h3>
+                <h3 className="text-2xl font-black">Need a Custom Dedicated Cloud Node?</h3>
                 <p className="text-slate-400 text-sm max-w-xl">
-                  আমাদের হাইপার-স্কেল ইনফ্রাস্ট্রাকচারে মাল্টি-সার্ভার ক্লাস্টারিং, ডেডিকেটেড লোড ব্যালেন্সার এবং ৯৯.৯৯% এসএলএ গ্যারান্টি দেওয়া হয়।
+                  Our hyper-scale infrastructure provides multi-server clustering, dedicated load balancing, and a 99.99% SLA guarantee.
                 </p>
               </div>
               <button
@@ -882,7 +882,7 @@ export default function BillingPage() {
                 }}
                 className="px-6 py-3 rounded-2xl bg-white text-slate-900 hover:bg-slate-100 font-extrabold text-sm flex-shrink-0 transition-all shadow-lg"
               >
-                এন্টারপ্রাইজ সাপোর্ট টিম
+                Enterprise Support Team
               </button>
             </div>
           </div>
@@ -894,10 +894,10 @@ export default function BillingPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                  আপনার সক্রিয় হোস্টিং সাবস্ক্রিপশনসমূহ
+                  Your Active Hosting Subscriptions
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  চলতি প্যাকেজের ব্যবহৃত ডিস্ক স্পেস, ব্যান্ডউইথ মিটার ও অটো-রিনিউয়াল পরিচালনা করুন।
+                  Manage current package disk usage, bandwidth meters, and automatic renewals.
                 </p>
               </div>
 
@@ -906,7 +906,7 @@ export default function BillingPage() {
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-md shadow-blue-600/20 transition-all"
               >
                 <Plus className="w-4 h-4" />
-                <span>নতুন প্যাকেজ নিন</span>
+                <span>Order New Package</span>
               </button>
             </div>
 
@@ -916,16 +916,16 @@ export default function BillingPage() {
                   <Layers className="w-8 h-8" />
                 </div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  কোন সক্রিয় সাবস্ক্রিপশন পাওয়া যায়নি
+                  No Active Subscriptions Found
                 </h3>
                 <p className="text-sm text-slate-500 max-w-md mx-auto mt-1 mb-6">
-                  আপনার হোস্টভরা একাউন্টে এখনও কোন হোস্টিং প্ল্যান সক্রিয় নেই। আমাদের সাশ্রয়ী প্যাকেজগুলো ঘুরে দেখুন।
+                  You do not have any active hosting plans yet. Explore our affordable high-performance packages.
                 </p>
                 <button
                   onClick={() => setActiveTab('packages')}
                   className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold transition-all shadow-md"
                 >
-                  হোস্টিং প্যাকেজ ব্রাউজ করুন
+                  Browse Hosting Packages
                 </button>
               </div>
             ) : (
@@ -959,19 +959,19 @@ export default function BillingPage() {
                                     : 'bg-rose-500/15 text-rose-600'
                                 }`}
                               >
-                                {sub.status === 'active' ? 'সক্রিয়' : sub.status}
+                                {sub.status === 'active' ? 'Active' : sub.status}
                               </span>
                             </div>
                             <div className="text-xs text-slate-400 mt-1">
-                              বিলিং সাইকেল: <span className="font-semibold text-slate-700 dark:text-slate-300">{sub.billing_cycle === 'yearly' ? 'বার্ষিক' : 'মাসিক'}</span> | মূল্য: <span className="font-bold text-blue-600 dark:text-blue-400">{formatPrice(sub.amount)}</span>
+                              Billing Cycle: <span className="font-semibold text-slate-700 dark:text-slate-300">{sub.billing_cycle === 'yearly' ? 'Yearly' : 'Monthly'}</span> | Price: <span className="font-bold text-blue-600 dark:text-blue-400">{formatPrice(sub.amount)}</span>
                             </div>
                           </div>
 
                           <div className="text-right">
-                            <div className="text-[11px] text-slate-400 font-medium">পরবর্তী বিলিং ডেট</div>
+                            <div className="text-[11px] text-slate-400 font-medium">Next Billing Date</div>
                             <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 flex items-center gap-1 justify-end">
                               <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                              {new Date(sub.next_billing_date).toLocaleDateString('bn-BD', {
+                              {new Date(sub.next_billing_date).toLocaleDateString('en-US', {
                                 year: 'numeric',
                                 month: 'short',
                                 day: 'numeric',
@@ -987,7 +987,7 @@ export default function BillingPage() {
                             <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
                               <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                                 <HardDrive className="w-3.5 h-3.5 text-blue-500" />
-                                ব্যবহৃত স্টোরেজ
+                                Storage Used
                               </span>
                               <span className="text-slate-900 dark:text-slate-100 font-bold">
                                 {sub.disk_used_mb >= 1024 ? `${(sub.disk_used_mb / 1024).toFixed(1)} GB` : `${sub.disk_used_mb} MB`} /{' '}
@@ -1009,7 +1009,7 @@ export default function BillingPage() {
                             <div className="flex items-center justify-between text-xs font-semibold mb-1.5">
                               <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                                 <Network className="w-3.5 h-3.5 text-emerald-500" />
-                                মাসিক ব্যান্ডউইথ
+                                Monthly Bandwidth
                               </span>
                               <span className="text-slate-900 dark:text-slate-100 font-bold">
                                 {sub.bandwidth_used_mb >= 1024 ? `${(sub.bandwidth_used_mb / 1024).toFixed(1)} GB` : `${sub.bandwidth_used_mb} MB`} /{' '}
@@ -1028,10 +1028,10 @@ export default function BillingPage() {
                           <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 text-xs">
                             <span className="text-slate-600 dark:text-slate-400 flex items-center gap-2 font-medium">
                               <Globe className="w-4 h-4 text-purple-500" />
-                              সংযুক্ত ওয়েবসাইট
+                              Connected Websites
                             </span>
                             <span className="font-bold text-slate-800 dark:text-slate-200">
-                              {sub.websites_count} টি সাইট
+                              {sub.websites_count} Sites
                             </span>
                           </div>
                         </div>
@@ -1046,14 +1046,14 @@ export default function BillingPage() {
                             className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 transition-colors flex items-center gap-1.5"
                           >
                             <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === `renew-${sub.id}` ? 'animate-spin' : ''}`} />
-                            <span>রিনিউ করুন</span>
+                            <span>Renew</span>
                           </button>
 
                           <button
                             onClick={() => setActiveTab('packages')}
                             className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
                           >
-                            আপগ্রেড
+                            Upgrade
                           </button>
                         </div>
 
@@ -1063,7 +1063,7 @@ export default function BillingPage() {
                             disabled={actionLoading === `cancel-${sub.id}`}
                             className="text-xs font-bold text-rose-500 hover:text-rose-600 transition-colors"
                           >
-                            বাতিল করুন
+                            Cancel
                           </button>
                         )}
                       </div>
@@ -1081,10 +1081,10 @@ export default function BillingPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                  বিলিং ইনভয়েস ও পেমেন্ট হিস্ট্রি
+                  Billing Invoices & Payment History
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  আপনার সকল হোস্টিং অর্ডারের অফিশিয়াল ইনভয়েস, মানি রিসিট ডাউনলোড ও বকেয়া পরিশোধ।
+                  Official invoices, downloadable receipts, and balance settlement for all hosting orders.
                 </p>
               </div>
             </div>
@@ -1094,20 +1094,20 @@ export default function BillingPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="py-4 px-6">ইনভয়েস #</th>
-                      <th className="py-4 px-6">তারিখ</th>
-                      <th className="py-4 px-6">বিবরণ</th>
-                      <th className="py-4 px-6">গেটওয়ে</th>
-                      <th className="py-4 px-6">পরিমাণ</th>
-                      <th className="py-4 px-6">স্ট্যাটাস</th>
-                      <th className="py-4 px-6 text-right">অ্যাকশন</th>
+                      <th className="py-4 px-6">Invoice #</th>
+                      <th className="py-4 px-6">Date</th>
+                      <th className="py-4 px-6">Description</th>
+                      <th className="py-4 px-6">Gateway</th>
+                      <th className="py-4 px-6">Amount</th>
+                      <th className="py-4 px-6">Status</th>
+                      <th className="py-4 px-6 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                     {invoices.length === 0 ? (
                       <tr>
                         <td colSpan={7} className="text-center py-12 text-slate-400">
-                          কোন ইনভয়েস রেকর্ড পাওয়া যায়নি।
+                          No invoice records found.
                         </td>
                       </tr>
                     ) : (
@@ -1118,7 +1118,7 @@ export default function BillingPage() {
                             {inv.invoice_number}
                           </td>
                           <td className="py-4 px-6 text-slate-500 dark:text-slate-400">
-                            {new Date(inv.created_at).toLocaleDateString('bn-BD', {
+                            {new Date(inv.created_at).toLocaleDateString('en-US', {
                               year: 'numeric',
                               month: 'short',
                               day: 'numeric',
@@ -1144,7 +1144,7 @@ export default function BillingPage() {
                               }`}
                             >
                               {inv.status === 'paid' && <Check className="w-3 h-3" />}
-                              {inv.status === 'paid' ? 'পরিশোধিত' : inv.status === 'unpaid' ? 'বকেয়া' : 'বাতিল'}
+                              {inv.status === 'paid' ? 'Paid' : inv.status === 'unpaid' ? 'Unpaid' : 'Cancelled'}
                             </span>
                           </td>
                           <td className="py-4 px-6 text-right">
@@ -1155,7 +1155,7 @@ export default function BillingPage() {
                                   disabled={actionLoading === `pay-${inv.id}`}
                                   className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
                                 >
-                                  পরিশোধ করুন
+                                  Pay Now
                                 </button>
                               )}
                               <button
@@ -1166,7 +1166,7 @@ export default function BillingPage() {
                                 className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-1"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                                <span>রসিদ</span>
+                                <span>Receipt</span>
                               </button>
                             </div>
                           </td>
@@ -1185,10 +1185,10 @@ export default function BillingPage() {
           <div className="space-y-6 animate-in fade-in duration-300">
             <div>
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                পেমেন্ট গেটওয়ে ইন্টিগ্রেশন হাব
+                Payment Gateway Integration Hub
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                বাংলাদেশী মোবাইল ফাইন্যান্সিয়াল সার্ভিস (bKash, Nagad, SSLCommerz) ও আন্তর্জাতিক কার্ড গেটওয়ে (Stripe, PayPal) সক্রিয় করুন।
+                Connect mobile financial services (bKash, Nagad, SSLCommerz) and international credit/debit card gateways (Stripe, PayPal).
               </p>
             </div>
 
@@ -1220,9 +1220,9 @@ export default function BillingPage() {
                           }`}
                         >
                           {gw.gateway === 'bkash'
-                            ? 'বিকাশ'
+                            ? 'bKash'
                             : gw.gateway === 'nagad'
-                            ? 'নগদ'
+                            ? 'Nagad'
                             : gw.gateway.toUpperCase().slice(0, 3)}
                         </div>
                         <div>
@@ -1242,20 +1242,20 @@ export default function BillingPage() {
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                         }`}
                       >
-                        {gw.enabled ? 'চালু' : 'বন্ধ'}
+                        {gw.enabled ? 'Enabled' : 'Disabled'}
                       </span>
                     </div>
 
                     {/* Metadata */}
                     <div className="space-y-2 mb-6 text-xs bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-500">এনভায়রনমেন্ট:</span>
+                        <span className="text-slate-500">Environment:</span>
                         <span className="font-semibold text-slate-800 dark:text-slate-200">
                           {gw.test_mode ? 'Sandbox / Test' : 'Live Production'}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-500">মার্চেন্ট আইডি:</span>
+                        <span className="text-slate-500">Merchant ID:</span>
                         <span className="font-mono text-slate-700 dark:text-slate-300">
                           {gw.merchant_id || 'Not Set'}
                         </span>
@@ -1278,7 +1278,7 @@ export default function BillingPage() {
                       className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                     >
                       <Settings className="w-3.5 h-3.5" />
-                      <span>সেটিংস কনফিগার করুন</span>
+                      <span>Configure Settings</span>
                     </button>
                   </div>
                 </div>
@@ -1293,10 +1293,10 @@ export default function BillingPage() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                  হোস্টিং প্যাকেজ ও কোটা ম্যানেজার
+                  Hosting Packages & Quota Manager
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  অ্যাডমিন হিসেবে নতুন ক্লাউড হোস্টিং প্যাকেজ তৈরি করুন, স্টোরেজ/ব্যান্ডউইথ কোটা ও প্রাইসিং আপডেট করুন।
+                  As admin, create new cloud hosting packages, configure storage/bandwidth quotas, and update pricing.
                 </p>
               </div>
 
@@ -1326,7 +1326,7 @@ export default function BillingPage() {
                 className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-md shadow-blue-600/20 transition-all"
               >
                 <Plus className="w-4 h-4" />
-                <span>নতুন প্যাকেজ তৈরি করুন</span>
+                <span>Create New Package</span>
               </button>
             </div>
 
@@ -1335,14 +1335,14 @@ export default function BillingPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
                     <tr>
-                      <th className="py-4 px-6">প্যাকেজের নাম</th>
-                      <th className="py-4 px-6">টিয়ার</th>
-                      <th className="py-4 px-6">মাসিক মূল্য</th>
-                      <th className="py-4 px-6">বার্ষিক মূল্য</th>
-                      <th className="py-4 px-6">ডিস্ক স্পেস</th>
-                      <th className="py-4 px-6">ডোমেইন কোটা</th>
-                      <th className="py-4 px-6">স্ট্যাটাস</th>
-                      <th className="py-4 px-6 text-right">অ্যাকশন</th>
+                      <th className="py-4 px-6">Package Name</th>
+                      <th className="py-4 px-6">Tier</th>
+                      <th className="py-4 px-6">Monthly Price</th>
+                      <th className="py-4 px-6">Yearly Price</th>
+                      <th className="py-4 px-6">Disk Space</th>
+                      <th className="py-4 px-6">Domain Quota</th>
+                      <th className="py-4 px-6">Status</th>
+                      <th className="py-4 px-6 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
@@ -1365,7 +1365,7 @@ export default function BillingPage() {
                           {p.disk_space_mb >= 1024 ? `${Math.round(p.disk_space_mb / 1024)} GB` : `${p.disk_space_mb} MB`}
                         </td>
                         <td className="py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">
-                          {p.max_websites} টি
+                          {p.max_websites} Sites
                         </td>
                         <td className="py-4 px-6">
                           <span
@@ -1386,14 +1386,14 @@ export default function BillingPage() {
                                 setPlanModalOpen(true);
                               }}
                               className="p-2 rounded-lg text-slate-600 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/50 transition-colors"
-                              title="সম্পাদনা করুন"
+                              title="Edit"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
                               onClick={() => handleDeletePlan(p.id)}
                               className="p-2 rounded-lg text-slate-600 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
-                              title="মুছে ফেলুন"
+                              title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -1420,7 +1420,7 @@ export default function BillingPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      হোস্টিং প্যাকেজ অর্ডার ও চেকআউট
+                      Hosting Package Order & Checkout
                     </h3>
                     <p className="text-xs text-slate-400">
                       {selectedPlanForOrder.name}
@@ -1439,31 +1439,31 @@ export default function BillingPage() {
               {/* Order Summary Box */}
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 space-y-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">নির্বাচিত প্যাকেজ:</span>
+                  <span className="text-slate-500">Selected Package:</span>
                   <span className="font-bold text-slate-900 dark:text-white">{selectedPlanForOrder.name}</span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">বিলিং মেয়াদ:</span>
+                  <span className="text-slate-500">Billing Cycle:</span>
                   <span className="font-bold text-slate-900 dark:text-white">
-                    {billingCycle === 'yearly' ? '১ বছর (বার্ষিক বিলিং)' : '১ মাস (মাসিক বিলিং)'}
+                    {billingCycle === 'yearly' ? '1 Year (Annual Billing)' : '1 Month (Monthly Billing)'}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-slate-500">স্টোরেজ কোটা:</span>
+                  <span className="text-slate-500">Storage Quota:</span>
                   <span className="font-semibold text-slate-700 dark:text-slate-300">
                     {Math.round(selectedPlanForOrder.disk_space_mb / 1024)} GB NVMe
                   </span>
                 </div>
                 {couponApplied && (
                   <div className="flex items-center justify-between text-xs text-emerald-600 font-bold">
-                    <span>প্রোমো ডিসকাউন্ট (10% OFF):</span>
+                    <span>Promo Discount (10% OFF):</span>
                     <span>
                       -{formatPrice((billingCycle === 'yearly' ? selectedPlanForOrder.price_yearly : selectedPlanForOrder.price_monthly) * 0.1)}
                     </span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                  <span className="text-sm font-bold text-slate-900 dark:text-white">মোট প্রদেয় মূল্য:</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">Total Payable Amount:</span>
                   <span className="text-2xl font-black text-blue-600 dark:text-blue-400">
                     {formatPrice(
                       (billingCycle === 'yearly' ? selectedPlanForOrder.price_yearly : selectedPlanForOrder.price_monthly) *
@@ -1479,7 +1479,7 @@ export default function BillingPage() {
                   type="text"
                   value={couponCode}
                   onChange={e => setCouponCode(e.target.value)}
-                  placeholder="কুপন কোড (যেমন: HOSTVRA10)"
+                  placeholder="Coupon code (e.g. HOSTVRA10)"
                   className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
@@ -1487,21 +1487,21 @@ export default function BillingPage() {
                   onClick={() => {
                     if (couponCode.trim().toUpperCase() === 'HOSTVRA10') {
                       setCouponApplied(true);
-                      showNotify('success', 'কুপন কোড HOSTVRA10 সফলভাবে প্রয়োগ করা হয়েছে!');
+                      showNotify('success', 'Coupon code HOSTVRA10 applied successfully!');
                     } else {
-                      showNotify('error', 'অবৈধ কুপন কোড। অনুগ্রহ করে HOSTVRA10 ট্রাই করুন।');
+                      showNotify('error', 'Invalid coupon code. Please try HOSTVRA10.');
                     }
                   }}
                   className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
                 >
-                  প্রয়োগ
+                  Apply
                 </button>
               </div>
 
               {/* Payment Gateway Picker */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  পেমেন্ট পদ্ধতি নির্বাচন করুন:
+                  Select Payment Method:
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
                   {gateways
@@ -1533,7 +1533,7 @@ export default function BillingPage() {
                   onClick={() => setCheckoutModalOpen(false)}
                   className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -1542,7 +1542,7 @@ export default function BillingPage() {
                   className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
                 >
                   {actionLoading === 'checkout' && <RefreshCw className="w-4 h-4 animate-spin" />}
-                  <span>অর্ডার নিশ্চিত করুন</span>
+                  <span>Confirm Order</span>
                 </button>
               </div>
             </div>
@@ -1557,7 +1557,7 @@ export default function BillingPage() {
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 print:hidden">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    অফিশিয়াল মানি রিসিট
+                    Official Money Receipt
                   </span>
                 </div>
 
@@ -1567,7 +1567,7 @@ export default function BillingPage() {
                     className="p-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold flex items-center gap-1.5 transition-colors"
                   >
                     <Printer className="w-4 h-4" />
-                    <span>প্রিন্ট</span>
+                    <span>Print</span>
                   </button>
                   <button
                     onClick={() => setReceiptModalOpen(false)}
@@ -1594,10 +1594,10 @@ export default function BillingPage() {
                     {selectedInvoice.invoice_number}
                   </div>
                   <div className="text-xs text-slate-500">
-                    তারিখ: {new Date(selectedInvoice.created_at).toLocaleDateString('bn-BD')}
+                    Date: {new Date(selectedInvoice.created_at).toLocaleDateString('en-US')}
                   </div>
                   <div className="inline-block px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
-                    {selectedInvoice.status === 'paid' ? 'PAID / পরিশোধিত' : 'UNPAID / বকেয়া'}
+                    {selectedInvoice.status === 'paid' ? 'PAID' : 'UNPAID'}
                   </div>
                 </div>
               </div>
@@ -1607,8 +1607,8 @@ export default function BillingPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="text-slate-400 uppercase font-bold border-b border-slate-100 dark:border-slate-800 pb-2">
                     <tr>
-                      <th className="py-2">আইটেম বিবরণ</th>
-                      <th className="py-2 text-right">পরিমাণ</th>
+                      <th className="py-2">Item Description</th>
+                      <th className="py-2 text-right">Amount</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
@@ -1628,15 +1628,15 @@ export default function BillingPage() {
               {/* Totals */}
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 space-y-2 text-xs">
                 <div className="flex justify-between text-slate-500">
-                  <span>সাবটোটাল:</span>
+                  <span>Subtotal:</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200">{formatPrice(selectedInvoice.subtotal)}</span>
                 </div>
                 <div className="flex justify-between text-slate-500">
-                  <span>ভ্যাট ও ট্যাক্স (0%):</span>
+                  <span>VAT & Tax (0%):</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200">{formatPrice(0)}</span>
                 </div>
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-700 flex justify-between text-sm font-black text-slate-900 dark:text-white">
-                  <span>মোট পরিশোধিত মূল্য:</span>
+                  <span>Total Paid Amount:</span>
                   <span className="text-blue-600 dark:text-blue-400 text-lg">{formatPrice(selectedInvoice.total)}</span>
                 </div>
               </div>
@@ -1644,14 +1644,14 @@ export default function BillingPage() {
               {/* Payment Details Footer */}
               <div className="flex items-center justify-between text-xs text-slate-400 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <div>
-                  পেমেন্ট পদ্ধতি: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{selectedInvoice.payment_method || 'Online'}</span>
+                  Payment Method: <span className="font-bold text-slate-700 dark:text-slate-300 uppercase">{selectedInvoice.payment_method || 'Online'}</span>
                   {selectedInvoice.transaction_id && (
                     <span className="ml-2 font-mono text-[11px]">({selectedInvoice.transaction_id})</span>
                   )}
                 </div>
                 <div className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle2 className="w-4 h-4" />
-                  ভেরিফাইড ডিজিটাল রসিদ
+                  Verified Digital Receipt
                 </div>
               </div>
             </div>
@@ -1669,9 +1669,9 @@ export default function BillingPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      {editingGateway.display_name} সেটিংস
+                      {editingGateway.display_name} Settings
                     </h3>
-                    <p className="text-xs text-slate-400">গেটওয়ে ক্রেডেনশিয়াল ও সিকিউরিটি কনফিগারেশন</p>
+                    <p className="text-xs text-slate-400">Gateway credentials and security configuration</p>
                   </div>
                 </div>
 
@@ -1686,7 +1686,7 @@ export default function BillingPage() {
               <div className="space-y-4 text-xs">
                 {/* Status Toggles */}
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
-                  <span className="font-bold text-slate-700 dark:text-slate-300">গেটওয়ে স্ট্যাটাস</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">Gateway Status</span>
                   <button
                     type="button"
                     onClick={() => setEditingGateway({ ...editingGateway, enabled: !editingGateway.enabled })}
@@ -1694,12 +1694,12 @@ export default function BillingPage() {
                       editingGateway.enabled ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600'
                     }`}
                   >
-                    {editingGateway.enabled ? 'Enabled (সক্রিয়)' : 'Disabled (বন্ধ)'}
+                    {editingGateway.enabled ? 'Enabled' : 'Disabled'}
                   </button>
                 </div>
 
                 <div className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50">
-                  <span className="font-bold text-slate-700 dark:text-slate-300">স্যান্ডবক্স / টেস্ট মোড</span>
+                  <span className="font-bold text-slate-700 dark:text-slate-300">Sandbox / Test Mode</span>
                   <button
                     type="button"
                     onClick={() => setEditingGateway({ ...editingGateway, test_mode: !editingGateway.test_mode })}
@@ -1754,7 +1754,7 @@ export default function BillingPage() {
                   onClick={() => setGatewayModalOpen(false)}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -1762,7 +1762,7 @@ export default function BillingPage() {
                   disabled={actionLoading === 'save-gateway'}
                   className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20"
                 >
-                  সংরক্ষণ করুন
+                  Save Changes
                 </button>
               </div>
             </div>
@@ -1780,9 +1780,9 @@ export default function BillingPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                      {editingPlan.id ? 'প্যাকেজ সম্পাদনা করুন' : 'নতুন হোস্টিং প্যাকেজ তৈরি করুন'}
+                      {editingPlan.id ? 'Edit Package' : 'Create New Hosting Package'}
                     </h3>
-                    <p className="text-xs text-slate-400">কোটা, মূল্য এবং অন্তর্ভুক্ত সুবিধাসমূহ কনফিগার করুন</p>
+                    <p className="text-xs text-slate-400">Configure quotas, pricing, and included features</p>
                   </div>
                 </div>
 
@@ -1796,7 +1796,7 @@ export default function BillingPage() {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">প্যাকেজের নাম</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Package Name</label>
                   <input
                     type="text"
                     value={editingPlan.name || ''}
@@ -1807,7 +1807,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">টিয়ার</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Tier</label>
                   <select
                     value={editingPlan.tier || 'starter'}
                     onChange={e => setEditingPlan({ ...editingPlan, tier: e.target.value as any })}
@@ -1821,7 +1821,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">মাসিক মূল্য (USD)</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Monthly Price (USD)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1832,7 +1832,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">বার্ষিক মূল্য (USD)</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Yearly Price (USD)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1843,7 +1843,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">স্টোরেজ (MB) (10240 = 10GB)</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Storage (MB) (10240 = 10GB)</label>
                   <input
                     type="number"
                     value={editingPlan.disk_space_mb || 10240}
@@ -1853,7 +1853,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">ব্যান্ডউইথ (MB) (102400 = 100GB)</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Bandwidth (MB) (102400 = 100GB)</label>
                   <input
                     type="number"
                     value={editingPlan.bandwidth_mb || 102400}
@@ -1863,7 +1863,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">সর্বোচ্চ ওয়েবসাইট</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max Websites</label>
                   <input
                     type="number"
                     value={editingPlan.max_websites || 1}
@@ -1873,7 +1873,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">সর্বোচ্চ ডাটাবেস</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max Databases</label>
                   <input
                     type="number"
                     value={editingPlan.max_databases || 2}
@@ -1883,7 +1883,7 @@ export default function BillingPage() {
                 </div>
 
                 <div className="col-span-2 space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">বিবরণ</label>
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Description</label>
                   <textarea
                     rows={2}
                     value={editingPlan.description || ''}
@@ -1900,7 +1900,7 @@ export default function BillingPage() {
                   onClick={() => setPlanModalOpen(false)}
                   className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
                 >
-                  বাতিল
+                  Cancel
                 </button>
                 <button
                   type="button"
@@ -1908,7 +1908,7 @@ export default function BillingPage() {
                   disabled={actionLoading === 'save-plan'}
                   className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20"
                 >
-                  প্যাকেজ সংরক্ষণ
+                  Save Package
                 </button>
               </div>
             </div>
