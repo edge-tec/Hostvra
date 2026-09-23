@@ -37,6 +37,8 @@ const (
 	PermDockerManage    = "docker.manage"
 	PermFilesBrowse     = "files.browse"
 	PermFilesEdit       = "files.edit"
+	PermFilesDelete     = "files.delete"
+	PermFilesManage     = "files.manage"
 	PermTerminalAccess  = "terminal.access"
 	PermBackupsCreate   = "backups.create"
 	PermBackupsRestore  = "backups.restore"
@@ -113,7 +115,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
 		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
-		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
+		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
 		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,

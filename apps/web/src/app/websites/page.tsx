@@ -918,37 +918,53 @@ export default function WebsitesPage() {
                         {colVisible.quickAction && (
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
-                              {/* 1. File Manager */}
+                              {/* 1. File Manager (Prominent One-Click Action) */}
                               <a
-                                href={`/files?path=${encodeURIComponent(site.document_root)}`}
-                                title={`Open File Manager (${site.document_root})`}
-                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition"
+                                href={`/files?domain=${encodeURIComponent(site.primary_domain)}&path=${encodeURIComponent(site.document_root)}`}
+                                title={`Open File Manager (/www/wwwroot/${site.primary_domain})`}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold shadow-xs transition"
                               >
-                                <Folder className="w-3.5 h-3.5" />
+                                <Folder className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>File Manager</span>
                               </a>
 
                               {/* 2. Config File */}
                               <button
                                 onClick={() => openConfModal(site)}
                                 title="Virtual Host Configuration"
-                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition cursor-pointer"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                              >
+                                <Settings className="w-3.5 h-3.5" />
+                              </button>
+
+                              {/* 3. Realtime Logs */}
+                              <button
+                                onClick={() => openLogsModal(site)}
+                                title="Site Access & Error Logs"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <FileText className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* 3. Speed & Performance */}
-                              <button
-                                onClick={() => {
-                                  setSelectedSite(site);
-                                  setSpeedModalOpen(true);
-                                }}
-                                title="Speed & Cache Optimization"
-                                className="p-1 rounded hover:bg-slate-200 dark:hover:bg-surface-700 hover:text-emerald-600 transition cursor-pointer"
+                              {/* 4. Terminal */}
+                              <a
+                                href={`/terminal?cwd=${encodeURIComponent(site.document_root)}`}
+                                title={`Open Terminal at ${site.document_root}`}
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
-                                <Gauge className="w-3.5 h-3.5" />
+                                <Terminal className="w-3.5 h-3.5" />
+                              </a>
+
+                              {/* 5. Directory & Permissions */}
+                              <button
+                                onClick={() => openSiteModal(site, 'directory')}
+                                title="Directory & Folder Permissions"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* 4. PHP Version Switch Pill */}
+                              {/* 6. PHP Version Switch Pill */}
                               <button
                                 onClick={() => openPhpSwitchModal(site)}
                                 title="Click to Switch PHP Version"

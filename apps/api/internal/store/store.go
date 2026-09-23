@@ -274,6 +274,23 @@ type Store interface {
 	GetSystemSettings(ctx context.Context) (*SystemSettings, error)
 	UpdateSystemSettings(ctx context.Context, settings *SystemSettings) error
 
+	// File Manager Enterprise v3.0
+	ListFileManagerFavorites(ctx context.Context, userID *uuid.UUID) ([]*FileManagerFavorite, error)
+	AddFileManagerFavorite(ctx context.Context, fav *FileManagerFavorite) error
+	DeleteFileManagerFavorite(ctx context.Context, userID *uuid.UUID, path string) error
+	ListFileManagerRecent(ctx context.Context, userID *uuid.UUID, limit int) ([]*FileManagerRecent, error)
+	RecordFileManagerRecent(ctx context.Context, rec *FileManagerRecent) error
+	ListFolderLabels(ctx context.Context, domain string) ([]*FolderLabel, error)
+	SetFolderLabel(ctx context.Context, label *FolderLabel) error
+	DeleteFolderLabel(ctx context.Context, path string) error
+	ListFileManagerTrash(ctx context.Context, domain string) ([]*FileManagerTrashItem, error)
+	AddFileManagerTrash(ctx context.Context, item *FileManagerTrashItem) error
+	GetFileManagerTrashItem(ctx context.Context, id uuid.UUID) (*FileManagerTrashItem, error)
+	DeleteFileManagerTrashItem(ctx context.Context, id uuid.UUID) error
+	EmptyFileManagerTrash(ctx context.Context, domain string) error
+	RecordFileManagerActivityLog(ctx context.Context, log *FileManagerActivityLog) error
+	ListFileManagerActivityLogs(ctx context.Context, domain string, limit int) ([]*FileManagerActivityLog, error)
+
 	// Close
 	Close() error
 }
@@ -335,6 +352,11 @@ type MemoryStore struct {
 	articles            []KnowledgeArticle
 	cannedResponses     []CannedResponse
 	systemSettings      *SystemSettings
+	fmFavorites         map[uuid.UUID]*FileManagerFavorite
+	fmRecent            map[uuid.UUID]*FileManagerRecent
+	fmFolderLabels      map[string]*FolderLabel
+	fmTrash             map[uuid.UUID]*FileManagerTrashItem
+	fmActivityLogs      []*FileManagerActivityLog
 	filePath            string
 }
 
@@ -578,6 +600,11 @@ func NewMemoryStore() *MemoryStore {
 		ticketReplies:       make([]TicketReply, 0),
 		articles:            make([]KnowledgeArticle, 0),
 		cannedResponses:     make([]CannedResponse, 0),
+		fmFavorites:         make(map[uuid.UUID]*FileManagerFavorite),
+		fmRecent:            make(map[uuid.UUID]*FileManagerRecent),
+		fmFolderLabels:      make(map[string]*FolderLabel),
+		fmTrash:             make(map[uuid.UUID]*FileManagerTrashItem),
+		fmActivityLogs:      make([]*FileManagerActivityLog, 0),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

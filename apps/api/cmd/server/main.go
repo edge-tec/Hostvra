@@ -446,8 +446,11 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
 			})
 
-			// File Manager Subsystem
-			r.Route("/files", func(r chi.Router) {
+			// Domain selector for multi-domain directory switcher
+			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/domains", fileHandler.ListDomains)
+
+			// File Manager Subsystem v3.0 (Enterprise)
+			mountFileManagerRoutes := func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/list", fileHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/stat", fileHandler.Stat)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/content", fileHandler.GetContent)
@@ -462,7 +465,30 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/permissions", fileHandler.Permissions)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/archive", fileHandler.Archive)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/extract", fileHandler.Extract)
-			})
+
+				// Enterprise v3.0 Endpoints
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/quick-access", fileHandler.QuickAccess)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Post("/favorite", fileHandler.AddFavorite)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Delete("/favorite", fileHandler.DeleteFavorite)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Post("/recent", fileHandler.RecordRecent)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Post("/label", fileHandler.SetFolderLabel)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Delete("/label", fileHandler.DeleteFolderLabel)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/tree", fileHandler.Tree)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/move", fileHandler.Move)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/trash", fileHandler.MoveToTrash)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/trash", fileHandler.ListTrash)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/restore", fileHandler.RestoreFromTrash)
+				r.With(rbac.RequirePermission(rbac.PermFilesDelete)).Delete("/trash/empty", fileHandler.EmptyTrash)
+				r.With(rbac.RequirePermission(rbac.PermFilesDelete)).Delete("/trash/{id}", fileHandler.DeleteTrashItem)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/search", fileHandler.Search)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/upload/chunk", fileHandler.ChunkUpload)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/download-zip", fileHandler.StreamZipDownload)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/storage", fileHandler.StorageInfo)
+				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/activity-logs", fileHandler.ActivityLogs)
+			}
+
+			r.Route("/files", mountFileManagerRoutes)
+			r.Route("/filemanager", mountFileManagerRoutes)
 
 			// Linux Firewall (UFW) & Fail2ban Subsystem
 			r.Route("/firewall", func(r chi.Router) {

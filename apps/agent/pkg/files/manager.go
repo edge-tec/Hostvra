@@ -813,3 +813,325 @@ func copyDir(src, dst string) error {
 	}
 	return nil
 }
+
+// ----------------------------------------------------------------------------
+// ENTERPRISE FILE MANAGER v3.0 EXTENSIONS
+// ----------------------------------------------------------------------------
+
+type TreeNode struct {
+	Name       string      `json:"name"`
+	Path       string      `json:"path"`
+	IsDir      bool        `json:"is_dir"`
+	ChildCount int         `json:"child_count"`
+	Children   []*TreeNode `json:"children,omitempty"`
+}
+
+// ListTree returns the immediate subdirectories for building a lazy tree
+func (fm *FileManager) ListTree(targetPath string, showHidden bool) ([]*TreeNode, error) {
+	validated, err := fm.ValidatePath(targetPath)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(validated)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]*TreeNode, 0)
+	for _, entry := range entries {
+		name := entry.Name()
+		if !showHidden && strings.HasPrefix(name, ".") {
+			continue
+		}
+		if !entry.IsDir() {
+			continue
+		}
+
+		fullSubPath := filepath.Join(validated, name)
+
+		// Count immediate subdirectories inside this folder
+		subCount := 0
+		if subEntries, err := os.ReadDir(fullSubPath); err == nil {
+			for _, se := range subEntries {
+				if se.IsDir() && (showHidden || !strings.HasPrefix(se.Name(), ".")) {
+					subCount++
+				}
+			}
+		}
+
+		nodes = append(nodes, &TreeNode{
+			Name:       name,
+			Path:       fullSubPath,
+			IsDir:      true,
+			ChildCount: subCount,
+			Children:   nil,
+		})
+	}
+	return nodes, nil
+}
+
+// CalculateDirSize recursively calculates size, total files and directories
+func (fm *FileManager) CalculateDirSize(targetPath string) (int64, int, int, error) {
+	validated, err := fm.ValidatePath(targetPath)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	var totalBytes int64
+	var fileCount int
+	var dirCount int
+
+	err = filepath.Walk(validated, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip unreadable files gracefully
+		}
+		if info.IsDir() {
+			if path != validated {
+				dirCount++
+			}
+		} else {
+			fileCount++
+			totalBytes += info.Size()
+		}
+		return nil
+	})
+
+	return totalBytes, fileCount, dirCount, err
+}
+
+// ResolveConflictPath handles replace, skip, or auto-rename when target file already exists
+func (fm *FileManager) ResolveConflictPath(destPath string, strategy string) (string, bool, error) {
+	_, err := os.Lstat(destPath)
+	if os.IsNotExist(err) {
+		return destPath, false, nil
+	}
+
+	switch strings.ToLower(strategy) {
+	case "replace":
+		return destPath, false, nil
+	case "skip":
+		return destPath, true, nil
+	case "rename":
+		fallthrough
+	default:
+		dir := filepath.Dir(destPath)
+		ext := filepath.Ext(destPath)
+		base := strings.TrimSuffix(filepath.Base(destPath), ext)
+
+		for i := 1; i <= 1000; i++ {
+			candidate := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+			if _, err := os.Lstat(candidate); os.IsNotExist(err) {
+				return candidate, false, nil
+			}
+		}
+		return "", false, fmt.Errorf("unable to generate unique conflict-free name for %s", destPath)
+	}
+}
+
+// Search performs a recursive search matching query, file type filters, and size bounds
+func (fm *FileManager) Search(rootPath string, query string, filterType string, minSize int64, maxSize int64, maxResults int) ([]FileItem, error) {
+	validated, err := fm.ValidatePath(rootPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if maxResults <= 0 {
+		maxResults = 250
+	}
+
+	lowerQuery := strings.ToLower(strings.TrimSpace(query))
+	filterType = strings.ToLower(strings.TrimSpace(filterType))
+
+	var results []FileItem
+
+	err = filepath.Walk(validated, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip unreadable
+		}
+		if len(results) >= maxResults {
+			return filepath.SkipAll
+		}
+
+		name := info.Name()
+		if lowerQuery != "" && !strings.Contains(strings.ToLower(name), lowerQuery) {
+			return nil
+		}
+
+		size := info.Size()
+		if minSize > 0 && size < minSize {
+			return nil
+		}
+		if maxSize > 0 && size > maxSize {
+			return nil
+		}
+
+		ext := strings.ToLower(filepath.Ext(name))
+		cleanExt := strings.TrimPrefix(ext, ".")
+
+		if filterType != "" && filterType != "all" {
+			match := false
+			switch filterType {
+			case "image":
+				match = cleanExt == "jpg" || cleanExt == "jpeg" || cleanExt == "png" || cleanExt == "gif" || cleanExt == "webp" || cleanExt == "svg" || cleanExt == "ico"
+			case "video":
+				match = cleanExt == "mp4" || cleanExt == "webm" || cleanExt == "mov" || cleanExt == "avi" || cleanExt == "mkv"
+			case "audio":
+				match = cleanExt == "mp3" || cleanExt == "wav" || cleanExt == "ogg" || cleanExt == "m4a" || cleanExt == "flac"
+			case "archive", "zip":
+				match = cleanExt == "zip" || cleanExt == "tar" || cleanExt == "gz" || cleanExt == "bz2" || cleanExt == "rar" || cleanExt == "7z"
+			case "php":
+				match = cleanExt == "php" || cleanExt == "phtml" || cleanExt == "php8"
+			case "html":
+				match = cleanExt == "html" || cleanExt == "htm"
+			case "css":
+				match = cleanExt == "css" || cleanExt == "scss" || cleanExt == "less"
+			case "js":
+				match = cleanExt == "js" || cleanExt == "mjs" || cleanExt == "cjs" || cleanExt == "ts" || cleanExt == "jsx" || cleanExt == "tsx"
+			case "json":
+				match = cleanExt == "json"
+			case "document":
+				match = cleanExt == "pdf" || cleanExt == "doc" || cleanExt == "docx" || cleanExt == "txt" || cleanExt == "md" || cleanExt == "csv"
+			}
+			if !match {
+				return nil
+			}
+		}
+
+		var uid, gid int
+		owner := "www-data"
+		group := "www-data"
+		if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+			uid = int(stat.Uid)
+			gid = int(stat.Gid)
+			if u, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+				owner = u.Username
+			}
+			if g, err := user.LookupGroupId(strconv.Itoa(gid)); err == nil {
+				group = g.Name
+			}
+		}
+
+		results = append(results, FileItem{
+			Name:       name,
+			Path:       path,
+			Size:       size,
+			Mode:       info.Mode().String(),
+			PermOctal:  fmt.Sprintf("%04o", info.Mode().Perm()),
+			Owner:      owner,
+			Group:      group,
+			UID:        uid,
+			GID:        gid,
+			IsDir:      info.IsDir(),
+			ModifiedAt: info.ModTime(),
+			Extension:  cleanExt,
+		})
+
+		return nil
+	})
+
+	return results, err
+}
+
+// MergeChunks assembles ordered chunk files into the final destination
+func (fm *FileManager) MergeChunks(targetPath string, chunkPaths []string) error {
+	validated, err := fm.ValidatePath(targetPath)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(validated), 0755); err != nil {
+		return err
+	}
+
+	dest, err := os.Create(validated)
+	if err != nil {
+		return err
+	}
+	defer dest.Close()
+
+	for _, chunkPath := range chunkPaths {
+		chunkFile, err := os.Open(chunkPath)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(dest, chunkFile)
+		chunkFile.Close()
+		_ = os.Remove(chunkPath)
+		if copyErr != nil {
+			return copyErr
+		}
+	}
+	return nil
+}
+
+// StreamZip archives the selected file paths and streams the zip output directly to w
+func (fm *FileManager) StreamZip(paths []string, w io.Writer) error {
+	archive := zip.NewWriter(w)
+	defer archive.Close()
+
+	for _, p := range paths {
+		validated, err := fm.ValidatePath(p)
+		if err != nil {
+			continue
+		}
+
+		info, err := os.Stat(validated)
+		if err != nil {
+			continue
+		}
+
+		if info.IsDir() {
+			baseDir := filepath.Dir(validated)
+			_ = filepath.Walk(validated, func(filePath string, fileInfo os.FileInfo, walkErr error) error {
+				if walkErr != nil {
+					return nil
+				}
+				relPath, err := filepath.Rel(baseDir, filePath)
+				if err != nil {
+					return nil
+				}
+				header, err := zip.FileInfoHeader(fileInfo)
+				if err != nil {
+					return nil
+				}
+				header.Name = filepath.ToSlash(relPath)
+				if fileInfo.IsDir() {
+					header.Name += "/"
+				} else {
+					header.Method = zip.Deflate
+				}
+				writer, err := archive.CreateHeader(header)
+				if err != nil {
+					return nil
+				}
+				if !fileInfo.IsDir() {
+					f, err := os.Open(filePath)
+					if err == nil {
+						_, _ = io.Copy(writer, f)
+						f.Close()
+					}
+				}
+				return nil
+			})
+		} else {
+			header, err := zip.FileInfoHeader(info)
+			if err != nil {
+				continue
+			}
+			header.Name = filepath.Base(validated)
+			header.Method = zip.Deflate
+			writer, err := archive.CreateHeader(header)
+			if err != nil {
+				continue
+			}
+			f, err := os.Open(validated)
+			if err == nil {
+				_, _ = io.Copy(writer, f)
+				f.Close()
+			}
+		}
+	}
+	return nil
+}
+

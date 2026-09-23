@@ -9,7 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"hostvra/agent/pkg/files"
 	"hostvra/api/internal/audit"
@@ -833,4 +837,1041 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = io.Copy(w, file)
 }
+
+// ----------------------------------------------------------------------------
+// ENTERPRISE FILE MANAGER v3.0 REST HANDLERS
+// ----------------------------------------------------------------------------
+
+func (h *FileHandler) trashDir() string {
+	p := "/var/lib/hostvra/trash"
+	if err := os.MkdirAll(p, 0755); err != nil {
+		p = filepath.Join(os.TempDir(), "hostvra_trash")
+		_ = os.MkdirAll(p, 0755)
+	}
+	return p
+}
+
+func (h *FileHandler) getUserID(r *http.Request) *uuid.UUID {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.UserID != uuid.Nil {
+		uid := claims.UserID
+		return &uid
+	}
+	return nil
+}
+
+type FavoriteRequest struct {
+	Path   string `json:"path"`
+	Domain string `json:"domain"`
+	Name   string `json:"name"`
+	Color  string `json:"color"`
+}
+
+type FolderLabelRequest struct {
+	Path   string `json:"path"`
+	Domain string `json:"domain"`
+	Color  string `json:"color"`
+	Label  string `json:"label"`
+}
+
+type RecentFolderRequest struct {
+	Path   string `json:"path"`
+	Domain string `json:"domain"`
+}
+
+type MoveRequest struct {
+	SrcPath          string   `json:"src_path"`
+	SrcPaths         []string `json:"src_paths"`
+	DestPath         string   `json:"dest_path"`
+	DestDomain       string   `json:"dest_domain"`
+	ConflictStrategy string   `json:"conflict_strategy"` // "replace", "skip", "rename"
+}
+
+type TrashMoveRequest struct {
+	Path   string   `json:"path"`
+	Paths  []string `json:"paths"`
+	Domain string   `json:"domain"`
+}
+
+type RestoreRequest struct {
+	TrashIDs         []string `json:"trash_ids"`
+	TrashID          string   `json:"trash_id"`
+	RestoreTo        string   `json:"restore_to"` // "original", "custom_folder", "domain"
+	CustomPath       string   `json:"custom_path"`
+	TargetDomain     string   `json:"target_domain"`
+	ConflictStrategy string   `json:"conflict_strategy"` // "replace", "skip", "rename"
+}
+
+type EmptyTrashRequest struct {
+	Confirmation string `json:"confirmation"` // must be "DELETE"
+	Domain       string `json:"domain"`
+}
+
+// QuickAccess returns sidebar favorites, recent folders, domains, roots, and trash stats
+func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	userID := h.getUserID(r)
+
+	favs, err := h.store.ListFileManagerFavorites(ctx, userID)
+	if err != nil {
+		favs = []*store.FileManagerFavorite{}
+	}
+
+	recent, err := h.store.ListFileManagerRecent(ctx, userID, 15)
+	if err != nil {
+		recent = []*store.FileManagerRecent{}
+	}
+
+	labels, err := h.store.ListFolderLabels(ctx, "")
+	if err != nil {
+		labels = []*store.FolderLabel{}
+	}
+
+	// Fetch websites/domains for My Domains section
+	sites, _ := h.store.ListWebsitesByOrg(ctx, uuid.Nil)
+	type DomainItem struct {
+		ID           string `json:"id"`
+		Domain       string `json:"domain"`
+		DocumentRoot string `json:"document_root"`
+		Status       string `json:"status"`
+	}
+	domainItems := make([]DomainItem, 0)
+	for _, s := range sites {
+		if s.DeletedAt == nil {
+			domainItems = append(domainItems, DomainItem{
+				ID:           s.ID.String(),
+				Domain:       s.PrimaryDomain,
+				DocumentRoot: s.DocumentRoot,
+				Status:       s.Status,
+			})
+		}
+	}
+
+	// Trash stats
+	trashItems, _ := h.store.ListFileManagerTrash(ctx, "")
+	var trashSize int64
+	for _, t := range trashItems {
+		trashSize += t.Size
+	}
+
+	// Determine existing root directory shortcut
+	rootDirectory := "/var/www"
+	if _, err := os.Stat("/www/wwwroot"); err == nil {
+		rootDirectory = "/www/wwwroot"
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"favorites":      favs,
+		"recent":         recent,
+		"domains":        domainItems,
+		"folder_labels":  labels,
+		"root_directory": rootDirectory,
+		"shortcuts": []map[string]string{
+			{"name": "Root Directory", "path": rootDirectory, "icon": "folder"},
+			{"name": "Trash Bin", "path": "/trash", "icon": "trash-2"},
+			{"name": "Backups", "path": "/var/backups", "icon": "archive"},
+			{"name": "Uploads", "path": filepath.Join(rootDirectory, "uploads"), "icon": "upload"},
+			{"name": "Downloads", "path": filepath.Join(rootDirectory, "downloads"), "icon": "download"},
+		},
+		"trash_stats": map[string]interface{}{
+			"count": len(trashItems),
+			"bytes": trashSize,
+		},
+	}, nil)
+}
+
+// AddFavorite pins a folder to quick access
+func (h *FileHandler) AddFavorite(w http.ResponseWriter, r *http.Request) {
+	var req FavoriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	cleanPath := filepath.Clean(req.Path)
+	if cleanPath == "" || cleanPath == "." {
+		response.Error(w, http.StatusBadRequest, "INVALID_PATH", "Valid path required", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, cleanPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	name := req.Name
+	if name == "" {
+		name = filepath.Base(cleanPath)
+	}
+
+	fav := &store.FileManagerFavorite{
+		ID:     uuid.New(),
+		UserID: h.getUserID(r),
+		Domain: req.Domain,
+		Path:   cleanPath,
+		Name:   name,
+		Color:  req.Color,
+	}
+
+	if err := h.store.AddFileManagerFavorite(r.Context(), fav); err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "file.favorite.add", "folder", cleanPath, "success", "", nil)
+
+	response.JSON(w, http.StatusOK, fav, nil)
+}
+
+// DeleteFavorite unpins a folder from quick access
+func (h *FileHandler) DeleteFavorite(w http.ResponseWriter, r *http.Request) {
+	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if targetPath == "" && r.Body != nil {
+		var req struct {
+			Path string `json:"path"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		targetPath = strings.TrimSpace(req.Path)
+	}
+
+	if targetPath == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	cleanPath := filepath.Clean(targetPath)
+	userID := h.getUserID(r)
+
+	if err := h.store.DeleteFileManagerFavorite(r.Context(), userID, cleanPath); err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "file.favorite.delete", "folder", cleanPath, "success", "", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": true,
+		"path":    cleanPath,
+	}, nil)
+}
+
+// RecordRecent updates the last accessed timestamp for a recently opened folder
+func (h *FileHandler) RecordRecent(w http.ResponseWriter, r *http.Request) {
+	var req RecentFolderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	cleanPath := filepath.Clean(req.Path)
+	if cleanPath == "" || cleanPath == "." {
+		response.Error(w, http.StatusBadRequest, "INVALID_PATH", "Valid path required", nil, "")
+		return
+	}
+
+	rec := &store.FileManagerRecent{
+		ID:     uuid.New(),
+		UserID: h.getUserID(r),
+		Domain: req.Domain,
+		Path:   cleanPath,
+	}
+
+	_ = h.store.RecordFileManagerRecent(r.Context(), rec)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{"recorded": true}, nil)
+}
+
+// SetFolderLabel assigns a color and label to a folder
+func (h *FileHandler) SetFolderLabel(w http.ResponseWriter, r *http.Request) {
+	var req FolderLabelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	cleanPath := filepath.Clean(req.Path)
+	if cleanPath == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	label := &store.FolderLabel{
+		ID:     uuid.New(),
+		Domain: req.Domain,
+		Path:   cleanPath,
+		Color:  req.Color,
+		Label:  req.Label,
+	}
+
+	if err := h.store.SetFolderLabel(r.Context(), label); err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, label, nil)
+}
+
+// DeleteFolderLabel removes color label from a folder
+func (h *FileHandler) DeleteFolderLabel(w http.ResponseWriter, r *http.Request) {
+	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if targetPath == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	_ = h.store.DeleteFolderLabel(r.Context(), filepath.Clean(targetPath))
+	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true}, nil)
+}
+
+// Tree returns lazy subdirectories for the Windows/VS Code folder tree
+func (h *FileHandler) Tree(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		targetPath = "/var/www"
+		if _, err := os.Stat("/www/wwwroot"); err == nil {
+			targetPath = "/www/wwwroot"
+		} else if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+			targetPath = "/"
+		}
+	}
+
+	if err := h.checkPathAuthorization(r, targetPath); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	showHidden := r.URL.Query().Get("show_hidden") == "true" || r.URL.Query().Get("show_hidden") == "1"
+
+	nodes, err := h.fileMgr.ListTree(targetPath, showHidden)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "TREE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"path":  filepath.Clean(targetPath),
+		"nodes": nodes,
+		"count": len(nodes),
+	}, nil)
+}
+
+// Move moves files or folders with conflict handling and cross-domain support
+func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
+	var req MoveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	var sources []string
+	if len(req.SrcPaths) > 0 {
+		sources = req.SrcPaths
+	} else if req.SrcPath != "" {
+		sources = []string{req.SrcPath}
+	}
+
+	if len(sources) == 0 || req.DestPath == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATHS", "Sources and dest_path are required", nil, "")
+		return
+	}
+
+	destDir := filepath.Clean(req.DestPath)
+	if err := h.checkPathAuthorization(r, destDir); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	// Auto-create destination folder if missing
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		response.Error(w, http.StatusInternalServerError, "MKDIR_ERROR", "Cannot create destination directory: "+err.Error(), nil, "")
+		return
+	}
+
+	var movedPaths []string
+	var errorMessages []string
+
+	for _, src := range sources {
+		src = strings.TrimSpace(src)
+		if src == "" {
+			continue
+		}
+		if err := h.checkPathAuthorization(r, src); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", src, err.Error()))
+			continue
+		}
+
+		targetDest := filepath.Join(destDir, filepath.Base(src))
+
+		resolvedTarget, skip, err := h.fileMgr.ResolveConflictPath(targetDest, req.ConflictStrategy)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", src, err.Error()))
+			continue
+		}
+		if skip {
+			continue
+		}
+
+		if err := h.fileMgr.Rename(src, resolvedTarget); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", src, err.Error()))
+			continue
+		}
+
+		h.audit.Log(r.Context(), r, "file.move", "file", src, "success", "", map[string]interface{}{
+			"dest_path":   resolvedTarget,
+			"dest_domain": req.DestDomain,
+		})
+		_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+			ID:              uuid.New(),
+			UserID:          h.getUserID(r),
+			Domain:          req.DestDomain,
+			Action:          "move",
+			SourcePath:      src,
+			DestinationPath: resolvedTarget,
+		})
+
+		movedPaths = append(movedPaths, resolvedTarget)
+	}
+
+	if len(movedPaths) == 0 && len(errorMessages) > 0 {
+		response.Error(w, http.StatusBadRequest, "MOVE_ERROR", strings.Join(errorMessages, "; "), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"moved":  true,
+		"paths":  movedPaths,
+		"count":  len(movedPaths),
+		"errors": errorMessages,
+	}, nil)
+}
+
+// MoveToTrash moves files or folders into the Enterprise Trash Bin instead of permanent deletion
+func (h *FileHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
+	var req TrashMoveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	var targets []string
+	if len(req.Paths) > 0 {
+		targets = req.Paths
+	} else if req.Path != "" {
+		targets = []string{req.Path}
+	}
+
+	if len(targets) == 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_PATH", "Path required", nil, "")
+		return
+	}
+
+	trashBase := h.trashDir()
+	var trashedItems []*store.FileManagerTrashItem
+	var errorMessages []string
+
+	claims, _ := auth.GetClaims(r.Context())
+	deletedBy := "Administrator"
+	if claims != nil && claims.Email != "" {
+		deletedBy = claims.Email
+	}
+
+	for _, target := range targets {
+		clean := filepath.Clean(target)
+		if clean == "/" || clean == "." {
+			errorMessages = append(errorMessages, clean+": Root cannot be deleted")
+			continue
+		}
+
+		if err := h.checkPathAuthorization(r, clean); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		info, err := os.Stat(clean)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		trashID := uuid.New()
+		trashFilename := fmt.Sprintf("%s_%s", trashID.String(), filepath.Base(clean))
+		physicalTrashPath := filepath.Join(trashBase, trashFilename)
+
+		var totalSize int64
+		isDir := info.IsDir()
+		if isDir {
+			sz, _, _, _ := h.fileMgr.CalculateDirSize(clean)
+			totalSize = sz
+		} else {
+			totalSize = info.Size()
+		}
+
+		// Move to physical trash directory
+		if err := h.fileMgr.Rename(clean, physicalTrashPath); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		trashItem := &store.FileManagerTrashItem{
+			ID:           trashID,
+			UserID:       h.getUserID(r),
+			Domain:       req.Domain,
+			OriginalPath: clean,
+			TrashPath:    physicalTrashPath,
+			Name:         filepath.Base(clean),
+			Size:         totalSize,
+			FileType:     filepath.Ext(clean),
+			IsDir:        isDir,
+			DeletedBy:    deletedBy,
+			DeletedAt:    time.Now().UTC(),
+		}
+
+		if err := h.store.AddFileManagerTrash(r.Context(), trashItem); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		h.audit.Log(r.Context(), r, "file.trash", "file", clean, "success", "", map[string]interface{}{
+			"trash_id": trashID.String(),
+			"size":     totalSize,
+		})
+		_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+			ID:         uuid.New(),
+			UserID:     h.getUserID(r),
+			UserEmail:  deletedBy,
+			Domain:     req.Domain,
+			Action:     "trash",
+			SourcePath: clean,
+		})
+
+		trashedItems = append(trashedItems, trashItem)
+	}
+
+	if len(trashedItems) == 0 && len(errorMessages) > 0 {
+		response.Error(w, http.StatusBadRequest, "TRASH_ERROR", strings.Join(errorMessages, "; "), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"trashed": true,
+		"items":   trashedItems,
+		"count":   len(trashedItems),
+		"errors":  errorMessages,
+	}, nil)
+}
+
+// ListTrash lists all items currently in the Enterprise Trash Bin
+func (h *FileHandler) ListTrash(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	items, err := h.store.ListFileManagerTrash(r.Context(), domain)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	var totalFiles int
+	var totalFolders int
+	var totalSize int64
+
+	for _, it := range items {
+		if it.IsDir {
+			totalFolders++
+		} else {
+			totalFiles++
+		}
+		totalSize += it.Size
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"items":         items,
+		"count":         len(items),
+		"total_files":   totalFiles,
+		"total_folders": totalFolders,
+		"total_size":    totalSize,
+	}, nil)
+}
+
+// RestoreFromTrash restores trashed items to original or custom destination with conflict resolution
+func (h *FileHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
+	var req RestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	var ids []string
+	if len(req.TrashIDs) > 0 {
+		ids = req.TrashIDs
+	} else if req.TrashID != "" {
+		ids = []string{req.TrashID}
+	}
+
+	if len(ids) == 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_ID", "trash_id or trash_ids required", nil, "")
+		return
+	}
+
+	var restoredPaths []string
+	var errorMessages []string
+
+	for _, rawID := range ids {
+		parsedID, err := uuid.Parse(strings.TrimSpace(rawID))
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: Invalid UUID", rawID))
+			continue
+		}
+
+		item, err := h.store.GetFileManagerTrashItem(r.Context(), parsedID)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: Trash item not found", rawID))
+			continue
+		}
+
+		// Determine target path
+		targetPath := item.OriginalPath
+		if req.RestoreTo == "custom_folder" && req.CustomPath != "" {
+			targetPath = filepath.Join(req.CustomPath, item.Name)
+		} else if req.RestoreTo == "domain" && req.TargetDomain != "" {
+			// Find domain's document root
+			targetPath = filepath.Join("/var/www", req.TargetDomain, item.Name)
+			if sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); err == nil {
+				for _, s := range sites {
+					if s.PrimaryDomain == req.TargetDomain {
+						targetPath = filepath.Join(s.DocumentRoot, item.Name)
+						break
+					}
+				}
+			}
+		}
+
+		cleanDest := filepath.Clean(targetPath)
+		if err := h.checkPathAuthorization(r, cleanDest); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", item.Name, err.Error()))
+			continue
+		}
+
+		// Automatically recreate destination directory if missing
+		parentDir := filepath.Dir(cleanDest)
+		if err := os.MkdirAll(parentDir, 0755); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: Cannot create directory: %s", item.Name, err.Error()))
+			continue
+		}
+
+		resolvedDest, skip, err := h.fileMgr.ResolveConflictPath(cleanDest, req.ConflictStrategy)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", item.Name, err.Error()))
+			continue
+		}
+		if skip {
+			continue
+		}
+
+		// Move from physical trash back to target
+		if err := h.fileMgr.Rename(item.TrashPath, resolvedDest); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", item.Name, err.Error()))
+			continue
+		}
+
+		// Delete from database
+		_ = h.store.DeleteFileManagerTrashItem(r.Context(), parsedID)
+
+		h.audit.Log(r.Context(), r, "file.restore", "file", resolvedDest, "success", "", map[string]interface{}{
+			"original_path": item.OriginalPath,
+			"restored_path": resolvedDest,
+		})
+		_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+			ID:              uuid.New(),
+			UserID:          h.getUserID(r),
+			Domain:          item.Domain,
+			Action:          "restore",
+			SourcePath:      item.OriginalPath,
+			DestinationPath: resolvedDest,
+		})
+
+		restoredPaths = append(restoredPaths, resolvedDest)
+	}
+
+	if len(restoredPaths) == 0 && len(errorMessages) > 0 {
+		response.Error(w, http.StatusBadRequest, "RESTORE_ERROR", strings.Join(errorMessages, "; "), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"restored": true,
+		"paths":    restoredPaths,
+		"count":    len(restoredPaths),
+		"errors":   errorMessages,
+	}, nil)
+}
+
+// EmptyTrash permanently purges all files in the Enterprise Trash Bin
+func (h *FileHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
+	var req EmptyTrashRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body", nil, "")
+		return
+	}
+
+	// Strictly require typing "DELETE" for security
+	if strings.TrimSpace(req.Confirmation) != "DELETE" {
+		response.Error(w, http.StatusBadRequest, "CONFIRMATION_REQUIRED", "Security check: Type 'DELETE' to confirm permanent purge", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", "Only Administrators can permanently empty the trash bin", nil, "")
+		return
+	}
+
+	items, err := h.store.ListFileManagerTrash(r.Context(), req.Domain)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	var purgedCount int
+	var freedBytes int64
+
+	for _, item := range items {
+		// Permanently remove physical file or directory
+		_ = os.RemoveAll(item.TrashPath)
+		purgedCount++
+		freedBytes += item.Size
+	}
+
+	// Delete from database
+	if err := h.store.EmptyFileManagerTrash(r.Context(), req.Domain); err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "file.trash.empty", "trash", "", "success", "", map[string]interface{}{
+		"files_purged": purgedCount,
+		"bytes_freed":  freedBytes,
+		"domain":       req.Domain,
+	})
+	_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+		ID:         uuid.New(),
+		UserID:     h.getUserID(r),
+		Domain:     req.Domain,
+		Action:     "empty_trash",
+		SourcePath: "",
+		Details: map[string]interface{}{
+			"files_purged": purgedCount,
+			"bytes_freed":  freedBytes,
+		},
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"empty":        true,
+		"files_purged": purgedCount,
+		"bytes_freed":  freedBytes,
+	}, nil)
+}
+
+// DeleteTrashItem permanently deletes a single item from trash
+func (h *FileHandler) DeleteTrashItem(w http.ResponseWriter, r *http.Request) {
+	rawID := chi.URLParam(r, "id")
+	if rawID == "" {
+		rawID = r.URL.Query().Get("id")
+	}
+
+	parsedID, err := uuid.Parse(strings.TrimSpace(rawID))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Valid UUID required", nil, "")
+		return
+	}
+
+	item, err := h.store.GetFileManagerTrashItem(r.Context(), parsedID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Trash item not found", nil, "")
+		return
+	}
+
+	// Permanently wipe physical file/folder
+	_ = os.RemoveAll(item.TrashPath)
+
+	_ = h.store.DeleteFileManagerTrashItem(r.Context(), parsedID)
+
+	h.audit.Log(r.Context(), r, "file.trash.delete_item", "trash", item.OriginalPath, "success", "", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"deleted": true,
+		"id":      rawID,
+	}, nil)
+}
+
+// Search performs full-text or filter-based global search across directories and domains
+func (h *FileHandler) Search(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("query")
+	targetPath := r.URL.Query().Get("path")
+	filterType := r.URL.Query().Get("type")
+	allDomains := r.URL.Query().Get("all_domains") == "true" || r.URL.Query().Get("all_domains") == "1"
+
+	var minSize int64
+	var maxSize int64
+	if s := r.URL.Query().Get("min_size"); s != "" {
+		minSize, _ = strconv.ParseInt(s, 10, 64)
+	}
+	if s := r.URL.Query().Get("max_size"); s != "" {
+		maxSize, _ = strconv.ParseInt(s, 10, 64)
+	}
+
+	var rootsToSearch []string
+
+	if allDomains {
+		if sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); err == nil && len(sites) > 0 {
+			for _, s := range sites {
+				if s.DeletedAt == nil && s.DocumentRoot != "" {
+					rootsToSearch = append(rootsToSearch, s.DocumentRoot)
+				}
+			}
+		}
+	}
+
+	if len(rootsToSearch) == 0 {
+		if targetPath == "" {
+			targetPath = "/var/www"
+			if _, err := os.Stat("/www/wwwroot"); err == nil {
+				targetPath = "/www/wwwroot"
+			}
+		}
+		if err := h.checkPathAuthorization(r, targetPath); err != nil {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+			return
+		}
+		rootsToSearch = []string{targetPath}
+	}
+
+	var allResults []files.FileItem
+	for _, root := range rootsToSearch {
+		if err := h.checkPathAuthorization(r, root); err != nil {
+			continue
+		}
+		res, err := h.fileMgr.Search(root, query, filterType, minSize, maxSize, 150)
+		if err == nil {
+			allResults = append(allResults, res...)
+		}
+		if len(allResults) >= 300 {
+			allResults = allResults[:300]
+			break
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"results": allResults,
+		"count":   len(allResults),
+		"query":   query,
+	}, nil)
+}
+
+// ChunkUpload handles large multipart chunk uploads (>10GB support)
+func (h *FileHandler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		response.Error(w, http.StatusBadRequest, "UPLOAD_ERROR", "Failed to parse chunk multipart body", nil, "")
+		return
+	}
+
+	uploadID := r.FormValue("upload_id")
+	filename := filepath.Base(filepath.Clean(r.FormValue("filename")))
+	targetDir := r.FormValue("target_dir")
+	chunkIndex, _ := strconv.Atoi(r.FormValue("chunk_index"))
+	totalChunks, _ := strconv.Atoi(r.FormValue("total_chunks"))
+
+	if uploadID == "" || filename == "" || targetDir == "" || totalChunks <= 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_PARAMS", "upload_id, filename, target_dir, and total_chunks required", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, targetDir); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	file, _, err := r.FormFile("chunk")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "MISSING_CHUNK", "No chunk file uploaded", nil, "")
+		return
+	}
+	defer file.Close()
+
+	chunkDir := filepath.Join(os.TempDir(), "hostvra_chunks", uploadID)
+	_ = os.MkdirAll(chunkDir, 0755)
+
+	chunkPath := filepath.Join(chunkDir, fmt.Sprintf("chunk_%05d", chunkIndex))
+	out, err := os.Create(chunkPath)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "IO_ERROR", err.Error(), nil, "")
+		return
+	}
+	_, copyErr := io.Copy(out, file)
+	out.Close()
+	if copyErr != nil {
+		response.Error(w, http.StatusInternalServerError, "IO_ERROR", copyErr.Error(), nil, "")
+		return
+	}
+
+	// Check if all chunks have arrived
+	isComplete := false
+	if chunkIndex == totalChunks-1 {
+		chunkFiles := make([]string, totalChunks)
+		allPresent := true
+		for i := 0; i < totalChunks; i++ {
+			p := filepath.Join(chunkDir, fmt.Sprintf("chunk_%05d", i))
+			if _, err := os.Stat(p); os.IsNotExist(err) {
+				allPresent = false
+				break
+			}
+			chunkFiles[i] = p
+		}
+
+		if allPresent {
+			finalPath := filepath.Join(targetDir, filename)
+			if err := h.fileMgr.MergeChunks(finalPath, chunkFiles); err != nil {
+				response.Error(w, http.StatusInternalServerError, "MERGE_ERROR", err.Error(), nil, "")
+				return
+			}
+			_ = os.RemoveAll(chunkDir)
+			isComplete = true
+
+			h.audit.Log(r.Context(), r, "file.upload.chunked", "file", finalPath, "success", "", nil)
+			_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+				ID:              uuid.New(),
+				UserID:          h.getUserID(r),
+				Action:          "upload",
+				DestinationPath: finalPath,
+			})
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"chunk_index": chunkIndex,
+		"complete":    isComplete,
+		"filename":    filename,
+	}, nil)
+}
+
+// StreamZipDownload archives multiple files/folders into a streaming ZIP download
+func (h *FileHandler) StreamZipDownload(w http.ResponseWriter, r *http.Request) {
+	rawPaths := r.URL.Query()["paths"]
+	if len(rawPaths) == 0 {
+		rawPaths = strings.Split(r.URL.Query().Get("paths_csv"), ",")
+	}
+
+	var validPaths []string
+	for _, p := range rawPaths {
+		clean := strings.TrimSpace(p)
+		if clean != "" && h.checkPathAuthorization(r, clean) == nil {
+			validPaths = append(validPaths, clean)
+		}
+	}
+
+	if len(validPaths) == 0 {
+		http.Error(w, "no authorized paths to archive", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", "attachment; filename=\"download.zip\"")
+	w.Header().Set("Content-Type", "application/zip")
+
+	_ = h.fileMgr.StreamZip(validPaths, w)
+}
+
+// StorageInfo returns folder size, domain disk usage, free space, and trash size
+func (h *FileHandler) StorageInfo(w http.ResponseWriter, r *http.Request) {
+	targetPath := r.URL.Query().Get("path")
+	if targetPath == "" {
+		targetPath = "/var/www"
+		if _, err := os.Stat("/www/wwwroot"); err == nil {
+			targetPath = "/www/wwwroot"
+		}
+	}
+
+	var folderSize int64
+	var fileCount int
+	var dirCount int
+	if info, err := os.Stat(targetPath); err == nil && info.IsDir() {
+		folderSize, fileCount, dirCount, _ = h.fileMgr.CalculateDirSize(targetPath)
+	}
+
+	// Trash size
+	trashItems, _ := h.store.ListFileManagerTrash(r.Context(), "")
+	var trashSize int64
+	for _, t := range trashItems {
+		trashSize += t.Size
+	}
+
+	// Disk storage via statfs
+	var stat syscall.Statfs_t
+	var totalDiskBytes int64
+	var freeDiskBytes int64
+	var usedDiskBytes int64
+	if err := syscall.Statfs(targetPath, &stat); err == nil {
+		totalDiskBytes = int64(stat.Blocks) * int64(stat.Bsize)
+		freeDiskBytes = int64(stat.Bavail) * int64(stat.Bsize)
+		usedDiskBytes = totalDiskBytes - freeDiskBytes
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"folder_size":      folderSize,
+		"file_count":       fileCount,
+		"dir_count":        dirCount,
+		"trash_size":       trashSize,
+		"total_disk_bytes": totalDiskBytes,
+		"used_disk_bytes":  usedDiskBytes,
+		"free_disk_bytes":  freeDiskBytes,
+	}, nil)
+}
+
+// ActivityLogs returns recent file manager activity audit logs
+func (h *FileHandler) ActivityLogs(w http.ResponseWriter, r *http.Request) {
+	domain := r.URL.Query().Get("domain")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 50
+	}
+
+	logs, err := h.store.ListFileManagerActivityLogs(r.Context(), domain, limit)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"logs":  logs,
+		"count": len(logs),
+	}, nil)
+}
+
+// ListDomains returns website domains for multi-domain directory switching
+func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
+	sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	type SimpleDomain struct {
+		ID           string `json:"id"`
+		Domain       string `json:"domain"`
+		DocumentRoot string `json:"document_root"`
+		Status       string `json:"status"`
+	}
+
+	res := make([]SimpleDomain, 0)
+	for _, s := range sites {
+		if s.DeletedAt == nil {
+			res = append(res, SimpleDomain{
+				ID:           s.ID.String(),
+				Domain:       s.PrimaryDomain,
+				DocumentRoot: s.DocumentRoot,
+				Status:       s.Status,
+			})
+		}
+	}
+
+	response.JSON(w, http.StatusOK, res, nil)
+}
+
 
