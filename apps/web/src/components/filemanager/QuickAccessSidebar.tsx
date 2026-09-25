@@ -83,6 +83,7 @@ interface QuickAccessSidebarProps {
   onTrashClick: () => void;
   isTrashActive: boolean;
   onDropItem?: (targetPath: string, isTrash?: boolean) => void;
+  onDeleteFolder?: (path: string) => void;
 }
 
 export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
@@ -96,6 +97,7 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
   onTrashClick,
   isTrashActive,
   onDropItem,
+  onDeleteFolder,
 }) => {
   const [data, setData] = useState<QuickAccessData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -277,6 +279,13 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
               toggleTreeNode(node.path);
             }
           }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (onDeleteFolder) {
+              onDeleteFolder(node.path);
+            }
+          }}
           style={{ paddingLeft: `${depth * 14 + 10}px` }}
           className={`group flex items-center justify-between py-1.5 pr-2 rounded-lg cursor-pointer transition ${
             isSelected
@@ -322,9 +331,22 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
               />
             )}
             {node.child_count > 0 && (
-              <span className="text-[10px] text-slate-400 font-mono px-1 rounded bg-slate-100 dark:bg-surface-800">
+              <span className={`text-[10px] text-slate-400 font-mono px-1 rounded bg-slate-100 dark:bg-surface-800 ${onDeleteFolder ? 'group-hover:hidden' : ''}`}>
                 {node.child_count}
               </span>
+            )}
+            {onDeleteFolder && (
+              <button
+                type="button"
+                title={`Delete ${node.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteFolder(node.path);
+                }}
+                className="hidden group-hover:flex items-center justify-center p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             )}
           </div>
         </div>
@@ -464,11 +486,26 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
                           />
                           <span className="truncate">{fav.name}</span>
                         </div>
-                        {fav.domain && (
-                          <span className="text-[10px] text-slate-400 truncate max-w-[80px]">
-                            {fav.domain}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {fav.domain && (
+                            <span className={`text-[10px] text-slate-400 truncate max-w-[80px] ${onDeleteFolder ? 'group-hover:hidden' : ''}`}>
+                              {fav.domain}
+                            </span>
+                          )}
+                          {onDeleteFolder && (
+                            <button
+                              type="button"
+                              title={`Delete ${fav.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteFolder(fav.path);
+                              }}
+                              className="hidden group-hover:flex items-center justify-center p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -678,7 +715,7 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
                     <div
                       key={rec.id}
                       onClick={() => onNavigate(rec.path, rec.domain)}
-                      className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition ${
+                      className={`group flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition ${
                         currentPath === rec.path && !isTrashActive
                           ? 'bg-slate-100 font-semibold dark:bg-surface-800'
                           : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-surface-800'
@@ -688,9 +725,24 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
                         <Folder className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className="truncate">{filepathBase(rec.path)}</span>
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono truncate max-w-[90px]">
-                        {rec.domain || filepathDir(rec.path)}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className={`text-[10px] text-slate-400 font-mono truncate max-w-[90px] ${onDeleteFolder ? 'group-hover:hidden' : ''}`}>
+                          {rec.domain || filepathDir(rec.path)}
+                        </span>
+                        {onDeleteFolder && (
+                          <button
+                            type="button"
+                            title={`Delete ${filepathBase(rec.path)}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteFolder(rec.path);
+                            }}
+                            className="hidden group-hover:flex items-center justify-center p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))
                 )}
