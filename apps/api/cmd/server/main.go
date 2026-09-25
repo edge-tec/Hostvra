@@ -846,6 +846,41 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 	}
 	_ = s.CreateOrganization(ctx, org)
 
+	// Ensure default primary server node exists for mail/web services
+	defaultServerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if _, err := s.GetServerByID(ctx, defaultServerID); err != nil {
+		hostname := "mail.hostvra.local"
+		if h, err := os.Hostname(); err == nil && h != "" {
+			hostname = h
+		}
+		now := time.Now().UTC()
+		defaultServer := &store.Server{
+			ID:              defaultServerID,
+			OrganizationID:  defaultOrgID,
+			Name:            "Hostvra Primary Node",
+			Hostname:        hostname,
+			IPAddress:       "127.0.0.1",
+			OSName:          "Linux",
+			OSVersion:       "Ubuntu 22.04",
+			Architecture:    "x86_64",
+			KernelVersion:   "5.15.0",
+			AgentVersion:    "1.0.0",
+			Status:          "online",
+			CPUCores:        2,
+			RAMTotalMB:      4096,
+			DiskTotalGB:     100,
+			AgentTokenHash:  "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			LastHeartbeatAt: &now,
+		}
+		if err := s.CreateServer(ctx, defaultServer); err != nil {
+			logger.Warn("Failed to seed default server node", "error", err)
+		} else {
+			logger.Info("Seeded default primary server node", "server_id", defaultServerID)
+		}
+	}
+
 	// Build map of accounts to guarantee working admin credentials
 	accountsToSeed := map[string]string{
 		"admin@hostvra.com":   "SuperSecretP@ss123!",

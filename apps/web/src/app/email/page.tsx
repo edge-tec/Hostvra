@@ -617,14 +617,16 @@ export default function EmailHostingPage() {
           const exists = prev.some((d) => d.id === addedDomain.id);
           return exists ? prev : [...prev, addedDomain];
         });
+        setNewMailboxDomain(addedDomain.id);
+        setSelectedSmtpDomain(addedDomain.domain);
+        setHealthDomainId(addedDomain.id);
         setShowAddDomainModal(false);
         setNewDomainName('');
         setNewDomainMailHost('');
         await openDNSModal(addedDomain);
       } else {
+        alert(res.error?.message || 'Failed to add email domain. Please verify server status.');
         await fetchEmailData();
-        setShowAddDomainModal(false);
-        setNewDomainName('');
       }
     } catch (err: any) {
       alert(`Failed to add domain: ${err.message || 'Unknown error'}`);
@@ -2094,93 +2096,123 @@ export default function EmailHostingPage() {
                 </button>
               </div>
 
-              <form onSubmit={handleAddMailbox} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Select Domain</label>
-                  <select
-                    value={newMailboxDomain}
-                    onChange={(e) => setNewMailboxDomain(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                  >
-                    {domains.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        @{d.domain}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Username (Local-Part)</label>
-                  <div className="flex items-center">
-                    <input
-                      type="text"
-                      required
-                      placeholder="info or support"
-                      value={newLocalPart}
-                      onChange={(e) => setNewLocalPart(e.target.value)}
-                      className="flex-1 px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-l-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                    />
-                    <span className="px-3 py-2.5 bg-slate-100 dark:bg-surface-800 border border-l-0 border-slate-200 dark:border-surface-800 rounded-r-xl text-xs text-slate-500 font-mono">
-                      @{domains.find((d) => d.id === newMailboxDomain)?.domain || 'hostvra.com'}
-                    </span>
+              {domains.length === 0 ? (
+                <div className="p-6 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 rounded-2xl text-center space-y-3">
+                  <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto" />
+                  <h4 className="text-sm font-bold text-amber-900 dark:text-amber-200">No Email Domains Configured Yet</h4>
+                  <p className="text-xs text-amber-700 dark:text-amber-300/90 leading-relaxed">
+                    You need to add an email domain first before creating mailboxes. Hostvra will generate a 2048-bit RSA DKIM key and prepare DNS records for your domain.
+                  </p>
+                  <div className="pt-2 flex justify-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddMailboxModal(false)}
+                      className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800"
+                    >
+                      Close
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAddMailboxModal(false);
+                        setShowAddDomainModal(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Email Domain First</span>
+                    </button>
                   </div>
                 </div>
+              ) : (
+                <form onSubmit={handleAddMailbox} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Select Domain</label>
+                    <select
+                      value={newMailboxDomain}
+                      onChange={(e) => setNewMailboxDomain(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      {domains.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          @{d.domain} ({d.mail_hostname || `mail.${d.domain}`})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Display Name</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Support Team"
-                    value={newMailboxName}
-                    onChange={(e) => setNewMailboxName(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Username (Local-Part)</label>
+                    <div className="flex items-center">
+                      <input
+                        type="text"
+                        required
+                        placeholder="info or support"
+                        value={newLocalPart}
+                        onChange={(e) => setNewLocalPart(e.target.value)}
+                        className="flex-1 px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-l-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono"
+                      />
+                      <span className="px-3 py-2.5 bg-slate-100 dark:bg-surface-800 border border-l-0 border-slate-200 dark:border-surface-800 rounded-r-xl text-xs text-indigo-600 dark:text-indigo-400 font-mono font-semibold">
+                        @{domains.find((d) => d.id === newMailboxDomain)?.domain || domains[0]?.domain || 'yourdomain.com'}
+                      </span>
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Password</label>
-                  <input
-                    type="password"
-                    required
-                    placeholder="At least 8 characters"
-                    value={newMailboxPass}
-                    onChange={(e) => setNewMailboxPass(e.target.value)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Display Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Sales Department"
+                      value={newMailboxName}
+                      onChange={(e) => setNewMailboxName(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                    Storage Quota (GB)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={newMailboxQuotaGB}
-                    onChange={(e) => setNewMailboxQuotaGB(parseInt(e.target.value) || 5)}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Password</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="At least 8 characters"
+                      value={newMailboxPass}
+                      onChange={(e) => setNewMailboxPass(e.target.value)}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono"
+                    />
+                  </div>
 
-                <div className="pt-3 flex justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddMailboxModal(false)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creatingMailbox}
-                    className="px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 disabled:opacity-50"
-                  >
-                    {creatingMailbox ? 'Creating...' : 'Create Mailbox'}
-                  </button>
-                </div>
-              </form>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Storage Quota (GB)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={newMailboxQuotaGB}
+                      onChange={(e) => setNewMailboxQuotaGB(parseInt(e.target.value) || 5)}
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="pt-3 flex justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddMailboxModal(false)}
+                      className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creatingMailbox}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 disabled:opacity-50"
+                    >
+                      {creatingMailbox ? 'Creating...' : 'Create Mailbox'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}
