@@ -298,6 +298,7 @@ type Store interface {
 	DeleteFileManagerFavorite(ctx context.Context, userID *uuid.UUID, path string) error
 	ListFileManagerRecent(ctx context.Context, userID *uuid.UUID, limit int) ([]*FileManagerRecent, error)
 	RecordFileManagerRecent(ctx context.Context, rec *FileManagerRecent) error
+	DeleteFileManagerRecent(ctx context.Context, path string) error
 	ListFolderLabels(ctx context.Context, domain string) ([]*FolderLabel, error)
 	SetFolderLabel(ctx context.Context, label *FolderLabel) error
 	DeleteFolderLabel(ctx context.Context, path string) error

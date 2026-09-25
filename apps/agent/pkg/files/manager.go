@@ -62,6 +62,7 @@ func NewFileManager(allowedRoots ...string) *FileManager {
 			"/etc/php",
 			"/var/log",
 			"/tmp",
+			"/var/lib/hostvra",
 			"/root/Hostvra",
 		}
 	}
@@ -306,7 +307,39 @@ func (fm *FileManager) Rename(oldPath, newPath string) error {
 		return err
 	}
 
-	return os.Rename(valOld, valNew)
+	// 1. Attempt atomic rename
+	renameErr := os.Rename(valOld, valNew)
+	if renameErr == nil {
+		return nil
+	}
+
+	// 2. If atomic rename failed (e.g. cross-device link EXDEV across mount points / filesystems),
+	// fallback to recursive copy + source deletion
+	info, statErr := os.Stat(valOld)
+	if statErr != nil {
+		return renameErr
+	}
+
+	// Ensure destination directory parent exists
+	if mkErr := os.MkdirAll(filepath.Dir(valNew), 0755); mkErr != nil {
+		return mkErr
+	}
+
+	var copyErr error
+	if info.IsDir() {
+		copyErr = copyDir(valOld, valNew)
+	} else {
+		copyErr = copyFile(valOld, valNew)
+	}
+
+	if copyErr != nil {
+		_ = os.RemoveAll(valNew)
+		return fmt.Errorf("cross-device move copy failed: %w", copyErr)
+	}
+
+	// Remove source after successful copy
+	_ = fm.Delete(valOld)
+	return nil
 }
 
 // Copy copies a file or directory tree to dstPath

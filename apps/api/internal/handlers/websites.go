@@ -350,7 +350,12 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if mvErr := h.fileMgr.Rename(docRoot, physicalTrashPath); mvErr != nil {
-					result["files_error"] = mvErr.Error()
+					// Fallback to permanent delete if moving to trash failed
+					if rmErr := h.fileMgr.Delete(docRoot); rmErr != nil {
+						result["files_error"] = fmt.Sprintf("Trash move failed: %s; Delete failed: %s", mvErr.Error(), rmErr.Error())
+					} else {
+						result["files_action"] = "permanently_deleted"
+					}
 				} else {
 					// Record trash metadata for restoration
 					deletedBy := "Administrator"
@@ -380,6 +385,9 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 					result["files_action"] = "moved_to_trash"
 					result["trash_id"] = trashID.String()
 				}
+				_ = h.store.DeleteFileManagerFavorite(r.Context(), nil, docRoot)
+				_ = h.store.DeleteFileManagerRecent(r.Context(), docRoot)
+				_ = h.store.DeleteFolderLabel(r.Context(), docRoot)
 			}
 		} else {
 			result["files_action"] = "not_found"

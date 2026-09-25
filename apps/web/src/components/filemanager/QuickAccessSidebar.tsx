@@ -136,11 +136,24 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
     }
   }, []);
 
-  useEffect(() => {
-    fetchQuickAccess();
-  }, [fetchQuickAccess, refreshKey]);
+  // Load tree children on expand or refresh
+  const fetchTreeNodeChildren = useCallback(async (path: string) => {
+    try {
+      setTreeLoading((prev) => ({ ...prev, [path]: true }));
+      const res = await apiFetch<{ nodes: TreeNodeData[] }>(
+        `/api/v1/filemanager/tree?path=${encodeURIComponent(path)}`
+      );
+      if (res.success && res.data) {
+        setTreeChildren((prev) => ({ ...prev, [path]: res.data?.nodes || [] }));
+      }
+    } catch (err) {
+      console.error('Failed to load tree node:', path, err);
+      setTreeExpanded((prev) => ({ ...prev, [path]: false }));
+    } finally {
+      setTreeLoading((prev) => ({ ...prev, [path]: false }));
+    }
+  }, []);
 
-  // Load tree children on expand
   const toggleTreeNode = async (path: string) => {
     const isCurrentlyExpanded = !!treeExpanded[path];
     if (isCurrentlyExpanded) {
@@ -152,21 +165,25 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
 
     // Fetch subdirectories if not loaded yet
     if (!treeChildren[path]) {
-      try {
-        setTreeLoading((prev) => ({ ...prev, [path]: true }));
-        const res = await apiFetch<{ nodes: TreeNodeData[] }>(
-          `/api/v1/filemanager/tree?path=${encodeURIComponent(path)}`
-        );
-        if (res.success && res.data) {
-          setTreeChildren((prev) => ({ ...prev, [path]: res.data?.nodes || [] }));
-        }
-      } catch (err) {
-        console.error('Failed to load tree node:', path, err);
-      } finally {
-        setTreeLoading((prev) => ({ ...prev, [path]: false }));
-      }
+      await fetchTreeNodeChildren(path);
     }
   };
+
+  useEffect(() => {
+    fetchQuickAccess();
+    if (refreshKey > 0) {
+      const rootPath = data?.root_directory || '/var/www';
+      fetchTreeNodeChildren(rootPath);
+      setTreeExpanded((currentExpanded) => {
+        Object.keys(currentExpanded).forEach((p) => {
+          if (currentExpanded[p] && p !== rootPath) {
+            fetchTreeNodeChildren(p);
+          }
+        });
+        return currentExpanded;
+      });
+    }
+  }, [fetchQuickAccess, refreshKey, fetchTreeNodeChildren, data?.root_directory]);
 
   // Initial root tree load
   useEffect(() => {

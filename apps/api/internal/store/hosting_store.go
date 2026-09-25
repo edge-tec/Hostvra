@@ -378,7 +378,7 @@ func (p *PostgresStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) 
 	query := `
 		SELECT id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
 		FROM websites
-		WHERE organization_id = $1 AND deleted_at IS NULL
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, orgID)

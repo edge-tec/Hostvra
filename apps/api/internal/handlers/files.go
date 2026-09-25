@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -631,6 +632,10 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			_ = h.store.DeleteFileManagerFavorite(r.Context(), h.getUserID(r), cleanPath)
+			_ = h.store.DeleteFileManagerRecent(r.Context(), cleanPath)
+			_ = h.store.DeleteFolderLabel(r.Context(), cleanPath)
+
 			h.audit.Log(r.Context(), r, "file.permanent_delete", "file", cleanPath, "success", "", nil)
 			deletedPaths = append(deletedPaths, cleanPath)
 		}
@@ -711,9 +716,12 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.store.AddFileManagerTrash(r.Context(), trashItem); err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
-			continue
+			log.Printf("[WARN] Failed to record trash metadata in database (path=%s): %v", clean, err)
 		}
+
+		_ = h.store.DeleteFileManagerFavorite(r.Context(), h.getUserID(r), clean)
+		_ = h.store.DeleteFileManagerRecent(r.Context(), clean)
+		_ = h.store.DeleteFolderLabel(r.Context(), clean)
 
 		h.audit.Log(r.Context(), r, "file.trash", "file", clean, "success", "", map[string]interface{}{
 			"trash_id": trashID.String(),
@@ -1025,16 +1033,43 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		favs = []*store.FileManagerFavorite{}
 	}
+	validFavs := make([]*store.FileManagerFavorite, 0, len(favs))
+	for _, f := range favs {
+		if _, statErr := os.Stat(f.Path); statErr == nil {
+			validFavs = append(validFavs, f)
+		} else {
+			_ = h.store.DeleteFileManagerFavorite(ctx, userID, f.Path)
+		}
+	}
+	favs = validFavs
 
 	recent, err := h.store.ListFileManagerRecent(ctx, userID, 15)
 	if err != nil {
 		recent = []*store.FileManagerRecent{}
 	}
+	validRecent := make([]*store.FileManagerRecent, 0, len(recent))
+	for _, r := range recent {
+		if info, statErr := os.Stat(r.Path); statErr == nil && info.IsDir() {
+			validRecent = append(validRecent, r)
+		} else {
+			_ = h.store.DeleteFileManagerRecent(ctx, r.Path)
+		}
+	}
+	recent = validRecent
 
 	labels, err := h.store.ListFolderLabels(ctx, "")
 	if err != nil {
 		labels = []*store.FolderLabel{}
 	}
+	validLabels := make([]*store.FolderLabel, 0, len(labels))
+	for _, l := range labels {
+		if _, statErr := os.Stat(l.Path); statErr == nil {
+			validLabels = append(validLabels, l)
+		} else {
+			_ = h.store.DeleteFolderLabel(ctx, l.Path)
+		}
+	}
+	labels = validLabels
 
 	// Fetch websites/domains for My Domains section
 	sites, _ := h.store.ListWebsitesByOrg(ctx, uuid.Nil)
@@ -1436,9 +1471,12 @@ func (h *FileHandler) MoveToTrash(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := h.store.AddFileManagerTrash(r.Context(), trashItem); err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
-			continue
+			log.Printf("[WARN] Failed to record trash metadata in database (path=%s): %v", clean, err)
 		}
+
+		_ = h.store.DeleteFileManagerFavorite(r.Context(), h.getUserID(r), clean)
+		_ = h.store.DeleteFileManagerRecent(r.Context(), clean)
+		_ = h.store.DeleteFolderLabel(r.Context(), clean)
 
 		h.audit.Log(r.Context(), r, "file.trash", "file", clean, "success", "", map[string]interface{}{
 			"trash_id": trashID.String(),

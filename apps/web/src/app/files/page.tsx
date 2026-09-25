@@ -434,6 +434,11 @@ export default function FileManagerPage() {
 
       if (res.success) {
         showToast(`Moved ${paths.length} ${paths.length === 1 ? 'item' : 'items'} to Trash Bin`);
+        setSelectedPaths(new Set());
+        if (previewOpen && previewItem && paths.includes(previewItem.path)) {
+          setPreviewOpen(false);
+          setPreviewItem(null);
+        }
         fetchDirectory(currentPath);
         setRefreshKey((k) => k + 1);
       } else {
@@ -2021,6 +2026,7 @@ export default function FileManagerPage() {
             onSuccess={(count) => {
               showToast(`Restored ${count} items successfully!`);
               fetchTrash();
+              setRefreshKey((k) => k + 1);
             }}
           />
         )}
@@ -2036,6 +2042,7 @@ export default function FileManagerPage() {
             onSuccess={(freed, count) => {
               showToast(`Trash permanently emptied! Freed ${formatBytes(freed)} across ${count} items.`);
               fetchTrash();
+              setRefreshKey((k) => k + 1);
             }}
           />
         )}

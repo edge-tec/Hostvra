@@ -59,7 +59,7 @@ func (m *MemoryStore) DeleteFileManagerFavorite(ctx context.Context, userID *uui
 
 	cleanPath := strings.TrimSpace(path)
 	for id, f := range m.fmFavorites {
-		if f.Path == cleanPath && (userID == nil || (f.UserID != nil && *f.UserID == *userID)) {
+		if (f.Path == cleanPath || strings.HasPrefix(f.Path, cleanPath+"/")) && (userID == nil || (f.UserID != nil && *f.UserID == *userID)) {
 			delete(m.fmFavorites, id)
 		}
 	}
@@ -112,6 +112,19 @@ func (m *MemoryStore) RecordFileManagerRecent(ctx context.Context, rec *FileMana
 	return nil
 }
 
+func (m *MemoryStore) DeleteFileManagerRecent(ctx context.Context, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cleanPath := strings.TrimSpace(path)
+	for id, r := range m.fmRecent {
+		if r.Path == cleanPath || strings.HasPrefix(r.Path, cleanPath+"/") {
+			delete(m.fmRecent, id)
+		}
+	}
+	return nil
+}
+
 func (m *MemoryStore) ListFolderLabels(ctx context.Context, domain string) ([]*FolderLabel, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -141,7 +154,12 @@ func (m *MemoryStore) DeleteFolderLabel(ctx context.Context, path string) error 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	delete(m.fmFolderLabels, path)
+	cleanPath := strings.TrimSpace(path)
+	for p := range m.fmFolderLabels {
+		if p == cleanPath || strings.HasPrefix(p, cleanPath+"/") {
+			delete(m.fmFolderLabels, p)
+		}
+	}
 	return nil
 }
 
@@ -287,11 +305,12 @@ func (p *PostgresStore) AddFileManagerFavorite(ctx context.Context, fav *FileMan
 }
 
 func (p *PostgresStore) DeleteFileManagerFavorite(ctx context.Context, userID *uuid.UUID, path string) error {
+	cleanPath := strings.TrimSpace(path)
 	query := `
 		DELETE FROM file_manager_favorites
-		WHERE path = $1 AND ($2::uuid IS NULL OR user_id = $2)
+		WHERE (path = $1 OR path LIKE $2) AND ($3::uuid IS NULL OR user_id = $3)
 	`
-	_, err := p.db.ExecContext(ctx, query, path, userID)
+	_, err := p.db.ExecContext(ctx, query, cleanPath, cleanPath+"/%", userID)
 	return err
 }
 
@@ -338,6 +357,13 @@ func (p *PostgresStore) RecordFileManagerRecent(ctx context.Context, rec *FileMa
 	return err
 }
 
+func (p *PostgresStore) DeleteFileManagerRecent(ctx context.Context, path string) error {
+	cleanPath := strings.TrimSpace(path)
+	query := `DELETE FROM file_manager_recent WHERE path = $1 OR path LIKE $2`
+	_, err := p.db.ExecContext(ctx, query, cleanPath, cleanPath+"/%")
+	return err
+}
+
 func (p *PostgresStore) ListFolderLabels(ctx context.Context, domain string) ([]*FolderLabel, error) {
 	query := `
 		SELECT id, domain, path, color, label, updated_at
@@ -380,8 +406,9 @@ func (p *PostgresStore) SetFolderLabel(ctx context.Context, label *FolderLabel) 
 }
 
 func (p *PostgresStore) DeleteFolderLabel(ctx context.Context, path string) error {
-	query := `DELETE FROM folder_labels WHERE path = $1`
-	_, err := p.db.ExecContext(ctx, query, path)
+	cleanPath := strings.TrimSpace(path)
+	query := `DELETE FROM folder_labels WHERE path = $1 OR path LIKE $2`
+	_, err := p.db.ExecContext(ctx, query, cleanPath, cleanPath+"/%")
 	return err
 }
 
@@ -418,6 +445,12 @@ func (p *PostgresStore) AddFileManagerTrash(ctx context.Context, item *FileManag
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 	`
 	_, err := p.db.ExecContext(ctx, query, item.ID, item.UserID, item.Domain, item.OriginalPath, item.TrashPath, item.Name, item.Size, item.FileType, item.IsDir, item.DeletedBy)
+	if err != nil && item.UserID != nil {
+		_, fallbackErr := p.db.ExecContext(ctx, query, item.ID, nil, item.Domain, item.OriginalPath, item.TrashPath, item.Name, item.Size, item.FileType, item.IsDir, item.DeletedBy)
+		if fallbackErr == nil {
+			return nil
+		}
+	}
 	return err
 }
 
@@ -468,8 +501,11 @@ func (p *PostgresStore) RecordFileManagerActivityLog(ctx context.Context, log *F
 		INSERT INTO file_manager_activity_logs (id, user_id, user_email, ip_address, browser, domain, action, source_path, destination_path, details, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 	`
-	_, err = p.db.ExecContext(ctx, query, log.ID, log.UserID, log.UserEmail, log.IPAddress, log.Browser, log.Domain, log.Action, log.SourcePath, log.DestinationPath, detailsJSON)
-	return err
+	_, execErr := p.db.ExecContext(ctx, query, log.ID, log.UserID, log.UserEmail, log.IPAddress, log.Browser, log.Domain, log.Action, log.SourcePath, log.DestinationPath, detailsJSON)
+	if execErr != nil && log.UserID != nil {
+		_, _ = p.db.ExecContext(ctx, query, log.ID, nil, log.UserEmail, log.IPAddress, log.Browser, log.Domain, log.Action, log.SourcePath, log.DestinationPath, detailsJSON)
+	}
+	return nil
 }
 
 func (p *PostgresStore) ListFileManagerActivityLogs(ctx context.Context, domain string, limit int) ([]*FileManagerActivityLog, error) {
