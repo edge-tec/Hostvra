@@ -32,6 +32,23 @@ var DefaultParams = &Params{
 	KeyLength:   32,
 }
 
+var DummyHash string
+
+func init() {
+	var err error
+	DummyHash, err = HashPassword("HostvraDummyTimingAttackMitigationPassword!123", DefaultParams)
+	if err != nil {
+		panic("failed to initialize dummy hash: " + err.Error())
+	}
+}
+
+// VerifyPasswordDummy runs an Argon2id comparison against DummyHash to equalize response latency
+// when a user is not found, effectively eliminating timing-based user enumeration.
+func VerifyPasswordDummy(password string) {
+	_, _ = VerifyPassword(password, DummyHash)
+}
+
+
 func HashPassword(password string, params *Params) (string, error) {
 	if params == nil {
 		params = DefaultParams

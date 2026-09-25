@@ -140,6 +140,19 @@ export default function WebsitesPage() {
   const [activeDropdownSite, setActiveDropdownSite] = useState<Website | null>(null);
   const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; openUp?: boolean } | null>(null);
 
+  // Delete website modal state
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteModalSite, setDeleteModalSite] = useState<Website | null>(null);
+  const [deleteOpts, setDeleteOpts] = useState({
+    delete_files: true,
+    permanent_wipe: false,
+    delete_database: false,
+    delete_dns: true,
+    delete_ftp: true,
+  });
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletingWebsite, setDeletingWebsite] = useState(false);
+
   // Existing Hostvra modules
   const [isolationModalSite, setIsolationModalSite] = useState<Website | null>(null);
   const [appModalSite, setAppModalSite] = useState<Website | null>(null);
@@ -442,15 +455,46 @@ export default function WebsitesPage() {
     await apiFetch(`/api/v1/websites/${site.id}/waf`, { method: 'POST' });
   };
 
-  // Delete Website
-  const handleDeleteWebsite = async (site: Website) => {
-    if (!confirm(`Are you sure you want to delete website '${site.primary_domain}'? This will delete the virtual host and PHP pool.`)) {
+  // Open Delete Website Modal
+  const handleDeleteWebsite = (site: Website) => {
+    setDeleteModalSite(site);
+    setDeleteConfirmText('');
+    setDeleteOpts({
+      delete_files: true,
+      permanent_wipe: false,
+      delete_database: false,
+      delete_dns: true,
+      delete_ftp: true,
+    });
+    setDeleteModalOpen(true);
+  };
+
+  // Confirm and Execute Website Deletion
+  const confirmDeleteWebsite = async () => {
+    if (!deleteModalSite) return;
+    if (deleteConfirmText.trim().toLowerCase() !== deleteModalSite.primary_domain.toLowerCase()) {
+      showToast('Please type the domain name exactly to confirm deletion.', true);
       return;
     }
-    setWebsites((prev) => prev.filter((s) => s.id !== site.id));
-    setSelectedIds((prev) => prev.filter((id) => id !== site.id));
-    showToast(`Website '${site.primary_domain}' deleted successfully.`);
-    await apiFetch(`/api/v1/websites/${site.id}`, { method: 'DELETE' });
+    setDeletingWebsite(true);
+    try {
+      const res = await apiFetch(`/api/v1/websites/${deleteModalSite.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify(deleteOpts),
+      });
+      if (res.success) {
+        showToast(`Website '${deleteModalSite.primary_domain}' deleted successfully.`);
+        setDeleteModalOpen(false);
+        setDeleteModalSite(null);
+        await fetchData();
+      } else {
+        showToast(res.error?.message || 'Failed to delete website.', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to delete website.', true);
+    } finally {
+      setDeletingWebsite(false);
+    }
   };
 
   // Execute Batch Actions
@@ -460,13 +504,41 @@ export default function WebsitesPage() {
     const count = selectedIds.length;
 
     if (batchAction === 'delete') {
-      if (!confirm(`Delete ${count} selected websites?`)) {
+      if (!confirm(`Are you sure you want to delete ${count} selected websites? Their document roots will be moved to Trash.`)) {
         setExecutingBatch(false);
         return;
       }
-      setWebsites((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
+      let successCount = 0;
+      let failCount = 0;
+      for (const id of selectedIds) {
+        try {
+          const res = await apiFetch(`/api/v1/websites/${id}`, {
+            method: 'DELETE',
+            body: JSON.stringify({
+              delete_files: true,
+              permanent_wipe: false,
+              delete_database: false,
+              delete_dns: true,
+              delete_ftp: true,
+            }),
+          });
+          if (res.success) {
+            successCount++;
+          } else {
+            failCount++;
+          }
+        } catch (err) {
+          console.error(`Failed to delete website ${id}:`, err);
+          failCount++;
+        }
+      }
       setSelectedIds([]);
-      showToast(`${count} websites deleted successfully.`);
+      if (failCount === 0) {
+        showToast(`${successCount} websites deleted successfully.`);
+      } else {
+        showToast(`Deleted ${successCount} websites, ${failCount} failed.`, true);
+      }
+      await fetchData();
     } else if (batchAction === 'start') {
       setWebsites((prev) =>
         prev.map((s) => (selectedIds.includes(s.id) ? { ...s, status: 'active' } : s))
@@ -2198,6 +2270,165 @@ export default function WebsitesPage() {
             }}
             showToast={showToast}
           />
+        )}
+
+        {/* Delete Website Confirmation Modal */}
+        {deleteModalOpen && deleteModalSite && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => {
+                  setDeleteModalOpen(false);
+                  setDeleteModalSite(null);
+                }}
+                disabled={deletingWebsite}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Delete Website</h2>
+                  <p className="text-xs text-rose-500 font-semibold">{deleteModalSite.primary_domain}</p>
+                </div>
+              </div>
+
+              <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800 dark:text-amber-200 space-y-1">
+                  <p className="font-semibold">This will delete the virtual host and PHP pool configurations.</p>
+                  <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80">Document root: <code className="bg-amber-100 dark:bg-amber-950/40 px-1 py-0.5 rounded font-mono">{deleteModalSite.document_root || 'N/A'}</code></p>
+                </div>
+              </div>
+
+              <div className="space-y-3 mb-5 text-xs">
+                <div className="font-bold text-slate-700 dark:text-slate-300">Cleanup Options:</div>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={deleteOpts.delete_files}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setDeleteOpts(prev => ({
+                        ...prev,
+                        delete_files: checked,
+                        permanent_wipe: checked ? prev.permanent_wipe : false,
+                      }));
+                    }}
+                    className="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Move files to Trash</div>
+                    <div className="text-[11px] text-slate-500">Safely stores document root files in Trash bin so they can be restored if needed.</div>
+                  </div>
+                </label>
+
+                {deleteOpts.delete_files && (
+                  <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer transition-colors ml-4">
+                    <input
+                      type="checkbox"
+                      checked={deleteOpts.permanent_wipe}
+                      onChange={(e) => setDeleteOpts(prev => ({ ...prev, permanent_wipe: e.target.checked }))}
+                      className="mt-0.5 rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+                    />
+                    <div>
+                      <div className="font-semibold text-rose-600 dark:text-rose-400">Permanently Wipe Files (Caution)</div>
+                      <div className="text-[11px] text-rose-500/80">Completely bypasses Trash bin and permanently deletes files from disk. Cannot be undone!</div>
+                    </div>
+                  </label>
+                )}
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={deleteOpts.delete_dns}
+                    onChange={(e) => setDeleteOpts(prev => ({ ...prev, delete_dns: e.target.checked }))}
+                    className="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Delete DNS Zone records</div>
+                    <div className="text-[11px] text-slate-500">Removes managed DNS zone entries associated with this domain.</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={deleteOpts.delete_ftp}
+                    onChange={(e) => setDeleteOpts(prev => ({ ...prev, delete_ftp: e.target.checked }))}
+                    className="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Delete associated FTP accounts</div>
+                    <div className="text-[11px] text-slate-500">Removes FTP users configured for this website directory.</div>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 cursor-pointer transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={deleteOpts.delete_database}
+                    onChange={(e) => setDeleteOpts(prev => ({ ...prev, delete_database: e.target.checked }))}
+                    className="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                  />
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Delete associated database</div>
+                    <div className="text-[11px] text-slate-500">Attempts to drop matching MySQL database if configured.</div>
+                  </div>
+                </label>
+              </div>
+
+              <div className="mb-5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Type <span className="font-bold text-rose-600 font-mono select-all">{deleteModalSite.primary_domain}</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={deleteModalSite.primary_domain}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteModalOpen(false);
+                    setDeleteModalSite(null);
+                  }}
+                  disabled={deletingWebsite}
+                  className="px-4 py-2 rounded-xl border border-slate-200 dark:border-surface-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteWebsite}
+                  disabled={deletingWebsite || deleteConfirmText.trim().toLowerCase() !== deleteModalSite.primary_domain.toLowerCase()}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {deletingWebsite ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Website</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* 17. Floating 3-Dots Action Menu (Fixed-position, never clipped by table overflow) */}

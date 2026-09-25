@@ -112,3 +112,77 @@ func TestAdminLoginSuccess(t *testing.T) {
 		t.Fatalf("expected non-empty access token")
 	}
 }
+
+func TestRegisterPasswordComplexity(t *testing.T) {
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+
+	cfg := &config.Config{
+		JWTSecret:        "super-secret-jwt-key-for-test-purposes-only-32chars!",
+		JWTElementsHours: 24,
+		RefreshTokenDays: 7,
+	}
+
+	authHandler := NewAuthHandler(cfg, memStore, auditLogger)
+
+	// 1. Weak password (no number or special char)
+	weakReq := RegisterRequest{
+		Email:            "newuser@hostvra.com",
+		Password:         "weakpassword",
+		FullName:         "New User",
+		OrganizationName: "New Org",
+	}
+	body, _ := json.Marshal(weakReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	authHandler.Register(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for weak password, got %d", w.Code)
+	}
+
+	// 2. Strong password
+	strongReq := RegisterRequest{
+		Email:            "stronguser@hostvra.com",
+		Password:         "Str0ng#P@ssw0rd2026",
+		FullName:         "Strong User",
+		OrganizationName: "Strong Org",
+	}
+	body, _ = json.Marshal(strongReq)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewReader(body))
+	w = httptest.NewRecorder()
+	authHandler.Register(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for strong password, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoginNonexistentUserConstantTime(t *testing.T) {
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+
+	cfg := &config.Config{
+		JWTSecret:        "super-secret-jwt-key-for-test-purposes-only-32chars!",
+		JWTElementsHours: 24,
+		RefreshTokenDays: 7,
+	}
+
+	authHandler := NewAuthHandler(cfg, memStore, auditLogger)
+
+	loginReq := LoginRequest{
+		Email:    "nonexistent@hostvra.com",
+		Password: "DummyPassword123!",
+	}
+	body, _ := json.Marshal(loginReq)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	authHandler.Login(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for nonexistent user, got %d", w.Code)
+	}
+}

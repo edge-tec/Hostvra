@@ -3,7 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -477,6 +480,277 @@ func (m *MemoryStore) ListEmailDeliveryLogs(ctx context.Context, serverID uuid.U
 		}
 	}
 	return logs, nil
+}
+
+// Email Signatures
+
+func (m *MemoryStore) GetEmailSignature(ctx context.Context, mailboxID uuid.UUID) (*EmailSignature, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	sig, ok := m.emailSignatures[mailboxID]
+	if !ok {
+		return &EmailSignature{
+			ID:        uuid.New(),
+			MailboxID: mailboxID,
+			IsEnabled: false,
+		}, nil
+	}
+	res := *sig
+	return &res, nil
+}
+
+func (m *MemoryStore) SetEmailSignature(ctx context.Context, sig *EmailSignature) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sig.ID == uuid.Nil {
+		sig.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if sig.CreatedAt.IsZero() {
+		sig.CreatedAt = now
+	}
+	sig.UpdatedAt = now
+	m.emailSignatures[sig.MailboxID] = sig
+	return nil
+}
+
+// Email Suppressions
+
+func (m *MemoryStore) AddEmailSuppression(ctx context.Context, sup *EmailSuppression) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, s := range m.emailSuppressions {
+		if s.ServerID == sup.ServerID && strings.EqualFold(s.Email, sup.Email) {
+			s.Reason = sup.Reason
+			s.BounceCode = sup.BounceCode
+			s.Metadata = sup.Metadata
+			return nil
+		}
+	}
+	if sup.ID == uuid.Nil {
+		sup.ID = uuid.New()
+	}
+	if sup.CreatedAt.IsZero() {
+		sup.CreatedAt = time.Now().UTC()
+	}
+	m.emailSuppressions[sup.ID] = sup
+	return nil
+}
+
+func (m *MemoryStore) ListEmailSuppressions(ctx context.Context, serverID uuid.UUID) ([]*EmailSuppression, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	list := make([]*EmailSuppression, 0)
+	for _, s := range m.emailSuppressions {
+		if s.ServerID == serverID {
+			res := *s
+			list = append(list, &res)
+		}
+	}
+	return list, nil
+}
+
+func (m *MemoryStore) DeleteEmailSuppression(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.emailSuppressions, id)
+	return nil
+}
+
+func (m *MemoryStore) IsEmailSuppressed(ctx context.Context, serverID uuid.UUID, email string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, s := range m.emailSuppressions {
+		if s.ServerID == serverID && strings.EqualFold(s.Email, email) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Webmail Messages
+
+func (m *MemoryStore) ListWebmailMessages(ctx context.Context, mailboxID uuid.UUID, folder string, limit, offset int, search string) ([]*WebmailMessage, int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	matched := make([]*WebmailMessage, 0)
+	for _, msg := range m.webmailMessages {
+		if msg.MailboxID == mailboxID {
+			if folder == "starred" {
+				if !msg.IsStarred {
+					continue
+				}
+			} else if folder == "important" {
+				if !msg.IsImportant {
+					continue
+				}
+			} else if folder != "" && folder != "all" && msg.Folder != folder {
+				continue
+			}
+			if search != "" {
+				s := strings.ToLower(search)
+				if !strings.Contains(strings.ToLower(msg.Subject), s) &&
+					!strings.Contains(strings.ToLower(msg.FromEmail), s) &&
+					!strings.Contains(strings.ToLower(msg.FromName), s) &&
+					!strings.Contains(strings.ToLower(msg.Snippet), s) {
+					continue
+				}
+			}
+			res := *msg
+			res.Attachments = make([]WebmailAttachment, 0)
+			for _, att := range m.webmailAttachments {
+				if att.MessageID == msg.ID {
+					res.Attachments = append(res.Attachments, *att)
+				}
+			}
+			matched = append(matched, &res)
+		}
+	}
+
+	for i := 0; i < len(matched); i++ {
+		for j := i + 1; j < len(matched); j++ {
+			if matched[j].CreatedAt.After(matched[i].CreatedAt) {
+				matched[i], matched[j] = matched[j], matched[i]
+			}
+		}
+	}
+
+	total := len(matched)
+	if offset > total {
+		return []*WebmailMessage{}, total, nil
+	}
+	end := offset + limit
+	if limit <= 0 || end > total {
+		end = total
+	}
+	return matched[offset:end], total, nil
+}
+
+func (m *MemoryStore) GetWebmailMessageByID(ctx context.Context, id uuid.UUID) (*WebmailMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	msg, ok := m.webmailMessages[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	res := *msg
+	res.Attachments = make([]WebmailAttachment, 0)
+	for _, att := range m.webmailAttachments {
+		if att.MessageID == msg.ID {
+			res.Attachments = append(res.Attachments, *att)
+		}
+	}
+	return &res, nil
+}
+
+func (m *MemoryStore) CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if msg.ID == uuid.Nil {
+		msg.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = now
+	}
+	msg.UpdatedAt = now
+	if msg.Snippet == "" && msg.BodyText != "" {
+		if len(msg.BodyText) > 120 {
+			msg.Snippet = msg.BodyText[:120] + "..."
+		} else {
+			msg.Snippet = msg.BodyText
+		}
+	}
+	m.webmailMessages[msg.ID] = msg
+	for _, att := range msg.Attachments {
+		att.MessageID = msg.ID
+		if att.ID == uuid.Nil {
+			att.ID = uuid.New()
+		}
+		att.CreatedAt = now
+		m.webmailAttachments[att.ID] = &att
+	}
+	return nil
+}
+
+func (m *MemoryStore) UpdateWebmailMessageFlags(ctx context.Context, id uuid.UUID, isUnread, isStarred, isImportant *bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.webmailMessages[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if isUnread != nil {
+		msg.IsUnread = *isUnread
+	}
+	if isStarred != nil {
+		msg.IsStarred = *isStarred
+	}
+	if isImportant != nil {
+		msg.IsImportant = *isImportant
+	}
+	msg.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (m *MemoryStore) MoveWebmailMessage(ctx context.Context, id uuid.UUID, targetFolder string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.webmailMessages[id]
+	if !ok {
+		return ErrNotFound
+	}
+	msg.Folder = targetFolder
+	msg.UpdatedAt = time.Now().UTC()
+	return nil
+}
+
+func (m *MemoryStore) DeleteWebmailMessage(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	msg, ok := m.webmailMessages[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if msg.Folder == "trash" {
+		delete(m.webmailMessages, id)
+		for attID, att := range m.webmailAttachments {
+			if att.MessageID == id {
+				delete(m.webmailAttachments, attID)
+			}
+		}
+	} else {
+		msg.Folder = "trash"
+		msg.UpdatedAt = time.Now().UTC()
+	}
+	return nil
+}
+
+func (m *MemoryStore) CreateWebmailAttachment(ctx context.Context, att *WebmailAttachment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if att.ID == uuid.Nil {
+		att.ID = uuid.New()
+	}
+	if att.CreatedAt.IsZero() {
+		att.CreatedAt = time.Now().UTC()
+	}
+	m.webmailAttachments[att.ID] = att
+	return nil
+}
+
+func (m *MemoryStore) ListWebmailAttachments(ctx context.Context, messageID uuid.UUID) ([]*WebmailAttachment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	list := make([]*WebmailAttachment, 0)
+	for _, att := range m.webmailAttachments {
+		if att.MessageID == messageID {
+			res := *att
+			list = append(list, &res)
+		}
+	}
+	return list, nil
 }
 
 // ============================================================================
@@ -1086,3 +1360,343 @@ func (p *PostgresStore) ListEmailDeliveryLogs(ctx context.Context, serverID uuid
 	}
 	return list, nil
 }
+
+// Postgres Email Signatures
+
+func (p *PostgresStore) GetEmailSignature(ctx context.Context, mailboxID uuid.UUID) (*EmailSignature, error) {
+	query := `
+		SELECT id, mailbox_id, plain_text, html_text, is_enabled, created_at, updated_at
+		FROM email_signatures
+		WHERE mailbox_id = $1
+	`
+	s := &EmailSignature{}
+	err := p.db.QueryRowContext(ctx, query, mailboxID).Scan(
+		&s.ID, &s.MailboxID, &s.PlainText, &s.HTMLText, &s.IsEnabled, &s.CreatedAt, &s.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return &EmailSignature{
+			ID:        uuid.New(),
+			MailboxID: mailboxID,
+			IsEnabled: false,
+		}, nil
+	}
+	return s, err
+}
+
+func (p *PostgresStore) SetEmailSignature(ctx context.Context, sig *EmailSignature) error {
+	query := `
+		INSERT INTO email_signatures (id, mailbox_id, plain_text, html_text, is_enabled, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+		ON CONFLICT (mailbox_id) DO UPDATE
+		SET plain_text = EXCLUDED.plain_text,
+		    html_text = EXCLUDED.html_text,
+		    is_enabled = EXCLUDED.is_enabled,
+		    updated_at = NOW()
+		RETURNING id, created_at, updated_at
+	`
+	if sig.ID == uuid.Nil {
+		sig.ID = uuid.New()
+	}
+	return p.db.QueryRowContext(ctx, query,
+		sig.ID, sig.MailboxID, sig.PlainText, sig.HTMLText, sig.IsEnabled,
+	).Scan(&sig.ID, &sig.CreatedAt, &sig.UpdatedAt)
+}
+
+// Postgres Email Suppressions
+
+func (p *PostgresStore) AddEmailSuppression(ctx context.Context, sup *EmailSuppression) error {
+	query := `
+		INSERT INTO email_suppressions (id, server_id, domain_id, email, reason, bounce_code, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		ON CONFLICT (server_id, email) DO UPDATE
+		SET reason = EXCLUDED.reason,
+		    bounce_code = EXCLUDED.bounce_code,
+		    metadata = EXCLUDED.metadata
+		RETURNING created_at
+	`
+	if sup.ID == uuid.Nil {
+		sup.ID = uuid.New()
+	}
+	metaJSON, _ := json.Marshal(sup.Metadata)
+	return p.db.QueryRowContext(ctx, query,
+		sup.ID, sup.ServerID, sup.DomainID, strings.ToLower(sup.Email),
+		sup.Reason, sup.BounceCode, metaJSON,
+	).Scan(&sup.CreatedAt)
+}
+
+func (p *PostgresStore) ListEmailSuppressions(ctx context.Context, serverID uuid.UUID) ([]*EmailSuppression, error) {
+	query := `
+		SELECT id, server_id, domain_id, email, reason, bounce_code, metadata, created_at
+		FROM email_suppressions
+		WHERE server_id = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*EmailSuppression, 0)
+	for rows.Next() {
+		s := &EmailSuppression{}
+		var metaRaw []byte
+		err := rows.Scan(
+			&s.ID, &s.ServerID, &s.DomainID, &s.Email, &s.Reason, &s.BounceCode, &metaRaw, &s.CreatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if len(metaRaw) > 0 {
+			_ = json.Unmarshal(metaRaw, &s.Metadata)
+		}
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+func (p *PostgresStore) DeleteEmailSuppression(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM email_suppressions WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (p *PostgresStore) IsEmailSuppressed(ctx context.Context, serverID uuid.UUID, email string) (bool, error) {
+	query := `SELECT 1 FROM email_suppressions WHERE server_id = $1 AND email = $2 LIMIT 1`
+	var exists int
+	err := p.db.QueryRowContext(ctx, query, serverID, strings.ToLower(email)).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Postgres Webmail Messages
+
+func (p *PostgresStore) ListWebmailMessages(ctx context.Context, mailboxID uuid.UUID, folder string, limit, offset int, search string) ([]*WebmailMessage, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	whereClause := "WHERE mailbox_id = $1"
+	args := []interface{}{mailboxID}
+	argIdx := 2
+
+	if folder == "starred" {
+		whereClause += " AND is_starred = TRUE"
+	} else if folder == "important" {
+		whereClause += " AND is_important = TRUE"
+	} else if folder != "" && folder != "all" {
+		whereClause += fmt.Sprintf(" AND folder = $%d", argIdx)
+		args = append(args, folder)
+		argIdx++
+	}
+
+	if search != "" {
+		whereClause += fmt.Sprintf(" AND (subject ILIKE $%d OR from_email ILIKE $%d OR from_name ILIKE $%d OR snippet ILIKE $%d)", argIdx, argIdx, argIdx, argIdx)
+		args = append(args, "%"+search+"%")
+		argIdx++
+	}
+
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM webmail_messages %s", whereClause)
+	var total int
+	_ = p.db.QueryRowContext(ctx, countQuery, args...).Scan(&total)
+
+	query := fmt.Sprintf(`
+		SELECT id, mailbox_id, account_email, folder, message_id, from_name, from_email,
+		       to_name, to_email, cc, bcc, subject, snippet, body_text, body_html,
+		       is_unread, is_starred, is_important, has_attachment, priority, size_bytes,
+		       created_at, updated_at
+		FROM webmail_messages
+		%s
+		ORDER BY created_at DESC
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIdx, argIdx+1)
+
+	args = append(args, limit, offset)
+	rows, err := p.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	list := make([]*WebmailMessage, 0)
+	for rows.Next() {
+		m := &WebmailMessage{}
+		err := rows.Scan(
+			&m.ID, &m.MailboxID, &m.AccountEmail, &m.Folder, &m.MessageID, &m.FromName, &m.FromEmail,
+			&m.ToName, &m.ToEmail, &m.Cc, &m.Bcc, &m.Subject, &m.Snippet, &m.BodyText, &m.BodyHTML,
+			&m.IsUnread, &m.IsStarred, &m.IsImportant, &m.HasAttachment, &m.Priority, &m.SizeBytes,
+			&m.CreatedAt, &m.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		list = append(list, m)
+	}
+	return list, total, nil
+}
+
+func (p *PostgresStore) GetWebmailMessageByID(ctx context.Context, id uuid.UUID) (*WebmailMessage, error) {
+	query := `
+		SELECT id, mailbox_id, account_email, folder, message_id, from_name, from_email,
+		       to_name, to_email, cc, bcc, subject, snippet, body_text, body_html,
+		       is_unread, is_starred, is_important, has_attachment, priority, size_bytes,
+		       created_at, updated_at
+		FROM webmail_messages
+		WHERE id = $1
+	`
+	m := &WebmailMessage{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&m.ID, &m.MailboxID, &m.AccountEmail, &m.Folder, &m.MessageID, &m.FromName, &m.FromEmail,
+		&m.ToName, &m.ToEmail, &m.Cc, &m.Bcc, &m.Subject, &m.Snippet, &m.BodyText, &m.BodyHTML,
+		&m.IsUnread, &m.IsStarred, &m.IsImportant, &m.HasAttachment, &m.Priority, &m.SizeBytes,
+		&m.CreatedAt, &m.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch attachments
+	attQuery := `
+		SELECT id, message_id, filename, content_type, size_bytes, storage_path, created_at
+		FROM webmail_attachments
+		WHERE message_id = $1
+	`
+	attRows, err := p.db.QueryContext(ctx, attQuery, m.ID)
+	if err == nil {
+		defer attRows.Close()
+		for attRows.Next() {
+			att := WebmailAttachment{}
+			if err := attRows.Scan(&att.ID, &att.MessageID, &att.Filename, &att.ContentType, &att.SizeBytes, &att.StoragePath, &att.CreatedAt); err == nil {
+				m.Attachments = append(m.Attachments, att)
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func (p *PostgresStore) CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error {
+	query := `
+		INSERT INTO webmail_messages (
+			id, mailbox_id, account_email, folder, message_id, from_name, from_email,
+			to_name, to_email, cc, bcc, subject, snippet, body_text, body_html,
+			is_unread, is_starred, is_important, has_attachment, priority, size_bytes,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7,
+			$8, $9, $10, $11, $12, $13, $14, $15,
+			$16, $17, $18, $19, $20, $21,
+			NOW(), NOW()
+		)
+		RETURNING created_at, updated_at
+	`
+	if msg.ID == uuid.Nil {
+		msg.ID = uuid.New()
+	}
+	if msg.Snippet == "" && msg.BodyText != "" {
+		if len(msg.BodyText) > 120 {
+			msg.Snippet = msg.BodyText[:120] + "..."
+		} else {
+			msg.Snippet = msg.BodyText
+		}
+	}
+	err := p.db.QueryRowContext(ctx, query,
+		msg.ID, msg.MailboxID, msg.AccountEmail, msg.Folder, msg.MessageID, msg.FromName, msg.FromEmail,
+		msg.ToName, msg.ToEmail, msg.Cc, msg.Bcc, msg.Subject, msg.Snippet, msg.BodyText, msg.BodyHTML,
+		msg.IsUnread, msg.IsStarred, msg.IsImportant, msg.HasAttachment, msg.Priority, msg.SizeBytes,
+	).Scan(&msg.CreatedAt, &msg.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	for _, att := range msg.Attachments {
+		att.MessageID = msg.ID
+		_ = p.CreateWebmailAttachment(ctx, &att)
+	}
+
+	return nil
+}
+
+func (p *PostgresStore) UpdateWebmailMessageFlags(ctx context.Context, id uuid.UUID, isUnread, isStarred, isImportant *bool) error {
+	query := `
+		UPDATE webmail_messages
+		SET is_unread = COALESCE($2, is_unread),
+		    is_starred = COALESCE($3, is_starred),
+		    is_important = COALESCE($4, is_important),
+		    updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := p.db.ExecContext(ctx, query, id, isUnread, isStarred, isImportant)
+	return err
+}
+
+func (p *PostgresStore) MoveWebmailMessage(ctx context.Context, id uuid.UUID, targetFolder string) error {
+	query := `
+		UPDATE webmail_messages
+		SET folder = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := p.db.ExecContext(ctx, query, id, targetFolder)
+	return err
+}
+
+func (p *PostgresStore) DeleteWebmailMessage(ctx context.Context, id uuid.UUID) error {
+	var currentFolder string
+	err := p.db.QueryRowContext(ctx, `SELECT folder FROM webmail_messages WHERE id = $1`, id).Scan(&currentFolder)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if currentFolder == "trash" {
+		_, err = p.db.ExecContext(ctx, `DELETE FROM webmail_messages WHERE id = $1`, id)
+		return err
+	}
+	_, err = p.db.ExecContext(ctx, `UPDATE webmail_messages SET folder = 'trash', updated_at = NOW() WHERE id = $1`, id)
+	return err
+}
+
+func (p *PostgresStore) CreateWebmailAttachment(ctx context.Context, att *WebmailAttachment) error {
+	query := `
+		INSERT INTO webmail_attachments (id, message_id, filename, content_type, size_bytes, storage_path, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, NOW())
+		RETURNING created_at
+	`
+	if att.ID == uuid.Nil {
+		att.ID = uuid.New()
+	}
+	return p.db.QueryRowContext(ctx, query,
+		att.ID, att.MessageID, att.Filename, att.ContentType, att.SizeBytes, att.StoragePath,
+	).Scan(&att.CreatedAt)
+}
+
+func (p *PostgresStore) ListWebmailAttachments(ctx context.Context, messageID uuid.UUID) ([]*WebmailAttachment, error) {
+	query := `
+		SELECT id, message_id, filename, content_type, size_bytes, storage_path, created_at
+		FROM webmail_attachments
+		WHERE message_id = $1
+	`
+	rows, err := p.db.QueryContext(ctx, query, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*WebmailAttachment, 0)
+	for rows.Next() {
+		att := &WebmailAttachment{}
+		err := rows.Scan(&att.ID, &att.MessageID, &att.Filename, &att.ContentType, &att.SizeBytes, &att.StoragePath, &att.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, att)
+	}
+	return list, nil
+}
+

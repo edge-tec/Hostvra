@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/files"
 	"hostvra/agent/pkg/isolation"
 	"hostvra/agent/pkg/security"
 	"hostvra/api/internal/audit"
@@ -30,6 +31,17 @@ type WebsiteHandler struct {
 	store        store.Store
 	audit        *audit.Logger
 	isolationMgr *isolation.Manager
+	fileMgr      *files.FileManager
+}
+
+// WebsiteDeleteRequest defines optional cleanup flags when deleting a website.
+// By default, website files are moved to trash and FTP accounts are cleaned up.
+type WebsiteDeleteRequest struct {
+	DeleteFiles   *bool `json:"delete_files"`    // default true → trash document root
+	PermanentWipe bool  `json:"permanent_wipe"` // default false → use trash instead of permanent delete
+	DeleteDatabase bool `json:"delete_database"` // default false
+	DeleteDNS      bool `json:"delete_dns"`      // default false
+	DeleteFTP      bool `json:"delete_ftp"`      // default true
 }
 
 func NewWebsiteHandler(cfg *config.Config, s store.Store, a *audit.Logger) *WebsiteHandler {
@@ -52,12 +64,69 @@ func NewWebsiteHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Webs
 		SystemdDir:   systemdDir,
 	})
 
+	fm := files.NewFileManager()
+	fm.AllowRootSystemWide()
+
 	return &WebsiteHandler{
 		cfg:          cfg,
 		store:        s,
 		audit:        a,
 		isolationMgr: isoMgr,
+		fileMgr:      fm,
 	}
+}
+
+// trashDir returns the Enterprise Trash Bin directory, creating it if needed.
+func (h *WebsiteHandler) trashDir() string {
+	p := "/var/lib/hostvra/trash"
+	if err := os.MkdirAll(p, 0755); err != nil {
+		p = filepath.Join(os.TempDir(), "hostvra_trash")
+		_ = os.MkdirAll(p, 0755)
+	}
+	return p
+}
+
+// isSafeWebsiteRoot checks that a document root is safe to delete/trash.
+// Blocks system-critical directories to prevent catastrophic data loss.
+func isSafeWebsiteRoot(docRoot string) bool {
+	clean := filepath.Clean(docRoot)
+
+	// Block absolute system roots
+	unsafeRoots := []string{
+		"/", "/var", "/etc", "/home", "/usr", "/bin", "/sbin",
+		"/root", "/boot", "/proc", "/sys", "/dev", "/run",
+		"/lib", "/lib64", "/tmp", "/opt",
+		"/var/www",      // bare web root without domain subdirectory
+		"/var/www/html", // default nginx/apache root
+		"/var/lib",
+		"/var/log",
+	}
+	for _, unsafe := range unsafeRoots {
+		if clean == unsafe {
+			return false
+		}
+	}
+
+	// Must be an absolute path
+	if !filepath.IsAbs(clean) {
+		return false
+	}
+
+	// Must not contain path traversal
+	if strings.Contains(clean, "..") {
+		return false
+	}
+
+	// Resolve symlinks and re-check
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		for _, unsafe := range unsafeRoots {
+			if resolved == unsafe {
+				return false
+			}
+		}
+	}
+
+	return true
 }
 
 type CreateWebsiteRequest struct {
@@ -234,27 +303,134 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up user isolation, PHP pool, and cgroup slice
+	// Parse optional cleanup flags from JSON body (defaults apply if body is empty)
+	var req WebsiteDeleteRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req) // ignore decode errors — use defaults
+	}
+	// Apply defaults: delete_files=true, delete_ftp=true
+	deleteFiles := true
+	if req.DeleteFiles != nil {
+		deleteFiles = *req.DeleteFiles
+	}
+
+	result := map[string]interface{}{
+		"deleted": true,
+		"domain":  site.PrimaryDomain,
+	}
+
+	// --- 1. Trash or permanently delete website files ---
+	if deleteFiles && site.DocumentRoot != "" {
+		docRoot := filepath.Clean(site.DocumentRoot)
+		if !isSafeWebsiteRoot(docRoot) {
+			response.Error(w, http.StatusBadRequest, "UNSAFE_PATH",
+				fmt.Sprintf("Document root '%s' is a protected system path and cannot be deleted", docRoot), nil, "")
+			return
+		}
+
+		if _, statErr := os.Stat(docRoot); statErr == nil {
+			if req.PermanentWipe {
+				// Permanent wipe — no recovery
+				if rmErr := h.fileMgr.Delete(docRoot); rmErr != nil {
+					result["files_error"] = rmErr.Error()
+				} else {
+					result["files_action"] = "permanently_deleted"
+				}
+			} else {
+				// Move to Enterprise Trash Bin (default — reversible)
+				trashBase := h.trashDir()
+				trashID := uuid.New()
+				trashFilename := fmt.Sprintf("%s_%s", trashID.String(), site.PrimaryDomain)
+				physicalTrashPath := filepath.Join(trashBase, trashFilename)
+
+				// Calculate size before moving
+				var totalSize int64
+				if sz, _, _, sErr := h.fileMgr.CalculateDirSize(docRoot); sErr == nil {
+					totalSize = sz
+				}
+
+				if mvErr := h.fileMgr.Rename(docRoot, physicalTrashPath); mvErr != nil {
+					result["files_error"] = mvErr.Error()
+				} else {
+					// Record trash metadata for restoration
+					deletedBy := "Administrator"
+					if claims != nil && claims.Email != "" {
+						deletedBy = claims.Email
+					}
+					var userID *uuid.UUID
+					if claims != nil && claims.UserID != uuid.Nil {
+						uid := claims.UserID
+						userID = &uid
+					}
+
+					trashItem := &store.FileManagerTrashItem{
+						ID:           trashID,
+						UserID:       userID,
+						Domain:       site.PrimaryDomain,
+						OriginalPath: docRoot,
+						TrashPath:    physicalTrashPath,
+						Name:         site.PrimaryDomain,
+						Size:         totalSize,
+						FileType:     "website",
+						IsDir:        true,
+						DeletedBy:    deletedBy,
+						DeletedAt:    time.Now().UTC(),
+					}
+					_ = h.store.AddFileManagerTrash(r.Context(), trashItem)
+					result["files_action"] = "moved_to_trash"
+					result["trash_id"] = trashID.String()
+				}
+			}
+		} else {
+			result["files_action"] = "not_found"
+		}
+	}
+
+	// --- 2. Clean up FTP accounts ---
+	if req.DeleteFTP || req.DeleteFiles == nil {
+		// Remove FTP user matching the website's system user
+		if site.SystemUser != "" {
+			_ = exec.Command("userdel", "--force", site.SystemUser).Run()
+			result["ftp_action"] = "cleaned"
+		}
+	}
+
+	// --- 3. Clean up user isolation, PHP pool, and cgroup slice ---
 	phpVer := "8.3"
 	if site.PHPVersion != nil && *site.PHPVersion != "" {
 		phpVer = *site.PHPVersion
 	}
 	_ = h.isolationMgr.DeprovisionWebsiteIsolation(r.Context(), site.SystemUser, phpVer)
 
-	// Clean up Nginx Virtual Host
+	// --- 4. Clean up Nginx Virtual Host ---
 	removeNginxVHost(site.PrimaryDomain)
 
+	// --- 5. Delete DNS zone (opt-in) ---
+	if req.DeleteDNS {
+		// Remove BIND/PowerDNS zone file for this domain
+		zonePath := filepath.Join("/etc/bind/zones", "db."+site.PrimaryDomain)
+		_ = os.Remove(zonePath)
+		_ = exec.Command("rndc", "reload").Run()
+		result["dns_action"] = "cleaned"
+	}
+
+	// --- 6. Delete database record ---
 	if err := h.store.DeleteWebsite(r.Context(), siteID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete website", nil, "")
 		return
 	}
 
 	h.audit.Log(r.Context(), r, "website.delete", "website", siteID.String(), "success", "", map[string]interface{}{
-		"domain":      site.PrimaryDomain,
-		"system_user": site.SystemUser,
+		"domain":         site.PrimaryDomain,
+		"system_user":    site.SystemUser,
+		"document_root":  site.DocumentRoot,
+		"files_trashed":  deleteFiles && !req.PermanentWipe,
+		"permanent_wipe": req.PermanentWipe,
+		"delete_dns":     req.DeleteDNS,
+		"delete_ftp":     req.DeleteFTP || req.DeleteFiles == nil,
 	})
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true}, nil)
+	response.JSON(w, http.StatusOK, result, nil)
 }
 
 func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {

@@ -55,8 +55,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	req.FullName = strings.TrimSpace(req.FullName)
 	req.OrganizationName = strings.TrimSpace(req.OrganizationName)
 
-	if req.Email == "" || len(req.Password) < 8 || req.FullName == "" {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Email, password (min 8 chars), and full name are required", nil, "")
+	if req.Email == "" || req.FullName == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Email and full name are required", nil, "")
+		return
+	}
+
+	if err := auth.ValidatePasswordComplexity(req.Password); err != nil {
+		response.Error(w, http.StatusBadRequest, "WEAK_PASSWORD", err.Error(), nil, "")
 		return
 	}
 
@@ -134,6 +139,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	user, err := h.store.GetUserByEmail(r.Context(), req.Email)
 	if err != nil {
+		auth.VerifyPasswordDummy(req.Password)
 		response.Error(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil, "")
 		return
 	}

@@ -118,8 +118,10 @@ type CopyRequest struct {
 }
 
 type DeleteRequest struct {
-	Path  string   `json:"path"`
-	Paths []string `json:"paths"`
+	Path      string   `json:"path"`
+	Paths     []string `json:"paths"`
+	Permanent bool     `json:"permanent"` // explicit permanent delete flag (default false = move to trash)
+	Domain    string   `json:"domain"`    // for trash metadata
 }
 
 type ChmodRequest struct {
@@ -569,9 +571,13 @@ func (h *FileHandler) Copy(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Delete removes a file or directory, or a batch of files/directories
+// Delete moves files to Enterprise Trash by default, or permanently deletes if permanent=true.
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	// Check for permanent flag from query param or JSON body
+	permanent := r.URL.Query().Get("permanent") == "true"
+
 	var pathsToDelete []string
+	var domain string
 
 	targetPath := strings.TrimSpace(r.URL.Query().Get("path"))
 	if targetPath != "" {
@@ -581,6 +587,10 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		var req DeleteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.Permanent {
+				permanent = true
+			}
+			domain = req.Domain
 			if len(req.Paths) > 0 {
 				for _, p := range req.Paths {
 					p = strings.TrimSpace(p)
@@ -599,39 +609,138 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var deletedPaths []string
-	var errorMessages []string
+	if permanent {
+		// Permanent delete — only allowed from Trash bin view or by admins
+		var deletedPaths []string
+		var errorMessages []string
 
-	for _, p := range pathsToDelete {
-		cleanPath := filepath.Clean(p)
-		if cleanPath == "/" || cleanPath == "." {
-			errorMessages = append(errorMessages, fmt.Sprintf("%s: Root directory cannot be deleted", p))
-			continue
+		for _, p := range pathsToDelete {
+			cleanPath := filepath.Clean(p)
+			if cleanPath == "/" || cleanPath == "." {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: Root directory cannot be deleted", p))
+				continue
+			}
+
+			if err := h.checkPathAuthorization(r, cleanPath); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+				continue
+			}
+
+			if err := h.fileMgr.Delete(cleanPath); err != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
+				continue
+			}
+
+			h.audit.Log(r.Context(), r, "file.permanent_delete", "file", cleanPath, "success", "", nil)
+			deletedPaths = append(deletedPaths, cleanPath)
 		}
 
-		if err := h.checkPathAuthorization(r, cleanPath); err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
-			continue
+		if len(deletedPaths) == 0 && len(errorMessages) > 0 {
+			response.Error(w, http.StatusBadRequest, "DELETE_ERROR", strings.Join(errorMessages, "; "), nil, "")
+			return
 		}
 
-		if err := h.fileMgr.Delete(cleanPath); err != nil {
-			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", p, err.Error()))
-			continue
-		}
-
-		h.audit.Log(r.Context(), r, "file.delete", "file", cleanPath, "success", "", nil)
-		deletedPaths = append(deletedPaths, cleanPath)
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"deleted": true,
+			"paths":   deletedPaths,
+			"count":   len(deletedPaths),
+			"errors":  errorMessages,
+		}, nil)
+		return
 	}
 
-	if len(deletedPaths) == 0 && len(errorMessages) > 0 {
+	// Default: Move to Enterprise Trash Bin (soft delete)
+	trashBase := h.trashDir()
+	var trashedItems []*store.FileManagerTrashItem
+	var errorMessages []string
+
+	claims, _ := auth.GetClaims(r.Context())
+	deletedBy := "Administrator"
+	if claims != nil && claims.Email != "" {
+		deletedBy = claims.Email
+	}
+
+	for _, p := range pathsToDelete {
+		clean := filepath.Clean(p)
+		if clean == "/" || clean == "." {
+			errorMessages = append(errorMessages, clean+": Root cannot be deleted")
+			continue
+		}
+
+		if err := h.checkPathAuthorization(r, clean); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		info, err := os.Stat(clean)
+		if err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		trashID := uuid.New()
+		trashFilename := fmt.Sprintf("%s_%s", trashID.String(), filepath.Base(clean))
+		physicalTrashPath := filepath.Join(trashBase, trashFilename)
+
+		var totalSize int64
+		isDir := info.IsDir()
+		if isDir {
+			sz, _, _, _ := h.fileMgr.CalculateDirSize(clean)
+			totalSize = sz
+		} else {
+			totalSize = info.Size()
+		}
+
+		if err := h.fileMgr.Rename(clean, physicalTrashPath); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		trashItem := &store.FileManagerTrashItem{
+			ID:           trashID,
+			UserID:       h.getUserID(r),
+			Domain:       domain,
+			OriginalPath: clean,
+			TrashPath:    physicalTrashPath,
+			Name:         filepath.Base(clean),
+			Size:         totalSize,
+			FileType:     filepath.Ext(clean),
+			IsDir:        isDir,
+			DeletedBy:    deletedBy,
+			DeletedAt:    time.Now().UTC(),
+		}
+
+		if err := h.store.AddFileManagerTrash(r.Context(), trashItem); err != nil {
+			errorMessages = append(errorMessages, fmt.Sprintf("%s: %s", clean, err.Error()))
+			continue
+		}
+
+		h.audit.Log(r.Context(), r, "file.trash", "file", clean, "success", "", map[string]interface{}{
+			"trash_id": trashID.String(),
+			"size":     totalSize,
+		})
+		_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
+			ID:         uuid.New(),
+			UserID:     h.getUserID(r),
+			UserEmail:  deletedBy,
+			Domain:     domain,
+			Action:     "trash",
+			SourcePath: clean,
+		})
+
+		trashedItems = append(trashedItems, trashItem)
+	}
+
+	if len(trashedItems) == 0 && len(errorMessages) > 0 {
 		response.Error(w, http.StatusBadRequest, "DELETE_ERROR", strings.Join(errorMessages, "; "), nil, "")
 		return
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"deleted": true,
-		"paths":   deletedPaths,
-		"count":   len(deletedPaths),
+		"trashed": true,
+		"items":   trashedItems,
+		"count":   len(trashedItems),
 		"errors":  errorMessages,
 	}, nil)
 }
@@ -1504,7 +1613,7 @@ func (h *FileHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// EmptyTrash permanently purges all files in the Enterprise Trash Bin
+// EmptyTrash permanently purges all files in the Enterprise Trash Bin with path containment verification
 func (h *FileHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 	var req EmptyTrashRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1530,12 +1639,27 @@ func (h *FileHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	trashBase := filepath.Clean(h.trashDir())
 	var purgedCount int
 	var freedBytes int64
+	var skippedCount int
 
 	for _, item := range items {
+		// Security: Verify each item's trash path is canonically inside the trash directory
+		cleanPath := filepath.Clean(item.TrashPath)
+		if !strings.HasPrefix(cleanPath, trashBase+string(filepath.Separator)) {
+			// Path injection — skip this item and log the anomaly
+			h.audit.Log(r.Context(), r, "file.trash.path_escape_blocked", "trash", item.TrashPath, "blocked", "", map[string]interface{}{
+				"trash_base": trashBase,
+				"item_path":  cleanPath,
+				"item_id":    item.ID.String(),
+			})
+			skippedCount++
+			continue
+		}
+
 		// Permanently remove physical file or directory
-		_ = os.RemoveAll(item.TrashPath)
+		_ = os.RemoveAll(cleanPath)
 		purgedCount++
 		freedBytes += item.Size
 	}
@@ -1547,9 +1671,10 @@ func (h *FileHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "file.trash.empty", "trash", "", "success", "", map[string]interface{}{
-		"files_purged": purgedCount,
-		"bytes_freed":  freedBytes,
-		"domain":       req.Domain,
+		"files_purged":  purgedCount,
+		"bytes_freed":   freedBytes,
+		"items_skipped": skippedCount,
+		"domain":        req.Domain,
 	})
 	_ = h.store.RecordFileManagerActivityLog(r.Context(), &store.FileManagerActivityLog{
 		ID:         uuid.New(),
@@ -1558,19 +1683,21 @@ func (h *FileHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		Action:     "empty_trash",
 		SourcePath: "",
 		Details: map[string]interface{}{
-			"files_purged": purgedCount,
-			"bytes_freed":  freedBytes,
+			"files_purged":  purgedCount,
+			"bytes_freed":   freedBytes,
+			"items_skipped": skippedCount,
 		},
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"empty":        true,
-		"files_purged": purgedCount,
-		"bytes_freed":  freedBytes,
+		"empty":         true,
+		"files_purged":  purgedCount,
+		"bytes_freed":   freedBytes,
+		"items_skipped": skippedCount,
 	}, nil)
 }
 
-// DeleteTrashItem permanently deletes a single item from trash
+// DeleteTrashItem permanently deletes a single item from trash with path containment verification
 func (h *FileHandler) DeleteTrashItem(w http.ResponseWriter, r *http.Request) {
 	rawID := chi.URLParam(r, "id")
 	if rawID == "" {
@@ -1589,12 +1716,40 @@ func (h *FileHandler) DeleteTrashItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Security: Verify the trash path is canonically inside the trash directory.
+	// This prevents a corrupted or malicious database record from causing
+	// arbitrary directory deletion via path injection.
+	cleanTrash := filepath.Clean(item.TrashPath)
+	trashBase := filepath.Clean(h.trashDir())
+	if !strings.HasPrefix(cleanTrash, trashBase+string(filepath.Separator)) {
+		response.Error(w, http.StatusForbidden, "PATH_ESCAPE",
+			"Trash item path is outside the authorized trash directory", nil, "")
+		h.audit.Log(r.Context(), r, "file.trash.path_escape_blocked", "trash", item.TrashPath, "blocked", "", map[string]interface{}{
+			"trash_base": trashBase,
+			"item_path":  cleanTrash,
+		})
+		return
+	}
+
+	// Verify caller ownership: item must belong to caller or caller must be admin
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
+		if item.UserID != nil && claims.UserID != *item.UserID {
+			response.Error(w, http.StatusForbidden, "ACCESS_DENIED",
+				"You can only permanently delete your own trash items", nil, "")
+			return
+		}
+	}
+
 	// Permanently wipe physical file/folder
-	_ = os.RemoveAll(item.TrashPath)
+	_ = os.RemoveAll(cleanTrash)
 
 	_ = h.store.DeleteFileManagerTrashItem(r.Context(), parsedID)
 
-	h.audit.Log(r.Context(), r, "file.trash.delete_item", "trash", item.OriginalPath, "success", "", nil)
+	h.audit.Log(r.Context(), r, "file.trash.delete_item", "trash", item.OriginalPath, "success", "", map[string]interface{}{
+		"trash_path": cleanTrash,
+		"size":       item.Size,
+	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"deleted": true,

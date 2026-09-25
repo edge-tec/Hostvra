@@ -117,6 +117,24 @@ type Store interface {
 	RecordEmailDeliveryLog(ctx context.Context, log *EmailDeliveryLog) error
 	ListEmailDeliveryLogs(ctx context.Context, serverID uuid.UUID, limit int) ([]*EmailDeliveryLog, error)
 
+	// Email Signatures & Suppressions
+	GetEmailSignature(ctx context.Context, mailboxID uuid.UUID) (*EmailSignature, error)
+	SetEmailSignature(ctx context.Context, sig *EmailSignature) error
+	AddEmailSuppression(ctx context.Context, sup *EmailSuppression) error
+	ListEmailSuppressions(ctx context.Context, serverID uuid.UUID) ([]*EmailSuppression, error)
+	DeleteEmailSuppression(ctx context.Context, id uuid.UUID) error
+	IsEmailSuppressed(ctx context.Context, serverID uuid.UUID, email string) (bool, error)
+
+	// Webmail Messages & Attachments
+	ListWebmailMessages(ctx context.Context, mailboxID uuid.UUID, folder string, limit, offset int, search string) ([]*WebmailMessage, int, error)
+	GetWebmailMessageByID(ctx context.Context, id uuid.UUID) (*WebmailMessage, error)
+	CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error
+	UpdateWebmailMessageFlags(ctx context.Context, id uuid.UUID, isUnread, isStarred, isImportant *bool) error
+	MoveWebmailMessage(ctx context.Context, id uuid.UUID, targetFolder string) error
+	DeleteWebmailMessage(ctx context.Context, id uuid.UUID) error
+	CreateWebmailAttachment(ctx context.Context, att *WebmailAttachment) error
+	ListWebmailAttachments(ctx context.Context, messageID uuid.UUID) ([]*WebmailAttachment, error)
+
 	// PHP Management
 	UpsertPHPVersion(ctx context.Context, v *PHPInstalledVersion) error
 	GetPHPVersion(ctx context.Context, serverID uuid.UUID, version string) (*PHPInstalledVersion, error)
@@ -319,6 +337,10 @@ type MemoryStore struct {
 	emailAutoresponders map[uuid.UUID]*EmailAutoresponder
 	emailDKIMKeys       map[uuid.UUID]*EmailDKIMKey
 	emailDeliveryLogs   []*EmailDeliveryLog
+	emailSignatures     map[uuid.UUID]*EmailSignature   // key: mailboxID
+	emailSuppressions   map[uuid.UUID]*EmailSuppression // key: id
+	webmailMessages     map[uuid.UUID]*WebmailMessage   // key: id
+	webmailAttachments  map[uuid.UUID]*WebmailAttachment // key: id
 	phpVersions         map[string]*PHPInstalledVersion // key: serverID:version
 	phpExtensions       map[string]*PHPExtension        // key: serverID:version:name
 	phpPools            map[uuid.UUID]*PHPFPMPool
@@ -568,6 +590,10 @@ func NewMemoryStore() *MemoryStore {
 		emailAutoresponders: make(map[uuid.UUID]*EmailAutoresponder),
 		emailDKIMKeys:       make(map[uuid.UUID]*EmailDKIMKey),
 		emailDeliveryLogs:   make([]*EmailDeliveryLog, 0),
+		emailSignatures:     make(map[uuid.UUID]*EmailSignature),
+		emailSuppressions:   make(map[uuid.UUID]*EmailSuppression),
+		webmailMessages:     make(map[uuid.UUID]*WebmailMessage),
+		webmailAttachments:  make(map[uuid.UUID]*WebmailAttachment),
 		phpVersions:         make(map[string]*PHPInstalledVersion),
 		phpExtensions:       make(map[string]*PHPExtension),
 		phpPools:            make(map[uuid.UUID]*PHPFPMPool),

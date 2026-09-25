@@ -101,6 +101,7 @@ func main() {
 	teamHandler := handlers.NewTeamHandler(cfg, dataStore, auditLogger)
 	apiKeyHandler := handlers.NewAPIKeyHandler(cfg, dataStore, auditLogger)
 	emailHandler := handlers.NewEmailHandler(cfg, dataStore, dnsService, auditLogger)
+	webmailHandler := handlers.NewWebmailHandler(cfg, dataStore, auditLogger)
 	phpHandler := handlers.NewPHPHandler(cfg, dataStore, auditLogger)
 	webServerHandler := handlers.NewWebServerHandler(cfg, dataStore, auditLogger)
 	updateHandler := handlers.NewUpdateHandler(cfg, dataStore, auditLogger, AppVersion)
@@ -192,8 +193,11 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public Auth Endpoints
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/register", authHandler.Register)
-			r.Post("/login", authHandler.Login)
+			registerLimiter := auth.NewRateLimiter(3, 60*time.Second, "Too many registration attempts. Please try again later.")
+			r.With(registerLimiter.RateLimitMiddleware).Post("/register", authHandler.Register)
+
+			loginLimiter := auth.NewLoginRateLimiter(5, 60*time.Second) // 5 login attempts per minute per IP
+			r.With(loginLimiter.RateLimitMiddleware).Post("/login", authHandler.Login)
 
 			// Authenticated User Info
 			r.Group(func(r chi.Router) {
@@ -603,23 +607,69 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/domains", emailHandler.CreateDomain)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}", emailHandler.GetDomain)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/domains/{id}", emailHandler.DeleteDomain)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/domains/{id}/dkim/generate", emailHandler.GenerateDKIM)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/dns", emailHandler.GetDomainDNS)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/verify-dns", emailHandler.VerifyDomainDNS)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/domains/{id}/dns/verify", emailHandler.VerifyDomainDNS)
 
 				// Mailboxes
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes", emailHandler.ListMailboxes)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes", emailHandler.CreateMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}", emailHandler.GetMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}", emailHandler.UpdateMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Patch("/mailboxes/{id}", emailHandler.UpdateMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/mailboxes/{id}", emailHandler.DeleteMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/mailboxes/{id}/test", emailHandler.TestMailbox)
 
-				// Aliases
+				// Signatures & Autoresponders
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}/signature", emailHandler.GetSignature)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/signature", emailHandler.SetSignature)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}/autoresponder", emailHandler.GetAutoresponder)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/autoresponder", emailHandler.SetAutoresponder)
+
+				// Aliases & Forwarders
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/aliases", emailHandler.ListAliases)
 				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Post("/aliases", emailHandler.CreateAlias)
 				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Delete("/aliases/{id}", emailHandler.DeleteAlias)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/forwarders", emailHandler.ListForwarders)
+				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Post("/forwarders", emailHandler.CreateForwarder)
+				r.With(rbac.RequirePermission(rbac.PermEmailAliasManage)).Delete("/forwarders/{id}", emailHandler.DeleteForwarder)
 
-				// Delivery Logs & Health
+				// Deliverability & Health & SMTP Settings
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
+				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/delivery-logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/smtp-settings", emailHandler.GetSMTPSettings)
+
+				// Mail Queue
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/queue", emailHandler.ListQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/flush", emailHandler.FlushQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
+
+				// Suppression List
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/suppressions", emailHandler.ListSuppressions)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/suppressions", emailHandler.AddSuppression)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/suppressions/{id}", emailHandler.DeleteSuppression)
+
+				// Services Management
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/services", emailHandler.ListServices)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/services/{name}/action", emailHandler.ManageService)
+
+				// Test Tool
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test", emailHandler.SendTestEmail)
+			})
+
+			// Webmail Operations
+			r.Route("/webmail", func(r chi.Router) {
+				r.Get("/messages", webmailHandler.ListMessages)
+				r.Get("/messages/{id}", webmailHandler.GetMessage)
+				r.Post("/send", webmailHandler.SendMessage)
+				r.Patch("/messages/{id}", webmailHandler.UpdateMessageFlags)
+				r.Post("/messages/{id}/move", webmailHandler.MoveMessage)
+				r.Post("/messages/draft", webmailHandler.SaveDraft)
+				r.Delete("/messages/{id}", webmailHandler.DeleteMessage)
 			})
 
 			// Enterprise Hosting Billing, Subscriptions, Invoices & Payment Gateways
