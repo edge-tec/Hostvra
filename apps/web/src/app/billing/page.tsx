@@ -798,29 +798,29 @@ export default function BillingPage() {
 
         {/* Global Controls & Tabs Bar */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-          {/* Main Tabs */}
-          <div className="flex flex-wrap items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80">
+          {/* Main Tabs (Responsive Swipable Scroll on Mobile) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700/80 overflow-x-auto max-w-full scrollbar-none flex-nowrap">
             <button
               onClick={() => setActiveTab('packages')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'packages'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Zap className="w-4 h-4" />
+              <Zap className="w-4 h-4 flex-shrink-0" />
               <span>Hosting Packages</span>
             </button>
 
             <button
               onClick={() => setActiveTab('subscriptions')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 relative ${
                 activeTab === 'subscriptions'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Layers className="w-4 h-4" />
+              <Layers className="w-4 h-4 flex-shrink-0" />
               <span>My Subscriptions</span>
               {activeSubsCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -831,13 +831,13 @@ export default function BillingPage() {
 
             <button
               onClick={() => setActiveTab('trials')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 relative ${
                 activeTab === 'trials'
                   ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Gift className="w-4 h-4 text-purple-500" />
+              <Gift className="w-4 h-4 text-purple-500 flex-shrink-0" />
               <span>Free Trials</span>
               {activeTrialsCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-purple-500 text-white">
@@ -848,13 +848,13 @@ export default function BillingPage() {
 
             <button
               onClick={() => setActiveTab('invoices')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 relative ${
                 activeTab === 'invoices'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <FileText className="w-4 h-4" />
+              <FileText className="w-4 h-4 flex-shrink-0" />
               <span>Invoices & Receipts</span>
               {unpaidInvoicesCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white animate-pulse">
@@ -865,25 +865,25 @@ export default function BillingPage() {
 
             <button
               onClick={() => setActiveTab('gateways')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'gateways'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <CreditCard className="w-4 h-4" />
+              <CreditCard className="w-4 h-4 flex-shrink-0" />
               <span>Payment Gateways</span>
             </button>
 
             <button
               onClick={() => setActiveTab('admin')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap flex-shrink-0 ${
                 activeTab === 'admin'
                   ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Sliders className="w-4 h-4" />
+              <Sliders className="w-4 h-4 flex-shrink-0" />
               <span>Package Manager</span>
             </button>
           </div>
@@ -958,8 +958,8 @@ export default function BillingPage() {
               </div>
             </div>
 
-            {/* Pricing Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
+            {/* Pricing Cards Grid (Responsive 1/2/4 Columns) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6 items-stretch">
               {plans.map(plan => {
                 const isFeatured = plan.tier === 'business';
                 const isReseller = plan.tier === 'reseller';
@@ -975,7 +975,7 @@ export default function BillingPage() {
                         : isReseller
                         ? 'bg-gradient-to-b from-emerald-600/5 to-teal-600/5 dark:from-emerald-950/20 dark:to-teal-950/20 border border-emerald-500/40 dark:border-emerald-500/30 shadow-md'
                         : 'bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm'
-                    } p-6 sm:p-7`}
+                    } p-5 sm:p-7`}
                   >
                     {/* Featured Badge */}
                     {isFeatured && (
@@ -1206,7 +1206,7 @@ export default function BillingPage() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6">
                 {subscriptions.map(sub => {
                   const matchingPlan = plans.find(p => p.id === sub.plan_id);
                   const maxDisk = matchingPlan?.disk_space_mb || 10240;
@@ -1217,13 +1217,13 @@ export default function BillingPage() {
                   return (
                     <div
                       key={sub.id}
-                      className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm flex flex-col justify-between"
+                      className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-sm flex flex-col justify-between"
                     >
                       <div>
                         {/* Header */}
-                        <div className="flex items-start justify-between gap-4 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                                 {sub.plan_name}
                               </h3>
@@ -1246,7 +1246,7 @@ export default function BillingPage() {
                             </div>
                             {sub.status === 'trial' && sub.trial_ends_at && (
                               <div className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-purple-600 dark:text-purple-400">
-                                <Clock className="w-3.5 h-3.5 text-purple-500" />
+                                <Clock className="w-3.5 h-3.5 text-purple-500 flex-shrink-0" />
                                 <span>
                                   Trial ends {new Date(sub.trial_ends_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                   {(() => {
@@ -1258,11 +1258,11 @@ export default function BillingPage() {
                             )}
                           </div>
 
-                          <div className="text-right">
+                          <div className="text-left sm:text-right">
                             <div className="text-[11px] text-slate-400 font-medium">
                               {sub.status === 'trial' ? 'Trial Expiry' : 'Next Billing Date'}
                             </div>
-                            <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 flex items-center gap-1 justify-end">
+                            <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 flex items-center gap-1 sm:justify-end">
                               <Calendar className="w-3.5 h-3.5 text-blue-500" />
                               {new Date(sub.status === 'trial' && sub.trial_ends_at ? sub.trial_ends_at : sub.next_billing_date).toLocaleDateString('en-US', {
                                 year: 'numeric',
@@ -1525,11 +1525,11 @@ export default function BillingPage() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
               {gateways.map(gw => (
                 <div
                   key={gw.gateway}
-                  className={`bg-white dark:bg-slate-900 rounded-3xl border p-6 shadow-sm flex flex-col justify-between transition-all ${
+                  className={`bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border p-5 sm:p-6 shadow-sm flex flex-col justify-between transition-all ${
                     gw.enabled
                       ? 'border-slate-200 dark:border-slate-800'
                       : 'border-dashed border-slate-300 dark:border-slate-800 opacity-75'
@@ -1538,9 +1538,9 @@ export default function BillingPage() {
                   <div>
                     {/* Header */}
                     <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div
-                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg ${
+                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-lg flex-shrink-0 ${
                             gw.gateway === 'bkash'
                               ? 'bg-pink-500/15 text-pink-600'
                               : gw.gateway === 'nagad'
@@ -1558,8 +1558,8 @@ export default function BillingPage() {
                             ? 'Nagad'
                             : gw.gateway.toUpperCase().slice(0, 3)}
                         </div>
-                        <div>
-                          <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                        <div className="min-w-0 truncate">
+                          <h3 className="font-bold text-sm text-slate-900 dark:text-white truncate">
                             {gw.display_name}
                           </h3>
                           <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
@@ -1569,7 +1569,7 @@ export default function BillingPage() {
                       </div>
 
                       <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider flex-shrink-0 ml-2 ${
                           gw.enabled
                             ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                             : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
@@ -1581,21 +1581,21 @@ export default function BillingPage() {
 
                     {/* Metadata */}
                     <div className="space-y-2 mb-6 text-xs bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl">
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500">Environment:</span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500 flex-shrink-0">Environment:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                           {gw.test_mode ? 'Sandbox / Test' : 'Live Production'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500">Merchant ID:</span>
-                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500 flex-shrink-0">Merchant ID:</span>
+                        <span className="font-mono text-slate-700 dark:text-slate-300 truncate max-w-[150px] sm:max-w-[200px] text-right">
                           {gw.merchant_id || 'Not Set'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500">API Key:</span>
-                        <span className="font-mono text-slate-700 dark:text-slate-300">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-500 flex-shrink-0">API Key:</span>
+                        <span className="font-mono text-slate-700 dark:text-slate-300 truncate max-w-[150px] sm:max-w-[200px] text-right">
                           {gw.api_key ? '••••' + gw.api_key.slice(-4) : 'Not Set'}
                         </span>
                       </div>
@@ -2119,8 +2119,8 @@ export default function BillingPage() {
 
         {/* MODAL 1: CHECKOUT & SUBSCRIPTION ORDER MODAL */}
         {checkoutModalOpen && selectedPlanForOrder && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-7 space-y-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-7 space-y-6 max-h-[90vh] overflow-y-auto">
               {/* Modal Header */}
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-3">
@@ -2245,7 +2245,7 @@ export default function BillingPage() {
                       handleStartFreeTrial(selectedPlanForOrder);
                     }}
                     disabled={actionLoading === `trial-${selectedPlanForOrder.id}`}
-                    className="px-4 py-2.5 rounded-xl border border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-xs font-bold transition-all flex items-center gap-1.5"
+                    className="px-4 py-2.5 rounded-xl border border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                   >
                     <Gift className="w-3.5 h-3.5 text-purple-500" />
                     <span>Start Free Trial ($0)</span>
@@ -2254,7 +2254,7 @@ export default function BillingPage() {
                   <div />
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setCheckoutModalOpen(false)}
@@ -2266,7 +2266,7 @@ export default function BillingPage() {
                     type="button"
                     onClick={handleConfirmCheckout}
                     disabled={actionLoading === 'checkout'}
-                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
                   >
                     {actionLoading === 'checkout' && <RefreshCw className="w-4 h-4 animate-spin" />}
                     <span>Confirm Order</span>
@@ -2279,8 +2279,8 @@ export default function BillingPage() {
 
         {/* MODAL 2: INVOICE & RECEIPT MODAL (PRINTABLE / BRANDED) */}
         {receiptModalOpen && selectedInvoice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden p-8 space-y-6">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
               {/* Top Controls */}
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 print:hidden">
                 <div className="flex items-center gap-2">
@@ -2388,8 +2388,8 @@ export default function BillingPage() {
 
         {/* MODAL 3: PAYMENT GATEWAY CONFIG MODAL */}
         {gatewayModalOpen && editingGateway && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-7 space-y-5">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-7 space-y-5 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-3">
                   <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
@@ -2765,8 +2765,8 @@ export default function BillingPage() {
 
         {/* MODAL 5: EXTEND TRIAL MODAL */}
         {extendModalOpen && selectedTrialForExtend && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div className="flex items-center gap-2.5">
                   <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
