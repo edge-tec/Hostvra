@@ -21,9 +21,10 @@ export function ChunkLoadRecovery() {
         console.warn('Chunk load error detected, reloading to fetch latest assets:', msg);
         const lastReload = sessionStorage.getItem('last_chunk_reload');
         const now = Date.now();
-        if (!lastReload || now - parseInt(lastReload, 10) > 10000) {
+        if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
           sessionStorage.setItem('last_chunk_reload', now.toString());
-          window.location.reload();
+          const cleanUrl = window.location.pathname.split('?')[0];
+          window.location.replace(`${cleanUrl}?_r=${now}`);
         }
       }
     };
