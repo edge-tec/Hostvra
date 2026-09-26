@@ -50,13 +50,14 @@ const (
 	PermWAFView         = "waf.view"
 	PermWAFManage       = "waf.manage"
 
-	// Email Permissions
+	// Email & Mail Server Permissions
 	PermEmailView          = "email.view"
 	PermEmailDomainManage  = "email.domain.manage"
 	PermEmailMailboxManage = "email.mailbox.manage"
 	PermEmailAliasManage   = "email.alias.manage"
 	PermEmailLogsView      = "email.logs.view"
 	PermEmailQueueManage   = "email.queue.manage"
+	PermMailServerManage   = "mail.server.manage"
 
 	// PHP Permissions
 	PermPHPView            = "php.view"
@@ -103,7 +104,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
-		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage, PermMailServerManage,
 		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
@@ -117,7 +118,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
-		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage, PermMailServerManage,
 		PermPHPView, PermPHPVersionManage, PermPHPExtensionManage, PermPHPIniManage, PermPHPFPMManage, PermPHPPoolManage, PermPHPHealthCheck,
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,

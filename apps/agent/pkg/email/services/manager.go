@@ -2,7 +2,9 @@ package services
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -116,25 +118,27 @@ func ManageEmailService(serviceName, action string) error {
 		return fmt.Errorf("unsupported service action: %s", action)
 	}
 
-	// Safety validation before restarting
-	if serviceName == "postfix" && (action == "restart" || action == "reload") {
-		if _, err := exec.LookPath("postfix"); err == nil {
-			if out, err := exec.Command("postfix", "check").CombinedOutput(); err != nil {
-				return fmt.Errorf("postfix configuration syntax check failed: %s (%w)", string(out), err)
+	// Safety validation before restarting (only run in Linux root environment)
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if serviceName == "postfix" && (action == "restart" || action == "reload") {
+			if _, err := exec.LookPath("postfix"); err == nil {
+				if out, err := exec.Command("postfix", "check").CombinedOutput(); err != nil {
+					return fmt.Errorf("postfix configuration syntax check failed: %s (%w)", string(out), err)
+				}
+			}
+		} else if serviceName == "dovecot" && (action == "restart" || action == "reload") {
+			if _, err := exec.LookPath("dovecot"); err == nil {
+				if out, err := exec.Command("dovecot", "-n").CombinedOutput(); err != nil {
+					return fmt.Errorf("dovecot configuration validation failed: %s (%w)", string(out), err)
+				}
 			}
 		}
-	} else if serviceName == "dovecot" && (action == "restart" || action == "reload") {
-		if _, err := exec.LookPath("dovecot"); err == nil {
-			if out, err := exec.Command("dovecot", "-n").CombinedOutput(); err != nil {
-				return fmt.Errorf("dovecot configuration validation failed: %s (%w)", string(out), err)
-			}
-		}
-	}
 
-	if _, err := exec.LookPath("systemctl"); err == nil {
-		out, err := exec.Command("systemctl", action, serviceName).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("systemctl %s %s failed: %s (%w)", action, serviceName, string(out), err)
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			out, err := exec.Command("systemctl", action, serviceName).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("systemctl %s %s failed: %s (%w)", action, serviceName, string(out), err)
+			}
 		}
 	}
 

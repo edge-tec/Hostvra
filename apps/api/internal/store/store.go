@@ -79,6 +79,14 @@ type Store interface {
 	ListSSLCertificates(ctx context.Context, orgID uuid.UUID) ([]*SSLCertificate, error)
 	DeleteSSL(ctx context.Context, id uuid.UUID) error
 
+	// Mail Server Subsystem
+	CreateMailServer(ctx context.Context, s *MailServer) error
+	GetMailServerByID(ctx context.Context, id uuid.UUID) (*MailServer, error)
+	ListMailServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*MailServer, error)
+	ListAllMailServers(ctx context.Context) ([]*MailServer, error)
+	UpdateMailServer(ctx context.Context, s *MailServer) error
+	DeleteMailServer(ctx context.Context, id uuid.UUID) error
+
 	// Email Domains
 	CreateEmailDomain(ctx context.Context, domain *EmailDomain) error
 	GetEmailDomainByID(ctx context.Context, id uuid.UUID) (*EmailDomain, error)
@@ -331,6 +339,7 @@ type MemoryStore struct {
 	databases           map[uuid.UUID]*Database
 	databaseUsers       map[uuid.UUID]*DatabaseUser
 	sslCerts            map[uuid.UUID]*SSLCertificate
+	mailServers         map[uuid.UUID]*MailServer
 	emailDomains        map[uuid.UUID]*EmailDomain
 	emailMailboxes      map[uuid.UUID]*EmailMailbox
 	emailAliases        map[uuid.UUID]*EmailAlias
@@ -584,6 +593,7 @@ func NewMemoryStore() *MemoryStore {
 		databases:           make(map[uuid.UUID]*Database),
 		databaseUsers:       make(map[uuid.UUID]*DatabaseUser),
 		sslCerts:            make(map[uuid.UUID]*SSLCertificate),
+		mailServers:         make(map[uuid.UUID]*MailServer),
 		emailDomains:        make(map[uuid.UUID]*EmailDomain),
 		emailMailboxes:      make(map[uuid.UUID]*EmailMailbox),
 		emailAliases:        make(map[uuid.UUID]*EmailAlias),

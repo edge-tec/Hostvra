@@ -159,3 +159,86 @@ func TestMemoryStore_EmailSubsystem(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for deleted domain, got %v", err)
 	}
 }
+
+func TestMemoryStore_MailServerSubsystem(t *testing.T) {
+	ctx := context.Background()
+	s := NewMemoryStore()
+
+	orgID := uuid.New()
+	nodeServerID := uuid.New()
+
+	ms := &MailServer{
+		OrganizationID:     orgID,
+		NodeServerID:       nodeServerID,
+		Name:               "Production Mail Edge",
+		Hostname:           "mail.hostvra.io",
+		PrimaryDomain:      "hostvra.io",
+		AdditionalDomains:  []string{"backup.hostvra.io"},
+		IPv4Address:        "198.51.100.25",
+		Timezone:           "UTC",
+		StorageLocation:    "/var/mail/vhosts",
+		SMTPPort:           25,
+		SMTPSubmissionPort: 587,
+		SMTPSPort:          465,
+		IMAPPort:           143,
+		IMAPSPort:          993,
+		POP3Port:           110,
+		POP3SPort:          995,
+		TLSEnabled:         true,
+		SpamFilterEnabled:  true,
+		AntivirusEnabled:   true,
+		DKIMEnabled:        true,
+		SPFEnabled:         true,
+		DMARCEnabled:       true,
+		WebmailEnabled:     true,
+	}
+
+	// 1. Create Mail Server
+	if err := s.CreateMailServer(ctx, ms); err != nil {
+		t.Fatalf("failed to create mail server: %v", err)
+	}
+
+	// 2. Duplicate rejection
+	dup := &MailServer{
+		OrganizationID: orgID,
+		NodeServerID:   nodeServerID,
+		Hostname:       "mail.hostvra.io",
+	}
+	if err := s.CreateMailServer(ctx, dup); err != ErrAlreadyExists {
+		t.Fatalf("expected ErrAlreadyExists on duplicate hostname, got: %v", err)
+	}
+
+	// 3. Get Mail Server
+	fetched, err := s.GetMailServerByID(ctx, ms.ID)
+	if err != nil {
+		t.Fatalf("failed to get mail server: %v", err)
+	}
+	if fetched.Hostname != "mail.hostvra.io" {
+		t.Errorf("expected mail.hostvra.io, got %s", fetched.Hostname)
+	}
+
+	// 4. List by Org
+	servers, err := s.ListMailServersByOrg(ctx, orgID)
+	if err != nil || len(servers) != 1 {
+		t.Fatalf("expected 1 server, got %d, err: %v", len(servers), err)
+	}
+
+	// 5. Update Mail Server
+	ms.Status = "maintenance"
+	ms.HealthStatus = "degraded"
+	if err := s.UpdateMailServer(ctx, ms); err != nil {
+		t.Fatalf("failed to update mail server: %v", err)
+	}
+	updated, err := s.GetMailServerByID(ctx, ms.ID)
+	if err != nil || updated.Status != "maintenance" {
+		t.Fatalf("expected status maintenance, got %s", updated.Status)
+	}
+
+	// 6. Delete Mail Server
+	if err := s.DeleteMailServer(ctx, ms.ID); err != nil {
+		t.Fatalf("failed to delete mail server: %v", err)
+	}
+	if _, err := s.GetMailServerByID(ctx, ms.ID); err != ErrNotFound {
+		t.Fatalf("expected ErrNotFound after deletion, got %v", err)
+	}
+}

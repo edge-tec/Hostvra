@@ -87,6 +87,62 @@ interface DeliveryLog {
   details: string;
 }
 
+interface MailServer {
+  id: string;
+  name: string;
+  hostname: string;
+  primary_domain: string;
+  additional_domains: string[];
+  ipv4_address: string;
+  ipv6_address?: string;
+  timezone: string;
+  storage_location: string;
+  mailbox_storage_limit_bytes: number;
+  max_mailbox_size_bytes: number;
+  max_attachment_size_bytes: number;
+  smtp_port: number;
+  smtp_submission_port: number;
+  smtps_port: number;
+  imap_port: number;
+  imaps_port: number;
+  pop3_port: number;
+  pop3s_port: number;
+  tls_enabled: boolean;
+  spam_filter_enabled: boolean;
+  antivirus_enabled: boolean;
+  dkim_enabled: boolean;
+  spf_enabled: boolean;
+  dmarc_enabled: boolean;
+  webmail_enabled: boolean;
+  auto_ssl_enabled: boolean;
+  backup_enabled: boolean;
+  status: string;
+  health_status: string;
+  rate_limit_per_mailbox_hr: number;
+  rate_limit_per_domain_hr: number;
+  rate_limit_per_ip_hr: number;
+  auth_failure_threshold: number;
+  domain_count?: number;
+  mailbox_count?: number;
+  created_at: string;
+  provisioning_logs?: string;
+}
+
+interface PreflightCheckItem {
+  name: string;
+  category: string;
+  status: 'passed' | 'warning' | 'failed';
+  message: string;
+  details?: string;
+}
+
+interface PreflightResult {
+  passed: boolean;
+  checked_at: string;
+  hostname: string;
+  checks: PreflightCheckItem[];
+}
+
 interface SuppressionItem {
   id: string;
   email: string;
@@ -187,17 +243,69 @@ interface TestEmailResult {
   error?: string;
 }
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
 export default function EmailHostingPage() {
   const [activeTab, setActiveTab] = useState<
-    'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester'
-  >('mailboxes');
+    'servers' | 'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester'
+  >('servers');
 
   const [selectedWebmailEmail, setSelectedWebmailEmail] = useState<string | undefined>(undefined);
   const [domains, setDomains] = useState<EmailDomain[]>([]);
   const [mailboxes, setMailboxes] = useState<EmailMailbox[]>([]);
+  const [mailServers, setMailServers] = useState<MailServer[]>([]);
+  const [mailServersLoading, setMailServersLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Mail Server Modal & Provisioning States
+  const [showCreateServerModal, setShowCreateServerModal] = useState(false);
+  const [serverLogsModal, setServerLogsModal] = useState<MailServer | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [preflightResult, setPreflightResult] = useState<PreflightResult | null>(null);
+  const [creatingServer, setCreatingServer] = useState(false);
+  const [serverCreationError, setServerCreationError] = useState<string | null>(null);
+  const [serverWizardTab, setServerWizardTab] = useState<'general' | 'storage_ports' | 'security' | 'ratelimits' | 'preflight'>('general');
+
+  // New Server Form States
+  const [serverName, setServerName] = useState('Primary Mail Node');
+  const [serverHostname, setServerHostname] = useState('mail.example.com');
+  const [serverPrimaryDomain, setServerPrimaryDomain] = useState('example.com');
+  const [serverAdditionalDomains, setServerAdditionalDomains] = useState('');
+  const [serverIPv4, setServerIPv4] = useState('127.0.0.1');
+  const [serverIPv6, setServerIPv6] = useState('');
+  const [serverTimezone, setServerTimezone] = useState('UTC');
+  const [serverStorageLocation, setServerStorageLocation] = useState('/var/mail/vhosts');
+  const [serverMailboxStorageLimitGB, setServerMailboxStorageLimitGB] = useState(100);
+  const [serverMaxMailboxSizeGB, setServerMaxMailboxSizeGB] = useState(10);
+  const [serverMaxAttachmentSizeMB, setServerMaxAttachmentSizeMB] = useState(50);
+  const [serverSmtpPort, setServerSmtpPort] = useState(25);
+  const [serverSmtpSubmissionPort, setServerSmtpSubmissionPort] = useState(587);
+  const [serverSmtpsPort, setServerSmtpsPort] = useState(465);
+  const [serverImapPort, setServerImapPort] = useState(143);
+  const [serverImapsPort, setServerImapsPort] = useState(993);
+  const [serverPop3Port, setServerPop3Port] = useState(110);
+  const [serverPop3sPort, setServerPop3sPort] = useState(995);
+  const [serverTlsEnabled, setServerTlsEnabled] = useState(true);
+  const [serverSpamFilterEnabled, setServerSpamFilterEnabled] = useState(true);
+  const [serverAntivirusEnabled, setServerAntivirusEnabled] = useState(false);
+  const [serverDkimEnabled, setServerDkimEnabled] = useState(true);
+  const [serverSpfEnabled, setServerSpfEnabled] = useState(true);
+  const [serverDmarcEnabled, setServerDmarcEnabled] = useState(true);
+  const [serverWebmailEnabled, setServerWebmailEnabled] = useState(true);
+  const [serverAutoSslEnabled, setServerAutoSslEnabled] = useState(true);
+  const [serverBackupEnabled, setServerBackupEnabled] = useState(true);
+  const [serverRateLimitMailboxHr, setServerRateLimitMailboxHr] = useState(200);
+  const [serverRateLimitDomainHr, setServerRateLimitDomainHr] = useState(1000);
+  const [serverRateLimitIpHr, setServerRateLimitIpHr] = useState(500);
+  const [serverAuthFailureThreshold, setServerAuthFailureThreshold] = useState(10);
 
   // Tab specific data
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -263,9 +371,10 @@ export default function EmailHostingPage() {
   const fetchEmailData = async () => {
     try {
       setLoading(true);
-      const [domRes, mbRes] = await Promise.all([
+      const [domRes, mbRes, srvRes] = await Promise.all([
         apiFetch<EmailDomain[]>('/api/v1/email/domains'),
         apiFetch<EmailMailbox[]>('/api/v1/email/mailboxes'),
+        apiFetch<MailServer[]>('/api/v1/email/servers'),
       ]);
       if (domRes.success && domRes.data) {
         setDomains(domRes.data);
@@ -281,10 +390,145 @@ export default function EmailHostingPage() {
           setTestEmailFrom(mbRes.data[0].email);
         }
       }
+      if (srvRes.success && srvRes.data) {
+        setMailServers(srvRes.data);
+      }
     } catch (err) {
       console.error('Failed to load email data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchMailServers = async () => {
+    try {
+      setMailServersLoading(true);
+      const res = await apiFetch<MailServer[]>('/api/v1/email/servers');
+      if (res.success && res.data) {
+        setMailServers(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load mail servers:', err);
+    } finally {
+      setMailServersLoading(false);
+    }
+  };
+
+  const handleRunPreflight = async () => {
+    try {
+      setPreflightLoading(true);
+      setServerCreationError(null);
+      const payload = {
+        hostname: serverHostname.trim(),
+        ipv4_address: serverIPv4.trim(),
+        ipv6_address: serverIPv6.trim() || undefined,
+        storage_location: serverStorageLocation.trim(),
+        smtp_port: Number(serverSmtpPort),
+        smtp_submission_port: Number(serverSmtpSubmissionPort),
+        smtps_port: Number(serverSmtpsPort),
+        imap_port: Number(serverImapPort),
+        imaps_port: Number(serverImapsPort),
+        pop3_port: Number(serverPop3Port),
+        pop3s_port: Number(serverPop3sPort),
+      };
+      const res = await apiFetch<PreflightResult>('/api/v1/email/servers/preflight', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (res.success && res.data) {
+        setPreflightResult(res.data);
+      } else {
+        setServerCreationError(res.error?.message || 'Preflight check failed to complete');
+      }
+    } catch (err: any) {
+      setServerCreationError(err.message || 'Preflight request encountered network error');
+    } finally {
+      setPreflightLoading(false);
+    }
+  };
+
+  const handleCreateMailServer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serverHostname.trim() || !serverPrimaryDomain.trim() || !serverIPv4.trim()) {
+      setServerCreationError('Hostname, Primary Domain, and IPv4 Address are required.');
+      return;
+    }
+
+    const additionalArr = serverAdditionalDomains
+      .split(/[\n,]/)
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0 && d !== serverPrimaryDomain.toLowerCase().trim());
+
+    const payload = {
+      name: serverName.trim() || serverHostname.trim(),
+      hostname: serverHostname.trim().toLowerCase(),
+      primary_domain: serverPrimaryDomain.trim().toLowerCase(),
+      additional_domains: additionalArr,
+      ipv4_address: serverIPv4.trim(),
+      ipv6_address: serverIPv6.trim() || undefined,
+      timezone: serverTimezone.trim() || 'UTC',
+      storage_location: serverStorageLocation.trim() || '/var/mail/vhosts',
+      mailbox_storage_limit_bytes: (Number(serverMailboxStorageLimitGB) || 100) * 1024 * 1024 * 1024,
+      max_mailbox_size_bytes: (Number(serverMaxMailboxSizeGB) || 10) * 1024 * 1024 * 1024,
+      max_attachment_size_bytes: (Number(serverMaxAttachmentSizeMB) || 50) * 1024 * 1024,
+      smtp_port: Number(serverSmtpPort) || 25,
+      smtp_submission_port: Number(serverSmtpSubmissionPort) || 587,
+      smtps_port: Number(serverSmtpsPort) || 465,
+      imap_port: Number(serverImapPort) || 143,
+      imaps_port: Number(serverImapsPort) || 993,
+      pop3_port: Number(serverPop3Port) || 110,
+      pop3s_port: Number(serverPop3sPort) || 995,
+      tls_enabled: serverTlsEnabled,
+      spam_filter_enabled: serverSpamFilterEnabled,
+      antivirus_enabled: serverAntivirusEnabled,
+      dkim_enabled: serverDkimEnabled,
+      spf_enabled: serverSpfEnabled,
+      dmarc_enabled: serverDmarcEnabled,
+      webmail_enabled: serverWebmailEnabled,
+      auto_ssl_enabled: serverAutoSslEnabled,
+      backup_enabled: serverBackupEnabled,
+      rate_limit_per_mailbox_hr: Number(serverRateLimitMailboxHr) || 0,
+      rate_limit_per_domain_hr: Number(serverRateLimitDomainHr) || 0,
+      rate_limit_per_ip_hr: Number(serverRateLimitIpHr) || 0,
+      auth_failure_threshold: Number(serverAuthFailureThreshold) || 10,
+    };
+
+    try {
+      setCreatingServer(true);
+      setServerCreationError(null);
+      const res = await apiFetch<MailServer>('/api/v1/email/servers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (res.success && res.data) {
+        setShowCreateServerModal(false);
+        setPreflightResult(null);
+        await fetchMailServers();
+        await fetchEmailData();
+        setActiveTab('servers');
+      } else {
+        setServerCreationError(res.error?.message || 'Failed to provision mail server node.');
+      }
+    } catch (err: any) {
+      setServerCreationError(err.message || 'Error communicating with Hostvra Agent provisioner.');
+    } finally {
+      setCreatingServer(false);
+    }
+  };
+
+  const handleDeleteMailServer = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove mail server node "${name}"? Mailboxes and domain bindings associated with this server will be detached.`)) {
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/v1/email/servers/${id}`, { method: 'DELETE' });
+      if (res.success) {
+        setMailServers((prev) => prev.filter((s) => s.id !== id));
+      } else {
+        alert(res.error?.message || 'Failed to remove mail server node.');
+      }
+    } catch (err: any) {
+      alert(`Error deleting mail server: ${err.message}`);
     }
   };
 
@@ -576,6 +820,7 @@ export default function EmailHostingPage() {
 
   // React to tab changes
   useEffect(() => {
+    if (activeTab === 'servers') fetchMailServers();
     if (activeTab === 'queue') fetchQueue();
     if (activeTab === 'logs') fetchLogs();
     if (activeTab === 'suppressions') fetchSuppressions();
@@ -864,6 +1109,21 @@ export default function EmailHostingPage() {
         {/* Navigation Tabs */}
         <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-surface-900 rounded-xl overflow-x-auto text-xs font-semibold border border-slate-200 dark:border-surface-800">
           <button
+            onClick={() => setActiveTab('servers')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all font-medium whitespace-nowrap ${
+              activeTab === 'servers'
+                ? 'bg-white dark:bg-surface-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Server className="w-4 h-4" />
+            <span>Mail Servers ({mailServers.length})</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-600 dark:text-purple-400">
+              Cluster
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('mailboxes')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all font-medium whitespace-nowrap ${
               activeTab === 'mailboxes'
@@ -871,7 +1131,7 @@ export default function EmailHostingPage() {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Server className="w-4 h-4" />
+            <Mail className="w-4 h-4" />
             <span>Mailboxes ({mailboxes.length})</span>
           </button>
 
@@ -986,6 +1246,274 @@ export default function EmailHostingPage() {
             <span>Send Test Tool</span>
           </button>
         </div>
+
+        {/* Tab Content: Mail Servers (Cluster Subsystem) */}
+        {activeTab === 'servers' && (
+          <div className="space-y-6">
+            {/* Header / Actions Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-xs">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Server className="w-5 h-5 text-indigo-500" />
+                    <span>Enterprise Mail Server Nodes</span>
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
+                    Hostvra Cluster
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Dedicated self-hosted mail instances running Postfix MTA, Dovecot IMAP/POP3, and Rspamd spam milter with zero artificial sending quotas.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={fetchMailServers}
+                  disabled={mailServersLoading}
+                  className="p-2.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-white dark:bg-surface-800 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all shadow-xs"
+                  title="Refresh Mail Server Nodes"
+                >
+                  <RefreshCw className={`w-4 h-4 ${mailServersLoading ? 'animate-spin text-indigo-500' : ''}`} />
+                </button>
+                <button
+                  onClick={() => {
+                    setServerCreationError(null);
+                    setPreflightResult(null);
+                    setServerWizardTab('general');
+                    setShowCreateServerModal(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create Mail Server</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Uncapped Architecture Notice */}
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-500/10 via-indigo-500/10 to-blue-500/10 border border-purple-200/50 dark:border-purple-500/20 flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <span className="font-bold text-slate-900 dark:text-white">Uncapped Sending Architecture: </span>
+                <span className="text-slate-600 dark:text-slate-300">
+                  Hostvra enforces no synthetic email sending limits (e.g. 100 or 1,000/day). Sending volume is governed strictly by server compute, disk I/O, mail queue capacity, and recipient server policies. Deliverability is preserved via DKIM, SPF, DMARC, and abuse rate controls.
+                </span>
+              </div>
+            </div>
+
+            {/* Server Nodes Grid */}
+            {mailServersLoading && mailServers.length === 0 ? (
+              <div className="p-12 text-center bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl space-y-3">
+                <RefreshCw className="w-8 h-8 animate-spin mx-auto text-indigo-500" />
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Loading mail server nodes...</p>
+              </div>
+            ) : mailServers.length === 0 ? (
+              <div className="p-12 text-center bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center mx-auto text-indigo-600 dark:text-indigo-400">
+                  <Server className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">No Mail Server Nodes Configured</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mt-1">
+                    Deploy your first standalone in-house email server node with automated Postfix, Dovecot, Rspamd, ClamAV, and Webmail provisioning.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setServerCreationError(null);
+                    setPreflightResult(null);
+                    setServerWizardTab('general');
+                    setShowCreateServerModal(true);
+                  }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Provision First Mail Server</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                {mailServers.map((srv) => (
+                  <div
+                    key={srv.id}
+                    className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-xs space-y-4 hover:border-slate-300 dark:hover:border-surface-700 transition-all"
+                  >
+                    {/* Top Row: Name, Hostname, Badges */}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 flex items-center justify-center text-purple-600 dark:text-purple-400 font-bold">
+                          <Server className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{srv.name}</h3>
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                srv.status === 'active'
+                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
+                                  : 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
+                              }`}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                              {srv.status.toUpperCase()}
+                            </span>
+                          </div>
+                          <p className="text-xs font-mono text-indigo-600 dark:text-indigo-400 mt-0.5">{srv.hostname}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            srv.health_status === 'healthy'
+                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                              : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                          }`}
+                        >
+                          {srv.health_status.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Network & Storage Specifications */}
+                    <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 dark:bg-surface-950 p-3 rounded-xl border border-slate-200/60 dark:border-surface-800/60">
+                      <div>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Primary Domain:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">{srv.primary_domain}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Server IPv4 / IPv6:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                          {srv.ipv4_address} {srv.ipv6_address ? `/ ${srv.ipv6_address}` : ''}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Storage Pool Limit:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200">
+                          {formatBytes(srv.mailbox_storage_limit_bytes)} (Max Box: {formatBytes(srv.max_mailbox_size_bytes)})
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[11px]">Maildir Location:</span>
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono text-[11px] truncate block">
+                          {srv.storage_location}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Port Matrix */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        <span>Active Service Protocols & Ports</span>
+                        <span className="text-slate-400 font-normal">Max Attachment: {formatBytes(srv.max_attachment_size_bytes)}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 text-[10px] font-mono">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-surface-700">
+                          SMTP: {srv.smtp_port}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                          Submission: {srv.smtp_submission_port} (STARTTLS)
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          SMTPS: {srv.smtps_port} (TLS)
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-surface-700">
+                          IMAP: {srv.imap_port}
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          IMAPS: {srv.imaps_port} (TLS)
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-surface-700">
+                          POP3: {srv.pop3_port} / {srv.pop3s_port}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Security & Feature Badges */}
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+                      <span className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300">
+                        TLS 1.3
+                      </span>
+                      {srv.spam_filter_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300">
+                          Rspamd Milter
+                        </span>
+                      )}
+                      {srv.antivirus_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300">
+                          ClamAV Scanner
+                        </span>
+                      )}
+                      {srv.dkim_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300">
+                          DKIM RSA-2048
+                        </span>
+                      )}
+                      {srv.spf_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">
+                          SPF Synthesizer
+                        </span>
+                      )}
+                      {srv.dmarc_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300">
+                          DMARC Enforcer
+                        </span>
+                      )}
+                      {srv.webmail_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300">
+                          Webmail Suite
+                        </span>
+                      )}
+                      {srv.backup_enabled && (
+                        <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300">
+                          Automated Backups
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Anti-Abuse & Rate Controls */}
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between border-t border-slate-100 dark:border-surface-800/80 pt-2.5">
+                      <span>
+                        Abuse Limits:{' '}
+                        <strong className="text-slate-700 dark:text-slate-300">
+                          {srv.rate_limit_per_mailbox_hr > 0 ? `${srv.rate_limit_per_mailbox_hr}/box/hr` : 'Uncapped'}
+                        </strong>{' '}
+                        | Fail Threshold:{' '}
+                        <strong className="text-slate-700 dark:text-slate-300">{srv.auth_failure_threshold} fails</strong>
+                      </span>
+                      <span>
+                        Domains:{' '}
+                        <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{srv.domain_count || 1}</strong> | Mailboxes:{' '}
+                        <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{srv.mailbox_count || 0}</strong>
+                      </span>
+                    </div>
+
+                    {/* Node Actions */}
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-surface-800">
+                      {srv.provisioning_logs && (
+                        <button
+                          onClick={() => setServerLogsModal(srv)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800 transition-all"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Provisioning Logs</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDeleteMailServer(srv.id, srv.name)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-all"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove Node</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tab Content: Mailboxes */}
         {activeTab === 'mailboxes' && (
@@ -2676,6 +3204,684 @@ export default function EmailHostingPage() {
                     Save Password
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Create Mail Server Wizard */}
+        {showCreateServerModal && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden my-auto">
+              {/* Modal Header */}
+              <div className="p-5 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between bg-slate-50/50 dark:bg-surface-950/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                    <Server className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Provision Enterprise Mail Server</h3>
+                    <p className="text-xs text-slate-500">Autonomous Postfix + Dovecot + Rspamd node orchestration</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowCreateServerModal(false)}
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Wizard Tabs Navigation */}
+              <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 dark:border-surface-800 bg-slate-50/20 dark:bg-surface-950/20 overflow-x-auto text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setServerWizardTab('general')}
+                  className={`px-3 py-2 border-b-2 transition-all whitespace-nowrap ${
+                    serverWizardTab === 'general'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  1. General Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerWizardTab('storage_ports')}
+                  className={`px-3 py-2 border-b-2 transition-all whitespace-nowrap ${
+                    serverWizardTab === 'storage_ports'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  2. Storage & Ports
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerWizardTab('security')}
+                  className={`px-3 py-2 border-b-2 transition-all whitespace-nowrap ${
+                    serverWizardTab === 'security'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  3. Security & Daemons
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerWizardTab('ratelimits')}
+                  className={`px-3 py-2 border-b-2 transition-all whitespace-nowrap ${
+                    serverWizardTab === 'ratelimits'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  4. Rate Limits & Anti-Abuse
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setServerWizardTab('preflight')}
+                  className={`px-3 py-2 border-b-2 transition-all whitespace-nowrap ${
+                    serverWizardTab === 'preflight'
+                      ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                  }`}
+                >
+                  5. Preflight Validation
+                  {preflightResult && (
+                    <span
+                      className={`ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        preflightResult.passed ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      }`}
+                    >
+                      {preflightResult.passed ? 'PASS' : 'WARN'}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Wizard Content */}
+              <form onSubmit={handleCreateMailServer} className="flex-1 overflow-y-auto p-6 space-y-5">
+                {serverCreationError && (
+                  <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex items-start gap-2.5 text-xs text-rose-800 dark:text-rose-300">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{serverCreationError}</span>
+                  </div>
+                )}
+
+                {/* Tab 1: General */}
+                {serverWizardTab === 'general' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Node Display Name
+                        </label>
+                        <input
+                          type="text"
+                          value={serverName}
+                          onChange={(e) => setServerName(e.target.value)}
+                          placeholder="e.g. Primary Mail Node"
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Mail Server Hostname (FQDN)
+                        </label>
+                        <input
+                          type="text"
+                          value={serverHostname}
+                          onChange={(e) => setServerHostname(e.target.value)}
+                          placeholder="e.g. mail.example.com"
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Should match the reverse DNS (PTR) record of the server IP.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Primary Mail Domain
+                        </label>
+                        <input
+                          type="text"
+                          value={serverPrimaryDomain}
+                          onChange={(e) => setServerPrimaryDomain(e.target.value)}
+                          placeholder="e.g. example.com"
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Server IPv4 Address
+                        </label>
+                        <input
+                          type="text"
+                          value={serverIPv4}
+                          onChange={(e) => setServerIPv4(e.target.value)}
+                          placeholder="e.g. 198.51.100.1 or 127.0.0.1"
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Server IPv6 Address (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={serverIPv6}
+                          onChange={(e) => setServerIPv6(e.target.value)}
+                          placeholder="e.g. 2001:db8::1"
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Server Timezone
+                        </label>
+                        <input
+                          type="text"
+                          value={serverTimezone}
+                          onChange={(e) => setServerTimezone(e.target.value)}
+                          placeholder="e.g. UTC"
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Additional Mail Domains (One per line or comma-separated)
+                      </label>
+                      <textarea
+                        value={serverAdditionalDomains}
+                        onChange={(e) => setServerAdditionalDomains(e.target.value)}
+                        placeholder="app.example.com&#10;sales.example.com"
+                        rows={2}
+                        className="w-full px-3.5 py-2 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Storage & Ports */}
+                {serverWizardTab === 'storage_ports' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Storage Location (Maildir Base)
+                        </label>
+                        <input
+                          type="text"
+                          value={serverStorageLocation}
+                          onChange={(e) => setServerStorageLocation(e.target.value)}
+                          placeholder="/var/mail/vhosts"
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Owned by vmail:vmail (UID 5000:5000)</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Mailbox Storage Pool Limit (GB)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverMailboxStorageLimitGB}
+                          onChange={(e) => setServerMailboxStorageLimitGB(Number(e.target.value))}
+                          min={1}
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Max Individual Mailbox Size (GB)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverMaxMailboxSizeGB}
+                          onChange={(e) => setServerMaxMailboxSizeGB(Number(e.target.value))}
+                          min={1}
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Max Message & Attachment Size (MB)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverMaxAttachmentSizeMB}
+                          onChange={(e) => setServerMaxAttachmentSizeMB(Number(e.target.value))}
+                          min={5}
+                          required
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Configured in Postfix message_size_limit</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">Daemon Listening Ports</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">SMTP Port</label>
+                          <input
+                            type="number"
+                            value={serverSmtpPort}
+                            onChange={(e) => setServerSmtpPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">Submission (STARTTLS)</label>
+                          <input
+                            type="number"
+                            value={serverSmtpSubmissionPort}
+                            onChange={(e) => setServerSmtpSubmissionPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">SMTPS (TLS)</label>
+                          <input
+                            type="number"
+                            value={serverSmtpsPort}
+                            onChange={(e) => setServerSmtpsPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">IMAP (143)</label>
+                          <input
+                            type="number"
+                            value={serverImapPort}
+                            onChange={(e) => setServerImapPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">IMAPS (993)</label>
+                          <input
+                            type="number"
+                            value={serverImapsPort}
+                            onChange={(e) => setServerImapsPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">POP3 (110)</label>
+                          <input
+                            type="number"
+                            value={serverPop3Port}
+                            onChange={(e) => setServerPop3Port(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] text-slate-500 mb-1">POP3S (995)</label>
+                          <input
+                            type="number"
+                            value={serverPop3sPort}
+                            onChange={(e) => setServerPop3sPort(Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-lg text-xs"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 3: Security & Daemons */}
+                {serverWizardTab === 'security' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverTlsEnabled}
+                          onChange={(e) => setServerTlsEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">TLS / SSL Encryption</span>
+                          <span className="text-slate-500 text-[11px]">Enforce opportunistic STARTTLS and mandatory TLS for IMAPS/SMTPS</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverSpamFilterEnabled}
+                          onChange={(e) => setServerSpamFilterEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">Rspamd Spam Filtering</span>
+                          <span className="text-slate-500 text-[11px]">Bayesian classification, greylisting, and milter integration</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverDkimEnabled}
+                          onChange={(e) => setServerDkimEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">DKIM RSA-2048 Signing</span>
+                          <span className="text-slate-500 text-[11px]">Automated key generation and milter header signing</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverSpfEnabled}
+                          onChange={(e) => setServerSpfEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">SPF Record Provisioning</span>
+                          <span className="text-slate-500 text-[11px]">Synthesize strict SPF records with matching server IP</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverDmarcEnabled}
+                          onChange={(e) => setServerDmarcEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">DMARC Policy Enforcement</span>
+                          <span className="text-slate-500 text-[11px]">Deploy _dmarc TXT with quarantine/reject deliverability alignment</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverWebmailEnabled}
+                          onChange={(e) => setServerWebmailEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">Roundcube Webmail</span>
+                          <span className="text-slate-500 text-[11px]">Browser-based webmail client configured for this mail node</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverAntivirusEnabled}
+                          onChange={(e) => setServerAntivirusEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">ClamAV Antivirus</span>
+                          <span className="text-slate-500 text-[11px]">Attachment virus scanning (Note: requires 1.5GB+ RAM)</span>
+                        </div>
+                      </label>
+
+                      <label className="p-3 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/50 flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={serverAutoSslEnabled}
+                          onChange={(e) => setServerAutoSslEnabled(e.target.checked)}
+                          className="mt-1 rounded text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <span className="font-bold text-slate-900 dark:text-white block">Auto-SSL (Let's Encrypt)</span>
+                          <span className="text-slate-500 text-[11px]">Automated certificate issuance and 90-day renewal cycle</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 4: Rate Limits & Anti-Abuse */}
+                {serverWizardTab === 'ratelimits' && (
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/50 text-xs text-purple-900 dark:text-purple-300">
+                      <p className="font-bold mb-1">Zero Arbitrary Daily Cap Policy</p>
+                      <p className="text-[11px] leading-relaxed">
+                        Hostvra does not limit your daily email volume. The rate limits below serve strictly as defensive abuse and spam controls to protect your server IP from reputation damage and blacklist listing.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Per-Mailbox Rate Limit (emails/hour)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverRateLimitMailboxHr}
+                          onChange={(e) => setServerRateLimitMailboxHr(Number(e.target.value))}
+                          min={0}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Set to 0 for unlimited</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Per-Domain Rate Limit (emails/hour)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverRateLimitDomainHr}
+                          onChange={(e) => setServerRateLimitDomainHr(Number(e.target.value))}
+                          min={0}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Set to 0 for unlimited</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          Per-Connecting-IP Rate Limit (emails/hour)
+                        </label>
+                        <input
+                          type="number"
+                          value={serverRateLimitIpHr}
+                          onChange={(e) => setServerRateLimitIpHr(Number(e.target.value))}
+                          min={0}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Set to 0 for unlimited</p>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                          SMTP Auth Failure Ban Threshold
+                        </label>
+                        <input
+                          type="number"
+                          value={serverAuthFailureThreshold}
+                          onChange={(e) => setServerAuthFailureThreshold(Number(e.target.value))}
+                          min={3}
+                          max={100}
+                          className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                        />
+                        <p className="text-[11px] text-slate-400 mt-1">Number of failed password attempts before temporary IP ban</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 5: Preflight Validation */}
+                {serverWizardTab === 'preflight' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white">Hostvra Agent System Preflight</h4>
+                        <p className="text-[11px] text-slate-500">
+                          Validates EUID privileges, listening ports, conflicting MTAs, and storage writeability.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRunPreflight}
+                        disabled={preflightLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition-all"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${preflightLoading ? 'animate-spin' : ''}`} />
+                        <span>{preflightLoading ? 'Checking...' : 'Run Preflight Check'}</span>
+                      </button>
+                    </div>
+
+                    {preflightResult ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-xs px-1">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            Results for {preflightResult.hostname} ({preflightResult.checked_at})
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              preflightResult.passed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                            }`}
+                          >
+                            {preflightResult.passed ? 'ALL CHECKS SATISFIED' : 'SYSTEM ISSUES DETECTED'}
+                          </span>
+                        </div>
+                        <div className="divide-y divide-slate-100 dark:divide-surface-800/80 border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden text-xs">
+                          {preflightResult.checks.map((chk, i) => (
+                            <div key={i} className="p-3 bg-white dark:bg-surface-900 flex items-start justify-between gap-3">
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-slate-900 dark:text-white">{chk.name}</span>
+                                  <span className="text-[10px] text-slate-400 uppercase font-mono">[{chk.category}]</span>
+                                </div>
+                                <p className="text-[11px] text-slate-500">{chk.message}</p>
+                                {chk.details && <p className="text-[10px] font-mono text-slate-400">{chk.details}</p>}
+                              </div>
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  chk.status === 'passed'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                    : chk.status === 'warning'
+                                    ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                                    : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                                }`}
+                              >
+                                {chk.status.toUpperCase()}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center border border-dashed border-slate-200 dark:border-surface-800 rounded-xl space-y-2">
+                        <Activity className="w-6 h-6 text-slate-400 mx-auto" />
+                        <p className="text-xs text-slate-600 dark:text-slate-300 font-semibold">Preflight check has not been executed yet.</p>
+                        <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
+                          Click "Run Preflight Check" above to test real port binding permissions, storage access, and ensure no conflicting sendmail or exim daemons are running.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Modal Footer Controls */}
+                <div className="pt-4 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateServerModal(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800"
+                  >
+                    Cancel
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    {serverWizardTab !== 'preflight' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (serverWizardTab === 'general') setServerWizardTab('storage_ports');
+                          else if (serverWizardTab === 'storage_ports') setServerWizardTab('security');
+                          else if (serverWizardTab === 'security') setServerWizardTab('ratelimits');
+                          else if (serverWizardTab === 'ratelimits') setServerWizardTab('preflight');
+                        }}
+                        className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-surface-700"
+                      >
+                        Next Step →
+                      </button>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      disabled={creatingServer}
+                      className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20 transition-all disabled:opacity-50"
+                    >
+                      {creatingServer ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Provisioning Node...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Server className="w-3.5 h-3.5" />
+                          <span>Deploy Mail Server Node</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: View Server Provisioning Logs */}
+        {serverLogsModal && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-2xl p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-indigo-500" />
+                    <span>Provisioning Audit Logs</span>
+                  </h3>
+                  <p className="text-xs font-mono text-slate-500 mt-0.5">{serverLogsModal.hostname} ({serverLogsModal.id})</p>
+                </div>
+                <button onClick={() => setServerLogsModal(null)} className="text-slate-400 hover:text-slate-700 p-1">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <pre className="font-mono text-xs p-4 bg-slate-950 text-slate-200 rounded-xl overflow-x-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed border border-slate-800">
+                {serverLogsModal.provisioning_logs || 'No provisioning logs recorded for this mail node.'}
+              </pre>
+
+              <div className="pt-2 flex justify-end">
+                <button
+                  onClick={() => setServerLogsModal(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-500"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>

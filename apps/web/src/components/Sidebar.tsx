@@ -67,7 +67,7 @@ const navGroups: NavGroup[] = [
       { label: 'Web Servers', href: '/webservers', icon: Layers, badge: 'Multi', badgeColor: 'purple' },
       { label: 'Databases', href: '/databases', icon: Database },
       { label: 'phpMyAdmin', href: '/phpmyadmin', icon: Database, badge: 'MySQL', badgeColor: 'amber' },
-      { label: 'Email Hosting', href: '/email', icon: Mail },
+      { label: 'Mail Server', href: '/email', icon: Mail, badge: 'Cluster', badgeColor: 'blue' },
       { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald' },
     ],
   },

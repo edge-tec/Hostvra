@@ -6,11 +6,64 @@ import (
 	"github.com/google/uuid"
 )
 
+// MailServer represents an independent enterprise mail server instance
+type MailServer struct {
+	ID                       uuid.UUID  `json:"id"`
+	OrganizationID           uuid.UUID  `json:"organization_id"`
+	NodeServerID             uuid.UUID  `json:"node_server_id"`
+	Name                     string     `json:"name"`
+	Hostname                 string     `json:"hostname"`
+	PrimaryDomain            string     `json:"primary_domain"`
+	AdditionalDomains        []string   `json:"additional_domains"`
+	IPv4Address              string     `json:"ipv4_address"`
+	IPv6Address              string     `json:"ipv6_address,omitempty"`
+	Timezone                 string     `json:"timezone"`
+	StorageLocation          string     `json:"storage_location"`
+	MailboxStorageLimitBytes int64      `json:"mailbox_storage_limit_bytes"`
+	MaxMailboxSizeBytes      int64      `json:"max_mailbox_size_bytes"`
+	MaxAttachmentSizeBytes   int64      `json:"max_attachment_size_bytes"`
+	SMTPPort                 int        `json:"smtp_port"`
+	SMTPSubmissionPort       int        `json:"smtp_submission_port"`
+	SMTPSPort                int        `json:"smtps_port"`
+	IMAPPort                 int        `json:"imap_port"`
+	IMAPSPort                int        `json:"imaps_port"`
+	POP3Port                 int        `json:"pop3_port"`
+	POP3SPort                int        `json:"pop3s_port"`
+	TLSEnabled               bool       `json:"tls_enabled"`
+	TLSCertPath              string     `json:"tls_cert_path,omitempty"`
+	TLSKeyPath               string     `json:"tls_key_path,omitempty"`
+	SpamFilterEnabled        bool       `json:"spam_filter_enabled"`
+	AntivirusEnabled         bool       `json:"antivirus_enabled"`
+	DKIMEnabled              bool       `json:"dkim_enabled"`
+	SPFEnabled               bool       `json:"spf_enabled"`
+	DMARCEnabled             bool       `json:"dmarc_enabled"`
+	WebmailEnabled           bool       `json:"webmail_enabled"`
+	AutoSSLEnabled           bool       `json:"auto_ssl_enabled"`
+	BackupEnabled            bool       `json:"backup_enabled"`
+	Status                   string     `json:"status"` // active, provisioning, stopped, error, maintenance
+	ProvisioningLogs         string     `json:"provisioning_logs,omitempty"`
+	LastHealthCheckAt        *time.Time `json:"last_health_check_at,omitempty"`
+	HealthStatus             string     `json:"health_status"`
+	RateLimitPerMailboxHr    int        `json:"rate_limit_per_mailbox_hr"`
+	RateLimitPerDomainHr     int        `json:"rate_limit_per_domain_hr"`
+	RateLimitPerIPHr         int        `json:"rate_limit_per_ip_hr"`
+	AuthFailureThreshold     int        `json:"auth_failure_threshold"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
+	DeletedAt                *time.Time `json:"deleted_at,omitempty"`
+
+	// Derived / populated for views
+	DomainCount  int `json:"domain_count,omitempty"`
+	MailboxCount int `json:"mailbox_count,omitempty"`
+	QueueSize    int `json:"queue_size,omitempty"`
+}
+
 // EmailDomain represents a domain configured for mail handling
 type EmailDomain struct {
 	ID                uuid.UUID  `json:"id"`
 	OrganizationID    uuid.UUID  `json:"organization_id"`
 	ServerID          uuid.UUID  `json:"server_id"`
+	MailServerID      *uuid.UUID `json:"mail_server_id,omitempty"`
 	Domain            string     `json:"domain"`
 	MailHostname      string     `json:"mail_hostname"` // e.g. "mail.example.com"
 	Status            string     `json:"status"`        // active, suspended, disabled

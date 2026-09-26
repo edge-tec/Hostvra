@@ -10,11 +10,168 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // ============================================================================
 // MEMORY STORE EMAIL IMPLEMENTATION
 // ============================================================================
+
+// Mail Servers
+
+func (m *MemoryStore) CreateMailServer(ctx context.Context, s *MailServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, existing := range m.mailServers {
+		if existing.NodeServerID == s.NodeServerID && existing.Hostname == s.Hostname && existing.DeletedAt == nil {
+			return ErrAlreadyExists
+		}
+	}
+
+	if s.ID == uuid.Nil {
+		s.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	s.CreatedAt = now
+	s.UpdatedAt = now
+	if s.Status == "" {
+		s.Status = "active"
+	}
+	if s.HealthStatus == "" {
+		s.HealthStatus = "healthy"
+	}
+	if s.StorageLocation == "" {
+		s.StorageLocation = "/var/mail/vhosts"
+	}
+	if s.MailboxStorageLimitBytes == 0 {
+		s.MailboxStorageLimitBytes = 53687091200 // 50GB
+	}
+	if s.MaxMailboxSizeBytes == 0 {
+		s.MaxMailboxSizeBytes = 10737418240 // 10GB
+	}
+	if s.MaxAttachmentSizeBytes == 0 {
+		s.MaxAttachmentSizeBytes = 52428800 // 50MB
+	}
+	if s.SMTPPort == 0 {
+		s.SMTPPort = 25
+	}
+	if s.SMTPSubmissionPort == 0 {
+		s.SMTPSubmissionPort = 587
+	}
+	if s.SMTPSPort == 0 {
+		s.SMTPSPort = 465
+	}
+	if s.IMAPPort == 0 {
+		s.IMAPPort = 143
+	}
+	if s.IMAPSPort == 0 {
+		s.IMAPSPort = 993
+	}
+	if s.POP3Port == 0 {
+		s.POP3Port = 110
+	}
+	if s.POP3SPort == 0 {
+		s.POP3SPort = 995
+	}
+	if s.RateLimitPerMailboxHr == 0 {
+		s.RateLimitPerMailboxHr = 500
+	}
+	if s.RateLimitPerDomainHr == 0 {
+		s.RateLimitPerDomainHr = 5000
+	}
+	if s.RateLimitPerIPHr == 0 {
+		s.RateLimitPerIPHr = 10000
+	}
+	if s.AuthFailureThreshold == 0 {
+		s.AuthFailureThreshold = 5
+	}
+
+	m.mailServers[s.ID] = s
+	return nil
+}
+
+func (m *MemoryStore) GetMailServerByID(ctx context.Context, id uuid.UUID) (*MailServer, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	s, exists := m.mailServers[id]
+	if !exists || s.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	cp := *s
+	return &cp, nil
+}
+
+func (m *MemoryStore) ListMailServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*MailServer, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*MailServer
+	for _, s := range m.mailServers {
+		if s.OrganizationID == orgID && s.DeletedAt == nil {
+			cp := *s
+			domainCount := 0
+			for _, d := range m.emailDomains {
+				if d.ServerID == s.NodeServerID && d.DeletedAt == nil {
+					domainCount++
+				}
+			}
+			mailboxCount := 0
+			for _, mb := range m.emailMailboxes {
+				if mb.ServerID == s.NodeServerID && mb.DeletedAt == nil {
+					mailboxCount++
+				}
+			}
+			cp.DomainCount = domainCount
+			cp.MailboxCount = mailboxCount
+			result = append(result, &cp)
+		}
+	}
+	return result, nil
+}
+
+func (m *MemoryStore) ListAllMailServers(ctx context.Context) ([]*MailServer, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []*MailServer
+	for _, s := range m.mailServers {
+		if s.DeletedAt == nil {
+			cp := *s
+			result = append(result, &cp)
+		}
+	}
+	return result, nil
+}
+
+func (m *MemoryStore) UpdateMailServer(ctx context.Context, s *MailServer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.mailServers[s.ID]
+	if !exists || existing.DeletedAt != nil {
+		return ErrNotFound
+	}
+
+	s.UpdatedAt = time.Now().UTC()
+	m.mailServers[s.ID] = s
+	return nil
+}
+
+func (m *MemoryStore) DeleteMailServer(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	existing, exists := m.mailServers[id]
+	if !exists || existing.DeletedAt != nil {
+		return ErrNotFound
+	}
+
+	now := time.Now().UTC()
+	existing.DeletedAt = &now
+	return nil
+}
 
 // Email Domains
 
@@ -756,6 +913,315 @@ func (m *MemoryStore) ListWebmailAttachments(ctx context.Context, messageID uuid
 // ============================================================================
 // POSTGRES STORE EMAIL IMPLEMENTATION
 // ============================================================================
+
+// Mail Servers
+
+func (p *PostgresStore) CreateMailServer(ctx context.Context, s *MailServer) error {
+	if s.ID == uuid.Nil {
+		s.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	s.CreatedAt = now
+	s.UpdatedAt = now
+	if s.Status == "" {
+		s.Status = "active"
+	}
+	if s.HealthStatus == "" {
+		s.HealthStatus = "healthy"
+	}
+	if s.StorageLocation == "" {
+		s.StorageLocation = "/var/mail/vhosts"
+	}
+	if s.MailboxStorageLimitBytes == 0 {
+		s.MailboxStorageLimitBytes = 53687091200
+	}
+	if s.MaxMailboxSizeBytes == 0 {
+		s.MaxMailboxSizeBytes = 10737418240
+	}
+	if s.MaxAttachmentSizeBytes == 0 {
+		s.MaxAttachmentSizeBytes = 52428800
+	}
+	if s.SMTPPort == 0 {
+		s.SMTPPort = 25
+	}
+	if s.SMTPSubmissionPort == 0 {
+		s.SMTPSubmissionPort = 587
+	}
+	if s.SMTPSPort == 0 {
+		s.SMTPSPort = 465
+	}
+	if s.IMAPPort == 0 {
+		s.IMAPPort = 143
+	}
+	if s.IMAPSPort == 0 {
+		s.IMAPSPort = 993
+	}
+	if s.POP3Port == 0 {
+		s.POP3Port = 110
+	}
+	if s.POP3SPort == 0 {
+		s.POP3SPort = 995
+	}
+	if s.RateLimitPerMailboxHr == 0 {
+		s.RateLimitPerMailboxHr = 500
+	}
+	if s.RateLimitPerDomainHr == 0 {
+		s.RateLimitPerDomainHr = 5000
+	}
+	if s.RateLimitPerIPHr == 0 {
+		s.RateLimitPerIPHr = 10000
+	}
+	if s.AuthFailureThreshold == 0 {
+		s.AuthFailureThreshold = 5
+	}
+
+	query := `
+		INSERT INTO mail_servers (
+			id, organization_id, node_server_id, name, hostname, primary_domain,
+			additional_domains, ipv4_address, ipv6_address, timezone, storage_location,
+			mailbox_storage_limit_bytes, max_mailbox_size_bytes, max_attachment_size_bytes,
+			smtp_port, smtp_submission_port, smtps_port, imap_port, imaps_port,
+			pop3_port, pop3s_port, tls_enabled, tls_cert_path, tls_key_path,
+			spam_filter_enabled, antivirus_enabled, dkim_enabled, spf_enabled,
+			dmarc_enabled, webmail_enabled, auto_ssl_enabled, backup_enabled,
+			status, provisioning_logs, last_health_check_at, health_status,
+			rate_limit_per_mailbox_hr, rate_limit_per_domain_hr, rate_limit_per_ip_hr,
+			auth_failure_threshold, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10, $11,
+			$12, $13, $14,
+			$15, $16, $17, $18, $19,
+			$20, $21, $22, $23, $24,
+			$25, $26, $27, $28,
+			$29, $30, $31, $32,
+			$33, $34, $35, $36,
+			$37, $38, $39,
+			$40, $41, $42
+		)`
+
+	var addDomains []string
+	if s.AdditionalDomains != nil {
+		addDomains = s.AdditionalDomains
+	} else {
+		addDomains = []string{}
+	}
+
+	_, err := p.db.ExecContext(ctx, query,
+		s.ID, s.OrganizationID, s.NodeServerID, s.Name, s.Hostname, s.PrimaryDomain,
+		pq.Array(addDomains), s.IPv4Address, s.IPv6Address, s.Timezone, s.StorageLocation,
+		s.MailboxStorageLimitBytes, s.MaxMailboxSizeBytes, s.MaxAttachmentSizeBytes,
+		s.SMTPPort, s.SMTPSubmissionPort, s.SMTPSPort, s.IMAPPort, s.IMAPSPort,
+		s.POP3Port, s.POP3SPort, s.TLSEnabled, s.TLSCertPath, s.TLSKeyPath,
+		s.SpamFilterEnabled, s.AntivirusEnabled, s.DKIMEnabled, s.SPFEnabled,
+		s.DMARCEnabled, s.WebmailEnabled, s.AutoSSLEnabled, s.BackupEnabled,
+		s.Status, s.ProvisioningLogs, s.LastHealthCheckAt, s.HealthStatus,
+		s.RateLimitPerMailboxHr, s.RateLimitPerDomainHr, s.RateLimitPerIPHr,
+		s.AuthFailureThreshold, s.CreatedAt, s.UpdatedAt,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "unique constraint") {
+			return ErrAlreadyExists
+		}
+		return fmt.Errorf("failed to create mail server: %w", err)
+	}
+	return nil
+}
+
+func (p *PostgresStore) GetMailServerByID(ctx context.Context, id uuid.UUID) (*MailServer, error) {
+	query := `
+		SELECT
+			s.id, s.organization_id, s.node_server_id, s.name, s.hostname, s.primary_domain,
+			s.additional_domains, s.ipv4_address, s.ipv6_address, s.timezone, s.storage_location,
+			s.mailbox_storage_limit_bytes, s.max_mailbox_size_bytes, s.max_attachment_size_bytes,
+			s.smtp_port, s.smtp_submission_port, s.smtps_port, s.imap_port, s.imaps_port,
+			s.pop3_port, s.pop3s_port, s.tls_enabled, s.tls_cert_path, s.tls_key_path,
+			s.spam_filter_enabled, s.antivirus_enabled, s.dkim_enabled, s.spf_enabled,
+			s.dmarc_enabled, s.webmail_enabled, s.auto_ssl_enabled, s.backup_enabled,
+			s.status, s.provisioning_logs, s.last_health_check_at, s.health_status,
+			s.rate_limit_per_mailbox_hr, s.rate_limit_per_domain_hr, s.rate_limit_per_ip_hr,
+			s.auth_failure_threshold, s.created_at, s.updated_at, s.deleted_at,
+			COALESCE((SELECT COUNT(*) FROM email_domains d WHERE d.server_id = s.node_server_id AND d.deleted_at IS NULL), 0) AS domain_count,
+			COALESCE((SELECT COUNT(*) FROM email_mailboxes m WHERE m.server_id = s.node_server_id AND m.deleted_at IS NULL), 0) AS mailbox_count
+		FROM mail_servers s
+		WHERE s.id = $1 AND s.deleted_at IS NULL`
+
+	var s MailServer
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&s.ID, &s.OrganizationID, &s.NodeServerID, &s.Name, &s.Hostname, &s.PrimaryDomain,
+		pq.Array(&s.AdditionalDomains), &s.IPv4Address, &s.IPv6Address, &s.Timezone, &s.StorageLocation,
+		&s.MailboxStorageLimitBytes, &s.MaxMailboxSizeBytes, &s.MaxAttachmentSizeBytes,
+		&s.SMTPPort, &s.SMTPSubmissionPort, &s.SMTPSPort, &s.IMAPPort, &s.IMAPSPort,
+		&s.POP3Port, &s.POP3SPort, &s.TLSEnabled, &s.TLSCertPath, &s.TLSKeyPath,
+		&s.SpamFilterEnabled, &s.AntivirusEnabled, &s.DKIMEnabled, &s.SPFEnabled,
+		&s.DMARCEnabled, &s.WebmailEnabled, &s.AutoSSLEnabled, &s.BackupEnabled,
+		&s.Status, &s.ProvisioningLogs, &s.LastHealthCheckAt, &s.HealthStatus,
+		&s.RateLimitPerMailboxHr, &s.RateLimitPerDomainHr, &s.RateLimitPerIPHr,
+		&s.AuthFailureThreshold, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt,
+		&s.DomainCount, &s.MailboxCount,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mail server by id: %w", err)
+	}
+	return &s, nil
+}
+
+func (p *PostgresStore) ListMailServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*MailServer, error) {
+	query := `
+		SELECT
+			s.id, s.organization_id, s.node_server_id, s.name, s.hostname, s.primary_domain,
+			s.additional_domains, s.ipv4_address, s.ipv6_address, s.timezone, s.storage_location,
+			s.mailbox_storage_limit_bytes, s.max_mailbox_size_bytes, s.max_attachment_size_bytes,
+			s.smtp_port, s.smtp_submission_port, s.smtps_port, s.imap_port, s.imaps_port,
+			s.pop3_port, s.pop3s_port, s.tls_enabled, s.tls_cert_path, s.tls_key_path,
+			s.spam_filter_enabled, s.antivirus_enabled, s.dkim_enabled, s.spf_enabled,
+			s.dmarc_enabled, s.webmail_enabled, s.auto_ssl_enabled, s.backup_enabled,
+			s.status, s.provisioning_logs, s.last_health_check_at, s.health_status,
+			s.rate_limit_per_mailbox_hr, s.rate_limit_per_domain_hr, s.rate_limit_per_ip_hr,
+			s.auth_failure_threshold, s.created_at, s.updated_at, s.deleted_at,
+			COALESCE((SELECT COUNT(*) FROM email_domains d WHERE d.server_id = s.node_server_id AND d.deleted_at IS NULL), 0) AS domain_count,
+			COALESCE((SELECT COUNT(*) FROM email_mailboxes m WHERE m.server_id = s.node_server_id AND m.deleted_at IS NULL), 0) AS mailbox_count
+		FROM mail_servers s
+		WHERE s.organization_id = $1 AND s.deleted_at IS NULL
+		ORDER BY s.created_at DESC`
+
+	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list mail servers by org: %w", err)
+	}
+	defer rows.Close()
+
+	var servers []*MailServer
+	for rows.Next() {
+		var s MailServer
+		if err := rows.Scan(
+			&s.ID, &s.OrganizationID, &s.NodeServerID, &s.Name, &s.Hostname, &s.PrimaryDomain,
+			pq.Array(&s.AdditionalDomains), &s.IPv4Address, &s.IPv6Address, &s.Timezone, &s.StorageLocation,
+			&s.MailboxStorageLimitBytes, &s.MaxMailboxSizeBytes, &s.MaxAttachmentSizeBytes,
+			&s.SMTPPort, &s.SMTPSubmissionPort, &s.SMTPSPort, &s.IMAPPort, &s.IMAPSPort,
+			&s.POP3Port, &s.POP3SPort, &s.TLSEnabled, &s.TLSCertPath, &s.TLSKeyPath,
+			&s.SpamFilterEnabled, &s.AntivirusEnabled, &s.DKIMEnabled, &s.SPFEnabled,
+			&s.DMARCEnabled, &s.WebmailEnabled, &s.AutoSSLEnabled, &s.BackupEnabled,
+			&s.Status, &s.ProvisioningLogs, &s.LastHealthCheckAt, &s.HealthStatus,
+			&s.RateLimitPerMailboxHr, &s.RateLimitPerDomainHr, &s.RateLimitPerIPHr,
+			&s.AuthFailureThreshold, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt,
+			&s.DomainCount, &s.MailboxCount,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan mail server row: %w", err)
+		}
+		servers = append(servers, &s)
+	}
+	return servers, nil
+}
+
+func (p *PostgresStore) ListAllMailServers(ctx context.Context) ([]*MailServer, error) {
+	query := `
+		SELECT
+			s.id, s.organization_id, s.node_server_id, s.name, s.hostname, s.primary_domain,
+			s.additional_domains, s.ipv4_address, s.ipv6_address, s.timezone, s.storage_location,
+			s.mailbox_storage_limit_bytes, s.max_mailbox_size_bytes, s.max_attachment_size_bytes,
+			s.smtp_port, s.smtp_submission_port, s.smtps_port, s.imap_port, s.imaps_port,
+			s.pop3_port, s.pop3s_port, s.tls_enabled, s.tls_cert_path, s.tls_key_path,
+			s.spam_filter_enabled, s.antivirus_enabled, s.dkim_enabled, s.spf_enabled,
+			s.dmarc_enabled, s.webmail_enabled, s.auto_ssl_enabled, s.backup_enabled,
+			s.status, s.provisioning_logs, s.last_health_check_at, s.health_status,
+			s.rate_limit_per_mailbox_hr, s.rate_limit_per_domain_hr, s.rate_limit_per_ip_hr,
+			s.auth_failure_threshold, s.created_at, s.updated_at, s.deleted_at,
+			COALESCE((SELECT COUNT(*) FROM email_domains d WHERE d.server_id = s.node_server_id AND d.deleted_at IS NULL), 0) AS domain_count,
+			COALESCE((SELECT COUNT(*) FROM email_mailboxes m WHERE m.server_id = s.node_server_id AND m.deleted_at IS NULL), 0) AS mailbox_count
+		FROM mail_servers s
+		WHERE s.deleted_at IS NULL
+		ORDER BY s.created_at DESC`
+
+	rows, err := p.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all mail servers: %w", err)
+	}
+	defer rows.Close()
+
+	var servers []*MailServer
+	for rows.Next() {
+		var s MailServer
+		if err := rows.Scan(
+			&s.ID, &s.OrganizationID, &s.NodeServerID, &s.Name, &s.Hostname, &s.PrimaryDomain,
+			pq.Array(&s.AdditionalDomains), &s.IPv4Address, &s.IPv6Address, &s.Timezone, &s.StorageLocation,
+			&s.MailboxStorageLimitBytes, &s.MaxMailboxSizeBytes, &s.MaxAttachmentSizeBytes,
+			&s.SMTPPort, &s.SMTPSubmissionPort, &s.SMTPSPort, &s.IMAPPort, &s.IMAPSPort,
+			&s.POP3Port, &s.POP3SPort, &s.TLSEnabled, &s.TLSCertPath, &s.TLSKeyPath,
+			&s.SpamFilterEnabled, &s.AntivirusEnabled, &s.DKIMEnabled, &s.SPFEnabled,
+			&s.DMARCEnabled, &s.WebmailEnabled, &s.AutoSSLEnabled, &s.BackupEnabled,
+			&s.Status, &s.ProvisioningLogs, &s.LastHealthCheckAt, &s.HealthStatus,
+			&s.RateLimitPerMailboxHr, &s.RateLimitPerDomainHr, &s.RateLimitPerIPHr,
+			&s.AuthFailureThreshold, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt,
+			&s.DomainCount, &s.MailboxCount,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan mail server row: %w", err)
+		}
+		servers = append(servers, &s)
+	}
+	return servers, nil
+}
+
+func (p *PostgresStore) UpdateMailServer(ctx context.Context, s *MailServer) error {
+	s.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE mail_servers SET
+			name = $1, hostname = $2, primary_domain = $3, additional_domains = $4,
+			ipv4_address = $5, ipv6_address = $6, timezone = $7, storage_location = $8,
+			mailbox_storage_limit_bytes = $9, max_mailbox_size_bytes = $10, max_attachment_size_bytes = $11,
+			smtp_port = $12, smtp_submission_port = $13, smtps_port = $14, imap_port = $15, imaps_port = $16,
+			pop3_port = $17, pop3s_port = $18, tls_enabled = $19, tls_cert_path = $20, tls_key_path = $21,
+			spam_filter_enabled = $22, antivirus_enabled = $23, dkim_enabled = $24, spf_enabled = $25,
+			dmarc_enabled = $26, webmail_enabled = $27, auto_ssl_enabled = $28, backup_enabled = $29,
+			status = $30, provisioning_logs = $31, last_health_check_at = $32, health_status = $33,
+			rate_limit_per_mailbox_hr = $34, rate_limit_per_domain_hr = $35, rate_limit_per_ip_hr = $36,
+			auth_failure_threshold = $37, updated_at = $38
+		WHERE id = $39 AND deleted_at IS NULL`
+
+	res, err := p.db.ExecContext(ctx, query,
+		s.Name, s.Hostname, s.PrimaryDomain, pq.Array(s.AdditionalDomains),
+		s.IPv4Address, s.IPv6Address, s.Timezone, s.StorageLocation,
+		s.MailboxStorageLimitBytes, s.MaxMailboxSizeBytes, s.MaxAttachmentSizeBytes,
+		s.SMTPPort, s.SMTPSubmissionPort, s.SMTPSPort, s.IMAPPort, s.IMAPSPort,
+		s.POP3Port, s.POP3SPort, s.TLSEnabled, s.TLSCertPath, s.TLSKeyPath,
+		s.SpamFilterEnabled, s.AntivirusEnabled, s.DKIMEnabled, s.SPFEnabled,
+		s.DMARCEnabled, s.WebmailEnabled, s.AutoSSLEnabled, s.BackupEnabled,
+		s.Status, s.ProvisioningLogs, s.LastHealthCheckAt, s.HealthStatus,
+		s.RateLimitPerMailboxHr, s.RateLimitPerDomainHr, s.RateLimitPerIPHr,
+		s.AuthFailureThreshold, s.UpdatedAt, s.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update mail server: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *PostgresStore) DeleteMailServer(ctx context.Context, id uuid.UUID) error {
+	now := time.Now().UTC()
+	query := `UPDATE mail_servers SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL`
+	res, err := p.db.ExecContext(ctx, query, now, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete mail server: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 func (p *PostgresStore) CreateEmailDomain(ctx context.Context, domain *EmailDomain) error {
 	query := `

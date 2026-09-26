@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -226,18 +227,22 @@ func ApplyMaps(configDir string, domains []VirtualDomain, mailboxes []VirtualMai
 			return fmt.Errorf("failed to write %s: %w", fname, err)
 		}
 
-		// Run postmap if postmap executable is present on the machine
-		if _, err := exec.LookPath("postmap"); err == nil {
-			cmd := exec.Command("postmap", targetPath)
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("postmap failed for %s: %s (%w)", fname, string(out), err)
+		// Run postmap if postmap executable is present on Linux as root
+		if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+			if _, err := exec.LookPath("postmap"); err == nil {
+				cmd := exec.Command("postmap", targetPath)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("postmap failed for %s: %s (%w)", fname, string(out), err)
+				}
 			}
 		}
 	}
 
-	// Reload postfix if running
-	if _, err := exec.LookPath("postfix"); err == nil {
-		_ = exec.Command("postfix", "reload").Run()
+	// Reload postfix if running on Linux as root
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if _, err := exec.LookPath("postfix"); err == nil {
+			_ = exec.Command("postfix", "reload").Run()
+		}
 	}
 
 	return nil
