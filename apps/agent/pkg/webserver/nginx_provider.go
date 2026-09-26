@@ -120,7 +120,75 @@ func (p *NginxProvider) Install(ctx context.Context) error {
 		return fmt.Errorf("unsupported package manager for nginx installation")
 	}
 
+	_ = p.EnsureDefaultHostvraVHost(ctx)
 	_ = exec.CommandContext(ctx, "systemctl", "enable", "nginx").Run()
+	return nil
+}
+
+// EnsureDefaultHostvraVHost configures the default server block to reverse-proxy
+// directly to Hostvra Web UI and Core API, and seeds fallback HTML in /var/www/html
+// to permanently resolve 403 Forbidden errors on fresh Nginx installs.
+func (p *NginxProvider) EnsureDefaultHostvraVHost(ctx context.Context) error {
+	_ = os.MkdirAll("/var/www/html", 0755)
+	indexFile := "/var/www/html/index.html"
+	if _, err := os.Stat(indexFile); err != nil {
+		content := "<!DOCTYPE html><html><head><title>Hostvra Server Active</title></head><body style=\"font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;\"><h1>Hostvra Server Active</h1><p>Hostvra control panel is online.</p></body></html>"
+		_ = os.WriteFile(indexFile, []byte(content), 0644)
+	}
+
+	confContent := `# Hostvra Control Panel - Default Reverse Proxy
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    client_max_body_size 500M;
+    server_tokens off;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+    }
+
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /var/www/html;
+    }
+}
+`
+	if _, err := os.Stat(p.vhostDir); err == nil {
+		panelPath := filepath.Join(p.vhostDir, "hostvra-panel")
+		_ = os.WriteFile(panelPath, []byte(confContent), 0644)
+		_ = os.Remove(filepath.Join(p.enabledDir, "default"))
+		_ = os.Remove(filepath.Join(p.enabledDir, "hostvra-panel"))
+		_ = os.Symlink(panelPath, filepath.Join(p.enabledDir, "hostvra-panel"))
+	} else {
+		confD := filepath.Join(p.configDir, "conf.d")
+		if _, err := os.Stat(confD); err == nil {
+			_ = os.Remove(filepath.Join(confD, "default.conf"))
+			_ = os.WriteFile(filepath.Join(confD, "hostvra-panel.conf"), []byte(confContent), 0644)
+		}
+	}
 	return nil
 }
 

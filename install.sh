@@ -135,9 +135,23 @@ install_dependencies() {
         apt-get install -y -qq curl wget tar gzip openssl ufw nginx ca-certificates \
             postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd rspamd \
             php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip > /dev/null
+
+        # Install Node.js & npm runtime for Hostvra Web Dashboard if missing
+        if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+            log_info "Installing Node.js & npm runtime for Hostvra Web Dashboard..."
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/dev/null 2>&1 || true
+            apt-get install -y -qq nodejs >/dev/null 2>&1 || apt-get install -y -qq nodejs npm >/dev/null 2>&1 || true
+        fi
     elif [[ "$PKG_MGR" == "dnf" ]]; then
         dnf install -y -q curl wget tar gzip openssl firewalld nginx ca-certificates \
             postfix dovecot rspamd php-fpm php-mysqlnd php-gd php-mbstring php-xml > /dev/null
+
+        # Install Node.js & npm runtime for Hostvra Web Dashboard if missing
+        if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+            log_info "Installing Node.js & npm runtime for Hostvra Web Dashboard..."
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - >/dev/null 2>&1 || true
+            dnf install -y -q nodejs >/dev/null 2>&1 || true
+        fi
     fi
 
     # Disable Apache/httpd to prevent port 80/443 conflict with Nginx
@@ -239,6 +253,147 @@ resolve_repo_root() {
         log_info "Hostvra source tree not found locally. Cloning from https://github.com/edge-tec/Hostvra.git..."
         git clone https://github.com/edge-tec/Hostvra.git /root/Hostvra
         REPO_ROOT="/root/Hostvra"
+    fi
+}
+
+# Configure Nginx Reverse Proxy for Hostvra Control Panel (Resolves 403 Forbidden)
+setup_nginx_panel() {
+    log_info "Configuring Nginx reverse proxy for Hostvra Control Panel..."
+
+    # Ensure /var/www/html exists with 0755 permissions and valid fallback HTML files
+    # to permanently eliminate any possibility of Nginx returning 403 Forbidden
+    mkdir -p /var/www/html
+    chmod 0755 /var/www /var/www/html 2>/dev/null || true
+
+    cat > /var/www/html/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hostvra Server Management</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: #131c2e; padding: 2.5rem; border-radius: 1rem; border: 1px solid #1e293b; max-width: 480px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+        .badge { display: inline-block; padding: 0.35rem 0.85rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-radius: 9999px; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.25rem; }
+        h1 { color: #f8fafc; font-size: 1.6rem; margin: 0 0 0.75rem 0; font-weight: 700; }
+        p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin: 0 0 1.5rem 0; }
+        .btn { display: inline-block; background: #0284c7; color: #fff; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; transition: background 0.2s; }
+        .btn:hover { background: #0369a1; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="badge">Hostvra Node Active</div>
+        <h1>Hostvra Control Panel</h1>
+        <p>Your Hostvra server management platform is active and ready. Access your control panel dashboard below.</p>
+        <a href="/" class="btn">Open Hostvra Dashboard</a>
+    </div>
+</body>
+</html>
+EOF
+
+    cat > /var/www/html/50x.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hostvra - Initializing Services</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .card { background: #131c2e; padding: 2.5rem; border-radius: 1rem; border: 1px solid #1e293b; max-width: 480px; text-align: center; }
+        h1 { color: #38bdf8; font-size: 1.5rem; }
+        p { color: #94a3b8; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Hostvra Services Starting</h1>
+        <p>The control panel services are currently starting up. Please refresh this page in a moment.</p>
+    </div>
+</body>
+</html>
+EOF
+    chmod 0644 /var/www/html/index.html /var/www/html/50x.html 2>/dev/null || true
+
+    cat > /tmp/hostvra-panel.nginx.conf << 'EOF'
+# Hostvra Control Panel - Production Reverse Proxy
+# Handles direct server IP access and unassigned domains, routing to Web UI and Core API.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    client_max_body_size 500M;
+    server_tokens off;
+
+    # Core Hostvra API Backend (Go daemon on port 8080)
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 900s;
+        proxy_buffering off;
+    }
+
+    # Hostvra Web Dashboard (Next.js daemon on port 3000)
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 900s;
+    }
+
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /var/www/html;
+    }
+}
+EOF
+
+    # Deploy configuration according to OS layout
+    if [[ -d "/etc/nginx/sites-available" ]]; then
+        # Debian / Ubuntu layout
+        mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+        cp /tmp/hostvra-panel.nginx.conf /etc/nginx/sites-available/hostvra-panel
+        # Remove Ubuntu default site that produces 403 Forbidden
+        rm -f /etc/nginx/sites-enabled/default
+        ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel
+    fi
+
+    if [[ -d "/etc/nginx/conf.d" ]]; then
+        # RHEL / CentOS / Rocky / AlmaLinux layout (or supplemental for Debian)
+        rm -f /etc/nginx/conf.d/default.conf
+        if [[ ! -d "/etc/nginx/sites-available" ]]; then
+            cp /tmp/hostvra-panel.nginx.conf /etc/nginx/conf.d/hostvra-panel.conf
+        fi
+    fi
+    rm -f /tmp/hostvra-panel.nginx.conf
+
+    # Validate and reload Nginx
+    if command -v nginx &>/dev/null; then
+        if nginx -t >/dev/null 2>&1; then
+            systemctl enable nginx 2>/dev/null || true
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+            log_success "Nginx reverse proxy configured and active (403 Forbidden resolved)."
+        else
+            log_warn "Nginx syntax check failed. Please check /etc/nginx/sites-available/hostvra-panel."
+        fi
     fi
 }
 
@@ -353,6 +508,7 @@ RestartSec=3s
 LimitNOFILE=65536
 Environment=NODE_ENV=production
 Environment=PORT=3000
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:$PATH
 
 [Install]
 WantedBy=multi-user.target
@@ -362,6 +518,7 @@ EOF
     systemctl enable --now hostvra-api.service 2>/dev/null || true
     systemctl enable --now hostvra-agent.service 2>/dev/null || true
     systemctl enable --now hostvra-web.service 2>/dev/null || true
+    setup_nginx_panel
     log_success "Systemd services configured and registered."
 }
 
@@ -407,7 +564,8 @@ display_summary() {
 
     echo -e " ${BOLD}Hostvra Control Panel Access:${NC}"
     echo -e " ----------------------------------------------------------------------"
-    echo -e "  • ${BOLD}Panel URL:${NC}      ${CYAN}http://${SERVER_IP}:${DEFAULT_PORT}${NC}"
+    echo -e "  • ${BOLD}Panel URL:${NC}      ${CYAN}http://${SERVER_IP}${NC}"
+    echo -e "  • ${BOLD}Direct API:${NC}     ${CYAN}http://${SERVER_IP}:${DEFAULT_PORT}${NC}"
     echo -e "  • ${BOLD}Admin Email:${NC}    ${BOLD}${ADMIN_EMAIL}${NC}"
     echo -e "  • ${BOLD}Password:${NC}       ${YELLOW}${BOLD}${ADMIN_PASSWORD}${NC}"
     echo -e " ----------------------------------------------------------------------\n"
@@ -465,9 +623,11 @@ perform_upgrade() {
 
     # 3. Reload & Restart Systemd Services
     log_info "Reloading systemd services with zero customer website downtime..."
+    setup_nginx_panel
     systemctl daemon-reload
     systemctl restart hostvra-api.service 2>/dev/null || true
     systemctl restart hostvra-agent.service 2>/dev/null || true
+    systemctl restart hostvra-web.service 2>/dev/null || true
 
     # 4. Post-Upgrade Health Check Smoke Probe
     log_info "Performing post-upgrade health probe verification..."

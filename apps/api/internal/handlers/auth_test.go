@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -143,8 +145,9 @@ func TestRegisterPasswordComplexity(t *testing.T) {
 	}
 
 	// 2. Strong password
+	strongEmail := fmt.Sprintf("stronguser_%d@hostvra.com", time.Now().UnixNano())
 	strongReq := RegisterRequest{
-		Email:            "stronguser@hostvra.com",
+		Email:            strongEmail,
 		Password:         "Str0ng#P@ssw0rd2026",
 		FullName:         "Strong User",
 		OrganizationName: "Strong Org",

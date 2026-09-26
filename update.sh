@@ -170,6 +170,104 @@ if command -v systemctl &>/dev/null; then
 
     echo "Restarting hostvra-web..."
     systemctl restart hostvra-web 2>/dev/null || true
+
+    # Ensure Nginx reverse proxy configuration is active and eliminates 403 Forbidden
+    if command -v nginx &>/dev/null; then
+        echo "Ensuring Nginx reverse proxy is active for Hostvra Control Panel..."
+        mkdir -p /var/www/html
+        chmod 0755 /var/www /var/www/html 2>/dev/null || true
+        if [[ ! -f /var/www/html/index.html ]]; then
+            echo "<!DOCTYPE html><html><head><title>Hostvra Server</title></head><body style=\"font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;\"><h1>Hostvra Server Online</h1></body></html>" > /var/www/html/index.html
+            chmod 0644 /var/www/html/index.html 2>/dev/null || true
+        fi
+        if [[ -d "/etc/nginx/sites-available" ]]; then
+            rm -f /etc/nginx/sites-enabled/default
+            cat > /etc/nginx/sites-available/hostvra-panel << 'NGINX_EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    client_max_body_size 500M;
+    server_tokens off;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 900s;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 900s;
+    }
+
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /var/www/html;
+    }
+}
+NGINX_EOF
+            ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel
+        elif [[ -d "/etc/nginx/conf.d" ]]; then
+            rm -f /etc/nginx/conf.d/default.conf
+            cat > /etc/nginx/conf.d/hostvra-panel.conf << 'NGINX_EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    client_max_body_size 500M;
+    server_tokens off;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;
+    }
+}
+NGINX_EOF
+        fi
+        if nginx -t &>/dev/null; then
+            systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+            echo "Nginx reverse proxy verified and reloaded successfully."
+        fi
+    fi
 fi
 
 if command -v pm2 &>/dev/null; then

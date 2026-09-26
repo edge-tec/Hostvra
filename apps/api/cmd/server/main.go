@@ -189,6 +189,31 @@ func main() {
 	r.Get("/ready", healthHandler.Ready)
 	r.Get("/version", healthHandler.Version)
 
+	// Root Endpoint - Browser redirect to Web Panel & API Status
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		// If request is from a web browser, redirect to the Hostvra Web Dashboard
+		if strings.Contains(r.Header.Get("Accept"), "text/html") {
+			host := r.Host
+			// Strip port 8080 if present to redirect to standard HTTP/HTTPS port
+			if strings.Contains(host, ":") {
+				host = strings.Split(host, ":")[0]
+			}
+			scheme := "http"
+			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+				scheme = "https"
+			}
+			http.Redirect(w, r, fmt.Sprintf("%s://%s", scheme, host), http.StatusTemporaryRedirect)
+			return
+		}
+		// Return JSON status for API clients
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"service": "Hostvra Control Plane API",
+			"version": AppVersion,
+			"status":  "healthy",
+		})
+	})
+
 	// API v1 Namespace
 	r.Route("/api/v1", func(r chi.Router) {
 		// Public Auth Endpoints
