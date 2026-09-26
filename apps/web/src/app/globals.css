@@ -429,10 +429,22 @@ html:not(.dark) .text-white:not(button[class*="bg-indigo"] *):not(button[class*=
 .bg-\[\#121824\],
 .bg-\[\#090D16\],
 .bg-\[\#0C0E14\],
-.dark-box,
-pre,
-code {
+.dark-box {
   color: #F8FAFC !important;
+}
+
+html.dark pre,
+html.dark code {
+  color: #F8FAFC !important;
+}
+
+/* Ensure audit logs and terminal outputs in light mode have pure black readable text */
+.audit-logs-pre,
+pre.audit-logs-pre,
+.audit-logs-pre *,
+pre.audit-logs-pre * {
+  color: #000000 !important;
+  background-color: #F8FAFC !important;
 }
 
 .bg-slate-900 *,

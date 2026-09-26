@@ -3774,8 +3774,8 @@ export default function EmailHostingPage() {
                                   <span className="font-semibold text-slate-900 dark:text-white">{chk.name}</span>
                                   <span className="text-[10px] text-slate-400 uppercase font-mono">[{chk.category}]</span>
                                 </div>
-                                <p className="text-[11px] text-slate-500">{chk.message}</p>
-                                {chk.details && <p className="text-[10px] font-mono text-slate-400">{chk.details}</p>}
+                                <p className="text-[11px] text-slate-800 dark:text-slate-200 font-medium">{chk.message}</p>
+                                {chk.details && <p className="text-[10px] font-mono text-slate-700 dark:text-slate-300">{chk.details}</p>}
                               </div>
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -3871,7 +3871,10 @@ export default function EmailHostingPage() {
                 </button>
               </div>
 
-              <pre className="font-mono text-xs p-4 bg-slate-950 text-slate-200 rounded-xl overflow-x-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed border border-slate-800">
+              <pre
+                className="font-mono text-xs p-4 rounded-xl overflow-x-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed border border-slate-300 dark:border-surface-700 font-semibold audit-logs-pre text-black"
+                style={{ color: '#000000', backgroundColor: '#F8FAFC' }}
+              >
                 {serverLogsModal.provisioning_logs || 'No provisioning logs recorded for this mail node.'}
               </pre>
 
