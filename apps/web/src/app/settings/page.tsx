@@ -307,13 +307,43 @@ export default function SettingsPage() {
       await persistSettings({ panel_domain: modalInput });
       showToast(`Panel domain updated to ${modalInput}`);
     } else if (modalType === 'user') {
-      setPanelUser(modalInput);
-      await persistSettings({ panel_user: modalInput });
-      showToast(`Panel username updated to ${modalInput}`);
+      const email = modalInput.trim();
+      setPanelUser(email);
+      try {
+        const res = await apiFetch<any>('/api/v1/auth/change-email', {
+          method: 'POST',
+          body: JSON.stringify({ email }),
+        });
+        if (res.success) {
+          showToast(`Admin login email updated to ${email}`);
+        } else {
+          showToast(res.error?.message || 'Failed to update admin email', true);
+        }
+      } catch (err: any) {
+        showToast(err.message || 'Error updating admin email', true);
+      }
+      await persistSettings({ panel_user: email });
     } else if (modalType === 'pass') {
-      setPanelPass('••••••••');
-      await persistSettings({ panel_pass: modalInput });
-      showToast('Panel password updated successfully');
+      const newPassword = modalInput.trim();
+      if (newPassword.length < 6) {
+        showToast('Password must be at least 6 characters', true);
+        return;
+      }
+      try {
+        const res = await apiFetch<any>('/api/v1/auth/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ new_password: newPassword }),
+        });
+        if (res.success) {
+          setPanelPass('••••••••');
+          showToast('Admin panel login password updated successfully!');
+        } else {
+          showToast(res.error?.message || 'Failed to update admin password', true);
+        }
+      } catch (err: any) {
+        showToast(err.message || 'Error updating password', true);
+      }
+      await persistSettings({ panel_pass: '••••••••' });
     } else if (modalType === 'timeout') {
       setSessionTimeout(modalInput);
       await persistSettings({ session_timeout: modalInput });
@@ -1954,12 +1984,21 @@ export default function SettingsPage() {
                       </select>
                     </div>
                   </div>
-                ) : (
+                 ) : (
                   <div>
-                    <label className="block text-slate-700 dark:text-slate-300 mb-1">Enter Value</label>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                      {modalType === 'pass'
+                        ? 'Enter New Admin Password'
+                        : modalType === 'user'
+                        ? 'Enter Admin Login Email / Username'
+                        : modalType === 'account'
+                        ? 'Enter Hostvra Cloud Account Email'
+                        : 'Enter Value'}
+                    </label>
                     <input
                       type={modalType === 'pass' ? 'password' : 'text'}
                       value={modalInput}
+                      placeholder={modalType === 'pass' ? 'Minimum 6 characters' : modalType === 'user' ? 'admin@yourdomain.com' : ''}
                       onChange={(e) => setModalInput(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none"
                     />

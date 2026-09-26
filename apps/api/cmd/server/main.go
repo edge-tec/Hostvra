@@ -227,10 +227,12 @@ func main() {
 			loginLimiter := auth.NewLoginRateLimiter(5, 60*time.Second) // 5 login attempts per minute per IP
 			r.With(loginLimiter.RateLimitMiddleware).Post("/login", authHandler.Login)
 
-			// Authenticated User Info
+			// Authenticated User Info & Profile Updates
 			r.Group(func(r chi.Router) {
 				r.Use(auth.Middleware(cfg.JWTSecret))
 				r.Get("/me", authHandler.Me)
+				r.Post("/change-password", authHandler.ChangePassword)
+				r.Post("/change-email", authHandler.ChangeEmail)
 			})
 		})
 
@@ -1019,11 +1021,13 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 
 		existingUser, err := s.GetUserByEmail(ctx, email)
 		if err == nil && existingUser != nil {
-			// Synchronize admin password on startup
-			if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
-				logger.Warn("Failed to synchronize admin password", "email", email, "error", err)
-			} else {
-				logger.Info("Synchronized administrator credentials", "email", email)
+			// Only overwrite password if explicitly specified via INITIAL_ADMIN_PASSWORD
+			if adminPass != "" && email == adminEmail {
+				if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
+					logger.Warn("Failed to synchronize admin password", "email", email, "error", err)
+				} else {
+					logger.Info("Synchronized administrator credentials from environment", "email", email)
+				}
 			}
 			continue
 		}

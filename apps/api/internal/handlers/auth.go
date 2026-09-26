@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -203,4 +204,142 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"org":  org,
 		"role": claims.Role,
 	}, nil)
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangePassword updates the logged-in user's password
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	var req ChangePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.NewPassword == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "New password is required", nil, "")
+		return
+	}
+
+	if len(req.NewPassword) < 6 {
+		response.Error(w, http.StatusBadRequest, "WEAK_PASSWORD", "Password must be at least 6 characters", nil, "")
+		return
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), claims.UserID)
+	if err != nil || user == nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User profile not found", nil, "")
+		return
+	}
+
+	// Verify current password if provided
+	if req.CurrentPassword != "" {
+		valid, _ := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+		if !valid {
+			response.Error(w, http.StatusUnauthorized, "INVALID_CURRENT_PASSWORD", "Current password does not match", nil, "")
+			return
+		}
+	}
+
+	newHash, err := auth.HashPassword(req.NewPassword, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "HASH_FAILED", "Failed to secure password", nil, "")
+		return
+	}
+
+	if err := h.store.UpdateUserPassword(r.Context(), user.ID, newHash); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update password", nil, "")
+		return
+	}
+
+	// Persist to /etc/hostvra/api.env if running on server
+	syncEnvCredentials("", req.NewPassword)
+
+	h.audit.Log(r.Context(), r, "auth.password_change", "user", user.ID.String(), "success", "", map[string]interface{}{
+		"email": user.Email,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Password updated successfully",
+	}, nil)
+}
+
+type ChangeEmailRequest struct {
+	Email string `json:"email"`
+}
+
+// ChangeEmail updates the logged-in user's email address
+func (h *AuthHandler) ChangeEmail(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	var req ChangeEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body", nil, "")
+		return
+	}
+
+	newEmail := strings.TrimSpace(strings.ToLower(req.Email))
+	if newEmail == "" || !strings.Contains(newEmail, "@") {
+		response.Error(w, http.StatusBadRequest, "INVALID_EMAIL", "A valid email address is required", nil, "")
+		return
+	}
+
+	// Check if already used by another account
+	existing, err := h.store.GetUserByEmail(r.Context(), newEmail)
+	if err == nil && existing != nil && existing.ID != claims.UserID {
+		response.Error(w, http.StatusConflict, "EMAIL_EXISTS", "This email is already in use by another account", nil, "")
+		return
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), claims.UserID)
+	if err != nil || user == nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User profile not found", nil, "")
+		return
+	}
+
+	if err := h.store.UpdateUserEmail(r.Context(), user.ID, newEmail); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update email address", nil, "")
+		return
+	}
+
+	// Persist to /etc/hostvra/api.env if running on server
+	syncEnvCredentials(newEmail, "")
+
+	h.audit.Log(r.Context(), r, "auth.email_change", "user", user.ID.String(), "success", "", map[string]interface{}{
+		"old_email": user.Email,
+		"new_email": newEmail,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"email":   newEmail,
+		"message": "Email address updated successfully",
+	}, nil)
+}
+
+func syncEnvCredentials(newEmail, newPassword string) {
+	envPath := "/etc/hostvra/api.env"
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for i, line := range lines {
+		if newEmail != "" && strings.HasPrefix(line, "INITIAL_ADMIN_EMAIL=") {
+			lines[i] = "INITIAL_ADMIN_EMAIL=" + newEmail
+		}
+		if newPassword != "" && strings.HasPrefix(line, "INITIAL_ADMIN_PASSWORD=") {
+			lines[i] = "INITIAL_ADMIN_PASSWORD=" + newPassword
+		}
+	}
+	_ = os.WriteFile(envPath, []byte(strings.Join(lines, "\n")), 0600)
 }
