@@ -654,9 +654,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}", emailHandler.UpdateMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Patch("/mailboxes/{id}", emailHandler.UpdateMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
-				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/mailboxes/{id}", emailHandler.DeleteMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/mailboxes/{id}/test", emailHandler.TestMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/toggle-suspend", emailHandler.ToggleMailboxSuspended)
+
+				// Client Setup Profiles (Thunderbird Autoconfig, Outlook Autodiscover, Apple MobileConfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autoconfig", emailHandler.GetThunderbirdAutoconfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autoconfig/{domain}", emailHandler.GetThunderbirdAutoconfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autodiscover", emailHandler.GetOutlookAutodiscover)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autodiscover/{domain}", emailHandler.GetOutlookAutodiscover)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mobileconfig", emailHandler.GetAppleMobileConfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mobileconfig/{domain}", emailHandler.GetAppleMobileConfig)
 
 				// Signatures & Autoresponders
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}/signature", emailHandler.GetSignature)
@@ -722,10 +730,14 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}", emailHandler.GetMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}", emailHandler.UpdateMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Patch("/mailboxes/{id}", emailHandler.UpdateMailbox)
-				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
-				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/password", emailHandler.ChangeMailboxPassword)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/mailboxes/{id}", emailHandler.DeleteMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/mailboxes/{id}/test", emailHandler.TestMailbox)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/toggle-suspend", emailHandler.ToggleMailboxSuspended)
+
+				// Client Setup Profiles
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autoconfig/{domain}", emailHandler.GetThunderbirdAutoconfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autodiscover/{domain}", emailHandler.GetOutlookAutodiscover)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mobileconfig/{domain}", emailHandler.GetAppleMobileConfig)
 
 				// Aliases & Forwarders
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/aliases", emailHandler.ListAliases)

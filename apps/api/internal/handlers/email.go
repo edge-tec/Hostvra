@@ -2018,3 +2018,250 @@ func (h *EmailHandler) syncPostfixMaps(ctx context.Context, serverID uuid.UUID) 
 
 	_ = postfix.ApplyMaps(postfixDir, vDomains, vMailboxes, vAliases)
 }
+
+// findDomainByName looks up the configured mail hostname for a domain
+func (h *EmailHandler) findDomainByName(ctx context.Context, domainName string) string {
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	orgID := defaultOrgID
+	if claims, ok := auth.GetClaims(ctx); ok && claims != nil && claims.OrganizationID != uuid.Nil {
+		orgID = claims.OrganizationID
+	}
+	domains, err := h.store.ListEmailDomainsByOrg(ctx, orgID)
+	if err != nil || len(domains) == 0 {
+		domains, _ = h.store.ListEmailDomainsByOrg(ctx, defaultOrgID)
+	}
+	for _, d := range domains {
+		if strings.EqualFold(d.Domain, domainName) {
+			if d.MailHostname != "" {
+				return d.MailHostname
+			}
+			return "mail." + d.Domain
+		}
+	}
+	if domainName != "" && domainName != "example.com" {
+		return "mail." + domainName
+	}
+	return "mail.example.com"
+}
+
+// GetThunderbirdAutoconfig outputs standard Mozilla Thunderbird XML autoconfig payload
+func (h *EmailHandler) GetThunderbirdAutoconfig(w http.ResponseWriter, r *http.Request) {
+	domainName := chi.URLParam(r, "domain")
+	if domainName == "" {
+		domainName = r.URL.Query().Get("domain")
+	}
+	if domainName == "" {
+		domainName = "example.com"
+	}
+	mailHost := h.findDomainByName(r.Context(), domainName)
+
+	xmlContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<clientConfig version="1.1">
+  <emailProvider id="%s">
+    <domain>%s</domain>
+    <displayName>%s Mail</displayName>
+    <displayShortName>%s</displayShortName>
+    <incomingServer type="imap">
+      <hostname>%s</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <username>%%EMAILADDRESS%%</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <incomingServer type="pop3">
+      <hostname>%s</hostname>
+      <port>995</port>
+      <socketType>SSL</socketType>
+      <username>%%EMAILADDRESS%%</username>
+      <authentication>password-cleartext</authentication>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>%s</hostname>
+      <port>587</port>
+      <socketType>STARTTLS</socketType>
+      <username>%%EMAILADDRESS%%</username>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+    <outgoingServer type="smtp">
+      <hostname>%s</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <username>%%EMAILADDRESS%%</username>
+      <authentication>password-cleartext</authentication>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>`, domainName, domainName, domainName, domainName, mailHost, mailHost, mailHost, mailHost)
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=autoconfig-%s.xml", domainName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(xmlContent))
+}
+
+// GetOutlookAutodiscover outputs standard Microsoft Exchange / Outlook autodiscover XML payload
+func (h *EmailHandler) GetOutlookAutodiscover(w http.ResponseWriter, r *http.Request) {
+	domainName := chi.URLParam(r, "domain")
+	if domainName == "" {
+		domainName = r.URL.Query().Get("domain")
+	}
+	if domainName == "" {
+		domainName = "example.com"
+	}
+	mailHost := h.findDomainByName(r.Context(), domainName)
+
+	xmlContent := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <Protocol>
+        <Type>IMAP</Type>
+        <Server>%s</Server>
+        <Port>993</Port>
+        <DomainRequired>off</DomainRequired>
+        <LoginName>username@%s</LoginName>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+      <Protocol>
+        <Type>POP3</Type>
+        <Server>%s</Server>
+        <Port>995</Port>
+        <DomainRequired>off</DomainRequired>
+        <LoginName>username@%s</LoginName>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+      <Protocol>
+        <Type>SMTP</Type>
+        <Server>%s</Server>
+        <Port>587</Port>
+        <DomainRequired>off</DomainRequired>
+        <LoginName>username@%s</LoginName>
+        <SPA>off</SPA>
+        <Encryption>TLS</Encryption>
+        <AuthRequired>on</AuthRequired>
+        <UsePOPAuth>off</UsePOPAuth>
+        <SMTPLast>off</SMTPLast>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>`, mailHost, domainName, mailHost, domainName, mailHost, domainName)
+
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=autodiscover-%s.xml", domainName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(xmlContent))
+}
+
+// GetAppleMobileConfig outputs an Apple iOS / macOS .mobileconfig plist XML configuration profile
+func (h *EmailHandler) GetAppleMobileConfig(w http.ResponseWriter, r *http.Request) {
+	domainName := chi.URLParam(r, "domain")
+	if domainName == "" {
+		domainName = r.URL.Query().Get("domain")
+	}
+	if domainName == "" {
+		domainName = "example.com"
+	}
+	mailHost := h.findDomainByName(r.Context(), domainName)
+
+	uuidStr := uuid.New().String()
+	payloadUUID := uuid.New().String()
+
+	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadDescription</key>
+    <string>Hostvra Email Configuration for %s</string>
+    <key>PayloadDisplayName</key>
+    <string>%s Mail</string>
+    <key>PayloadIdentifier</key>
+    <string>com.hostvra.mail.%s</string>
+    <key>PayloadOrganization</key>
+    <string>Hostvra Enterprise</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>%s</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>EmailAccountDescription</key>
+            <string>%s Mailbox</string>
+            <key>EmailAccountType</key>
+            <string>EmailTypeIMAP</string>
+            <key>IncomingMailServerAuthentication</key>
+            <string>EmailAuthPassword</string>
+            <key>IncomingMailServerHostName</key>
+            <string>%s</string>
+            <key>IncomingMailServerPortNumber</key>
+            <integer>993</integer>
+            <key>IncomingMailServerUseSSL</key>
+            <true/>
+            <key>OutgoingMailServerAuthentication</key>
+            <string>EmailAuthPassword</string>
+            <key>OutgoingMailServerHostName</key>
+            <string>%s</string>
+            <key>OutgoingMailServerPortNumber</key>
+            <integer>587</integer>
+            <key>OutgoingMailServerUseSSL</key>
+            <false/>
+            <key>OutgoingPasswordSameAsIncomingPassword</key>
+            <true/>
+            <key>PayloadDescription</key>
+            <string>Configures Email Account</string>
+            <key>PayloadDisplayName</key>
+            <string>Email Account</string>
+            <key>PayloadIdentifier</key>
+            <string>com.hostvra.mail.account.%s</string>
+            <key>PayloadType</key>
+            <string>com.apple.mail.managed</string>
+            <key>PayloadUUID</key>
+            <string>%s</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+</dict>
+</plist>`, domainName, domainName, domainName, uuidStr, domainName, mailHost, mailHost, domainName, payloadUUID)
+
+	w.Header().Set("Content-Type", "application/x-apple-aspen-config")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.mobileconfig", domainName))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(plistContent))
+}
+
+// ToggleMailboxSuspended updates the active/suspended status of a mailbox
+func (h *EmailHandler) ToggleMailboxSuspended(w http.ResponseWriter, r *http.Request) {
+	mailboxID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	suspendStr := r.URL.Query().Get("suspend")
+	shouldSuspend := suspendStr == "true" || suspendStr == "1"
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mailboxID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	mb.IsSuspended = shouldSuspend
+	if err := h.store.UpdateEmailMailbox(r.Context(), mb); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update mailbox suspension status", nil, "")
+		return
+	}
+
+	go h.syncPostfixMaps(context.Background(), mb.ServerID)
+	response.JSON(w, http.StatusOK, mb, nil)
+}

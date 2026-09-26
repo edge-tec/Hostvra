@@ -37,7 +37,11 @@ import {
   Radio,
   FileText,
   UserCheck,
+  BookOpen,
+  Download,
+  UserX,
 } from 'lucide-react';
+import { EmailUserGuide } from '@/components/EmailUserGuide';
 
 interface EmailDomain {
   id: string;
@@ -253,7 +257,7 @@ function formatBytes(bytes?: number): string {
 
 export default function EmailHostingPage() {
   const [activeTab, setActiveTab] = useState<
-    'servers' | 'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester'
+    'servers' | 'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester' | 'guide'
   >('servers');
 
   const [selectedWebmailEmail, setSelectedWebmailEmail] = useState<string | undefined>(undefined);
@@ -928,6 +932,25 @@ export default function EmailHostingPage() {
     }
   };
 
+  const handleToggleSuspendMailbox = async (mb: EmailMailbox) => {
+    const actionName = mb.is_suspended ? 'Resume' : 'Suspend';
+    if (!confirm(`${actionName} mailbox ${mb.email}? When suspended, login and outbound mail submission are disabled.`)) {
+      return;
+    }
+    try {
+      const res = await apiFetch<EmailMailbox>(`/api/v1/email/mailboxes/${mb.id}/toggle-suspend?suspend=${!mb.is_suspended}`, {
+        method: 'POST',
+      });
+      if (res.success) {
+        setMailboxes((prev) => prev.map((item) => (item.id === mb.id ? { ...item, is_suspended: !mb.is_suspended } : item)));
+      } else {
+        alert(res.error?.message || `Failed to ${actionName.toLowerCase()} mailbox.`);
+      }
+    } catch (err: any) {
+      alert(`Error updating mailbox status: ${err.message || 'Network error'}`);
+    }
+  };
+
   const handleDeleteDomain = async (id: string) => {
     if (confirm('Delete email domain and all associated mailboxes and DKIM keys?')) {
       try {
@@ -1011,16 +1034,20 @@ export default function EmailHostingPage() {
               <Inbox className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
               <span>Webmail (Inbox)</span>
             </button>
-            {domains.length > 0 && (
-              <button
-                onClick={() => openDNSModal(domains[0])}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-emerald-50 dark:bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-600/20 border border-emerald-200 dark:border-emerald-500/30 transition shadow-xs"
-                title="View DKIM, SPF, DMARC, MX DNS records"
-              >
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                <span>DNS & Security</span>
-              </button>
-            )}
+            <button
+              onClick={() => {
+                if (domains.length > 0) {
+                  openDNSModal(domains[0]);
+                } else {
+                  setShowAddDomainModal(true);
+                }
+              }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-emerald-50 dark:bg-emerald-600/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-600/20 border border-emerald-200 dark:border-emerald-500/30 transition shadow-xs"
+              title="View DKIM, SPF, DMARC, MX DNS records"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span>DNS & Security</span>
+            </button>
             <button
               onClick={() => setActiveTab('tester')}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-white dark:bg-surface-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-surface-700 border border-slate-200 dark:border-surface-700 transition shadow-xs"
@@ -1244,6 +1271,21 @@ export default function EmailHostingPage() {
           >
             <Terminal className="w-4 h-4" />
             <span>Send Test Tool</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('guide')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all font-medium whitespace-nowrap ${
+              activeTab === 'guide'
+                ? 'bg-white dark:bg-surface-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>User Guide (35 Topics)</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-600 dark:text-indigo-400">
+              Docs
+            </span>
           </button>
         </div>
 
@@ -1594,9 +1636,17 @@ export default function EmailHostingPage() {
                               </div>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
-                                Active
-                              </span>
+                              {mb.is_suspended ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
+                                  <Lock className="w-3 h-3" />
+                                  Suspended
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Active
+                                </span>
+                              )}
                             </td>
                             <td className="px-6 py-4 text-right space-x-2">
                               <button
@@ -1630,6 +1680,17 @@ export default function EmailHostingPage() {
                                 title="Change Password"
                               >
                                 <Key className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleToggleSuspendMailbox(mb)}
+                                className={`p-1.5 rounded-lg transition ${
+                                  mb.is_suspended
+                                    ? 'hover:bg-emerald-50 dark:hover:bg-emerald-500/20 text-amber-600 hover:text-emerald-600'
+                                    : 'hover:bg-amber-50 dark:hover:bg-amber-500/20 text-slate-400 hover:text-amber-600'
+                                }`}
+                                title={mb.is_suspended ? 'Resume Mailbox (Re-enable Access)' : 'Suspend Mailbox (Block Access)'}
+                              >
+                                {mb.is_suspended ? <UserCheck className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
                               </button>
                               <button
                                 onClick={() => handleDeleteMailbox(mb.id)}
@@ -2066,6 +2127,120 @@ export default function EmailHostingPage() {
                   </div>
                 </div>
               )}
+
+              {/* Automated Client Configuration Profiles */}
+              <div className="p-5 rounded-2xl bg-gradient-to-r from-slate-50 to-indigo-50/30 dark:from-surface-950 dark:to-indigo-950/20 border border-slate-200 dark:border-surface-800 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-500" />
+                      <span>Automated Mail Client Setup Profiles</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Download pre-configured device profiles and discovery XML files for {selectedSmtpDomain || 'your domain'}.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('guide')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:bg-slate-50 dark:hover:bg-surface-700 shadow-xs transition"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>View 35-Topic User Guide</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <a
+                    href={`/api/v1/email/clients/apple?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    download
+                    className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+                        <span>Apple iOS &amp; macOS</span>
+                        <Download className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        One-click <code className="font-mono text-indigo-500">.mobileconfig</code> payload profile.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-2 block">
+                      Download Profile &rarr;
+                    </span>
+                  </a>
+
+                  <a
+                    href={`/api/v1/email/clients/thunderbird?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    download
+                    className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+                        <span>Mozilla Thunderbird</span>
+                        <Download className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Standard <code className="font-mono text-indigo-500">autoconfig.xml</code> payload.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-2 block">
+                      Download XML &rarr;
+                    </span>
+                  </a>
+
+                  <a
+                    href={`/api/v1/email/clients/outlook?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    download
+                    className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+                        <span>Microsoft Outlook</span>
+                        <Download className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 transition" />
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Exchange <code className="font-mono text-indigo-500">autodiscover.xml</code> payload.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mt-2 block">
+                      Download XML &rarr;
+                    </span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Client Setup Walkthroughs */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1.5 shadow-xs">
+                  <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                    <Layers className="w-4 h-4 text-indigo-500" />
+                    <span>Microsoft Outlook</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Choose <strong>Manual Setup &gt; IMAP</strong>. Set Incoming Host to <code className="font-mono font-bold text-slate-700 dark:text-slate-300">{smtpSettings?.incoming_server || 'mail.' + (selectedSmtpDomain || 'example.com')}</code> on port <strong>993 (SSL/TLS)</strong>, and Outgoing Host on port <strong>587 (STARTTLS)</strong>.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1.5 shadow-xs">
+                  <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                    <Mail className="w-4 h-4 text-blue-500" />
+                    <span>Mozilla Thunderbird</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Enter your email and password. Thunderbird auto-detects ports <strong>993</strong> and <strong>587</strong> via Hostvra's XML autoconfig endpoint.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1.5 shadow-xs">
+                  <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                    <Cpu className="w-4 h-4 text-purple-500" />
+                    <span>Apple Mail &amp; iOS</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Download the <code className="font-mono text-indigo-500">.mobileconfig</code> profile above or manually add an IMAP account with username as full email and SSL enabled.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -2518,6 +2693,23 @@ export default function EmailHostingPage() {
               )}
             </div>
           </div>
+        )}
+
+        {/* Tab Content: User Guide (35 Topics) */}
+        {activeTab === 'guide' && (
+          <EmailUserGuide
+            currentDomain={selectedSmtpDomain || domains[0]?.domain || 'example.com'}
+            mailHostname={smtpSettings?.incoming_server || `mail.${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+            serverIPv4={mailServers[0]?.ipv4_address || '127.0.0.1'}
+            imapPort={smtpSettings?.incoming_imap_port || 143}
+            imapsPort={993}
+            pop3Port={smtpSettings?.incoming_pop3_port || 110}
+            pop3sPort={995}
+            smtpSubmissionPort={smtpSettings?.outgoing_smtp_submission_port || 587}
+            smtpsPort={smtpSettings?.outgoing_smtp_ssl_port || 465}
+            storagePath={mailServers[0]?.storage_location || '/var/mail/vhosts'}
+            onSelectTab={(tab) => setActiveTab(tab as any)}
+          />
         )}
 
         {/* Modal: Add Email Domain */}
