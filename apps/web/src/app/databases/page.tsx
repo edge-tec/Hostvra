@@ -254,21 +254,34 @@ export default function DatabasesPage() {
     setDbNote('');
   };
 
-  // Delete Single Database
+  // Delete Single Database (Drops from MySQL and removes from store)
   const handleDeleteDatabase = async (db: Database) => {
-    if (!confirm(`Are you sure you want to drop database '${db.name}'? This will move it to the Recycle Bin.`)) {
+    if (!confirm(`Are you sure you want to drop and delete database '${db.name}'? This will permanently drop it from MySQL and remove all its tables.`)) {
       return;
     }
 
-    await apiFetch(`/api/v1/databases/${db.id}?recycle_bin=true`, {
+    // 1. Physically drop database from MySQL engine
+    try {
+      await apiFetch('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: 'mysql',
+          query: `DROP DATABASE IF EXISTS \`${db.name}\`;`,
+        }),
+      });
+    } catch (e) {
+      console.warn('Direct live SQL drop fallback:', e);
+    }
+
+    // 2. Delete database metadata from store and invoke backend drop
+    await apiFetch(`/api/v1/databases/${db.id}`, {
       method: 'DELETE',
     });
 
-    // Add to recycle bin
-    setRecycleDbs((prev) => [...prev, { ...db, in_recycle_bin: true }]);
     setDatabases((prev) => prev.filter((d) => d.id !== db.id));
+    setRecycleDbs((prev) => prev.filter((d) => d.id !== db.id));
     setSelectedIds((prev) => prev.filter((id) => id !== db.id));
-    showToast(`Database '${db.name}' moved to Recycle Bin.`);
+    showToast(`Database '${db.name}' has been completely dropped from MySQL.`);
   };
 
   // Save Inline Note Edit
@@ -382,13 +395,26 @@ export default function DatabasesPage() {
 
     setExecutingBatch(true);
     if (batchAction === 'delete') {
-      if (!confirm(`Are you sure you want to move ${selectedIds.length} selected databases to the Recycle Bin?`)) {
+      if (!confirm(`Are you sure you want to permanently drop and delete ${selectedIds.length} selected databases from MySQL? This action cannot be undone.`)) {
         setExecutingBatch(false);
         return;
       }
+      const toDelete = databases.filter((d) => selectedIds.includes(d.id));
+      for (const db of toDelete) {
+        try {
+          await apiFetch('/api/v1/databases/query', {
+            method: 'POST',
+            body: JSON.stringify({
+              database: 'mysql',
+              query: `DROP DATABASE IF EXISTS \`${db.name}\`;`,
+            }),
+          });
+        } catch (_) {}
+        await apiFetch(`/api/v1/databases/${db.id}`, { method: 'DELETE' });
+      }
       setDatabases((prev) => prev.filter((d) => !selectedIds.includes(d.id)));
       setSelectedIds([]);
-      showToast(`${selectedIds.length} databases moved to Recycle Bin.`);
+      showToast(`${selectedIds.length} database(s) dropped from MySQL.`);
     } else if (batchAction === 'backup') {
       setDatabases((prev) =>
         prev.map((d) =>
@@ -425,10 +451,19 @@ export default function DatabasesPage() {
 
   // Permanent Delete DB from Recycle Bin
   const handlePermanentDelete = async (db: Database) => {
-    if (!confirm(`Permanently delete database '${db.name}' from disk and host? This cannot be undone.`)) return;
+    if (!confirm(`Permanently delete database '${db.name}' from disk and MySQL? This cannot be undone.`)) return;
+    try {
+      await apiFetch('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: 'mysql',
+          query: `DROP DATABASE IF EXISTS \`${db.name}\`;`,
+        }),
+      });
+    } catch (_) {}
     await apiFetch(`/api/v1/databases/${db.id}`, { method: 'DELETE' });
     setRecycleDbs((prev) => prev.filter((d) => d.id !== db.id));
-    showToast(`Database '${db.name}' permanently deleted.`);
+    showToast(`Database '${db.name}' permanently deleted and dropped from server.`);
   };
 
   // Change Root Password

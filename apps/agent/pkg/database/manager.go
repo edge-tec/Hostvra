@@ -469,11 +469,24 @@ func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset
 
 // ExecuteDropDatabase drops the database from the live server.
 func (m *Manager) ExecuteDropDatabase(ctx context.Context, name string) error {
+	// 1. Direct connection via pool
+	if m.pool != nil {
+		db, err := m.pool.GetDB(ctx, "information_schema")
+		if err == nil {
+			if _, execErr := db.ExecContext(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)); execErr == nil {
+				return nil
+			}
+		}
+	}
+
+	// 2. Fallback to mysql CLI
 	if path, err := exec.LookPath("mysql"); err == nil {
 		sqlScript := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)
-		args := []string{"-e", sqlScript}
+		var args []string
 		if m.rootPassword != "" {
-			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
+			args = []string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword), "-e", sqlScript}
+		} else {
+			args = []string{"-e", sqlScript}
 		}
 		cmd := exec.CommandContext(ctx, path, args...)
 		_ = cmd.Run()

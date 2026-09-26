@@ -181,9 +181,8 @@ export function Sidebar() {
             {group.items.map((item) => {
               const Icon = item.icon;
               const isActive =
-                item.href === '/dashboard'
-                  ? pathname === '/dashboard'
-                  : pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href));
+                pathname === item.href ||
+                (item.href !== '/' && pathname?.startsWith(item.href + '/'));
 
               return (
                 <Link

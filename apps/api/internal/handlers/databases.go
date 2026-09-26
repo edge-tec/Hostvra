@@ -236,29 +236,49 @@ func (h *DatabaseHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete drops a database or moves it to the recycle bin
 func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	dbID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid database UUID", nil, "")
-		return
-	}
-
+	idParam := strings.TrimSpace(chi.URLParam(r, "id"))
 	recycle := r.URL.Query().Get("recycle_bin") == "true"
-	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
-	if err == nil && db != nil {
-		if !recycle {
-			_ = h.dbMgr.ExecuteDropDatabase(r.Context(), db.Name)
-		}
-	}
 
-	if err := h.store.DeleteDatabase(r.Context(), dbID); err != nil {
-		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete database", nil, "")
+	dbID, err := uuid.Parse(idParam)
+	if err == nil {
+		db, err := h.store.GetDatabaseByID(r.Context(), dbID)
+		if err == nil && db != nil {
+			if !recycle {
+				_ = h.dbMgr.ExecuteDropDatabase(r.Context(), db.Name)
+			}
+		}
+
+		if err := h.store.DeleteDatabase(r.Context(), dbID); err != nil {
+			response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete database", nil, "")
+			return
+		}
+
+		h.audit.Log(r.Context(), r, "database.delete", "database", dbID.String(), "success", "", map[string]interface{}{
+			"recycle_bin": recycle,
+		})
+		response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true, "recycle_bin": recycle}, nil)
 		return
 	}
 
-	h.audit.Log(r.Context(), r, "database.delete", "database", dbID.String(), "success", "", map[string]interface{}{
-		"recycle_bin": recycle,
-	})
-	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true, "recycle_bin": recycle}, nil)
+	// If not a UUID, treat idParam as a database name to drop directly from live MySQL
+	if idParam != "" && !recycle {
+		lower := strings.ToLower(idParam)
+		if lower == "mysql" || lower == "information_schema" || lower == "performance_schema" || lower == "sys" {
+			response.Error(w, http.StatusBadRequest, "PROTECTED_DATABASE", "Cannot drop system database", nil, "")
+			return
+		}
+		if err := h.dbMgr.ExecuteDropDatabase(r.Context(), idParam); err != nil {
+			response.Error(w, http.StatusInternalServerError, "DROP_ERROR", "Failed to drop live database: "+err.Error(), nil, "")
+			return
+		}
+		h.audit.Log(r.Context(), r, "database.drop", "database", idParam, "success", "", map[string]interface{}{
+			"name": idParam,
+		})
+		response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true, "name": idParam}, nil)
+		return
+	}
+
+	response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid database identifier", nil, "")
 }
 
 // GetStatus returns the operational status and version of the database server

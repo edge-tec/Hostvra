@@ -606,6 +606,72 @@ function PhpMyAdminCore() {
     }
   };
 
+  // Drop / Delete Database Functionality
+  const handleDropDatabase = async (dbNameToDrop?: string) => {
+    const target = dbNameToDrop || currentDb;
+    if (!target) return;
+    if (['mysql', 'information_schema', 'performance_schema', 'sys'].includes(target.toLowerCase())) {
+      showToast('Cannot drop MySQL system databases.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to permanently DROP database '${target}'? All tables and data will be destroyed from MySQL immediately.`)) {
+      return;
+    }
+
+    try {
+      const res = await apiFetch<any>('/api/v1/databases/query', {
+        method: 'POST',
+        body: JSON.stringify({
+          database: target === currentDb ? 'mysql' : currentDb,
+          query: `DROP DATABASE IF EXISTS \`${target}\`;`,
+        }),
+      });
+
+      if (res && res.data && res.data.error) {
+        showToast(`Failed to drop database: ${res.data.error}`);
+        return;
+      }
+
+      showToast(`Database '${target}' successfully dropped.`);
+
+      // Also clean up Hostvra metadata store if it was registered there
+      try {
+        const allMetaRes = await apiFetch<any[]>('/api/v1/databases');
+        if (allMetaRes && Array.isArray(allMetaRes.data)) {
+          const match = allMetaRes.data.find((d: any) => d && d.name === target);
+          if (match && match.id) {
+            await apiFetch(`/api/v1/databases/${match.id}`, { method: 'DELETE' });
+          }
+        }
+      } catch (e) {
+        // metadata cleanup error can be ignored
+      }
+
+      // Immediately refresh tree from live MySQL schema
+      const treeRes = await apiFetch<DatabaseTreeNode[]>('/api/v1/databases/tree');
+      if (treeRes && treeRes.success && Array.isArray(treeRes.data)) {
+        setTreeNodes(treeRes.data);
+        if (currentDb === target) {
+          const nextDb = treeRes.data.find(
+            (d) => d.name !== 'information_schema' && d.name !== 'mysql' && d.name !== 'performance_schema' && d.name !== 'sys'
+          ) || treeRes.data[0];
+          if (nextDb) {
+            setCurrentDb(nextDb.name);
+            setSelectedTable('');
+            fetchTableDetails(nextDb.name);
+          } else {
+            setCurrentDb('');
+            setSelectedTable('');
+            setTableDetails([]);
+          }
+        }
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Error dropping database');
+    }
+  };
+
   // Row Delete in Browse Tab
   const handleDeleteRow = async (row: Record<string, any>) => {
     if (!browseData || !browseData.primary_key) {
@@ -1487,14 +1553,14 @@ function PhpMyAdminCore() {
                   <div key={node.name} className="space-y-0.5">
                     {/* Database Node */}
                     <div
-                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition ${
+                      className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl transition group ${
                         isCurrent
                           ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold'
                           : 'hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300'
                       }`}
                     >
                       <div
-                        className="flex items-center gap-1.5 truncate flex-1"
+                        className="flex items-center gap-1.5 truncate flex-1 cursor-pointer"
                         onClick={() => {
                           if (currentDb !== node.name) handleSwitchDb(node.name);
                           setExpandedDbs((prev) => ({ ...prev, [node.name]: !isExpanded }));
@@ -1506,9 +1572,25 @@ function PhpMyAdminCore() {
                         <DatabaseIcon className={`w-3.5 h-3.5 ${isCurrent ? 'text-amber-500' : 'text-slate-400'}`} />
                         <span className="truncate font-mono">{node.name}</span>
                       </div>
-                      <span className="text-[10px] font-mono px-1.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500">
-                        {node.tables?.length || 0}
-                      </span>
+
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-[10px] font-mono px-1.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500">
+                          {node.tables?.length || 0}
+                        </span>
+
+                        {!['mysql', 'information_schema', 'performance_schema', 'sys'].includes(node.name.toLowerCase()) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDropDatabase(node.name);
+                            }}
+                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            title={`Drop database ${node.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Expanded Database Hierarchy */}
@@ -1808,6 +1890,17 @@ function PhpMyAdminCore() {
                         <Plus className="w-3.5 h-3.5" />
                         <span>Create Table</span>
                       </button>
+
+                      {!['mysql', 'information_schema', 'performance_schema', 'sys'].includes((currentDb || '').toLowerCase()) && (
+                        <button
+                          onClick={() => handleDropDatabase(currentDb)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800 text-xs font-bold transition shadow-xs cursor-pointer"
+                          title={`Drop database ${currentDb}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Drop Database</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -2593,6 +2686,27 @@ function PhpMyAdminCore() {
                         Delete Table (DROP)
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {/* Database Danger Zone: Drop Entire Database */}
+                {!['mysql', 'information_schema', 'performance_schema', 'sys'].includes(currentDb.toLowerCase()) && (
+                  <div className="p-4 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 space-y-3 md:col-span-2">
+                    <div className="flex items-center gap-2">
+                      <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
+                      <h3 className="font-bold text-red-900 dark:text-red-200">Database Danger Zone: `{currentDb}`</h3>
+                    </div>
+                    <p className="text-xs text-red-700 dark:text-red-300">
+                      Permanently drop database <strong className="font-mono">{currentDb}</strong> and all of its tables, routines, and data from MySQL. This action is irreversible.
+                    </p>
+                    <button
+                      onClick={() => handleDropDatabase(currentDb)}
+                      disabled={opRunning}
+                      className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-2 transition-colors disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Drop Database ({currentDb})</span>
+                    </button>
                   </div>
                 )}
               </div>
