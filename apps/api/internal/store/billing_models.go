@@ -24,12 +24,20 @@ type HostingPlan struct {
 	PriceMonthly  float64   `json:"price_monthly"`
 	PriceYearly   float64   `json:"price_yearly"`
 	Currency      string    `json:"currency"` // USD, BDT, EUR
+	SetupFee      float64   `json:"setup_fee"`
+	TrialAllowed  bool      `json:"trial_allowed"`
+	TrialDays     int       `json:"trial_days"`
+	IsFeatured    bool      `json:"is_featured"`
+	CPULimit      float64   `json:"cpu_limit"`
+	RAMLimitMB    int       `json:"ram_limit_mb"`
 	DiskSpaceMB   int64     `json:"disk_space_mb"`
 	BandwidthMB   int64     `json:"bandwidth_mb"`
 	MaxWebsites   int       `json:"max_websites"`
 	MaxDatabases  int       `json:"max_databases"`
 	MaxMailboxes  int       `json:"max_mailboxes"`
 	MaxFTP        int       `json:"max_ftp"`
+	MaxCron       int       `json:"max_cron"`
+	MaxSubdomains int       `json:"max_subdomains"`
 	DedicatedIP   bool      `json:"dedicated_ip"`
 	FreeSSL       bool      `json:"free_ssl"`
 	Features      []string  `json:"features"`
@@ -42,6 +50,7 @@ type HostingPlan struct {
 type SubscriptionStatus string
 
 const (
+	SubStatusTrial     SubscriptionStatus = "trial"
 	SubStatusActive    SubscriptionStatus = "active"
 	SubStatusPending   SubscriptionStatus = "pending"
 	SubStatusSuspended SubscriptionStatus = "suspended"
@@ -64,9 +73,20 @@ type Subscription struct {
 	BandwidthUsedMB int64              `json:"bandwidth_used_mb"`
 	WebsitesCount   int                `json:"websites_count"`
 	NextBillingDate time.Time          `json:"next_billing_date"`
+	TrialStartedAt  *time.Time         `json:"trial_started_at,omitempty"`
+	TrialEndsAt     *time.Time         `json:"trial_ends_at,omitempty"`
 	AutoRenew       bool               `json:"auto_renew"`
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
+}
+
+type TrialSettings struct {
+	Enabled              bool      `json:"enabled"`
+	DefaultDays          int       `json:"default_days"`
+	RequirePaymentMethod bool      `json:"require_payment_method"`
+	OneTrialPerCustomer  bool      `json:"one_trial_per_customer"`
+	AutoSuspendOnExpiry  bool      `json:"auto_suspend_on_expiry"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 type InvoiceStatus string

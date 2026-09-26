@@ -26,22 +26,30 @@ func (m *MemoryStore) seedBillingData() {
 		now := time.Now().UTC()
 		seedPlans := []*HostingPlan{
 			{
-				ID:           uuid.MustParse("10000000-0000-0000-0000-000000000001"),
-				Name:         "Starter Cloud",
-				Slug:         "starter-cloud",
-				Description:  "Perfect for personal websites, blogs, and lightweight web projects.",
-				Tier:         PlanTierStarter,
-				PriceMonthly: 4.99,
-				PriceYearly:  49.99,
-				Currency:     "USD",
-				DiskSpaceMB:  10240,  // 10 GB
-				BandwidthMB:  102400, // 100 GB
-				MaxWebsites:  1,
-				MaxDatabases: 2,
-				MaxMailboxes: 5,
-				MaxFTP:       2,
-				DedicatedIP:  false,
-				FreeSSL:      true,
+				ID:            uuid.MustParse("10000000-0000-0000-0000-000000000001"),
+				Name:          "Starter Cloud",
+				Slug:          "starter-cloud",
+				Description:   "Perfect for personal websites, blogs, and lightweight web projects.",
+				Tier:          PlanTierStarter,
+				PriceMonthly:  4.99,
+				PriceYearly:   49.99,
+				Currency:      "USD",
+				SetupFee:      0.00,
+				TrialAllowed:  true,
+				TrialDays:     14,
+				IsFeatured:    false,
+				CPULimit:      1.0,
+				RAMLimitMB:    1024,
+				DiskSpaceMB:   10240,  // 10 GB
+				BandwidthMB:   102400, // 100 GB
+				MaxWebsites:   1,
+				MaxDatabases:  2,
+				MaxMailboxes:  5,
+				MaxFTP:        2,
+				MaxCron:       5,
+				MaxSubdomains: 10,
+				DedicatedIP:   false,
+				FreeSSL:       true,
 				Features: []string{
 					"1 Hosted Website",
 					"10 GB NVMe SSD Storage",
@@ -58,22 +66,30 @@ func (m *MemoryStore) seedBillingData() {
 				UpdatedAt: now,
 			},
 			{
-				ID:           uuid.MustParse("10000000-0000-0000-0000-000000000002"),
-				Name:         "Business Cloud",
-				Slug:         "business-cloud",
-				Description:  "Fast, reliable SSD hosting engineered for small businesses and e-commerce stores.",
-				Tier:         PlanTierBusiness,
-				PriceMonthly: 9.99,
-				PriceYearly:  99.99,
-				Currency:     "USD",
-				DiskSpaceMB:  51200,  // 50 GB
-				BandwidthMB:  512000, // 500 GB
-				MaxWebsites:  5,
-				MaxDatabases: 10,
-				MaxMailboxes: 25,
-				MaxFTP:       10,
-				DedicatedIP:  false,
-				FreeSSL:      true,
+				ID:            uuid.MustParse("10000000-0000-0000-0000-000000000002"),
+				Name:          "Business Cloud",
+				Slug:          "business-cloud",
+				Description:   "Fast, reliable SSD hosting engineered for small businesses and e-commerce stores.",
+				Tier:          PlanTierBusiness,
+				PriceMonthly:  9.99,
+				PriceYearly:   99.99,
+				Currency:      "USD",
+				SetupFee:      0.00,
+				TrialAllowed:  true,
+				TrialDays:     14,
+				IsFeatured:    true,
+				CPULimit:      2.0,
+				RAMLimitMB:    2048,
+				DiskSpaceMB:   51200,  // 50 GB
+				BandwidthMB:   512000, // 500 GB
+				MaxWebsites:   5,
+				MaxDatabases:  10,
+				MaxMailboxes:  25,
+				MaxFTP:        10,
+				MaxCron:       15,
+				MaxSubdomains: 25,
+				DedicatedIP:   false,
+				FreeSSL:       true,
 				Features: []string{
 					"5 Hosted Websites",
 					"50 GB NVMe SSD Storage",
@@ -91,22 +107,30 @@ func (m *MemoryStore) seedBillingData() {
 				UpdatedAt: now,
 			},
 			{
-				ID:           uuid.MustParse("10000000-0000-0000-0000-000000000003"),
-				Name:         "Enterprise Cloud",
-				Slug:         "enterprise-cloud",
-				Description:  "Dedicated isolated resources, ultra-fast NVMe, and priority SLA for mission-critical apps.",
-				Tier:         PlanTierEnterprise,
-				PriceMonthly: 24.99,
-				PriceYearly:  249.99,
-				Currency:     "USD",
-				DiskSpaceMB:  204800,  // 200 GB
-				BandwidthMB:  2048000, // 2000 GB
-				MaxWebsites:  25,
-				MaxDatabases: 100,
-				MaxMailboxes: 100,
-				MaxFTP:       50,
-				DedicatedIP:  true,
-				FreeSSL:      true,
+				ID:            uuid.MustParse("10000000-0000-0000-0000-000000000003"),
+				Name:          "Enterprise Cloud",
+				Slug:          "enterprise-cloud",
+				Description:   "Dedicated isolated resources, ultra-fast NVMe, and priority SLA for mission-critical apps.",
+				Tier:          PlanTierEnterprise,
+				PriceMonthly:  24.99,
+				PriceYearly:   249.99,
+				Currency:      "USD",
+				SetupFee:      0.00,
+				TrialAllowed:  false,
+				TrialDays:     0,
+				IsFeatured:    false,
+				CPULimit:      4.0,
+				RAMLimitMB:    4096,
+				DiskSpaceMB:   204800,  // 200 GB
+				BandwidthMB:   2048000, // 2000 GB
+				MaxWebsites:   25,
+				MaxDatabases:  100,
+				MaxMailboxes:  100,
+				MaxFTP:        50,
+				MaxCron:       50,
+				MaxSubdomains: 100,
+				DedicatedIP:   true,
+				FreeSSL:       true,
 				Features: []string{
 					"25 Hosted Websites / Staging Environments",
 					"200 GB Ultra NVMe Storage",
@@ -124,22 +148,30 @@ func (m *MemoryStore) seedBillingData() {
 				UpdatedAt: now,
 			},
 			{
-				ID:           uuid.MustParse("10000000-0000-0000-0000-000000000004"),
-				Name:         "Reseller Cloud Pro",
-				Slug:         "reseller-cloud-pro",
-				Description:  "Start your own web hosting agency with white-label control and individual client cPanels.",
-				Tier:         PlanTierReseller,
-				PriceMonthly: 49.99,
-				PriceYearly:  499.99,
-				Currency:     "USD",
-				DiskSpaceMB:  512000,  // 500 GB
-				BandwidthMB:  5120000, // 5 TB
-				MaxWebsites:  100,
-				MaxDatabases: 200,
-				MaxMailboxes: 500,
-				MaxFTP:       100,
-				DedicatedIP:  true,
-				FreeSSL:      true,
+				ID:            uuid.MustParse("10000000-0000-0000-0000-000000000004"),
+				Name:          "Reseller Cloud Pro",
+				Slug:          "reseller-cloud-pro",
+				Description:   "Start your own web hosting agency with white-label control and individual client cPanels.",
+				Tier:          PlanTierReseller,
+				PriceMonthly:  49.99,
+				PriceYearly:   499.99,
+				Currency:      "USD",
+				SetupFee:      0.00,
+				TrialAllowed:  false,
+				TrialDays:     0,
+				IsFeatured:    false,
+				CPULimit:      8.0,
+				RAMLimitMB:    16384,
+				DiskSpaceMB:   512000,  // 500 GB
+				BandwidthMB:   5120000, // 5 TB
+				MaxWebsites:   100,
+				MaxDatabases:  200,
+				MaxMailboxes:  500,
+				MaxFTP:        100,
+				MaxCron:       100,
+				MaxSubdomains: 500,
+				DedicatedIP:   true,
+				FreeSSL:       true,
 				Features: []string{
 					"100 Client cPanel Accounts",
 					"500 GB Enterprise NVMe Pool",
@@ -384,6 +416,55 @@ func (m *MemoryStore) UpdateSubscription(ctx context.Context, sub *Subscription)
 	sub.UpdatedAt = time.Now().UTC()
 
 	m.subscriptions[sub.ID] = sub
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) ListAllSubscriptions(ctx context.Context) ([]*Subscription, error) {
+	return m.ListSubscriptions(ctx, uuid.Nil)
+}
+
+func (m *MemoryStore) ListTrials(ctx context.Context) ([]*Subscription, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var trials []*Subscription
+	for _, s := range m.subscriptions {
+		if s.Status == SubStatusTrial || s.TrialEndsAt != nil {
+			trials = append(trials, s)
+		}
+	}
+	sort.Slice(trials, func(i, j int) bool {
+		return trials[i].CreatedAt.After(trials[j].CreatedAt)
+	})
+	return trials, nil
+}
+
+func (m *MemoryStore) GetTrialSettings(ctx context.Context) (*TrialSettings, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.trialSettings == nil {
+		return &TrialSettings{
+			Enabled:              true,
+			DefaultDays:          14,
+			RequirePaymentMethod: false,
+			OneTrialPerCustomer:  true,
+			AutoSuspendOnExpiry:  true,
+			UpdatedAt:            time.Now().UTC(),
+		}, nil
+	}
+	copy := *m.trialSettings
+	return &copy, nil
+}
+
+func (m *MemoryStore) SaveTrialSettings(ctx context.Context, settings *TrialSettings) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	settings.UpdatedAt = time.Now().UTC()
+	copy := *settings
+	m.trialSettings = &copy
 	m.saveToDiskLocked()
 	return nil
 }
@@ -776,6 +857,59 @@ func (p *PostgresStore) UpdateSubscription(ctx context.Context, sub *Subscriptio
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
 		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *PostgresStore) ListAllSubscriptions(ctx context.Context) ([]*Subscription, error) {
+	return p.ListSubscriptions(ctx, uuid.Nil)
+}
+
+func (p *PostgresStore) ListTrials(ctx context.Context) ([]*Subscription, error) {
+	subs, err := p.ListSubscriptions(ctx, uuid.Nil)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListTrials(ctx)
+	}
+	var trials []*Subscription
+	for _, s := range subs {
+		if s.Status == SubStatusTrial || s.TrialEndsAt != nil {
+			trials = append(trials, s)
+		}
+	}
+	return trials, nil
+}
+
+func (p *PostgresStore) GetTrialSettings(ctx context.Context) (*TrialSettings, error) {
+	query := `SELECT enabled, default_days, require_payment_method, one_trial_per_customer, auto_suspend_on_expiry, updated_at FROM trial_settings WHERE id = 1`
+	ts := &TrialSettings{}
+	err := p.db.QueryRowContext(ctx, query).Scan(
+		&ts.Enabled, &ts.DefaultDays, &ts.RequirePaymentMethod, &ts.OneTrialPerCustomer, &ts.AutoSuspendOnExpiry, &ts.UpdatedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.GetTrialSettings(ctx)
+	}
+	return ts, nil
+}
+
+func (p *PostgresStore) SaveTrialSettings(ctx context.Context, settings *TrialSettings) error {
+	settings.UpdatedAt = time.Now().UTC()
+	query := `
+		INSERT INTO trial_settings (id, enabled, default_days, require_payment_method, one_trial_per_customer, auto_suspend_on_expiry, updated_at)
+		VALUES (1, $1, $2, $3, $4, $5, $6)
+		ON CONFLICT (id) DO UPDATE SET
+			enabled = EXCLUDED.enabled,
+			default_days = EXCLUDED.default_days,
+			require_payment_method = EXCLUDED.require_payment_method,
+			one_trial_per_customer = EXCLUDED.one_trial_per_customer,
+			auto_suspend_on_expiry = EXCLUDED.auto_suspend_on_expiry,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err := p.db.ExecContext(ctx, query, settings.Enabled, settings.DefaultDays, settings.RequirePaymentMethod, settings.OneTrialPerCustomer, settings.AutoSuspendOnExpiry, settings.UpdatedAt)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.SaveTrialSettings(ctx, settings)
 	}
 	return nil
 }

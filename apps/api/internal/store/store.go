@@ -193,11 +193,15 @@ type Store interface {
 	UpdatePlan(ctx context.Context, plan *HostingPlan) error
 	DeletePlan(ctx context.Context, id uuid.UUID) error
 
-	// Subscriptions
+	// Subscriptions & Trials
 	ListSubscriptions(ctx context.Context, orgID uuid.UUID) ([]*Subscription, error)
+	ListAllSubscriptions(ctx context.Context) ([]*Subscription, error)
+	ListTrials(ctx context.Context) ([]*Subscription, error)
 	GetSubscriptionByID(ctx context.Context, id uuid.UUID) (*Subscription, error)
 	CreateSubscription(ctx context.Context, sub *Subscription) error
 	UpdateSubscription(ctx context.Context, sub *Subscription) error
+	GetTrialSettings(ctx context.Context) (*TrialSettings, error)
+	SaveTrialSettings(ctx context.Context, settings *TrialSettings) error
 
 	// Invoices
 	ListInvoices(ctx context.Context, orgID uuid.UUID) ([]*Invoice, error)
@@ -362,6 +366,7 @@ type MemoryStore struct {
 	hostingPlans        map[uuid.UUID]*HostingPlan
 	subscriptions       map[uuid.UUID]*Subscription
 	invoices            map[uuid.UUID]*Invoice
+	trialSettings       *TrialSettings
 	gatewayConfigs      map[string]*PaymentGatewayConfig
 	hostingAccounts     map[uuid.UUID]*HostingAccount
 	tldPricings         map[string]*TLDPricing
@@ -616,6 +621,14 @@ func NewMemoryStore() *MemoryStore {
 		hostingPlans:        make(map[uuid.UUID]*HostingPlan),
 		subscriptions:       make(map[uuid.UUID]*Subscription),
 		invoices:            make(map[uuid.UUID]*Invoice),
+		trialSettings: &TrialSettings{
+			Enabled:              true,
+			DefaultDays:          14,
+			RequirePaymentMethod: false,
+			OneTrialPerCustomer:  true,
+			AutoSuspendOnExpiry:  true,
+			UpdatedAt:            time.Now().UTC(),
+		},
 		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
 		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
 		tldPricings:         make(map[string]*TLDPricing),

@@ -807,12 +807,20 @@ export interface HostingPlan {
   price_monthly: number;
   price_yearly: number;
   currency: string;
+  setup_fee?: number;
+  trial_allowed?: boolean;
+  trial_days?: number;
+  is_featured?: boolean;
+  cpu_limit?: number;
+  ram_limit_mb?: number;
   disk_space_mb: number;
   bandwidth_mb: number;
   max_websites: number;
   max_databases: number;
   max_mailboxes: number;
   max_ftp: number;
+  max_cron?: number;
+  max_subdomains?: number;
   dedicated_ip: boolean;
   free_ssl: boolean;
   features: string[];
@@ -829,7 +837,7 @@ export interface Subscription {
   plan_id: string;
   plan_name: string;
   server_id?: string;
-  status: 'active' | 'pending' | 'suspended' | 'cancelled' | 'expired';
+  status: 'active' | 'pending' | 'suspended' | 'cancelled' | 'expired' | 'trial';
   billing_cycle: 'monthly' | 'yearly';
   amount: number;
   currency: string;
@@ -837,9 +845,20 @@ export interface Subscription {
   bandwidth_used_mb: number;
   websites_count: number;
   next_billing_date: string;
+  trial_started_at?: string;
+  trial_ends_at?: string;
   auto_renew: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface TrialSettings {
+  enabled: boolean;
+  default_days: number;
+  require_payment_method: boolean;
+  one_trial_per_customer: boolean;
+  auto_suspend_on_expiry: boolean;
+  updated_at?: string;
 }
 
 export interface Invoice {

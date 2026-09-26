@@ -39,8 +39,9 @@ import {
   Building,
   User,
   ShieldAlert,
+  Gift,
 } from 'lucide-react';
-import { apiFetch, HostingPlan, Subscription, Invoice, PaymentGatewayConfig } from '@/lib/api';
+import { apiFetch, HostingPlan, Subscription, Invoice, PaymentGatewayConfig, TrialSettings } from '@/lib/api';
 
 // Fallback initial plans for seamless offline/fallback preview
 const DEFAULT_PLANS: HostingPlan[] = [
@@ -53,12 +54,20 @@ const DEFAULT_PLANS: HostingPlan[] = [
     price_monthly: 4.99,
     price_yearly: 49.99,
     currency: 'USD',
+    setup_fee: 0,
+    trial_allowed: true,
+    trial_days: 14,
+    is_featured: false,
+    cpu_limit: 1,
+    ram_limit_mb: 2048,
     disk_space_mb: 10240,
     bandwidth_mb: 102400,
     max_websites: 1,
     max_databases: 2,
     max_mailboxes: 5,
     max_ftp: 2,
+    max_cron: 5,
+    max_subdomains: 10,
     dedicated_ip: false,
     free_ssl: true,
     features: [
@@ -83,12 +92,20 @@ const DEFAULT_PLANS: HostingPlan[] = [
     price_monthly: 9.99,
     price_yearly: 99.99,
     currency: 'USD',
+    setup_fee: 0,
+    trial_allowed: true,
+    trial_days: 14,
+    is_featured: true,
+    cpu_limit: 2,
+    ram_limit_mb: 4096,
     disk_space_mb: 51200,
     bandwidth_mb: 512000,
     max_websites: 5,
     max_databases: 10,
     max_mailboxes: 25,
     max_ftp: 10,
+    max_cron: 20,
+    max_subdomains: 50,
     dedicated_ip: false,
     free_ssl: true,
     features: [
@@ -114,12 +131,20 @@ const DEFAULT_PLANS: HostingPlan[] = [
     price_monthly: 24.99,
     price_yearly: 249.99,
     currency: 'USD',
+    setup_fee: 0,
+    trial_allowed: false,
+    trial_days: 0,
+    is_featured: false,
+    cpu_limit: 4,
+    ram_limit_mb: 8192,
     disk_space_mb: 204800,
     bandwidth_mb: 2048000,
     max_websites: 25,
     max_databases: 100,
     max_mailboxes: 100,
     max_ftp: 50,
+    max_cron: 50,
+    max_subdomains: 100,
     dedicated_ip: true,
     free_ssl: true,
     features: [
@@ -145,12 +170,20 @@ const DEFAULT_PLANS: HostingPlan[] = [
     price_monthly: 49.99,
     price_yearly: 499.99,
     currency: 'USD',
+    setup_fee: 0,
+    trial_allowed: false,
+    trial_days: 0,
+    is_featured: false,
+    cpu_limit: 8,
+    ram_limit_mb: 16384,
     disk_space_mb: 512000,
     bandwidth_mb: 5120000,
     max_websites: 100,
     max_databases: 200,
     max_mailboxes: 500,
     max_ftp: 100,
+    max_cron: 100,
+    max_subdomains: 500,
     dedicated_ip: true,
     free_ssl: true,
     features: [
@@ -212,7 +245,7 @@ const DEFAULT_GATEWAYS: PaymentGatewayConfig[] = [
 ];
 
 export default function BillingPage() {
-  const [activeTab, setActiveTab] = useState<'packages' | 'subscriptions' | 'invoices' | 'gateways' | 'admin'>('packages');
+  const [activeTab, setActiveTab] = useState<'packages' | 'subscriptions' | 'invoices' | 'gateways' | 'admin' | 'trials'>('packages');
   const [currency, setCurrency] = useState<'USD' | 'BDT'>('USD');
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
 
@@ -221,6 +254,14 @@ export default function BillingPage() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [gateways, setGateways] = useState<PaymentGatewayConfig[]>(DEFAULT_GATEWAYS);
+  const [trialSettings, setTrialSettings] = useState<TrialSettings>({
+    enabled: true,
+    default_days: 14,
+    require_payment_method: false,
+    one_trial_per_customer: true,
+    auto_suspend_on_expiry: true,
+  });
+  const [trialsList, setTrialsList] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -243,6 +284,11 @@ export default function BillingPage() {
   // Admin Plan Editor Modal
   const [planModalOpen, setPlanModalOpen] = useState(false);
   const [editingPlan, setEditingPlan] = useState<Partial<HostingPlan> | null>(null);
+
+  // Extend Trial Modal
+  const [extendModalOpen, setExtendModalOpen] = useState(false);
+  const [selectedTrialForExtend, setSelectedTrialForExtend] = useState<Subscription | null>(null);
+  const [extendDays, setExtendDays] = useState<number>(7);
 
   const BDT_RATE = 120; // 1 USD = 120 BDT
 
@@ -285,6 +331,26 @@ export default function BillingPage() {
       const gwRes = await apiFetch<PaymentGatewayConfig[]>('/api/v1/billing/gateways');
       if (gwRes.data && gwRes.data.length > 0) {
         setGateways(gwRes.data);
+      }
+
+      // 5. Load trial settings
+      try {
+        const tsRes = await apiFetch<TrialSettings>('/api/v1/billing/trial-settings');
+        if (tsRes.data) {
+          setTrialSettings(tsRes.data);
+        }
+      } catch (tsErr) {
+        console.warn('Trial settings fetch notice:', tsErr);
+      }
+
+      // 6. Load trials
+      try {
+        const trialsRes = await apiFetch<Subscription[]>('/api/v1/billing/trials');
+        if (trialsRes.data) {
+          setTrialsList(trialsRes.data);
+        }
+      } catch (trErr) {
+        console.warn('Trials fetch notice:', trErr);
       }
     } catch (err: any) {
       console.warn('Backend billing fetch notice:', err);
@@ -496,10 +562,139 @@ export default function BillingPage() {
     }
   };
 
+  // Start Free Trial Directly
+  const handleStartFreeTrial = async (plan: HostingPlan) => {
+    setActionLoading(`trial-${plan.id}`);
+    try {
+      const res = await apiFetch<any>('/api/v1/billing/subscriptions', {
+        method: 'POST',
+        body: JSON.stringify({
+          plan_id: plan.id,
+          billing_cycle: 'monthly',
+          start_trial: true,
+        }),
+      });
+
+      if (res.data) {
+        showNotify('success', `Congratulations! Your 14-day free trial of ${plan.name} has been activated!`);
+        await loadData();
+        setActiveTab('subscriptions');
+      } else {
+        showNotify('error', res.error?.message || 'Failed to start free trial');
+      }
+    } catch (err: any) {
+      showNotify('error', err.message || 'Error starting free trial');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Save Trial Settings (Admin)
+  const handleSaveTrialSettings = async () => {
+    setActionLoading('save-trial-settings');
+    try {
+      const res = await apiFetch<TrialSettings>('/api/v1/billing/trial-settings', {
+        method: 'PUT',
+        body: JSON.stringify(trialSettings),
+      });
+      if (res.data) {
+        setTrialSettings(res.data);
+        showNotify('success', 'Master trial settings updated successfully!');
+      } else {
+        showNotify('error', res.error?.message || 'Failed to update trial settings');
+      }
+    } catch (err: any) {
+      showNotify('error', err.message || 'Error saving trial settings');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Confirm Trial Extension
+  const handleConfirmExtendTrial = async () => {
+    if (!selectedTrialForExtend) return;
+    setActionLoading(`extend-${selectedTrialForExtend.id}`);
+    try {
+      const res = await apiFetch<any>(`/api/v1/billing/trials/${selectedTrialForExtend.id}/extend`, {
+        method: 'POST',
+        body: JSON.stringify({ days: extendDays }),
+      });
+      if (res.data) {
+        showNotify('success', `Free trial extended by ${extendDays} days!`);
+        setExtendModalOpen(false);
+        loadData();
+      } else {
+        showNotify('error', res.error?.message || 'Failed to extend trial');
+      }
+    } catch (err: any) {
+      showNotify('error', err.message || 'Error extending trial');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // End Trial Immediately
+  const handleEndTrial = async (subId: string) => {
+    if (!confirm('Are you sure you want to end this customer free trial immediately?')) return;
+    setActionLoading(`end-${subId}`);
+    try {
+      const res = await apiFetch<any>(`/api/v1/billing/trials/${subId}/end`, {
+        method: 'POST',
+      });
+      if (res.data) {
+        showNotify('success', 'Trial has been ended and subscription marked as cancelled.');
+        loadData();
+      } else {
+        showNotify('error', res.error?.message || 'Failed to end trial');
+      }
+    } catch (err: any) {
+      showNotify('error', err.message || 'Error ending trial');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Convert Trial to Paid Subscription
+  const handleConvertTrial = async (subId: string) => {
+    setActionLoading(`convert-${subId}`);
+    try {
+      const res = await apiFetch<any>(`/api/v1/billing/trials/${subId}/convert`, {
+        method: 'POST',
+      });
+      if (res.data) {
+        showNotify('success', 'Trial converted to paid subscription! Invoice created.');
+        await loadData();
+        setActiveTab('invoices');
+      } else {
+        showNotify('error', res.error?.message || 'Failed to convert trial');
+      }
+    } catch (err: any) {
+      showNotify('error', err.message || 'Error converting trial');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Total active subscriptions count
   const activeSubsCount = useMemo(() => {
     return subscriptions.filter(s => s.status === 'active').length;
   }, [subscriptions]);
+
+  // Active trials count
+  const activeTrialsCount = useMemo(() => {
+    return (trialsList.length > 0 ? trialsList : subscriptions).filter(s => s.status === 'trial').length;
+  }, [subscriptions, trialsList]);
+
+  // Converted trials count
+  const convertedTrialsCount = useMemo(() => {
+    return trialsList.filter(t => t.status === 'active').length;
+  }, [trialsList]);
+
+  // Trial conversion rate %
+  const trialConversionRate = useMemo(() => {
+    if (trialsList.length === 0) return 0;
+    return Math.round((convertedTrialsCount / trialsList.length) * 100);
+  }, [trialsList, convertedTrialsCount]);
 
   // Unpaid invoices count
   const unpaidInvoicesCount = useMemo(() => {
@@ -553,6 +748,10 @@ export default function BillingPage() {
                 <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{activeSubsCount}</div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Active Subscriptions</div>
               </div>
+              <div className="px-4 py-2 text-center border-r border-slate-200 dark:border-slate-700 last:border-0">
+                <div className="text-2xl font-black text-purple-600 dark:text-purple-400">{activeTrialsCount}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Free Trials</div>
+              </div>
               <div className="px-4 py-2 text-center">
                 <div className="text-2xl font-black text-amber-600 dark:text-amber-400">{unpaidInvoicesCount}</div>
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">Unpaid Invoices</div>
@@ -590,6 +789,23 @@ export default function BillingPage() {
               {activeSubsCount > 0 && (
                 <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                   {activeSubsCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('trials')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all relative ${
+                activeTab === 'trials'
+                  ? 'bg-white dark:bg-slate-900 text-purple-600 dark:text-purple-400 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Gift className="w-4 h-4 text-purple-500" />
+              <span>Free Trials</span>
+              {activeTrialsCount > 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-purple-500 text-white">
+                  {activeTrialsCount}
                 </span>
               )}
             </button>
@@ -736,6 +952,11 @@ export default function BillingPage() {
                         Hosting Agency
                       </div>
                     )}
+                    {plan.trial_allowed && !isFeatured && !isReseller && (
+                      <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3.5 py-1 rounded-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-[11px] font-extrabold uppercase tracking-widest shadow-md">
+                        {plan.trial_days || 14}-Day Free Trial
+                      </div>
+                    )}
 
                     <div>
                       {/* Plan Header */}
@@ -777,6 +998,12 @@ export default function BillingPage() {
                             ? `Billed annually at ${formatPrice(price)} /yr`
                             : 'Renews automatically every month'}
                         </div>
+                        {plan.trial_allowed && (
+                          <div className="mt-2 text-xs font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                            <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                            <span>Includes {plan.trial_days || 14}-Day Free Trial</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Quotas Quick Grid */}
@@ -841,19 +1068,37 @@ export default function BillingPage() {
                     </div>
 
                     {/* Order Action Button */}
-                    <button
-                      onClick={() => handleOpenCheckout(plan)}
-                      className={`w-full py-3.5 px-5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${
-                        isFeatured
-                          ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25 hover:shadow-lg'
-                          : isReseller
-                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
-                          : 'bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900'
-                      }`}
-                    >
-                      <span>Get Started</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                    <div className="space-y-2 mt-auto">
+                      <button
+                        onClick={() => handleOpenCheckout(plan)}
+                        className={`w-full py-3.5 px-5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${
+                          isFeatured
+                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25 hover:shadow-lg'
+                            : isReseller
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
+                            : 'bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900'
+                        }`}
+                      >
+                        <span>Get Started</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+
+                      {plan.trial_allowed && (
+                        <button
+                          type="button"
+                          onClick={() => handleStartFreeTrial(plan)}
+                          disabled={actionLoading === `trial-${plan.id}`}
+                          className="w-full py-2.5 px-4 rounded-xl text-xs font-bold border border-purple-500/30 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-colors flex items-center justify-center gap-2"
+                        >
+                          {actionLoading === `trial-${plan.id}` ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Gift className="w-3.5 h-3.5" />
+                          )}
+                          <span>Start {plan.trial_days || 14}-Day Free Trial</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -948,26 +1193,42 @@ export default function BillingPage() {
                               </h3>
                               <span
                                 className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider ${
-                                  sub.status === 'active'
+                                  sub.status === 'trial'
+                                    ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30'
+                                    : sub.status === 'active'
                                     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                                     : sub.status === 'pending'
                                     ? 'bg-amber-500/15 text-amber-600'
                                     : 'bg-rose-500/15 text-rose-600'
                                 }`}
                               >
-                                {sub.status === 'active' ? 'Active' : sub.status}
+                                {sub.status === 'trial' ? 'Free Trial' : sub.status === 'active' ? 'Active' : sub.status}
                               </span>
                             </div>
                             <div className="text-xs text-slate-400 mt-1">
                               Billing Cycle: <span className="font-semibold text-slate-700 dark:text-slate-300">{sub.billing_cycle === 'yearly' ? 'Yearly' : 'Monthly'}</span> | Price: <span className="font-bold text-blue-600 dark:text-blue-400">{formatPrice(sub.amount)}</span>
                             </div>
+                            {sub.status === 'trial' && sub.trial_ends_at && (
+                              <div className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-purple-600 dark:text-purple-400">
+                                <Clock className="w-3.5 h-3.5 text-purple-500" />
+                                <span>
+                                  Trial ends {new Date(sub.trial_ends_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {(() => {
+                                    const diff = Math.ceil((new Date(sub.trial_ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                    return diff > 0 ? ` (${diff} days left)` : ' (Expires today)';
+                                  })()}
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           <div className="text-right">
-                            <div className="text-[11px] text-slate-400 font-medium">Next Billing Date</div>
+                            <div className="text-[11px] text-slate-400 font-medium">
+                              {sub.status === 'trial' ? 'Trial Expiry' : 'Next Billing Date'}
+                            </div>
                             <div className="text-xs font-bold text-slate-800 dark:text-slate-200 mt-0.5 flex items-center gap-1 justify-end">
                               <Calendar className="w-3.5 h-3.5 text-blue-500" />
-                              {new Date(sub.next_billing_date).toLocaleDateString('en-US', {
+                              {new Date(sub.status === 'trial' && sub.trial_ends_at ? sub.trial_ends_at : sub.next_billing_date).toLocaleDateString('en-US', {
                                 year: 'numeric',
                                 month: 'short',
                                 day: 'numeric',
@@ -1035,32 +1296,72 @@ export default function BillingPage() {
 
                       {/* Card Actions */}
                       <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleRenewSubscription(sub)}
-                            disabled={actionLoading === `renew-${sub.id}`}
-                            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 transition-colors flex items-center gap-1.5"
-                          >
-                            <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === `renew-${sub.id}` ? 'animate-spin' : ''}`} />
-                            <span>Renew</span>
-                          </button>
+                        {sub.status === 'trial' ? (
+                          <div className="flex items-center gap-2 w-full justify-between">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleConvertTrial(sub.id)}
+                                disabled={actionLoading === `convert-${sub.id}`}
+                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm transition-all flex items-center gap-1.5"
+                              >
+                                {actionLoading === `convert-${sub.id}` ? (
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Zap className="w-3.5 h-3.5" />
+                                )}
+                                <span>Convert to Paid</span>
+                              </button>
 
-                          <button
-                            onClick={() => setActiveTab('packages')}
-                            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
-                          >
-                            Upgrade
-                          </button>
-                        </div>
+                              <button
+                                onClick={() => {
+                                  setSelectedTrialForExtend(sub);
+                                  setExtendModalOpen(true);
+                                }}
+                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 transition-colors flex items-center gap-1.5"
+                              >
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>Extend</span>
+                              </button>
+                            </div>
 
-                        {sub.status === 'active' && (
-                          <button
-                            onClick={() => handleCancelSubscription(sub)}
-                            disabled={actionLoading === `cancel-${sub.id}`}
-                            className="text-xs font-bold text-rose-500 hover:text-rose-600 transition-colors"
-                          >
-                            Cancel
-                          </button>
+                            <button
+                              onClick={() => handleEndTrial(sub.id)}
+                              disabled={actionLoading === `end-${sub.id}`}
+                              className="text-xs font-bold text-rose-500 hover:text-rose-600 transition-colors"
+                            >
+                              End Trial
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleRenewSubscription(sub)}
+                                disabled={actionLoading === `renew-${sub.id}`}
+                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/50 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 transition-colors flex items-center gap-1.5"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === `renew-${sub.id}` ? 'animate-spin' : ''}`} />
+                                <span>Renew</span>
+                              </button>
+
+                              <button
+                                onClick={() => setActiveTab('packages')}
+                                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                              >
+                                Upgrade
+                              </button>
+                            </div>
+
+                            {sub.status === 'active' && (
+                              <button
+                                onClick={() => handleCancelSubscription(sub)}
+                                disabled={actionLoading === `cancel-${sub.id}`}
+                                className="text-xs font-bold text-rose-500 hover:text-rose-600 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
@@ -1337,6 +1638,7 @@ export default function BillingPage() {
                       <th className="py-4 px-6">Yearly Price</th>
                       <th className="py-4 px-6">Disk Space</th>
                       <th className="py-4 px-6">Domain Quota</th>
+                      <th className="py-4 px-6">Free Trial</th>
                       <th className="py-4 px-6">Status</th>
                       <th className="py-4 px-6 text-right">Action</th>
                     </tr>
@@ -1362,6 +1664,17 @@ export default function BillingPage() {
                         </td>
                         <td className="py-4 px-6 font-semibold text-slate-700 dark:text-slate-300">
                           {p.max_websites} Sites
+                        </td>
+                        <td className="py-4 px-6">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              p.trial_allowed
+                                ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {p.trial_allowed ? `${p.trial_days || 14}d Trial` : 'Disabled'}
+                          </span>
                         </td>
                         <td className="py-4 px-6">
                           <span
@@ -1400,6 +1713,370 @@ export default function BillingPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 6: FREE TRIALS & CONVERSION MANAGER */}
+        {activeTab === 'trials' && (
+          <div className="space-y-8 animate-in fade-in duration-300">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Gift className="w-5 h-5 text-purple-500" />
+                  <span>Free Trial Subscriptions & Platform Policies</span>
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Supervise customer 14-day free trials, manage anti-abuse policies, extend durations, and convert trials directly to paid subscriptions.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setActiveTab('packages')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow-md shadow-purple-600/20 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Start New Free Trial</span>
+              </button>
+            </div>
+
+            {/* Trial Key Metrics */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Trials Initiated</div>
+                <div className="text-3xl font-black text-slate-900 dark:text-white mt-1">
+                  {trialsList.length > 0 ? trialsList.length : subscriptions.filter(s => s.status === 'trial').length}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">From landing page and dashboard</div>
+              </div>
+
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Trials In Progress</div>
+                <div className="text-3xl font-black text-purple-600 dark:text-purple-400 mt-1">
+                  {activeTrialsCount}
+                </div>
+                <div className="text-[11px] text-purple-500/80 mt-1">Currently evaluating Hostvra stack</div>
+              </div>
+
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Converted to Paid</div>
+                <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1">
+                  {convertedTrialsCount}
+                </div>
+                <div className="text-[11px] text-emerald-500/80 mt-1">Upgraded into recurring subscriptions</div>
+              </div>
+
+              <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
+                <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Conversion Rate</div>
+                <div className="text-3xl font-black text-blue-600 dark:text-blue-400 mt-1">
+                  {trialConversionRate}%
+                </div>
+                <div className="text-[11px] text-blue-500/80 mt-1">Trial-to-paid customer conversion</div>
+              </div>
+            </div>
+
+            {/* Trial Settings & Abuse Policy Card */}
+            <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                    <Sliders className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Global Free Trial Policies & Anti-Abuse Controls
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Enforce system-wide trial duration limits, master toggle, and anti-abuse safeguards.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveTrialSettings}
+                  disabled={actionLoading === 'save-trial-settings'}
+                  className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-500/20 transition-all flex items-center gap-2"
+                >
+                  {actionLoading === 'save-trial-settings' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  <span>Save Policy Settings</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-xs">
+                {/* Master Switch */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 space-y-3 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 dark:text-white">Master Trial Switch</span>
+                      <button
+                        type="button"
+                        onClick={() => setTrialSettings(s => ({ ...s, enabled: !s.enabled }))}
+                        className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                          trialSettings.enabled ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            trialSettings.enabled ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                      Allow new customers to activate instant hosting trials without initial payment.
+                    </p>
+                  </div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                    {trialSettings.enabled ? 'Master Switch: Enabled' : 'Master Switch: Disabled'}
+                  </div>
+                </div>
+
+                {/* Default Duration */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 space-y-3">
+                  <div className="font-bold text-slate-900 dark:text-white">Default Trial Duration</div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Standard duration in days for newly provisioned hosting trials.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="90"
+                      value={trialSettings.default_days}
+                      onChange={e => setTrialSettings(s => ({ ...s, default_days: Math.max(1, parseInt(e.target.value) || 14) }))}
+                      className="w-24 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                    <span className="text-slate-500 font-semibold">Days</span>
+                  </div>
+                </div>
+
+                {/* One Trial Per Customer */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 space-y-3 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 dark:text-white">Anti-Abuse Verification</span>
+                      <button
+                        type="button"
+                        onClick={() => setTrialSettings(s => ({ ...s, one_trial_per_customer: !s.one_trial_per_customer }))}
+                        className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                          trialSettings.one_trial_per_customer ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            trialSettings.one_trial_per_customer ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                      Enforce one trial per user account and client IP address to prevent resource farming.
+                    </p>
+                  </div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                    {trialSettings.one_trial_per_customer ? 'Strict Anti-Abuse Active' : 'Multiple Trials Allowed'}
+                  </div>
+                </div>
+
+                {/* Auto Suspend On Expiry */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 space-y-3 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 dark:text-white">Auto-Suspend on Expiry</span>
+                      <button
+                        type="button"
+                        onClick={() => setTrialSettings(s => ({ ...s, auto_suspend_on_expiry: !s.auto_suspend_on_expiry }))}
+                        className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                          trialSettings.auto_suspend_on_expiry ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            trialSettings.auto_suspend_on_expiry ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                      Automatically suspend client containers and vhosts when trial period expires without conversion.
+                    </p>
+                  </div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                    {trialSettings.auto_suspend_on_expiry ? 'Auto-Suspend Enabled' : 'Grace Period Allowed'}
+                  </div>
+                </div>
+
+                {/* Require Payment Method */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/60 space-y-3 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 dark:text-white">Require Card Upfront</span>
+                      <button
+                        type="button"
+                        onClick={() => setTrialSettings(s => ({ ...s, require_payment_method: !s.require_payment_method }))}
+                        className={`w-11 h-6 rounded-full transition-colors relative flex items-center p-0.5 ${
+                          trialSettings.require_payment_method ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                            trialSettings.require_payment_method ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                      Require credit card verification prior to trial activation ($0 authorization charge).
+                    </p>
+                  </div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                    {trialSettings.require_payment_method ? 'Card Required' : 'No Card Required (Instant)'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Live Customer Free Trials Table */}
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden space-y-4 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Active Customer Free Trials
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Real-time list of all users and organizations on trial status with countdown timers.
+                  </p>
+                </div>
+                <button
+                  onClick={loadData}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  title="Refresh Trials"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+
+              {((trialsList.length > 0 ? trialsList : subscriptions).filter(s => s.status === 'trial' || s.trial_ends_at).length === 0) ? (
+                <div className="text-center py-12 px-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
+                  <Gift className="w-10 h-10 text-purple-400 mx-auto mb-3" />
+                  <div className="text-sm font-bold text-slate-900 dark:text-white">No Active Customer Free Trials</div>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+                    Customers who register with free trial plans from the public landing page will be displayed here with one-click extension and conversion actions.
+                  </p>
+                  <button
+                    onClick={() => setActiveTab('packages')}
+                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold transition-all shadow-sm"
+                  >
+                    View Available Trial Packages
+                  </button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Subscription ID</th>
+                        <th className="py-3 px-4">Package</th>
+                        <th className="py-3 px-4">Trial Started</th>
+                        <th className="py-3 px-4">Trial Expiry / Remaining</th>
+                        <th className="py-3 px-4">Status</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
+                      {(trialsList.length > 0 ? trialsList : subscriptions)
+                        .filter(s => s.status === 'trial' || s.trial_ends_at)
+                        .map(tr => {
+                          const isTrial = tr.status === 'trial';
+                          const endsAt = tr.trial_ends_at ? new Date(tr.trial_ends_at) : new Date(tr.next_billing_date);
+                          const daysLeft = Math.ceil((endsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+
+                          return (
+                            <tr key={tr.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors">
+                              <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                                <div>{tr.id.substring(0, 13)}...</div>
+                                <div className="text-[10px] text-slate-400">User: {tr.user_id ? tr.user_id.substring(0, 8) : 'demo-user'}</div>
+                              </td>
+                              <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
+                                {tr.plan_name}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400">
+                                {tr.trial_started_at
+                                  ? new Date(tr.trial_started_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                  : new Date(tr.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                  {endsAt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </div>
+                                <div className="text-[10px] font-bold mt-0.5">
+                                  {isTrial ? (
+                                    daysLeft > 0 ? (
+                                      <span className="text-purple-600 dark:text-purple-400">⏳ {daysLeft} days remaining</span>
+                                    ) : (
+                                      <span className="text-rose-600 dark:text-rose-400">⚠️ Expired today</span>
+                                    )
+                                  ) : (
+                                    <span className="text-emerald-600 dark:text-emerald-400">Converted</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                                    tr.status === 'trial'
+                                      ? 'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30'
+                                      : tr.status === 'active'
+                                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                      : 'bg-rose-500/15 text-rose-600'
+                                  }`}
+                                >
+                                  {tr.status === 'trial' ? 'Free Trial' : tr.status === 'active' ? 'Converted to Paid' : tr.status}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                {isTrial ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={() => {
+                                        setSelectedTrialForExtend(tr);
+                                        setExtendModalOpen(true);
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 text-[11px] font-bold transition-colors"
+                                      title="Extend Trial"
+                                    >
+                                      +Extend
+                                    </button>
+                                    <button
+                                      onClick={() => handleConvertTrial(tr.id)}
+                                      disabled={actionLoading === `convert-${tr.id}`}
+                                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all shadow-sm"
+                                      title="Convert to Paid Subscription"
+                                    >
+                                      {actionLoading === `convert-${tr.id}` ? '...' : 'Convert'}
+                                    </button>
+                                    <button
+                                      onClick={() => handleEndTrial(tr.id)}
+                                      disabled={actionLoading === `end-${tr.id}`}
+                                      className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors"
+                                      title="End Trial"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400 italic">No actions</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1523,23 +2200,42 @@ export default function BillingPage() {
               </div>
 
               {/* Modal Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setCheckoutModalOpen(false)}
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmCheckout}
-                  disabled={actionLoading === 'checkout'}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
-                >
-                  {actionLoading === 'checkout' && <RefreshCw className="w-4 h-4 animate-spin" />}
-                  <span>Confirm Order</span>
-                </button>
+              <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                {selectedPlanForOrder.trial_allowed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCheckoutModalOpen(false);
+                      handleStartFreeTrial(selectedPlanForOrder);
+                    }}
+                    disabled={actionLoading === `trial-${selectedPlanForOrder.id}`}
+                    className="px-4 py-2.5 rounded-xl border border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-xs font-bold transition-all flex items-center gap-1.5"
+                  >
+                    <Gift className="w-3.5 h-3.5 text-purple-500" />
+                    <span>Start Free Trial ($0)</span>
+                  </button>
+                ) : (
+                  <div />
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmCheckout}
+                    disabled={actionLoading === 'checkout'}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2"
+                  >
+                    {actionLoading === 'checkout' && <RefreshCw className="w-4 h-4 animate-spin" />}
+                    <span>Confirm Order</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1878,6 +2574,126 @@ export default function BillingPage() {
                   />
                 </div>
 
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max Mailboxes</label>
+                  <input
+                    type="number"
+                    value={editingPlan.max_mailboxes || 5}
+                    onChange={e => setEditingPlan({ ...editingPlan, max_mailboxes: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max FTP Accounts</label>
+                  <input
+                    type="number"
+                    value={editingPlan.max_ftp || 2}
+                    onChange={e => setEditingPlan({ ...editingPlan, max_ftp: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">CPU Limit (vCPU Cores)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="64"
+                    value={editingPlan.cpu_limit || 1}
+                    onChange={e => setEditingPlan({ ...editingPlan, cpu_limit: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">RAM Limit (MB) (2048 = 2GB)</label>
+                  <input
+                    type="number"
+                    min="512"
+                    step="512"
+                    value={editingPlan.ram_limit_mb || 2048}
+                    onChange={e => setEditingPlan({ ...editingPlan, ram_limit_mb: parseInt(e.target.value) || 2048 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max Cron Jobs</label>
+                  <input
+                    type="number"
+                    value={editingPlan.max_cron || 5}
+                    onChange={e => setEditingPlan({ ...editingPlan, max_cron: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Max Subdomains</label>
+                  <input
+                    type="number"
+                    value={editingPlan.max_subdomains || 10}
+                    onChange={e => setEditingPlan({ ...editingPlan, max_subdomains: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Setup Fee ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editingPlan.setup_fee || 0}
+                    onChange={e => setEditingPlan({ ...editingPlan, setup_fee: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Trial Duration (Days)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="90"
+                    disabled={!editingPlan.trial_allowed}
+                    value={editingPlan.trial_days || 14}
+                    onChange={e => setEditingPlan({ ...editingPlan, trial_days: parseInt(e.target.value) || 14 })}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
+                  />
+                </div>
+
+                <div className="col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={editingPlan.trial_allowed ?? true}
+                      onChange={e => setEditingPlan({ ...editingPlan, trial_allowed: e.target.checked })}
+                      className="rounded text-purple-600 focus:ring-purple-500 w-4 h-4"
+                    />
+                    <span>Allow Free Trial</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={editingPlan.is_featured ?? false}
+                      onChange={e => setEditingPlan({ ...editingPlan, is_featured: e.target.checked })}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                    />
+                    <span>Featured Badge</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={editingPlan.is_active ?? true}
+                      onChange={e => setEditingPlan({ ...editingPlan, is_active: e.target.checked })}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                    />
+                    <span>Active Package</span>
+                  </label>
+                </div>
+
                 <div className="col-span-2 space-y-1">
                   <label className="font-bold text-slate-700 dark:text-slate-300">Description</label>
                   <textarea
@@ -1905,6 +2721,86 @@ export default function BillingPage() {
                   className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20"
                 >
                   Save Package
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL 5: EXTEND TRIAL MODAL */}
+        {extendModalOpen && selectedTrialForExtend && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Extend Customer Trial</h3>
+                    <p className="text-xs text-slate-400">{selectedTrialForExtend.plan_name}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setExtendModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <p className="text-slate-500 dark:text-slate-400">
+                  Select the number of additional evaluation days to grant to this client trial subscription:
+                </p>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {[3, 7, 14, 30].map(d => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setExtendDays(d)}
+                      className={`py-2 rounded-xl font-bold border transition-all ${
+                        extendDays === d
+                          ? 'border-purple-500 bg-purple-500/10 text-purple-600 dark:text-purple-400 ring-2 ring-purple-500/20'
+                          : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      +{d} Days
+                    </button>
+                  ))}
+                </div>
+
+                <div className="space-y-1 pt-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">Custom Days to Add:</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    value={extendDays}
+                    onChange={e => setExtendDays(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold"
+                    placeholder="Custom days"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setExtendModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmExtendTrial}
+                  disabled={actionLoading === `extend-${selectedTrialForExtend.id}`}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-md shadow-purple-500/20 flex items-center gap-1.5 transition-all"
+                >
+                  {actionLoading === `extend-${selectedTrialForExtend.id}` && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Confirm Extension</span>
                 </button>
               </div>
             </div>

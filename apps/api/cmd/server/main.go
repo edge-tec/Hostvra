@@ -240,6 +240,7 @@ func main() {
 		// Public Hosting Plans Catalog & Payment Webhooks
 		r.Get("/billing/plans", billingHandler.ListPlans)
 		r.Get("/billing/plans/{id}", billingHandler.GetPlan)
+		r.Get("/billing/trial-settings", billingHandler.GetTrialSettings)
 		r.Post("/billing/webhooks/{gateway}", billingHandler.HandleWebhook)
 
 		// Public Domain Search, Whois & TLD Pricing
@@ -795,6 +796,17 @@ func main() {
 				// Payment Gateways
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/gateways", billingHandler.ListGateways)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/gateways/{gateway}", billingHandler.UpdateGateway)
+
+				// Unified Checkout
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/checkout", billingHandler.CreateCheckoutSession)
+
+				// Admin Trial Management & Settings
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/trial-settings", billingHandler.GetTrialSettings)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/trial-settings", billingHandler.UpdateTrialSettings)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/trials", billingHandler.ListTrials)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/extend", billingHandler.ExtendTrial)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/end", billingHandler.EndTrial)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/convert", billingHandler.ConvertTrial)
 			})
 
 			// Client Hosting Accounts (WHM Multi-Tenancy & Provisioning)

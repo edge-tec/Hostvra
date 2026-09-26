@@ -87,24 +87,32 @@ func (h *BillingHandler) GetPlan(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreatePlanRequest struct {
-	Name         string         `json:"name"`
-	Slug         string         `json:"slug"`
-	Description  string         `json:"description"`
-	Tier         store.PlanTier `json:"tier"`
-	PriceMonthly float64        `json:"price_monthly"`
-	PriceYearly  float64        `json:"price_yearly"`
-	Currency     string         `json:"currency"`
-	DiskSpaceMB  int64          `json:"disk_space_mb"`
-	BandwidthMB  int64          `json:"bandwidth_mb"`
-	MaxWebsites  int            `json:"max_websites"`
-	MaxDatabases int            `json:"max_databases"`
-	MaxMailboxes int            `json:"max_mailboxes"`
-	MaxFTP       int            `json:"max_ftp"`
-	DedicatedIP  bool           `json:"dedicated_ip"`
-	FreeSSL      bool           `json:"free_ssl"`
-	Features     []string       `json:"features"`
-	IsActive     bool           `json:"is_active"`
-	SortOrder    int            `json:"sort_order"`
+	Name          string         `json:"name"`
+	Slug          string         `json:"slug"`
+	Description   string         `json:"description"`
+	Tier          store.PlanTier `json:"tier"`
+	PriceMonthly  float64        `json:"price_monthly"`
+	PriceYearly   float64        `json:"price_yearly"`
+	Currency      string         `json:"currency"`
+	SetupFee      float64        `json:"setup_fee"`
+	TrialAllowed  bool           `json:"trial_allowed"`
+	TrialDays     int            `json:"trial_days"`
+	IsFeatured    bool           `json:"is_featured"`
+	CPULimit      float64        `json:"cpu_limit"`
+	RAMLimitMB    int            `json:"ram_limit_mb"`
+	DiskSpaceMB   int64          `json:"disk_space_mb"`
+	BandwidthMB   int64          `json:"bandwidth_mb"`
+	MaxWebsites   int            `json:"max_websites"`
+	MaxDatabases  int            `json:"max_databases"`
+	MaxMailboxes  int            `json:"max_mailboxes"`
+	MaxFTP        int            `json:"max_ftp"`
+	MaxCron       int            `json:"max_cron"`
+	MaxSubdomains int            `json:"max_subdomains"`
+	DedicatedIP   bool           `json:"dedicated_ip"`
+	FreeSSL       bool           `json:"free_ssl"`
+	Features      []string       `json:"features"`
+	IsActive      bool           `json:"is_active"`
+	SortOrder     int            `json:"sort_order"`
 }
 
 func (h *BillingHandler) CreatePlan(w http.ResponseWriter, r *http.Request) {
@@ -127,27 +135,38 @@ func (h *BillingHandler) CreatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.Currency == "" {
 		req.Currency = "USD"
 	}
+	if req.TrialDays <= 0 && req.TrialAllowed {
+		req.TrialDays = 14
+	}
 
 	plan := &store.HostingPlan{
-		ID:           uuid.New(),
-		Name:         req.Name,
-		Slug:         req.Slug,
-		Description:  req.Description,
-		Tier:         req.Tier,
-		PriceMonthly: req.PriceMonthly,
-		PriceYearly:  req.PriceYearly,
-		Currency:     req.Currency,
-		DiskSpaceMB:  req.DiskSpaceMB,
-		BandwidthMB:  req.BandwidthMB,
-		MaxWebsites:  req.MaxWebsites,
-		MaxDatabases: req.MaxDatabases,
-		MaxMailboxes: req.MaxMailboxes,
-		MaxFTP:       req.MaxFTP,
-		DedicatedIP:  req.DedicatedIP,
-		FreeSSL:      req.FreeSSL,
-		Features:     req.Features,
-		IsActive:     req.IsActive,
-		SortOrder:    req.SortOrder,
+		ID:            uuid.New(),
+		Name:          req.Name,
+		Slug:          req.Slug,
+		Description:   req.Description,
+		Tier:          req.Tier,
+		PriceMonthly:  req.PriceMonthly,
+		PriceYearly:   req.PriceYearly,
+		Currency:      req.Currency,
+		SetupFee:      req.SetupFee,
+		TrialAllowed:  req.TrialAllowed,
+		TrialDays:     req.TrialDays,
+		IsFeatured:    req.IsFeatured,
+		CPULimit:      req.CPULimit,
+		RAMLimitMB:    req.RAMLimitMB,
+		DiskSpaceMB:   req.DiskSpaceMB,
+		BandwidthMB:   req.BandwidthMB,
+		MaxWebsites:   req.MaxWebsites,
+		MaxDatabases:  req.MaxDatabases,
+		MaxMailboxes:  req.MaxMailboxes,
+		MaxFTP:        req.MaxFTP,
+		MaxCron:       req.MaxCron,
+		MaxSubdomains: req.MaxSubdomains,
+		DedicatedIP:   req.DedicatedIP,
+		FreeSSL:       req.FreeSSL,
+		Features:      req.Features,
+		IsActive:      req.IsActive,
+		SortOrder:     req.SortOrder,
 	}
 
 	if err := h.store.CreatePlan(r.Context(), plan); err != nil {
@@ -195,12 +214,26 @@ func (h *BillingHandler) UpdatePlan(w http.ResponseWriter, r *http.Request) {
 	if req.Currency != "" {
 		plan.Currency = req.Currency
 	}
+	plan.SetupFee = req.SetupFee
+	plan.TrialAllowed = req.TrialAllowed
+	if req.TrialDays > 0 {
+		plan.TrialDays = req.TrialDays
+	}
+	plan.IsFeatured = req.IsFeatured
+	if req.CPULimit > 0 {
+		plan.CPULimit = req.CPULimit
+	}
+	if req.RAMLimitMB > 0 {
+		plan.RAMLimitMB = req.RAMLimitMB
+	}
 	plan.DiskSpaceMB = req.DiskSpaceMB
 	plan.BandwidthMB = req.BandwidthMB
 	plan.MaxWebsites = req.MaxWebsites
 	plan.MaxDatabases = req.MaxDatabases
 	plan.MaxMailboxes = req.MaxMailboxes
 	plan.MaxFTP = req.MaxFTP
+	plan.MaxCron = req.MaxCron
+	plan.MaxSubdomains = req.MaxSubdomains
 	plan.DedicatedIP = req.DedicatedIP
 	plan.FreeSSL = req.FreeSSL
 	if req.Features != nil {
@@ -268,10 +301,11 @@ func (h *BillingHandler) GetSubscription(w http.ResponseWriter, r *http.Request)
 }
 
 type CreateSubscriptionRequest struct {
-	PlanID       string `json:"plan_id"`
-	BillingCycle string `json:"billing_cycle"` // monthly, yearly
+	PlanID        string `json:"plan_id"`
+	BillingCycle  string `json:"billing_cycle"` // monthly, yearly
 	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad, sslcommerz, paypal
-	AutoRenew    bool   `json:"auto_renew"`
+	AutoRenew     bool   `json:"auto_renew"`
+	StartTrial    bool   `json:"start_trial"`
 }
 
 func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -304,6 +338,105 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 	if req.BillingCycle == "yearly" {
 		amount = plan.PriceYearly
 		nextBilling = time.Now().UTC().AddDate(1, 0, 0)
+	}
+
+	// ------------------------------------------------------------------------
+	// Free Trial Activation Flow
+	// ------------------------------------------------------------------------
+	if req.StartTrial {
+		trialSettings, _ := h.store.GetTrialSettings(r.Context())
+		if trialSettings != nil && !trialSettings.Enabled {
+			response.Error(w, http.StatusBadRequest, "TRIALS_DISABLED", "Free trials are currently disabled by administrator", nil, "")
+			return
+		}
+		if !plan.TrialAllowed {
+			response.Error(w, http.StatusBadRequest, "PLAN_TRIAL_NOT_ALLOWED", "Selected plan is not eligible for free trial", nil, "")
+			return
+		}
+
+		if trialSettings != nil && trialSettings.OneTrialPerCustomer {
+			// Anti-abuse: verify user has not previously claimed a trial
+			existingSubs, err := h.store.ListSubscriptions(r.Context(), claims.OrganizationID)
+			if err == nil {
+				for _, es := range existingSubs {
+					if es.Status == store.SubStatusTrial || es.TrialEndsAt != nil {
+						response.Error(w, http.StatusBadRequest, "TRIAL_ALREADY_USED", "A free trial has already been claimed for this account", nil, "")
+						return
+					}
+				}
+			}
+		}
+
+		trialDays := plan.TrialDays
+		if trialDays <= 0 && trialSettings != nil && trialSettings.DefaultDays > 0 {
+			trialDays = trialSettings.DefaultDays
+		}
+		if trialDays <= 0 {
+			trialDays = 14
+		}
+
+		now := time.Now().UTC()
+		ends := now.AddDate(0, 0, trialDays)
+		subID := uuid.New()
+		sub := &store.Subscription{
+			ID:              subID,
+			UserID:          claims.UserID,
+			OrganizationID:  claims.OrganizationID,
+			PlanID:          plan.ID,
+			PlanName:        plan.Name,
+			Status:          store.SubStatusTrial,
+			BillingCycle:    req.BillingCycle,
+			Amount:          amount,
+			Currency:        plan.Currency,
+			DiskUsedMB:      100,
+			BandwidthUsedMB: 50,
+			WebsitesCount:   0,
+			NextBillingDate: ends,
+			TrialStartedAt:  &now,
+			TrialEndsAt:     &ends,
+			AutoRenew:       req.AutoRenew,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+
+		if err := h.store.CreateSubscription(r.Context(), sub); err != nil {
+			response.Error(w, http.StatusInternalServerError, "CREATE_FAILED", "Failed to activate free trial", err.Error(), "")
+			return
+		}
+
+		// Create $0.00 Trial Invoice marked Paid
+		inv := &store.Invoice{
+			ID:             uuid.New(),
+			InvoiceNumber:  fmt.Sprintf("INV-TRL-%d-%05d", now.Year(), rand.Intn(90000)+10000),
+			UserID:         claims.UserID,
+			SubscriptionID: &subID,
+			PlanID:         plan.ID,
+			Description:    fmt.Sprintf("%s (%d-Day Free Trial)", plan.Name, trialDays),
+			Subtotal:       0.0,
+			Tax:            0.0,
+			Discount:       amount,
+			Total:          0.0,
+			Currency:       plan.Currency,
+			Status:         store.InvoiceStatusPaid,
+			PaymentMethod:  "free_trial",
+			TransactionID:  fmt.Sprintf("trial_%s_%d", subID.String()[:8], now.Unix()),
+			DueDate:        ends,
+			PaidAt:         &now,
+			CreatedAt:      now,
+		}
+		_ = h.store.CreateInvoice(r.Context(), inv)
+
+		h.audit.Log(r.Context(), r, "billing.trial.start", "subscription", sub.ID.String(), "success", fmt.Sprintf("Started %d-day free trial on %s", trialDays, plan.Name), nil)
+
+		response.JSON(w, http.StatusCreated, map[string]interface{}{
+			"subscription":    sub,
+			"invoice":         inv,
+			"trial_activated": true,
+			"trial_days":      trialDays,
+			"expires_at":      ends,
+			"message":         fmt.Sprintf("Congratulations! Your %d-day free trial for %s has been activated.", trialDays, plan.Name),
+		}, nil)
+		return
 	}
 
 	subID := uuid.New()
@@ -881,4 +1014,342 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		"message": "Unhandled event status: " + payload.Status,
 	}, nil)
 }
+
+// ----------------------------------------------------------------------------
+// Trial Management & Settings API
+// ----------------------------------------------------------------------------
+
+func (h *BillingHandler) GetTrialSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.store.GetTrialSettings(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve trial settings", err.Error(), "")
+		return
+	}
+	response.JSON(w, http.StatusOK, settings, nil)
+}
+
+func (h *BillingHandler) UpdateTrialSettings(w http.ResponseWriter, r *http.Request) {
+	var req store.TrialSettings
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.DefaultDays <= 0 {
+		req.DefaultDays = 14
+	}
+
+	if err := h.store.SaveTrialSettings(r.Context(), &req); err != nil {
+		response.Error(w, http.StatusInternalServerError, "SAVE_FAILED", "Failed to save trial settings", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "billing.trial_settings.update", "trial_settings", "global", "success", "Updated trial settings", nil)
+
+	response.JSON(w, http.StatusOK, req, nil)
+}
+
+func (h *BillingHandler) ListTrials(w http.ResponseWriter, r *http.Request) {
+	trials, err := h.store.ListTrials(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list trials", err.Error(), "")
+		return
+	}
+
+	now := time.Now().UTC()
+	activeCount := 0
+	expiredCount := 0
+	convertedCount := 0
+
+	for _, t := range trials {
+		if t.Status == store.SubStatusActive {
+			convertedCount++
+		} else if t.Status == store.SubStatusTrial {
+			if t.TrialEndsAt != nil && t.TrialEndsAt.Before(now) {
+				expiredCount++
+			} else {
+				activeCount++
+			}
+		} else if t.Status == store.SubStatusExpired {
+			expiredCount++
+		}
+	}
+
+	conversionRate := 0.0
+	if len(trials) > 0 {
+		conversionRate = (float64(convertedCount) / float64(len(trials))) * 100.0
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"trials": trials,
+		"metrics": map[string]interface{}{
+			"total_trials":     len(trials),
+			"active_trials":    activeCount,
+			"expired_trials":   expiredCount,
+			"converted_trials": convertedCount,
+			"conversion_rate":  conversionRate,
+		},
+	}, &response.Meta{Total: len(trials)})
+}
+
+type ExtendTrialRequest struct {
+	Days int `json:"days"`
+}
+
+func (h *BillingHandler) ExtendTrial(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid subscription ID", nil, "")
+		return
+	}
+
+	sub, err := h.store.GetSubscriptionByID(r.Context(), subID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
+	var req ExtendTrialRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Days <= 0 {
+		req.Days = 7
+	}
+
+	baseTime := time.Now().UTC()
+	if sub.TrialEndsAt != nil && sub.TrialEndsAt.After(baseTime) {
+		baseTime = *sub.TrialEndsAt
+	}
+	newEnds := baseTime.AddDate(0, 0, req.Days)
+	sub.TrialEndsAt = &newEnds
+	sub.NextBillingDate = newEnds
+	sub.Status = store.SubStatusTrial
+
+	if err := h.store.UpdateSubscription(r.Context(), sub); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to extend trial", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "billing.trial.extend", "subscription", sub.ID.String(), "success", fmt.Sprintf("Extended trial by %d days", req.Days), nil)
+
+	response.JSON(w, http.StatusOK, sub, nil)
+}
+
+func (h *BillingHandler) EndTrial(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid subscription ID", nil, "")
+		return
+	}
+
+	sub, err := h.store.GetSubscriptionByID(r.Context(), subID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	sub.TrialEndsAt = &now
+	sub.Status = store.SubStatusExpired
+
+	if err := h.store.UpdateSubscription(r.Context(), sub); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to end trial", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "billing.trial.end", "subscription", sub.ID.String(), "success", "Ended trial early", nil)
+
+	response.JSON(w, http.StatusOK, sub, nil)
+}
+
+func (h *BillingHandler) ConvertTrial(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid subscription ID", nil, "")
+		return
+	}
+
+	sub, err := h.store.GetSubscriptionByID(r.Context(), subID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
+	plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "PLAN_NOT_FOUND", "Associated plan not found", nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	sub.Status = store.SubStatusActive
+	if sub.BillingCycle == "yearly" {
+		sub.NextBillingDate = now.AddDate(1, 0, 0)
+	} else {
+		sub.NextBillingDate = now.AddDate(0, 1, 0)
+	}
+
+	if err := h.store.UpdateSubscription(r.Context(), sub); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to convert trial", err.Error(), "")
+		return
+	}
+
+	// Create first paid invoice
+	amount := plan.PriceMonthly
+	if sub.BillingCycle == "yearly" {
+		amount = plan.PriceYearly
+	}
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
+		UserID:         sub.UserID,
+		SubscriptionID: &sub.ID,
+		PlanID:         plan.ID,
+		Description:    fmt.Sprintf("%s (%s Cycle Conversion from Trial)", plan.Name, strings.Title(sub.BillingCycle)),
+		Subtotal:       amount,
+		Tax:            0.0,
+		Discount:       0.0,
+		Total:          amount,
+		Currency:       plan.Currency,
+		Status:         store.InvoiceStatusPaid,
+		PaymentMethod:  "admin_conversion",
+		TransactionID:  fmt.Sprintf("conv_%s_%d", sub.ID.String()[:8], now.Unix()),
+		DueDate:        now.AddDate(0, 0, 7),
+		PaidAt:         &now,
+		CreatedAt:      now,
+	}
+	_ = h.store.CreateInvoice(r.Context(), inv)
+
+	h.audit.Log(r.Context(), r, "billing.trial.convert", "subscription", sub.ID.String(), "success", "Converted trial to paid subscription", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"subscription": sub,
+		"invoice":      inv,
+		"message":      "Trial successfully converted to active paid subscription",
+	}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Unified Checkout Session API
+// ----------------------------------------------------------------------------
+
+type CheckoutSessionRequest struct {
+	PlanID        string `json:"plan_id"`
+	BillingCycle  string `json:"billing_cycle"` // monthly, yearly
+	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad, paypal
+	StartTrial    bool   `json:"start_trial"`
+	SuccessURL    string `json:"success_url"`
+	CancelURL     string `json:"cancel_url"`
+}
+
+func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+
+	var req CheckoutSessionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	planUUID, err := uuid.Parse(req.PlanID)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PLAN_ID", "Invalid plan ID", nil, "")
+		return
+	}
+
+	plan, err := h.store.GetPlanByID(r.Context(), planUUID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "PLAN_NOT_FOUND", "Plan not found", nil, "")
+		return
+	}
+
+	if req.BillingCycle == "" {
+		req.BillingCycle = "monthly"
+	}
+
+	amount := plan.PriceMonthly
+	if req.BillingCycle == "yearly" {
+		amount = plan.PriceYearly
+	}
+
+	// If Free Trial requested
+	if req.StartTrial {
+		subReq := CreateSubscriptionRequest{
+			PlanID:        req.PlanID,
+			BillingCycle:  req.BillingCycle,
+			PaymentMethod: "free_trial",
+			AutoRenew:     true,
+			StartTrial:    true,
+		}
+		jsonBody, _ := json.Marshal(subReq)
+		r.Body = io.NopCloser(strings.NewReader(string(jsonBody)))
+		h.CreateSubscription(w, r)
+		return
+	}
+
+	// Create Pending Subscription & Invoice
+	subID := uuid.New()
+	now := time.Now().UTC()
+	nextBilling := now.AddDate(0, 1, 0)
+	if req.BillingCycle == "yearly" {
+		nextBilling = now.AddDate(1, 0, 0)
+	}
+
+	sub := &store.Subscription{
+		ID:              subID,
+		UserID:          claims.UserID,
+		OrganizationID:  claims.OrganizationID,
+		PlanID:          plan.ID,
+		PlanName:        plan.Name,
+		Status:          store.SubStatusPending,
+		BillingCycle:    req.BillingCycle,
+		Amount:          amount,
+		Currency:        plan.Currency,
+		DiskUsedMB:      0,
+		BandwidthUsedMB: 0,
+		WebsitesCount:   0,
+		NextBillingDate: nextBilling,
+		AutoRenew:       true,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	_ = h.store.CreateSubscription(r.Context(), sub)
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
+		UserID:         claims.UserID,
+		SubscriptionID: &subID,
+		PlanID:         plan.ID,
+		Description:    fmt.Sprintf("%s (%s Subscription)", plan.Name, strings.Title(req.BillingCycle)),
+		Subtotal:       amount,
+		Tax:            0.0,
+		Discount:       0.0,
+		Total:          amount,
+		Currency:       plan.Currency,
+		Status:         store.InvoiceStatusUnpaid,
+		PaymentMethod:  req.PaymentMethod,
+		DueDate:        now.AddDate(0, 0, 3),
+		CreatedAt:      now,
+	}
+	_ = h.store.CreateInvoice(r.Context(), inv)
+
+	h.audit.Log(r.Context(), r, "billing.checkout.create", "invoice", inv.ID.String(), "success", fmt.Sprintf("Created checkout session for %s", plan.Name), nil)
+
+	response.JSON(w, http.StatusCreated, map[string]interface{}{
+		"subscription_id": sub.ID,
+		"invoice_id":      inv.ID,
+		"invoice_number":  inv.InvoiceNumber,
+		"amount":          amount,
+		"currency":        plan.Currency,
+		"plan_name":       plan.Name,
+		"billing_cycle":   req.BillingCycle,
+		"payment_method":  req.PaymentMethod,
+		"status":          "pending",
+		"checkout_url":    fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String()),
+	}, nil)
+}
+
 
