@@ -32,9 +32,18 @@ type Store interface {
 	CreateUser(ctx context.Context, user *User, orgID uuid.UUID, role string) error
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
+	ListUsers(ctx context.Context) ([]*User, error)
+	UpdateUserStatus(ctx context.Context, id uuid.UUID, isActive bool) error
+	UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip string) error
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	UpdateUserEmail(ctx context.Context, id uuid.UUID, newEmail string) error
+	DeleteUser(ctx context.Context, id uuid.UUID) error
+
+	// User Plan Overrides
+	GetUserPlanOverride(ctx context.Context, userID uuid.UUID) (*UserPlanOverride, error)
+	UpsertUserPlanOverride(ctx context.Context, override *UserPlanOverride) error
+	DeleteUserPlanOverride(ctx context.Context, userID uuid.UUID) error
 
 	// Servers & Enrollment
 	CreateServer(ctx context.Context, server *Server) error
@@ -395,6 +404,7 @@ type MemoryStore struct {
 	fmFolderLabels      map[string]*FolderLabel
 	fmTrash             map[uuid.UUID]*FileManagerTrashItem
 	fmActivityLogs      []*FileManagerActivityLog
+	userPlanOverrides   map[uuid.UUID]*UserPlanOverride
 	filePath            string
 }
 
@@ -426,6 +436,7 @@ type memoryDumpData struct {
 	Articles           []KnowledgeArticle                     `json:"articles,omitempty"`
 	CannedResponses    []CannedResponse                       `json:"canned_responses,omitempty"`
 	SystemSettings     *SystemSettings                        `json:"system_settings,omitempty"`
+	UserPlanOverrides  map[uuid.UUID]*UserPlanOverride        `json:"user_plan_overrides,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -479,6 +490,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		Articles:           m.articles,
 		CannedResponses:    m.cannedResponses,
 		SystemSettings:     m.systemSettings,
+		UserPlanOverrides:  m.userPlanOverrides,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -581,6 +593,9 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.SystemSettings != nil {
 		m.systemSettings = data.SystemSettings
 	}
+	if data.UserPlanOverrides != nil {
+		m.userPlanOverrides = data.UserPlanOverrides
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -656,6 +671,7 @@ func NewMemoryStore() *MemoryStore {
 		fmFolderLabels:      make(map[string]*FolderLabel),
 		fmTrash:             make(map[uuid.UUID]*FileManagerTrashItem),
 		fmActivityLogs:      make([]*FileManagerActivityLog, 0),
+		userPlanOverrides:   make(map[uuid.UUID]*UserPlanOverride),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

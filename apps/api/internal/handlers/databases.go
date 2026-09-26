@@ -13,16 +13,19 @@ import (
 
 	"hostvra/agent/pkg/database"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type DatabaseHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
-	dbMgr *database.Manager
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	dbMgr    *database.Manager
+	quotaSvc *quota.Service
 }
 
 func NewDatabaseHandler(cfg *config.Config, s store.Store, a *audit.Logger) *DatabaseHandler {
@@ -32,6 +35,10 @@ func NewDatabaseHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Dat
 		audit: a,
 		dbMgr: database.NewManager(),
 	}
+}
+
+func (h *DatabaseHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // Request & Response DTOs
@@ -113,6 +120,14 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Create provisions a new database and associated user
 func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "databases"); err != nil {
+			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
+
 	var req CreateDatabaseRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid JSON payload", nil, "")

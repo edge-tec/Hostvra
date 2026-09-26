@@ -16,14 +16,16 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type TerminalHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	quotaSvc *quota.Service
 }
 
 func NewTerminalHandler(cfg *config.Config, s store.Store, a *audit.Logger) *TerminalHandler {
@@ -32,6 +34,10 @@ func NewTerminalHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Ter
 		store: s,
 		audit: a,
 	}
+}
+
+func (h *TerminalHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 type TerminalInfoResponse struct {
@@ -107,9 +113,17 @@ func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 
 // Execute runs a terminal command inside the host environment
 func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
-	if _, ok := auth.GetClaims(r.Context()); !ok {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
 		return
+	}
+
+	if h.quotaSvc != nil {
+		if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+			return
+		}
 	}
 
 	var req ExecuteCommandRequest

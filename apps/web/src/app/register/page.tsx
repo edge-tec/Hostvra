@@ -41,18 +41,35 @@ function RegisterForm() {
     setLoading(true);
     setError(null);
 
-    const res = await apiFetch<{ tokens: { access_token: string } }>('/api/v1/auth/register', {
+    const res = await apiFetch<{
+      tokens: { access_token: string };
+      user: { id: string; email: string; full_name: string };
+      role: string;
+      is_superadmin: boolean;
+    }>('/api/v1/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         full_name: fullName,
         email,
         organization_name: orgName || `${fullName.split(' ')[0]}'s Cloud`,
         password,
+        plan_slug: planSlug || undefined,
       }),
     });
 
     if (res.success && res.data) {
       setStoredToken(res.data.tokens.access_token);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(
+          'hostvra_user',
+          JSON.stringify({
+            id: res.data.user?.id,
+            email: res.data.user?.email,
+            role: res.data.role || 'customer',
+            is_superadmin: Boolean(res.data.is_superadmin),
+          })
+        );
+      }
 
       // If a hosting plan was selected during registration
       if (selectedPlan) {

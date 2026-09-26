@@ -29,15 +29,17 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/dns"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type EmailHandler struct {
-	cfg   *config.Config
-	store store.Store
-	dns   *dns.Service
-	audit *audit.Logger
+	cfg      *config.Config
+	store    store.Store
+	dns      *dns.Service
+	audit    *audit.Logger
+	quotaSvc *quota.Service
 }
 
 func NewEmailHandler(cfg *config.Config, s store.Store, d *dns.Service, a *audit.Logger) *EmailHandler {
@@ -47,6 +49,10 @@ func NewEmailHandler(cfg *config.Config, s store.Store, d *dns.Service, a *audit
 		dns:   d,
 		audit: a,
 	}
+}
+
+func (h *EmailHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // ----------------------------------------------------------------------------
@@ -1152,6 +1158,14 @@ func (h *EmailHandler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) CreateMailbox(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "mailboxes"); err != nil {
+			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
+
 	var req CreateMailboxRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")

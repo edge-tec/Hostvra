@@ -35,12 +35,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, Server as ServerModel, AppPackage, DashboardOverview } from '@/lib/api';
+import { apiFetch, Server as ServerModel, AppPackage, DashboardOverview, getStoredUserRole } from '@/lib/api';
 import { AppControlModal } from '@/components/AppControlModal';
 import { getPinnedAppIds, togglePinApp } from '@/lib/appstore-utils';
+import { CustomerDashboard } from '@/components/CustomerDashboard';
 
 export default function DashboardPage() {
   const router = useRouter();
+  const [userRole, setUserRole] = useState<'customer' | 'admin'>('customer');
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [viewMode, setViewMode] = useState<'customer' | 'admin'>('customer');
+  const [roleLoaded, setRoleLoaded] = useState(false);
   const [servers, setServers] = useState<ServerModel[]>([]);
   const [apps, setApps] = useState<AppPackage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,6 +94,25 @@ export default function DashboardPage() {
   });
 
   const [apiError, setApiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const roleInfo = getStoredUserRole();
+    const isAdmin = roleInfo.role === 'admin' || roleInfo.role === 'superadmin' || roleInfo.isSuperAdmin;
+    setUserRole(isAdmin ? 'admin' : 'customer');
+    setIsSuperAdmin(roleInfo.isSuperAdmin);
+    setViewMode(isAdmin ? 'admin' : 'customer');
+    setRoleLoaded(true);
+
+    // Also check server auth session to guarantee accuracy
+    apiFetch<{ role?: string; is_superadmin?: boolean }>('/api/v1/auth/me').then((res) => {
+      if (res.success && res.data) {
+        const liveAdmin = res.data.role === 'admin' || res.data.role === 'superadmin' || Boolean(res.data.is_superadmin);
+        setUserRole(liveAdmin ? 'admin' : 'customer');
+        setIsSuperAdmin(Boolean(res.data.is_superadmin));
+        setViewMode(liveAdmin ? 'admin' : 'customer');
+      }
+    }).catch(() => {});
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -287,9 +311,61 @@ export default function DashboardPage() {
     return { line1, line2, area1, area2, pts1, pts2 };
   }, [chartHistory, chartTab]);
 
+  if (viewMode === 'customer') {
+    return (
+      <DashboardShell>
+        {userRole === 'admin' && (
+          <div className="mb-4 flex items-center justify-between p-3 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 text-xs">
+            <span className="font-semibold text-indigo-900 dark:text-indigo-300">
+              Administrator Preview: Viewing Customer Hosting Dashboard
+            </span>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/users"
+                className="px-3 py-1 font-semibold rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 hover:bg-indigo-200 transition-colors"
+              >
+                User Management
+              </Link>
+              <button
+                onClick={() => setViewMode('admin')}
+                className="px-3 py-1 font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+              >
+                Switch to Server Telemetry
+              </button>
+            </div>
+          </div>
+        )}
+        <CustomerDashboard />
+      </DashboardShell>
+    );
+  }
+
   return (
     <DashboardShell>
       <div className="space-y-4">
+        {userRole === 'admin' && (
+          <div className="flex items-center justify-between p-3 rounded-xl bg-slate-100 dark:bg-surface-800/80 border border-slate-200 dark:border-surface-700 text-xs">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span className="font-bold">Root Server Infrastructure Node (Admin Control Plane)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                href="/admin/users"
+                className="px-3 py-1 font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+              >
+                Manage Tenant Accounts
+              </Link>
+              <button
+                onClick={() => setViewMode('customer')}
+                className="px-3 py-1 font-semibold rounded-lg bg-slate-200 dark:bg-surface-700 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-surface-600 transition-colors"
+              >
+                Customer Portal View
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Realtime API Disconnected Alert */}
         {apiError && (
           <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between shadow-sm">

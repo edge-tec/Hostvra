@@ -22,6 +22,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
@@ -32,6 +33,7 @@ type WebsiteHandler struct {
 	audit        *audit.Logger
 	isolationMgr *isolation.Manager
 	fileMgr      *files.FileManager
+	quotaSvc     *quota.Service
 }
 
 // WebsiteDeleteRequest defines optional cleanup flags when deleting a website.
@@ -74,6 +76,10 @@ func NewWebsiteHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Webs
 		isolationMgr: isoMgr,
 		fileMgr:      fm,
 	}
+}
+
+func (h *WebsiteHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // trashDir returns the Enterprise Trash Bin directory, creating it if needed.
@@ -154,6 +160,13 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
+
+	if claims != nil && h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "websites"); err != nil {
+			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
 
 	var req CreateWebsiteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

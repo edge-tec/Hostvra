@@ -1373,3 +1373,144 @@ export async function triggerDomainReconciliation(): Promise<ApiResponse<{ messa
     method: 'POST',
   });
 }
+
+// ==========================================
+// USER PLANS, QUOTAS & ADMIN USER MANAGEMENT
+// ==========================================
+
+export interface UserPlanOverride {
+  user_id: string;
+  plan_id?: string;
+  max_websites?: number;
+  max_databases?: number;
+  max_mailboxes?: number;
+  max_ftp?: number;
+  max_cron?: number;
+  max_subdomains?: number;
+  disk_space_mb?: number;
+  bandwidth_mb?: number;
+  permission_terminal?: boolean;
+  permission_backups?: boolean;
+  permission_dns?: boolean;
+  permission_ssl?: boolean;
+  permission_file_manager?: boolean;
+  permission_cron?: boolean;
+  permission_apps?: boolean;
+  permission_php_selector?: boolean;
+  notes?: string;
+}
+
+export interface UserResourceUsage {
+  websites_count: number;
+  databases_count: number;
+  mailboxes_count: number;
+  ftp_count: number;
+  cron_count: number;
+  subdomains_count: number;
+  disk_used_mb: number;
+  bandwidth_used_mb: number;
+}
+
+export interface EffectiveUserPlan {
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  role: string;
+  is_active: boolean;
+  is_superadmin: boolean;
+  plan_id: string;
+  plan_name: string;
+  plan_slug: string;
+  plan_tier: string;
+  subscription_status: string;
+  max_websites: number;
+  max_databases: number;
+  max_mailboxes: number;
+  max_ftp: number;
+  max_cron: number;
+  max_subdomains: number;
+  disk_space_mb: number;
+  bandwidth_mb: number;
+  permissions: Record<string, boolean>;
+  usage: UserResourceUsage;
+  overrides?: UserPlanOverride;
+}
+
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_active: boolean;
+  is_superadmin: boolean;
+  last_login_at?: string;
+  created_at: string;
+  effective_plan?: EffectiveUserPlan;
+  has_custom_overrides: boolean;
+}
+
+export function getStoredUserRole(): { role: string; isSuperAdmin: boolean } {
+  if (typeof window === 'undefined') return { role: 'customer', isSuperAdmin: false };
+  try {
+    const raw = localStorage.getItem('hostvra_user');
+    if (raw) {
+      const u = JSON.parse(raw);
+      return { role: u.role || 'customer', isSuperAdmin: Boolean(u.is_superadmin) };
+    }
+    const token = localStorage.getItem('hostvra_access_token');
+    if (token) {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        return { role: payload.role || 'customer', isSuperAdmin: Boolean(payload.is_superadmin) };
+      }
+    }
+  } catch {}
+  return { role: 'customer', isSuperAdmin: false };
+}
+
+export async function fetchUserEffectivePlan(): Promise<ApiResponse<EffectiveUserPlan>> {
+  return apiFetch<EffectiveUserPlan>('/api/v1/user/plan');
+}
+
+export async function fetchAdminUsers(): Promise<ApiResponse<AdminUserListItem[]>> {
+  return apiFetch<AdminUserListItem[]>('/api/v1/admin/users');
+}
+
+export async function fetchAdminUserDetail(userId: string): Promise<ApiResponse<{ user: User; effective_plan: EffectiveUserPlan }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}`);
+}
+
+export async function updateAdminUserPlan(userId: string, planId: string, billingCycle: 'monthly' | 'yearly'): Promise<ApiResponse<{ message: string; effective_plan: EffectiveUserPlan }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/plan`, {
+    method: 'PUT',
+    body: JSON.stringify({ plan_id: planId, billing_cycle: billingCycle }),
+  });
+}
+
+export async function updateAdminUserOverrides(userId: string, overrides: Partial<UserPlanOverride>): Promise<ApiResponse<{ message: string; effective_plan: EffectiveUserPlan }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/overrides`, {
+    method: 'PUT',
+    body: JSON.stringify(overrides),
+  });
+}
+
+export async function deleteAdminUserOverrides(userId: string): Promise<ApiResponse<{ message: string; effective_plan: EffectiveUserPlan }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/overrides`, {
+    method: 'DELETE',
+  });
+}
+
+export async function updateAdminUserStatus(userId: string, isActive: boolean): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export async function deleteAdminUser(userId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}`, {
+    method: 'DELETE',
+  });
+}
+

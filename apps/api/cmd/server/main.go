@@ -27,6 +27,7 @@ import (
 	"hostvra/api/internal/handlers"
 	"hostvra/api/internal/license"
 	"hostvra/api/internal/migration"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/store"
 )
@@ -140,6 +141,16 @@ func main() {
 	settingsHandler := handlers.NewSettingsHandler(cfg, dataStore, auditLogger)
 	migrationMgr := migration.NewManager()
 	migrationHandler := handlers.NewMigrationHandler(migrationMgr, auditLogger)
+
+	// Initialize Centralized Quota & Permission Engine
+	quotaService := quota.NewService(dataStore)
+	websiteHandler.SetQuotaService(quotaService)
+	databaseHandler.SetQuotaService(quotaService)
+	emailHandler.SetQuotaService(quotaService)
+	cronHandler.SetQuotaService(quotaService)
+	terminalHandler.SetQuotaService(quotaService)
+
+	adminUsersHandler := handlers.NewAdminUsersHandler(dataStore, quotaService, auditLogger)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -269,8 +280,23 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.Middleware(cfg.JWTSecret))
 
-			r.Post("/system/fix", dashboardHandler.RunFix)
-			r.Post("/system/restart", dashboardHandler.RestartTarget)
+			// Customer Self-Service Package Quota & Effective Limits
+			r.Get("/user/plan", adminUsersHandler.GetUserEffectivePlan)
+
+			// Admin User Management & Custom Overrides (Strictly restricted to Admin/SuperAdmin)
+			r.Route("/admin/users", func(r chi.Router) {
+				r.Use(rbac.RequireAdmin())
+				r.Get("/", adminUsersHandler.ListUsers)
+				r.Get("/{id}", adminUsersHandler.GetUserDetails)
+				r.Put("/{id}/plan", adminUsersHandler.UpdateUserPlan)
+				r.Put("/{id}/overrides", adminUsersHandler.UpdateUserOverrides)
+				r.Delete("/{id}/overrides", adminUsersHandler.DeleteUserOverrides)
+				r.Put("/{id}/status", adminUsersHandler.UpdateUserStatus)
+				r.Delete("/{id}", adminUsersHandler.DeleteUser)
+			})
+
+			r.With(rbac.RequireAdmin()).Post("/system/fix", dashboardHandler.RunFix)
+			r.With(rbac.RequireAdmin()).Post("/system/restart", dashboardHandler.RestartTarget)
 
 			// Server Fleet
 			r.Route("/servers", func(r chi.Router) {
@@ -863,6 +889,7 @@ func main() {
 
 			// Domain Reseller Admin Management Endpoints
 			r.Route("/admin/domains", func(r chi.Router) {
+				r.Use(rbac.RequireAdmin())
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/", domainAdminHandler.ListDomains)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/metrics", domainAdminHandler.GetMetrics)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/orders", domainAdminHandler.ListOrders)

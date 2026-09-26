@@ -37,7 +37,7 @@ import {
   CreditCard,
   LifeBuoy,
 } from 'lucide-react';
-import { clearStoredAuth } from '@/lib/api';
+import { clearStoredAuth, getStoredUserRole, apiFetch } from '@/lib/api';
 
 interface NavItem {
   label: string;
@@ -52,9 +52,9 @@ interface NavGroup {
   items: NavItem[];
 }
 
-const navGroups: NavGroup[] = [
+const adminNavGroups: NavGroup[] = [
   {
-    title: 'HOSTING & DOMAINS',
+    title: 'SERVER & HOSTING',
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
       { label: 'Domain Manager', href: '/domains', icon: Globe },
@@ -94,6 +94,7 @@ const navGroups: NavGroup[] = [
   {
     title: 'SYSTEM & BILLING',
     items: [
+      { label: 'User Management', href: '/admin/users', icon: Users, badge: 'Tenants', badgeColor: 'purple' },
       { label: 'Billing & Plans', href: '/billing', icon: CreditCard, badge: 'Cloud', badgeColor: 'amber' },
       { label: 'Domain Reseller', href: '/admin/domains', icon: Globe, badge: 'Admin', badgeColor: 'purple' },
       { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
@@ -106,11 +107,62 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+const customerNavGroups: NavGroup[] = [
+  {
+    title: 'MY HOSTING',
+    items: [
+      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'My Websites', href: '/websites', icon: Server },
+      { label: 'Domains & DNS', href: '/domains', icon: Globe },
+      { label: 'DNS Zones', href: '/dns', icon: Globe },
+      { label: 'File Manager', href: '/files', icon: FolderTree },
+      { label: 'FTP Accounts', href: '/ftp', icon: FolderSync },
+      { label: 'Databases (MySQL)', href: '/databases', icon: Database },
+      { label: 'phpMyAdmin', href: '/phpmyadmin', icon: Database, badge: 'SQL', badgeColor: 'amber' },
+      { label: 'Email Accounts', href: '/email', icon: Mail },
+      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald' },
+      { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
+    ],
+  },
+  {
+    title: 'DEVELOPER & TOOLS',
+    items: [
+      { label: 'Cron Jobs', href: '/cron', icon: Clock },
+      { label: 'Backups & Snapshots', href: '/backups', icon: DownloadCloud },
+      { label: '1-Click App Store', href: '/app-store', icon: Boxes, badge: 'Apps', badgeColor: 'blue' },
+      { label: 'Terminal', href: '/terminal', icon: Terminal, badge: 'CLI', badgeColor: 'blue' },
+    ],
+  },
+  {
+    title: 'ACCOUNT & BILLING',
+    items: [
+      { label: 'Package & Quotas', href: '/billing', icon: CreditCard, badge: 'Plan', badgeColor: 'emerald' },
+      { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
+      { label: 'Account Settings', href: '/settings', icon: Settings },
+    ],
+  },
+];
+
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    const roleInfo = getStoredUserRole();
+    const admin = roleInfo.role === 'admin' || roleInfo.role === 'superadmin' || roleInfo.isSuperAdmin;
+    setIsAdmin(admin);
+
+    apiFetch<{ role?: string; is_superadmin?: boolean }>('/api/v1/auth/me').then((res) => {
+      if (res.success && res.data) {
+        setIsAdmin(res.data.role === 'admin' || res.data.role === 'superadmin' || Boolean(res.data.is_superadmin));
+      }
+    }).catch(() => {});
+  }, []);
+
+  const navGroups = isAdmin ? adminNavGroups : customerNavGroups;
 
   useEffect(() => {
     const saved = localStorage.getItem('hostvra_sidebar_collapsed');

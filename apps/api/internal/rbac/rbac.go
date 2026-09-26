@@ -14,6 +14,8 @@ const (
 	RoleManager   = "manager"
 	RoleDeveloper = "developer"
 	RoleViewer    = "viewer"
+	RoleCustomer  = "customer"
+	RoleUser      = "user"
 )
 
 // Standard Permission Constants
@@ -161,10 +163,36 @@ var RolePermissionMatrix = map[string][]string{
 		PermPHPView,
 		PermWebServerView,
 	},
+	RoleCustomer: {
+		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
+		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
+		PermSSLView, PermSSLManage,
+		PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage,
+		PermCronView, PermCronManage,
+		PermBackupsCreate, PermBackupsRestore,
+		PermDNSManage,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage,
+		PermPHPView, PermPHPHealthCheck,
+		PermWebServerView,
+		PermBillingView,
+	},
+	RoleUser: {
+		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
+		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
+		PermSSLView, PermSSLManage,
+		PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage,
+		PermCronView, PermCronManage,
+		PermBackupsCreate, PermBackupsRestore,
+		PermDNSManage,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage,
+		PermPHPView, PermPHPHealthCheck,
+		PermWebServerView,
+		PermBillingView,
+	},
 }
 
 func HasPermission(role string, isSuperAdmin bool, permission string) bool {
-	if isSuperAdmin || role == RoleOwner {
+	if isSuperAdmin {
 		return true
 	}
 
@@ -194,6 +222,28 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions for this operation", map[string]string{
 					"required_permission": permission,
 					"user_role":           claims.Role,
+				}, "")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAdmin ensures that only global administrators or superadmins can access the endpoint
+func RequireAdmin() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := auth.GetClaims(r.Context())
+			if !ok {
+				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication context missing", nil, "")
+				return
+			}
+
+			if !claims.IsSuperAdmin && claims.Role != RoleAdmin {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privileges required", map[string]string{
+					"user_role": claims.Role,
 				}, "")
 				return
 			}

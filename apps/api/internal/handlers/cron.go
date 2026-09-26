@@ -12,15 +12,17 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type CronHandler struct {
-	cfg     *config.Config
-	store   store.Store
-	audit   *audit.Logger
-	cronMgr *cron.CronManager
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	cronMgr  *cron.CronManager
+	quotaSvc *quota.Service
 }
 
 func NewCronHandler(cfg *config.Config, s store.Store, a *audit.Logger) *CronHandler {
@@ -30,6 +32,10 @@ func NewCronHandler(cfg *config.Config, s store.Store, a *audit.Logger) *CronHan
 		audit:   a,
 		cronMgr: cron.NewCronManager(),
 	}
+}
+
+func (h *CronHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // Request DTOs
@@ -90,6 +96,13 @@ func (h *CronHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "cron"); err != nil {
+			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
+
 	sysUser := strings.TrimSpace(req.SystemUser)
 	if sysUser == "" || sysUser == "root" {
 		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {

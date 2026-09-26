@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -34,6 +35,7 @@ type RegisterRequest struct {
 	Password         string `json:"password"`
 	FullName         string `json:"full_name"`
 	OrganizationName string `json:"organization_name"`
+	PlanSlug         string `json:"plan_slug,omitempty"`
 }
 
 type LoginRequest struct {
@@ -55,6 +57,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	req.FullName = strings.TrimSpace(req.FullName)
 	req.OrganizationName = strings.TrimSpace(req.OrganizationName)
+	req.PlanSlug = strings.TrimSpace(strings.ToLower(req.PlanSlug))
 
 	if req.Email == "" || req.FullName == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Email and full name are required", nil, "")
@@ -67,7 +70,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.OrganizationName == "" {
-		req.OrganizationName = req.FullName + "'s Org"
+		req.OrganizationName = req.FullName + "'s Hosting Space"
 	}
 
 	// Hash password with Argon2id
@@ -83,7 +86,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		ID:          uuid.New(),
 		Name:        req.OrganizationName,
 		Slug:        orgSlug,
-		PlanTier:    "free",
+		PlanTier:    "starter",
 		MaxServers:  1,
 		MaxWebsites: 5,
 	}
@@ -92,7 +95,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create User as Owner
+	// Create User with Customer / User Role (NEVER Admin or SuperAdmin)
+	userRole := "customer"
 	user := &store.User{
 		ID:           uuid.New(),
 		Email:        req.Email,
@@ -100,16 +104,64 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		FullName:     req.FullName,
 		IsActive:     true,
 		IsSuperAdmin: false,
+		Role:         userRole,
+		DefaultOrgID: org.ID,
 	}
 
-	if err := h.store.CreateUser(r.Context(), user, org.ID, "owner"); err != nil {
+	if err := h.store.CreateUser(r.Context(), user, org.ID, userRole); err != nil {
 		response.Error(w, http.StatusConflict, "USER_EXISTS", "User with this email already exists", nil, "")
 		return
 	}
 
-	// Mint JWT pair
+	// Auto-assign Hosting Package and create initial Subscription
+	var assignedPlan *store.HostingPlan
+	if req.PlanSlug != "" {
+		if p, err := h.store.GetPlanBySlug(r.Context(), req.PlanSlug); err == nil && p != nil {
+			assignedPlan = p
+		}
+	}
+	if assignedPlan == nil {
+		if plans, err := h.store.ListPlans(r.Context()); err == nil && len(plans) > 0 {
+			for _, p := range plans {
+				if strings.Contains(strings.ToLower(p.Slug), "starter") || p.Tier == store.PlanTierStarter {
+					assignedPlan = p
+					break
+				}
+			}
+			if assignedPlan == nil {
+				assignedPlan = plans[0]
+			}
+		}
+	}
+
+	if assignedPlan != nil {
+		trialDays := 14
+		if assignedPlan.TrialDays > 0 {
+			trialDays = assignedPlan.TrialDays
+		}
+		now := time.Now().UTC()
+		trialEnd := now.AddDate(0, 0, trialDays)
+		sub := &store.Subscription{
+			ID:              uuid.New(),
+			UserID:          user.ID,
+			OrganizationID:  org.ID,
+			PlanID:          assignedPlan.ID,
+			PlanName:        assignedPlan.Name,
+			Status:          store.SubStatusTrial,
+			BillingCycle:    "monthly",
+			Amount:          0.00,
+			Currency:        assignedPlan.Currency,
+			NextBillingDate: trialEnd,
+			TrialStartedAt:  &now,
+			TrialEndsAt:     &trialEnd,
+			AutoRenew:       true,
+		}
+		_ = h.store.CreateSubscription(r.Context(), sub)
+	}
+
+	// Mint JWT pair with Customer role
 	tokens, _, err := auth.GenerateTokenPair(
-		user.ID, org.ID, user.Email, "owner", false,
+		user.ID, org.ID, user.Email, userRole, false,
 		h.cfg.JWTSecret, h.cfg.JWTElementsHours, h.cfg.RefreshTokenDays,
 	)
 	if err != nil {
@@ -118,15 +170,19 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "auth.register", "user", user.ID.String(), "success", "", map[string]interface{}{
-		"email":   user.Email,
-		"org_id":  org.ID,
-		"org_name": org.Name,
+		"email":     user.Email,
+		"org_id":    org.ID,
+		"org_name":  org.Name,
+		"role":      userRole,
+		"plan_name": func() string { if assignedPlan != nil { return assignedPlan.Name }; return "Starter" }(),
 	})
 
 	response.JSON(w, http.StatusCreated, map[string]interface{}{
 		"user":   user,
 		"org":    org,
 		"tokens": tokens,
+		"plan":   assignedPlan,
+		"role":   userRole,
 	}, nil)
 }
 
@@ -162,8 +218,15 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Retrieve Org
 	org, _ := h.store.GetOrganizationByID(r.Context(), user.DefaultOrgID)
 
+	userRole := user.Role
+	if user.IsSuperAdmin {
+		userRole = "admin"
+	} else if userRole == "" || userRole == "owner" {
+		userRole = "customer"
+	}
+
 	tokens, _, err := auth.GenerateTokenPair(
-		user.ID, user.DefaultOrgID, user.Email, user.Role, user.IsSuperAdmin,
+		user.ID, user.DefaultOrgID, user.Email, userRole, user.IsSuperAdmin,
 		h.cfg.JWTSecret, h.cfg.JWTElementsHours, h.cfg.RefreshTokenDays,
 	)
 	if err != nil {
@@ -175,12 +238,15 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	h.audit.Log(r.Context(), r, "auth.login", "user", user.ID.String(), "success", "", map[string]interface{}{
 		"email": user.Email,
+		"role":  userRole,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"user":   user,
-		"org":    org,
-		"tokens": tokens,
+		"user":          user,
+		"org":           org,
+		"tokens":        tokens,
+		"role":          userRole,
+		"is_superadmin": user.IsSuperAdmin,
 	}, nil)
 }
 
@@ -200,9 +266,10 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	org, _ := h.store.GetOrganizationByID(r.Context(), claims.OrganizationID)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"user": user,
-		"org":  org,
-		"role": claims.Role,
+		"user":          user,
+		"org":           org,
+		"role":          claims.Role,
+		"is_superadmin": claims.IsSuperAdmin,
 	}, nil)
 }
 
