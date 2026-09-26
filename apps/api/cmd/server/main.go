@@ -216,6 +216,9 @@ func main() {
 
 	// API v1 Namespace
 	r.Route("/api/v1", func(r chi.Router) {
+		// Health & Status
+		r.Get("/health", healthHandler.Health)
+
 		// Public Auth Endpoints
 		r.Route("/auth", func(r chi.Router) {
 			registerLimiter := auth.NewRateLimiter(3, 60*time.Second, "Too many registration attempts. Please try again later.")
