@@ -310,33 +310,57 @@ export default function BillingPage() {
     setLoading(true);
     try {
       // 1. Load plans
-      const plansRes = await apiFetch<HostingPlan[]>('/api/v1/billing/plans?all=true');
-      if (plansRes.data && plansRes.data.length > 0) {
-        setPlans(plansRes.data);
+      const plansRes = await apiFetch<any>('/api/v1/billing/plans?all=true');
+      if (plansRes && plansRes.data) {
+        const rawPlans = Array.isArray(plansRes.data)
+          ? plansRes.data
+          : Array.isArray(plansRes.data.plans)
+          ? plansRes.data.plans
+          : [];
+        if (rawPlans.length > 0) {
+          setPlans(rawPlans);
+        }
       }
 
       // 2. Load subscriptions
-      const subsRes = await apiFetch<Subscription[]>('/api/v1/billing/subscriptions');
-      if (subsRes.data) {
-        setSubscriptions(subsRes.data);
+      const subsRes = await apiFetch<any>('/api/v1/billing/subscriptions');
+      if (subsRes && subsRes.data) {
+        const rawSubs = Array.isArray(subsRes.data)
+          ? subsRes.data
+          : Array.isArray(subsRes.data.subscriptions)
+          ? subsRes.data.subscriptions
+          : [];
+        setSubscriptions(rawSubs);
       }
 
       // 3. Load invoices
-      const invsRes = await apiFetch<Invoice[]>('/api/v1/billing/invoices');
-      if (invsRes.data) {
-        setInvoices(invsRes.data);
+      const invsRes = await apiFetch<any>('/api/v1/billing/invoices');
+      if (invsRes && invsRes.data) {
+        const rawInvs = Array.isArray(invsRes.data)
+          ? invsRes.data
+          : Array.isArray(invsRes.data.invoices)
+          ? invsRes.data.invoices
+          : [];
+        setInvoices(rawInvs);
       }
 
       // 4. Load gateways
-      const gwRes = await apiFetch<PaymentGatewayConfig[]>('/api/v1/billing/gateways');
-      if (gwRes.data && gwRes.data.length > 0) {
-        setGateways(gwRes.data);
+      const gwRes = await apiFetch<any>('/api/v1/billing/gateways');
+      if (gwRes && gwRes.data) {
+        const rawGws = Array.isArray(gwRes.data)
+          ? gwRes.data
+          : Array.isArray(gwRes.data.gateways)
+          ? gwRes.data.gateways
+          : [];
+        if (rawGws.length > 0) {
+          setGateways(rawGws);
+        }
       }
 
       // 5. Load trial settings
       try {
-        const tsRes = await apiFetch<TrialSettings>('/api/v1/billing/trial-settings');
-        if (tsRes.data) {
+        const tsRes = await apiFetch<any>('/api/v1/billing/trial-settings');
+        if (tsRes && tsRes.data && typeof tsRes.data === 'object' && !Array.isArray(tsRes.data)) {
           setTrialSettings(tsRes.data);
         }
       } catch (tsErr) {
@@ -345,9 +369,14 @@ export default function BillingPage() {
 
       // 6. Load trials
       try {
-        const trialsRes = await apiFetch<Subscription[]>('/api/v1/billing/trials');
-        if (trialsRes.data) {
-          setTrialsList(trialsRes.data);
+        const trialsRes = await apiFetch<any>('/api/v1/billing/trials');
+        if (trialsRes && trialsRes.data) {
+          const rawTrials = Array.isArray(trialsRes.data)
+            ? trialsRes.data
+            : Array.isArray(trialsRes.data.trials)
+            ? trialsRes.data.trials
+            : [];
+          setTrialsList(rawTrials);
         }
       } catch (trErr) {
         console.warn('Trials fetch notice:', trErr);
@@ -675,31 +704,38 @@ export default function BillingPage() {
     }
   };
 
+  const safePlans = Array.isArray(plans) ? plans : [];
+  const safeSubscriptions = Array.isArray(subscriptions) ? subscriptions : [];
+  const safeInvoices = Array.isArray(invoices) ? invoices : [];
+  const safeGateways = Array.isArray(gateways) ? gateways : [];
+  const safeTrials = Array.isArray(trialsList) ? trialsList : [];
+
   // Total active subscriptions count
   const activeSubsCount = useMemo(() => {
-    return subscriptions.filter(s => s.status === 'active').length;
-  }, [subscriptions]);
+    return safeSubscriptions.filter(s => s && s.status === 'active').length;
+  }, [safeSubscriptions]);
 
   // Active trials count
   const activeTrialsCount = useMemo(() => {
-    return (trialsList.length > 0 ? trialsList : subscriptions).filter(s => s.status === 'trial').length;
-  }, [subscriptions, trialsList]);
+    const target = safeTrials.length > 0 ? safeTrials : safeSubscriptions;
+    return target.filter(s => s && s.status === 'trial').length;
+  }, [safeSubscriptions, safeTrials]);
 
   // Converted trials count
   const convertedTrialsCount = useMemo(() => {
-    return trialsList.filter(t => t.status === 'active').length;
-  }, [trialsList]);
+    return safeTrials.filter(t => t && t.status === 'active').length;
+  }, [safeTrials]);
 
   // Trial conversion rate %
   const trialConversionRate = useMemo(() => {
-    if (trialsList.length === 0) return 0;
-    return Math.round((convertedTrialsCount / trialsList.length) * 100);
-  }, [trialsList, convertedTrialsCount]);
+    if (safeTrials.length === 0) return 0;
+    return Math.round((convertedTrialsCount / safeTrials.length) * 100);
+  }, [safeTrials, convertedTrialsCount]);
 
   // Unpaid invoices count
   const unpaidInvoicesCount = useMemo(() => {
-    return invoices.filter(i => i.status === 'unpaid' || i.status === 'overdue').length;
-  }, [invoices]);
+    return safeInvoices.filter(i => i && (i.status === 'unpaid' || i.status === 'overdue')).length;
+  }, [safeInvoices]);
 
   return (
     <DashboardShell>
@@ -1746,7 +1782,7 @@ export default function BillingPage() {
               <div className="p-5 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
                 <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Trials Initiated</div>
                 <div className="text-3xl font-black text-slate-900 dark:text-white mt-1">
-                  {trialsList.length > 0 ? trialsList.length : subscriptions.filter(s => s.status === 'trial').length}
+                  {safeTrials.length > 0 ? safeTrials.length : safeSubscriptions.filter(s => s && s.status === 'trial').length}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">From landing page and dashboard</div>
               </div>
@@ -1958,7 +1994,7 @@ export default function BillingPage() {
                 </button>
               </div>
 
-              {((trialsList.length > 0 ? trialsList : subscriptions).filter(s => s.status === 'trial' || s.trial_ends_at).length === 0) ? (
+              {(((safeTrials.length > 0 ? safeTrials : safeSubscriptions).filter(s => s && (s.status === 'trial' || s.trial_ends_at)).length === 0)) ? (
                 <div className="text-center py-12 px-4 border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl">
                   <Gift className="w-10 h-10 text-purple-400 mx-auto mb-3" />
                   <div className="text-sm font-bold text-slate-900 dark:text-white">No Active Customer Free Trials</div>
@@ -1986,8 +2022,8 @@ export default function BillingPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
-                      {(trialsList.length > 0 ? trialsList : subscriptions)
-                        .filter(s => s.status === 'trial' || s.trial_ends_at)
+                      {(safeTrials.length > 0 ? safeTrials : safeSubscriptions)
+                        .filter(s => s && (s.status === 'trial' || s.trial_ends_at))
                         .map(tr => {
                           const isTrial = tr.status === 'trial';
                           const endsAt = tr.trial_ends_at ? new Date(tr.trial_ends_at) : new Date(tr.next_billing_date);
