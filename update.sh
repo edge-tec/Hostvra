@@ -130,6 +130,7 @@ if [[ -d "apps/agent" ]]; then
 fi
 
 echo "=== [4/6] Building Next.js Web UI Production Bundle ==="
+rm -rf apps/web/.next .next
 (cd apps/web && npm install --no-audit && npm run build)
 # Ensure root .next symlink exists for universal CWD static asset resolution
 ln -sfn apps/web/.next .next 2>/dev/null || true
@@ -170,6 +171,9 @@ if command -v systemctl &>/dev/null; then
 
     echo "Restarting hostvra-web..."
     systemctl restart hostvra-web 2>/dev/null || true
+    if command -v pm2 &>/dev/null; then
+        pm2 restart hostvra-web --update-env 2>/dev/null || true
+    fi
 
     # Ensure Nginx reverse proxy configuration is active and eliminates 403 Forbidden
     if command -v nginx &>/dev/null; then
