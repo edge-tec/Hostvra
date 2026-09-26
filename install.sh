@@ -416,8 +416,8 @@ deploy_services() {
         (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra" cmd/hostvra/main.go 2>/dev/null || true)
         log_success "Hostvra binaries compiled and placed successfully!"
     else
-        log_info "Simulating binary placement for target ${BIN_ARCH}..."
-        touch "${INSTALL_DIR}/hostvra-api" "${INSTALL_DIR}/hostvra-agent" "${INSTALL_DIR}/hostvra"
+        log_error "No precompiled binaries found in ${REPO_ROOT}/bin and Go compiler is not installed."
+        log_fatal "Failed to deploy Hostvra binaries: Go toolchain or precompiled binaries are required."
     fi
 
     # Compile / build Next.js UI dashboard if npm available

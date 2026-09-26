@@ -137,24 +137,6 @@ func (m *MemoryStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Datab
 
 	db, exists := m.databases[id]
 	if !exists || db.DeletedAt != nil {
-		if id.String() == "11111111-1111-1111-1111-111111111111" {
-			return &Database{
-				ID:           uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-				Name:         "gafargaon",
-				Username:     "gafargaon",
-				Password:     "Gafargaon@2026#Secure",
-				CharacterSet: "utf8mb4",
-				Collation:    "utf8mb4_unicode_ci",
-				Quota:        "Unlimited",
-				BackupStatus: "1 Backup",
-				BackupCount:  1,
-				Location:     "Localhost",
-				Note:         "Main application production database (gafargaon)",
-				HostAllow:    "localhost",
-				InRecycleBin: false,
-				CreatedAt:    time.Now().UTC().Add(-48 * time.Hour),
-			}, nil
-		}
 		return nil, ErrNotFound
 	}
 	return db, nil
@@ -169,26 +151,6 @@ func (m *MemoryStore) ListDatabasesByServer(ctx context.Context, serverID uuid.U
 		if (serverID == uuid.Nil || d.ServerID == serverID) && d.DeletedAt == nil {
 			dbs = append(dbs, d)
 		}
-	}
-	if len(dbs) == 0 {
-		return []*Database{
-			{
-				ID:           uuid.MustParse("11111111-1111-1111-1111-111111111111"),
-				Name:         "gafargaon",
-				Username:     "gafargaon",
-				Password:     "Gafargaon@2026#Secure",
-				CharacterSet: "utf8mb4",
-				Collation:    "utf8mb4_unicode_ci",
-				Quota:        "Unlimited",
-				BackupStatus: "1 Backup",
-				BackupCount:  1,
-				Location:     "Localhost",
-				Note:         "Main application production database (gafargaon)",
-				HostAllow:    "localhost",
-				InRecycleBin: false,
-				CreatedAt:    time.Now().UTC().Add(-48 * time.Hour),
-			},
-		}, nil
 	}
 	return dbs, nil
 }

@@ -307,7 +307,8 @@ func (m *MemoryStore) CreateDomainOrder(ctx context.Context, order *DomainOrder)
 	}
 	order.UpdatedAt = now
 	order.DomainName = strings.ToLower(strings.TrimSpace(order.DomainName))
-	m.domainOrders[order.ID] = order
+	cp := *order
+	m.domainOrders[order.ID] = &cp
 	return nil
 }
 
@@ -319,7 +320,8 @@ func (m *MemoryStore) GetDomainOrderByID(ctx context.Context, id uuid.UUID) (*Do
 	if !ok {
 		return nil, ErrNotFound
 	}
-	return o, nil
+	cp := *o
+	return &cp, nil
 }
 
 func (m *MemoryStore) GetDomainOrderByInvoiceID(ctx context.Context, invoiceID uuid.UUID) (*DomainOrder, error) {
@@ -328,7 +330,8 @@ func (m *MemoryStore) GetDomainOrderByInvoiceID(ctx context.Context, invoiceID u
 
 	for _, o := range m.domainOrders {
 		if o.InvoiceID != nil && *o.InvoiceID == invoiceID {
-			return o, nil
+			cp := *o
+			return &cp, nil
 		}
 	}
 	return nil, ErrNotFound
@@ -340,7 +343,8 @@ func (m *MemoryStore) GetDomainOrderByIdempotencyKey(ctx context.Context, key st
 
 	for _, o := range m.domainOrders {
 		if o.IdempotencyKey == key {
-			return o, nil
+			cp := *o
+			return &cp, nil
 		}
 	}
 	return nil, ErrNotFound
@@ -353,7 +357,8 @@ func (m *MemoryStore) ListDomainOrdersByUserID(ctx context.Context, userID uuid.
 	var list []*DomainOrder
 	for _, o := range m.domainOrders {
 		if o.UserID == userID {
-			list = append(list, o)
+			cp := *o
+			list = append(list, &cp)
 		}
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -368,7 +373,8 @@ func (m *MemoryStore) ListAllDomainOrders(ctx context.Context) ([]*DomainOrder, 
 
 	var list []*DomainOrder
 	for _, o := range m.domainOrders {
-		list = append(list, o)
+		cp := *o
+		list = append(list, &cp)
 	}
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].CreatedAt.After(list[j].CreatedAt)
@@ -384,7 +390,8 @@ func (m *MemoryStore) UpdateDomainOrder(ctx context.Context, order *DomainOrder)
 		return ErrNotFound
 	}
 	order.UpdatedAt = time.Now().UTC()
-	m.domainOrders[order.ID] = order
+	cp := *order
+	m.domainOrders[order.ID] = &cp
 	return nil
 }
 

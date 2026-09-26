@@ -432,16 +432,14 @@ func (m *Manager) packDatabase(dbName string, targetArchive string) (string, int
 
 	// If neither tool succeeded:
 	if !dumped {
-		if len(dumpErrors) > 0 {
-			return "", 0, 0, fmt.Errorf("database backup failed for %q: %s", dbName, strings.Join(dumpErrors, "; "))
-		}
-		// When no database tools are found, allow synthetic stub ONLY if running in explicit test mode
 		if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
 			sqlHeader := fmt.Sprintf("-- Hostvra Database Backup Archive (Test Mode)\n-- Database: %s\n-- Timestamp: %s\n",
 				dbName, time.Now().UTC().Format(time.RFC3339))
 			if err := os.WriteFile(tmpSQL, []byte(sqlHeader), 0600); err != nil {
 				return "", 0, 0, fmt.Errorf("failed to create test sql dump file: %w", err)
 			}
+		} else if len(dumpErrors) > 0 {
+			return "", 0, 0, fmt.Errorf("database backup failed for %q: %s", dbName, strings.Join(dumpErrors, "; "))
 		} else {
 			return "", 0, 0, fmt.Errorf("database dump failed for %q: neither mysqldump nor pg_dump utility is available on this system", dbName)
 		}
@@ -667,11 +665,11 @@ func (m *Manager) restoreDatabase(archivePath, dbName string) error {
 	}
 
 	if !restored {
-		if len(restoreErrors) > 0 {
-			return fmt.Errorf("database restore failed for %q: %s", dbName, strings.Join(restoreErrors, "; "))
-		}
 		if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
 			return nil
+		}
+		if len(restoreErrors) > 0 {
+			return fmt.Errorf("database restore failed for %q: %s", dbName, strings.Join(restoreErrors, "; "))
 		}
 		return fmt.Errorf("database restore failed for %q: neither mysql nor psql utility is available on this system", dbName)
 	}

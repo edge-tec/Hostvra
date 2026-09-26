@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -172,8 +174,11 @@ func (m *Manager) GetServerDatabases(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	// Default fallback return
-	return []string{"gafargaon", "hostvra_db", "mysql", "test_db"}, nil
+	// Fail closed if MySQL is unreachable
+	if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+		return []string{"test_db"}, nil
+	}
+	return nil, fmt.Errorf("no connection available to MySQL database engine")
 }
 
 // ColumnInfo represents metadata for a table column.
@@ -229,52 +234,14 @@ func (m *Manager) GetDatabaseTables(ctx context.Context, dbName string) ([]Table
 					})
 				}
 			}
-			if len(list) > 0 {
-				return list, nil
-			}
+			return list, nil
 		}
 	}
 
-	// If database is gafargaon (or demo), populate exact tables from phpMyAdmin reference
-	if strings.EqualFold(dbName, "gafargaon") {
-		return []TableInfo{
-			{Name: "activity_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "admin_copilot_queries", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 4, SizeKb: 32, DataLength: "16 KB", IndexLength: "16 KB"},
-			{Name: "agriculture_guides", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 2, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_answers", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 14, SizeKb: 48, DataLength: "32 KB", IndexLength: "16 KB"},
-			{Name: "ai_assistant_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_categories", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 12, SizeKb: 32, DataLength: "16 KB", IndexLength: "16 KB"},
-			{Name: "ai_citizen_sessions", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_conversations", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 11, SizeKb: 64, DataLength: "32 KB", IndexLength: "32 KB"},
-			{Name: "ai_evaluation_cases", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_failed_queries", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_feedback", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_generated_reports", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 1, SizeKb: 32, DataLength: "16 KB", IndexLength: "16 KB"},
-			{Name: "ai_governance_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_human_decision_audits", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_knowledge_bases", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_knowledge_chunks", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 299, SizeKb: 512, DataLength: "384 KB", IndexLength: "128 KB"},
-			{Name: "ai_knowledge_sources", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 19, SizeKb: 96, DataLength: "64 KB", IndexLength: "32 KB"},
-			{Name: "ai_messages", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 58, SizeKb: 128, DataLength: "96 KB", IndexLength: "32 KB"},
-			{Name: "ai_model_registries", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_multimodal_queries", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ai_questions", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 14, SizeKb: 48, DataLength: "32 KB", IndexLength: "16 KB"},
-			{Name: "ai_search_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 58, SizeKb: 80, DataLength: "48 KB", IndexLength: "32 KB"},
-			{Name: "ai_voice_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "ambulances", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 2, SizeKb: 32, DataLength: "16 KB", IndexLength: "16 KB"},
-			{Name: "anomaly_events", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "api_gateway_audit_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "application_drafts", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "application_timelines", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "appointment_slots", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "approval_action_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "approval_workflows", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-			{Name: "audit_logs", Engine: "InnoDB", Collation: "utf8mb4_unicode_ci", Rows: 0, SizeKb: 16, DataLength: "16 KB", IndexLength: "0 KB"},
-		}, nil
+	if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+		return []TableInfo{}, nil
 	}
-
-	// Return empty slice so an empty database shows 0 tables
-	return []TableInfo{}, nil
+	return nil, fmt.Errorf("no connection available to MySQL database engine")
 }
 
 // GetDatabaseColumns returns live column schema for the specified table.
@@ -321,22 +288,14 @@ func (m *Manager) GetDatabaseColumns(ctx context.Context, dbName, tableName stri
 					cols = append(cols, col)
 				}
 			}
-			if len(cols) > 0 {
-				return cols, nil
-			}
+			return cols, nil
 		}
 	}
 
-	// Default fallback columns for demo/local tables
-	return []ColumnInfo{
-		{Field: "id", Type: "bigint(20) unsigned", Collation: "", Null: "NO", Key: "PRI", Default: "NULL", Extra: "auto_increment", Privileges: "select,insert,update,references"},
-		{Field: "title", Type: "varchar(255)", Collation: "utf8mb4_unicode_ci", Null: "NO", Key: "", Default: "NULL", Extra: "", Privileges: "select,insert,update,references"},
-		{Field: "content", Type: "longtext", Collation: "utf8mb4_unicode_ci", Null: "YES", Key: "", Default: "NULL", Extra: "", Privileges: "select,insert,update,references"},
-		{Field: "status", Type: "varchar(50)", Collation: "utf8mb4_unicode_ci", Null: "NO", Key: "MUL", Default: "active", Extra: "", Privileges: "select,insert,update,references"},
-		{Field: "metadata", Type: "json", Collation: "", Null: "YES", Key: "", Default: "NULL", Extra: "", Privileges: "select,insert,update,references"},
-		{Field: "created_at", Type: "timestamp", Collation: "", Null: "YES", Key: "", Default: "CURRENT_TIMESTAMP", Extra: "", Privileges: "select,insert,update,references"},
-		{Field: "updated_at", Type: "timestamp", Collation: "", Null: "YES", Key: "", Default: "CURRENT_TIMESTAMP", Extra: "on update CURRENT_TIMESTAMP", Privileges: "select,insert,update,references"},
-	}, nil
+	if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+		return []ColumnInfo{}, nil
+	}
+	return nil, fmt.Errorf("no connection available to MySQL database engine")
 }
 
 // ExecuteQuery runs a SQL command on the host database.
@@ -586,14 +545,17 @@ func (m *Manager) RunDatabaseTools(ctx context.Context, dbName, action string) (
 		}
 		cmd := exec.CommandContext(ctx, path, args...)
 		out, err := cmd.CombinedOutput()
-		if err == nil {
-			return string(out), nil
+		if err != nil {
+			return string(out), fmt.Errorf("mysqlcheck %s failed: %w (%s)", action, err, strings.TrimSpace(string(out)))
 		}
+		return string(out), nil
 	}
 
-	// Standard simulation output when CLI tools are not installed in dev
-	return fmt.Sprintf("[%s] Table check and %s on database '%s' completed successfully. Status: OK (0 errors, 0 corrupted tables).",
-		time.Now().Format("2006-01-02 15:04:05"), action, dbName), nil
+	if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+		return fmt.Sprintf("[%s] Test Mode: Table check and %s on database '%s' executed.",
+			time.Now().Format("2006-01-02 15:04:05"), action, dbName), nil
+	}
+	return "", errors.New("mysqlcheck utility is not installed on this system")
 }
 
 // DumpDatabase exports a SQL dump for the database.
@@ -617,22 +579,33 @@ func (m *Manager) DumpDatabase(ctx context.Context, dbName string) ([]byte, erro
 		return out, nil
 	}
 
-	// Fallback SQL dump when mysqldump binary is not installed in local environment
-	header := fmt.Sprintf("-- Hostvra Database Backup Snapshot\n-- Database: %s\n-- Dump Date: %s\n-- Host: 127.0.0.1\n\nCREATE DATABASE IF NOT EXISTS `%s`;\nUSE `%s`;\n-- Dump Complete.\n",
-		dbName, time.Now().UTC().Format(time.RFC3339), dbName, dbName)
-	return []byte(header), nil
+	if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+		header := fmt.Sprintf("-- Hostvra Database Backup Snapshot (Test Mode)\n-- Database: %s\n-- Dump Date: %s\n-- Host: 127.0.0.1\n\nCREATE DATABASE IF NOT EXISTS `%s`;\nUSE `%s`;\n-- Dump Complete.\n",
+			dbName, time.Now().UTC().Format(time.RFC3339), dbName, dbName)
+		return []byte(header), nil
+	}
+	return nil, errors.New("mysqldump utility is not installed on this server")
 }
 
 // ImportDatabase restores a SQL dump into the specified database.
 func (m *Manager) ImportDatabase(ctx context.Context, dbName string, sqlData []byte) error {
-	if path, err := exec.LookPath("mysql"); err == nil {
-		args := []string{dbName}
-		if m.rootPassword != "" {
-			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
+	path, err := exec.LookPath("mysql")
+	if err != nil {
+		if os.Getenv("HOSTVRA_TEST_MODE") == "1" {
+			return nil
 		}
-		cmd := exec.CommandContext(ctx, path, args...)
-		cmd.Stdin = bytes.NewReader(sqlData)
-		return cmd.Run()
+		return errors.New("mysql client utility is not installed on this server")
+	}
+	args := []string{dbName}
+	if m.rootPassword != "" {
+		args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
+	}
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Stdin = bytes.NewReader(sqlData)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("mysql import failed: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

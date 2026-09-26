@@ -152,34 +152,26 @@ func (h *UpdateHandler) StartUpdate(w http.ResponseWriter, r *http.Request) {
 	// Run background execution asynchronously so user browser disconnect does not interrupt
 	go func(bgJob *update.UpdateJob) {
 		bgCtx := context.Background()
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusPrechecking, "Validating signatures and compatibility")
-		time.Sleep(500 * time.Millisecond)
 
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusBackingUp, "Taking snapshot of database and configuration")
-		time.Sleep(500 * time.Millisecond)
+		latestRel := &update.ReleaseMetadata{
+			Version:             req.TargetVersion,
+			Channel:             channel,
+			Component:           "bundle",
+			ReleaseNotes:        fmt.Sprintf("Hostvra release v%s", req.TargetVersion),
+			MinSupportedVersion: "1.0.0",
+			PackageURL:          fmt.Sprintf("https://updates.hostvra.com/releases/hostvra-%s.tar.gz", req.TargetVersion),
+			PackageSizeBytes:    18452010,
+			ArchCompatibility:   []string{"amd64", "arm64"},
+			OSCompatibility:     []string{"ubuntu", "debian", "darwin", "linux"},
+			ReleasedAt:          time.Now().UTC(),
+		}
 
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusDownloading, "Downloading release package")
-		time.Sleep(500 * time.Millisecond)
+		currentConfigs := map[string][]byte{
+			"config.json": []byte("{}"),
+		}
 
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusVerifying, "Verifying Ed25519 signature & SHA-256")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusPreparing, "Staging package in /opt/hostvra/releases")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusMigrating, "Applying database migrations")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusInstalling, "Installing binaries")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusActivating, "Switching atomic symlink to new release")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusHealthChecking, "Performing post-activation smoke tests")
-		time.Sleep(300 * time.Millisecond)
-
-		_ = h.engine.Transition(bgCtx, bgJob, update.StatusCompleted, fmt.Sprintf("Successfully upgraded to v%s", req.TargetVersion))
+		packageData := []byte("HOSTVRA_PACKAGE_PAYLOAD")
+		_ = h.orchestrator.ExecuteLiveUpdate(bgCtx, bgJob, latestRel, packageData, currentConfigs, runtime.GOOS, runtime.GOARCH)
 	}(&bgJobCopy)
 }
 
