@@ -1508,6 +1508,13 @@ export async function updateAdminUserStatus(userId: string, isActive: boolean): 
   });
 }
 
+export async function updateAdminUserRole(userId: string, role: string): Promise<ApiResponse<{ message: string; role: string }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/role`, {
+    method: 'PUT',
+    body: JSON.stringify({ role }),
+  });
+}
+
 export async function deleteAdminUser(userId: string): Promise<ApiResponse<{ message: string }>> {
   return apiFetch(`/api/v1/admin/users/${userId}`, {
     method: 'DELETE',

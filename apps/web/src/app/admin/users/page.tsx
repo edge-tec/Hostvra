@@ -42,6 +42,7 @@ import {
   updateAdminUserOverrides,
   deleteAdminUserOverrides,
   updateAdminUserStatus,
+  updateAdminUserRole,
   getStoredUserRole,
 } from '@/lib/api';
 
@@ -56,6 +57,8 @@ export default function AdminUsersPage() {
   // Modals
   const [editPlanModal, setEditPlanModal] = useState(false);
   const [editOverrideModal, setEditOverrideModal] = useState(false);
+  const [editRoleModal, setEditRoleModal] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<'customer' | 'user' | 'admin'>('customer');
 
   // Form states
   const [selectedPlanId, setSelectedPlanId] = useState('');
@@ -121,6 +124,32 @@ export default function AdminUsersPage() {
         loadData();
       } else {
         setMessage({ type: 'error', text: res.error?.message || 'Failed to update plan' });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err?.message || 'Request failed' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openRoleModal = (u: AdminUserListItem) => {
+    setSelectedUser(u);
+    const curr = (u.role === 'admin' ? 'admin' : u.role === 'user' ? 'user' : 'customer') as 'customer' | 'user' | 'admin';
+    setSelectedRole(curr);
+    setEditRoleModal(true);
+  };
+
+  const handleSaveRole = async () => {
+    if (!selectedUser) return;
+    setSaving(true);
+    try {
+      const res = await updateAdminUserRole(selectedUser.id, selectedRole);
+      if (res.success) {
+        setMessage({ type: 'success', text: `Role updated to ${selectedRole.toUpperCase()} for ${selectedUser.email}` });
+        setEditRoleModal(false);
+        loadData();
+      } else {
+        setMessage({ type: 'error', text: res.error?.message || 'Failed to update user role' });
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err?.message || 'Request failed' });
@@ -213,7 +242,12 @@ export default function AdminUsersPage() {
     const matchesSearch =
       u.email.toLowerCase().includes(search.toLowerCase()) ||
       u.full_name.toLowerCase().includes(search.toLowerCase());
-    const matchesRole = filterRole === 'all' || u.role === filterRole;
+    const matchesRole =
+      filterRole === 'all' ||
+      (filterRole === 'customer' && (u.role === 'customer' || u.role === 'owner' || !u.role)) ||
+      (filterRole === 'superadmin' && u.is_superadmin) ||
+      (filterRole === 'admin' && (u.role === 'admin' || u.is_superadmin)) ||
+      (filterRole === 'user' && u.role === 'user');
     return matchesSearch && matchesRole;
   });
 
@@ -288,6 +322,7 @@ export default function AdminUsersPage() {
               <option value="customer">Customers</option>
               <option value="user">Users</option>
               <option value="admin">Administrators</option>
+              <option value="superadmin">SuperAdmins</option>
             </select>
           </div>
         </div>
@@ -341,15 +376,24 @@ export default function AdminUsersPage() {
 
                         {/* Role */}
                         <td className="py-3.5 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              u.role === 'admin' || u.is_superadmin
-                                ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/30'
-                                : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30'
-                            }`}
+                          <button
+                            onClick={() => openRoleModal(u)}
+                            className="group inline-flex items-center gap-1.5 cursor-pointer focus:outline-none"
+                            title="Click to change user role"
                           >
-                            {u.is_superadmin ? 'SuperAdmin' : u.role}
-                          </span>
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase transition-all group-hover:ring-2 group-hover:ring-offset-1 ${
+                                u.is_superadmin || u.role === 'admin'
+                                  ? 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/30'
+                                  : u.role === 'user'
+                                  ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30'
+                                  : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30'
+                              }`}
+                            >
+                              {u.is_superadmin ? 'SuperAdmin' : (u.role === 'owner' || u.role === 'customer' || !u.role ? 'Customer' : u.role)}
+                            </span>
+                            <Edit2 className="w-2.5 h-2.5 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                          </button>
                         </td>
 
                         {/* Status */}
@@ -422,6 +466,13 @@ export default function AdminUsersPage() {
                         {/* Admin Controls */}
                         <td className="py-3.5 px-4 text-right">
                           <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => openRoleModal(u)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-100 transition-colors flex items-center gap-1"
+                              title="Assign User Role (Customer, User, Admin)"
+                            >
+                              <Shield className="w-3 h-3" /> Role
+                            </button>
                             <button
                               onClick={() => openPlanModal(u)}
                               className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 transition-colors"
@@ -730,6 +781,111 @@ export default function AdminUsersPage() {
                   className="px-4 py-2 text-xs font-bold bg-amber-600 text-white rounded-xl hover:bg-amber-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Apply Overrides'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Change User Role Modal */}
+        {editRoleModal && selectedUser && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  Assign User Role: {selectedUser.email}
+                </h3>
+                <button
+                  onClick={() => setEditRoleModal(false)}
+                  className="p-1 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Select the platform role for this account. Customers have full access to hosting features governed by their package quotas.
+                </p>
+
+                <div className="space-y-2.5">
+                  {/* Customer Option */}
+                  <div
+                    onClick={() => setSelectedRole('customer')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      selectedRole === 'customer'
+                        ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-500/10 ring-2 ring-emerald-500/20'
+                        : 'border-slate-200 dark:border-surface-800 hover:border-slate-300 dark:hover:border-surface-700 bg-white dark:bg-surface-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        Customer (Default / Package Account)
+                      </div>
+                      <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 px-2 py-0.5 rounded-full">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                      Hosting client with personal dashboard, websites, databases, mailboxes, and file manager governed by their package plan.
+                    </p>
+                  </div>
+
+                  {/* Standard User Option */}
+                  <div
+                    onClick={() => setSelectedRole('user')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      selectedRole === 'user'
+                        ? 'border-blue-500 bg-blue-50/60 dark:bg-blue-500/10 ring-2 ring-blue-500/20'
+                        : 'border-slate-200 dark:border-surface-800 hover:border-slate-300 dark:hover:border-surface-700 bg-white dark:bg-surface-900'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      Standard User
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                      Standard user account with base platform access.
+                    </p>
+                  </div>
+
+                  {/* Admin Option */}
+                  <div
+                    onClick={() => setSelectedRole('admin')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      selectedRole === 'admin'
+                        ? 'border-purple-500 bg-purple-50/60 dark:bg-purple-500/10 ring-2 ring-purple-500/20'
+                        : 'border-slate-200 dark:border-surface-800 hover:border-slate-300 dark:hover:border-surface-700 bg-white dark:bg-surface-900'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-xs text-slate-900 dark:text-white">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      Administrator
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                      Full access to server fleet, all tenant users, global packages, WHM controls, and system-level operations.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-surface-800">
+                <button
+                  type="button"
+                  onClick={() => setEditRoleModal(false)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveRole}
+                  disabled={saving}
+                  className="px-4 py-2 text-xs font-bold bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Update Role'}
                 </button>
               </div>
             </div>

@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -52,11 +54,19 @@ func (h *AdminUsersHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]*UserListItemDTO, 0, len(users))
 	for _, u := range users {
+		displayRole := u.Role
+		if u.IsSuperAdmin {
+			displayRole = "superadmin"
+		} else if displayRole == "owner" || displayRole == "" {
+			displayRole = "customer"
+			_ = h.store.UpdateUserRole(r.Context(), u.ID, "customer")
+		}
+
 		item := &UserListItemDTO{
 			ID:           u.ID,
 			Email:        u.Email,
 			FullName:     u.FullName,
-			Role:         u.Role,
+			Role:         displayRole,
 			IsActive:     u.IsActive,
 			IsSuperAdmin: u.IsSuperAdmin,
 			CreatedAt:    u.CreatedAt.Format("2006-01-02 15:04:05"),
@@ -93,6 +103,11 @@ func (h *AdminUsersHandler) GetUserDetails(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User profile not found", nil, "")
 		return
+	}
+
+	if !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+		user.Role = "customer"
+		_ = h.store.UpdateUserRole(r.Context(), user.ID, "customer")
 	}
 
 	effective, err := h.quotaService.ResolveEffectivePlan(r.Context(), userID)
@@ -181,6 +196,22 @@ func (h *AdminUsersHandler) UpdateUserPlan(w http.ResponseWriter, r *http.Reques
 			AutoRenew:      true,
 		}
 		_ = h.store.CreateSubscription(r.Context(), newSub)
+	}
+
+	// Synchronize user's hosting accounts with the new plan configuration
+	if accounts, err := h.store.ListHostingAccounts(r.Context(), user.DefaultOrgID, nil); err == nil {
+		for _, acc := range accounts {
+			if acc.UserID == user.ID {
+				acc.PlanID = plan.ID
+				acc.PlanName = plan.Name
+				acc.DiskLimitMB = plan.DiskSpaceMB
+				acc.BandwidthLimitMB = plan.BandwidthMB
+				acc.WebsitesLimit = plan.MaxWebsites
+				acc.DatabasesLimit = plan.MaxDatabases
+				acc.MailboxesLimit = plan.MaxMailboxes
+				_ = h.store.UpdateHostingAccount(r.Context(), acc)
+			}
+		}
 	}
 
 	h.audit.Log(r.Context(), r, "admin.user.change_plan", "user", userID.String(), "success", "", map[string]interface{}{
@@ -285,6 +316,55 @@ func (h *AdminUsersHandler) UpdateUserStatus(w http.ResponseWriter, r *http.Requ
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"message":   "User account status updated to " + action,
 		"is_active": req.IsActive,
+	}, nil)
+}
+
+type UpdateUserRoleRequest struct {
+	Role string `json:"role"`
+}
+
+// UpdateUserRole handles PUT /api/v1/admin/users/{id}/role
+func (h *AdminUsersHandler) UpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	userIDStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user UUID", nil, "")
+		return
+	}
+
+	var req UpdateUserRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Role == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid role is required", nil, "")
+		return
+	}
+
+	cleanRole := strings.ToLower(strings.TrimSpace(req.Role))
+	switch cleanRole {
+	case "customer", "user", "admin":
+	default:
+		response.Error(w, http.StatusBadRequest, "INVALID_ROLE", "Role must be 'customer', 'user', or 'admin'", nil, "")
+		return
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found", nil, "")
+		return
+	}
+
+	if err := h.store.UpdateUserRole(r.Context(), userID, cleanRole); err != nil {
+		response.Error(w, http.StatusInternalServerError, "ROLE_UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "admin.user.update_role", "user", userID.String(), "success", fmt.Sprintf("Changed role of %s to %s", user.Email, cleanRole), map[string]interface{}{
+		"previous_role": user.Role,
+		"new_role":      cleanRole,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"message": "User role successfully updated",
+		"role":    cleanRole,
 	}, nil)
 }
 

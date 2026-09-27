@@ -289,6 +289,7 @@ func main() {
 				r.Get("/", adminUsersHandler.ListUsers)
 				r.Get("/{id}", adminUsersHandler.GetUserDetails)
 				r.Put("/{id}/plan", adminUsersHandler.UpdateUserPlan)
+				r.Put("/{id}/role", adminUsersHandler.UpdateUserRole)
 				r.Put("/{id}/overrides", adminUsersHandler.UpdateUserOverrides)
 				r.Delete("/{id}/overrides", adminUsersHandler.DeleteUserOverrides)
 				r.Put("/{id}/status", adminUsersHandler.UpdateUserStatus)
@@ -1072,6 +1073,16 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 			logger.Warn("Failed to seed initial admin user", "email", email, "error", err)
 		} else {
 			logger.Info("Initial administrator account successfully initialized", "email", email)
+		}
+	}
+
+	// Normalize any legacy non-superadmin users whose role was set to 'owner' or empty to 'customer'
+	if allUsers, err := s.ListUsers(ctx); err == nil {
+		for _, u := range allUsers {
+			if !u.IsSuperAdmin && (u.Role == "owner" || u.Role == "") {
+				_ = s.UpdateUserRole(ctx, u.ID, "customer")
+				logger.Info("Normalized legacy user role to customer", "email", u.Email)
+			}
 		}
 	}
 }

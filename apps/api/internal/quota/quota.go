@@ -138,11 +138,16 @@ func (s *Service) ResolveEffectivePlan(ctx context.Context, userID uuid.UUID) (*
 		}
 	}
 
+	userRole := user.Role
+	if userRole == "owner" || userRole == "" {
+		userRole = "customer"
+	}
+
 	effective := &store.EffectiveUserPlan{
 		UserID:             user.ID,
 		UserEmail:          user.Email,
 		UserName:           user.FullName,
-		Role:               user.Role,
+		Role:               userRole,
 		IsActive:           user.IsActive,
 		IsSuperAdmin:       false,
 		PlanID:             assignedPlan.ID,

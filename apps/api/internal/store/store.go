@@ -756,7 +756,11 @@ func (m *MemoryStore) GetUserByEmail(ctx context.Context, email string) (*User, 
 	if !exists {
 		return nil, ErrNotFound
 	}
-	return m.users[id], nil
+	user := m.users[id]
+	if user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+		user.Role = "customer"
+	}
+	return user, nil
 }
 
 func (m *MemoryStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
@@ -766,6 +770,9 @@ func (m *MemoryStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, err
 	user, exists := m.users[id]
 	if !exists {
 		return nil, ErrNotFound
+	}
+	if user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+		user.Role = "customer"
 	}
 	return user, nil
 }
@@ -1328,13 +1335,16 @@ func (p *PostgresStore) GetUserByEmail(ctx context.Context, email string) (*User
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
+	if err == nil && user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+		user.Role = "customer"
+	}
 	return user, err
 }
 
 func (p *PostgresStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	query := `
 		SELECT u.id, u.email, u.password_hash, u.full_name, u.is_active, u.is_superadmin, u.two_factor_enabled,
-		       om.organization_id, COALESCE(r.name, 'owner')
+		       om.organization_id, CASE WHEN r.name = 'owner' OR r.name IS NULL OR r.name = '' THEN 'customer' ELSE r.name END
 		FROM users u
 		LEFT JOIN organization_members om ON om.user_id = u.id
 		LEFT JOIN roles r ON r.id = om.role_id
@@ -1348,6 +1358,9 @@ func (p *PostgresStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, e
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
+	}
+	if err == nil && user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+		user.Role = "customer"
 	}
 	return user, err
 }

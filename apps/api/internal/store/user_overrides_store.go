@@ -19,6 +19,9 @@ func (m *MemoryStore) ListUsers(ctx context.Context) ([]*User, error) {
 
 	users := make([]*User, 0, len(m.users))
 	for _, u := range m.users {
+		if !u.IsSuperAdmin && (u.Role == "owner" || u.Role == "") {
+			u.Role = "customer"
+		}
 		users = append(users, u)
 	}
 
@@ -122,7 +125,7 @@ func (p *PostgresStore) ListUsers(ctx context.Context) ([]*User, error) {
 		       u.two_factor_enabled, u.last_login_at, COALESCE(u.last_login_ip::text, ''),
 		       u.created_at, u.updated_at,
 		       COALESCE(om.organization_id, '00000000-0000-0000-0000-000000000000'::uuid) as default_org_id,
-		       COALESCE(r.name, 'customer') as role
+		       CASE WHEN r.name = 'owner' OR r.name IS NULL OR r.name = '' THEN 'customer' ELSE r.name END as role
 		FROM users u
 		LEFT JOIN organization_members om ON u.id = om.user_id
 		LEFT JOIN roles r ON om.role_id = r.id
@@ -150,6 +153,9 @@ func (p *PostgresStore) ListUsers(ctx context.Context) ([]*User, error) {
 			return nil, err
 		}
 		u.LastLoginIP = lastLoginIP
+		if !u.IsSuperAdmin && (u.Role == "owner" || u.Role == "") {
+			u.Role = "customer"
+		}
 		if !seen[u.ID] {
 			seen[u.ID] = true
 			users = append(users, u)
