@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,7 +54,33 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 		return fmt.Errorf("unauthorized: missing authentication claims")
 	}
 
-	clean := filepath.Clean(targetPath)
+	// 1. Decode single and double URL-encoded path traversal attempts
+	candidate := strings.TrimSpace(targetPath)
+	for i := 0; i < 3; i++ {
+		if unescaped, err := url.QueryUnescape(candidate); err == nil && unescaped != candidate {
+			candidate = unescaped
+		} else {
+			break
+		}
+	}
+
+	clean := filepath.Clean(candidate)
+
+	// 2. Reject relative paths and explicit directory traversal sequences
+	if !filepath.IsAbs(clean) {
+		return fmt.Errorf("invalid path: relative paths are forbidden")
+	}
+	if strings.Contains(clean, "/../") || strings.HasPrefix(clean, "../") || clean == ".." {
+		return fmt.Errorf("path traversal sequence forbidden")
+	}
+
+	// 3. System-wide critical kernel memory guards (forbidden even for admin panel users)
+	criticalHardware := []string{"/dev/mem", "/dev/kmem", "/dev/port", "/proc/kcore"}
+	for _, ch := range criticalHardware {
+		if clean == ch || strings.HasPrefix(clean, ch+"/") {
+			return fmt.Errorf("direct access to raw kernel memory device '%s' is prohibited", clean)
+		}
+	}
 
 	if claims.Role != "owner" && claims.Role != "admin" {
 		restrictedRoots := []string{

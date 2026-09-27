@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,6 +27,10 @@ import (
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
+)
+
+var (
+	validDomainRegex = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$`)
 )
 
 type WebsiteHandler struct {
@@ -441,9 +446,13 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.PrimaryDomain = strings.TrimSpace(strings.ToLower(req.PrimaryDomain))
+	req.PrimaryDomain = strings.TrimRight(strings.TrimSpace(strings.ToLower(req.PrimaryDomain)), ".")
 	if req.PrimaryDomain == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Primary domain is required", nil, "")
+		return
+	}
+	if len(req.PrimaryDomain) > 253 || !validDomainRegex.MatchString(req.PrimaryDomain) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid primary domain format. Must be a valid fully qualified domain name (FQDN)", nil, "")
 		return
 	}
 
@@ -458,6 +467,20 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DocumentRoot == "" {
 		req.DocumentRoot = "/var/www/" + req.PrimaryDomain + "/public_html"
+	} else {
+		cleanDocRoot := filepath.Clean(req.DocumentRoot)
+		allowed := strings.HasPrefix(cleanDocRoot, "/var/www/") || strings.HasPrefix(cleanDocRoot, "/home/")
+		if envRoot := os.Getenv("HOSTVRA_WEB_ROOT"); envRoot != "" {
+			envClean := filepath.Clean(envRoot)
+			if strings.HasPrefix(cleanDocRoot, envClean+"/") || cleanDocRoot == envClean {
+				allowed = true
+			}
+		}
+		if !allowed {
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Document root must reside inside /var/www or /home", nil, "")
+			return
+		}
+		req.DocumentRoot = cleanDocRoot
 	}
 
 	defaultPHP := "8.3"

@@ -18,9 +18,13 @@ func (m *Manager) AddColumn(ctx context.Context, dbName, tableName, colName, col
 		nullClause = "NULL"
 	}
 
-	colDef := fmt.Sprintf("%s %s", SafeQuoteIdentifier(colName), colType)
-	if collation != "" {
-		colDef += fmt.Sprintf(" COLLATE %s", collation)
+	cleanColType := strings.ReplaceAll(colType, ";", "")
+	cleanCollation := strings.ReplaceAll(collation, ";", "")
+	cleanExtra := strings.ReplaceAll(extra, ";", "")
+
+	colDef := fmt.Sprintf("%s %s", SafeQuoteIdentifier(colName), cleanColType)
+	if cleanCollation != "" {
+		colDef += fmt.Sprintf(" COLLATE %s", cleanCollation)
 	}
 	colDef += " " + nullClause
 
@@ -30,8 +34,8 @@ func (m *Manager) AddColumn(ctx context.Context, dbName, tableName, colName, col
 		colDef += " DEFAULT NULL"
 	}
 
-	if extra != "" {
-		colDef += " " + extra
+	if cleanExtra != "" {
+		colDef += " " + cleanExtra
 	}
 
 	afterClause := ""
@@ -60,9 +64,13 @@ func (m *Manager) ModifyColumn(ctx context.Context, dbName, tableName, oldColNam
 		nullClause = "NULL"
 	}
 
-	colDef := fmt.Sprintf("%s %s %s", SafeQuoteIdentifier(oldColName), SafeQuoteIdentifier(newColName), colType)
-	if collation != "" {
-		colDef += fmt.Sprintf(" COLLATE %s", collation)
+	cleanColType := strings.ReplaceAll(colType, ";", "")
+	cleanCollation := strings.ReplaceAll(collation, ";", "")
+	cleanExtra := strings.ReplaceAll(extra, ";", "")
+
+	colDef := fmt.Sprintf("%s %s %s", SafeQuoteIdentifier(oldColName), SafeQuoteIdentifier(newColName), cleanColType)
+	if cleanCollation != "" {
+		colDef += fmt.Sprintf(" COLLATE %s", cleanCollation)
 	}
 	colDef += " " + nullClause
 
@@ -72,8 +80,8 @@ func (m *Manager) ModifyColumn(ctx context.Context, dbName, tableName, oldColNam
 		colDef += " DEFAULT NULL"
 	}
 
-	if extra != "" {
-		colDef += " " + extra
+	if cleanExtra != "" {
+		colDef += " " + cleanExtra
 	}
 
 	query := fmt.Sprintf("ALTER TABLE %s CHANGE COLUMN %s", SafeQuoteIdentifier(tableName), colDef)

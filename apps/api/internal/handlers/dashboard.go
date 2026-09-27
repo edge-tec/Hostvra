@@ -629,8 +629,23 @@ func (h *DashboardHandler) RestartTarget(w http.ResponseWriter, r *http.Request)
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
+	req.Target = strings.ToLower(strings.TrimSpace(req.Target))
 	if req.Target == "" {
 		req.Target = "panel"
+	}
+
+	validTargets := map[string]bool{
+		"panel":         true,
+		"nginx":         true,
+		"apache":        true,
+		"openlitespeed": true,
+		"php-fpm":       true,
+		"server":        true,
+	}
+
+	if !validTargets[req.Target] {
+		response.Error(w, http.StatusBadRequest, "INVALID_TARGET", "Unsupported or invalid restart target. Allowed targets: panel, nginx, apache, openlitespeed, php-fpm, server", nil, "")
+		return
 	}
 
 	h.audit.Log(r.Context(), r, "system.restart", "system", req.Target, "success", "", map[string]interface{}{
@@ -643,11 +658,15 @@ func (h *DashboardHandler) RestartTarget(w http.ResponseWriter, r *http.Request)
 		switch target {
 		case "nginx":
 			_ = exec.Command("systemctl", "reload", "nginx").Run()
+		case "apache":
+			_ = exec.Command("systemctl", "reload", "apache2").Run()
+		case "openlitespeed":
+			_ = exec.Command("systemctl", "restart", "lsws").Run()
+		case "php-fpm":
+			_ = exec.Command("systemctl", "reload", "php8.2-fpm").Run()
 		case "panel":
-			// Graceful restart of API service
 			_ = exec.Command("systemctl", "restart", "hostvra-api").Run()
 		case "server":
-			// Server reboot
 			_ = exec.Command("reboot").Run()
 		}
 	}(req.Target)

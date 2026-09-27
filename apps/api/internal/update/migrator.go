@@ -60,19 +60,25 @@ func CalculateChecksum(sqlContent string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// EnsureMigrationTable creates database_migrations table if not exists
 func (m *DatabaseMigrator) EnsureMigrationTable(ctx context.Context) error {
 	query := `
 CREATE TABLE IF NOT EXISTS database_migrations (
-    id SERIAL PRIMARY KEY,
-    version VARCHAR(50) NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    checksum VARCHAR(64) NOT NULL,
+    id SERIAL,
+    version VARCHAR(100) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    checksum VARCHAR(64) NOT NULL DEFAULT '',
     applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    execution_time_ms INTEGER NOT NULL,
-    rollback_sql TEXT,
+    execution_time_ms INTEGER NOT NULL DEFAULT 0,
+    rollback_sql TEXT DEFAULT '',
     is_success BOOLEAN NOT NULL DEFAULT true
-);`
+);
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS id SERIAL;
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS checksum VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS execution_time_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS rollback_sql TEXT DEFAULT '';
+ALTER TABLE database_migrations ADD COLUMN IF NOT EXISTS is_success BOOLEAN NOT NULL DEFAULT true;
+`
 	_, err := m.db.ExecContext(ctx, query)
 	return err
 }

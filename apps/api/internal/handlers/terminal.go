@@ -197,9 +197,11 @@ exit $__HV_EXIT__
 
 	cmd := exec.CommandContext(ctx, shell, "-c", script)
 
-	var stdoutBuf, stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	const maxOutputBytes = 1024 * 1024 // 1MB buffer ceiling per command output
+	stdoutBuf := &limitedBuffer{limit: maxOutputBytes}
+	stderrBuf := &limitedBuffer{limit: maxOutputBytes}
+	cmd.Stdout = stdoutBuf
+	cmd.Stderr = stderrBuf
 
 	start := time.Now()
 	err := cmd.Run()
@@ -211,7 +213,7 @@ exit $__HV_EXIT__
 			exitCode = exitErr.ExitCode()
 		} else if ctx.Err() == context.DeadlineExceeded {
 			exitCode = 124 // Timeout standard
-			stderrBuf.WriteString("\n[Hostvra Terminal] Execution timed out after 60 seconds.")
+			stderrBuf.WriteString("\n[Hostvra Terminal] Execution timed out.")
 		} else {
 			exitCode = 1
 			stderrBuf.WriteString(fmt.Sprintf("\n[Hostvra Terminal] Process error: %s", err.Error()))
@@ -264,4 +266,37 @@ exit $__HV_EXIT__
 	}
 
 	response.JSON(w, http.StatusOK, respData, nil)
+}
+
+// limitedBuffer bounds output capturing to limit bytes to prevent unbounded memory allocation
+type limitedBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (l *limitedBuffer) Write(p []byte) (int, error) {
+	if l.buf.Len() >= l.limit {
+		l.truncated = true
+		return len(p), nil
+	}
+	remaining := l.limit - l.buf.Len()
+	if len(p) > remaining {
+		l.buf.Write(p[:remaining])
+		l.truncated = true
+		return len(p), nil
+	}
+	return l.buf.Write(p)
+}
+
+func (l *limitedBuffer) WriteString(s string) (int, error) {
+	return l.Write([]byte(s))
+}
+
+func (l *limitedBuffer) String() string {
+	res := l.buf.String()
+	if l.truncated {
+		res += "\n\n[Hostvra Terminal: Output truncated at 1MB limit to protect server memory]"
+	}
+	return res
 }

@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -104,14 +106,12 @@ func (h *CronHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sysUser := strings.TrimSpace(req.SystemUser)
-	if sysUser == "" || sysUser == "root" {
-		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can schedule cron jobs as root", nil, "")
-			return
-		}
-		if sysUser == "" {
-			sysUser = "root"
-		}
+	if err := h.validateTenantSystemUser(r.Context(), claims, sysUser); err != nil {
+		response.Error(w, http.StatusForbidden, "CRON_USER_FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+	if sysUser == "" {
+		sysUser = "root"
 	}
 
 	job := cron.CronJob{
@@ -337,14 +337,12 @@ func (h *CronHandler) TestCommand(w http.ResponseWriter, r *http.Request) {
 
 	claims, _ := auth.GetClaims(r.Context())
 	sysUser := strings.TrimSpace(req.SystemUser)
-	if sysUser == "" || sysUser == "root" {
-		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can test commands as root", nil, "")
-			return
-		}
-		if sysUser == "" {
-			sysUser = "root"
-		}
+	if err := h.validateTenantSystemUser(r.Context(), claims, sysUser); err != nil {
+		response.Error(w, http.StatusForbidden, "CRON_USER_FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+	if sysUser == "" {
+		sysUser = "root"
 	}
 
 	res, err := h.cronMgr.ExecuteNow(req.Command, sysUser)
@@ -368,4 +366,25 @@ func (h *CronHandler) TestCommand(w http.ResponseWriter, r *http.Request) {
 	})
 
 	response.JSON(w, http.StatusOK, res, nil)
+}
+
+// validateTenantSystemUser ensures non-admin users can only schedule cron jobs under system users
+// belonging to their own organization's websites.
+func (h *CronHandler) validateTenantSystemUser(ctx context.Context, claims *auth.Claims, sysUser string) error {
+	if claims == nil || claims.Role == "owner" || claims.Role == "admin" {
+		return nil
+	}
+	if sysUser == "" || sysUser == "root" {
+		return fmt.Errorf("only owner or admin can execute cron jobs as root")
+	}
+	sites, err := h.store.ListWebsitesByOrg(ctx, claims.OrganizationID)
+	if err != nil || len(sites) == 0 {
+		return fmt.Errorf("no websites registered for your organization to run cron jobs")
+	}
+	for _, s := range sites {
+		if s.SystemUser == sysUser {
+			return nil
+		}
+	}
+	return fmt.Errorf("system user '%s' does not belong to any website in your organization", sysUser)
 }
