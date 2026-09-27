@@ -60,16 +60,6 @@ func EnsureAllSchemas(db *sql.DB) error {
 	sort.Strings(sqlFiles)
 
 	for _, filename := range sqlFiles {
-		// Check if already applied
-		var exists bool
-		err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM database_migrations WHERE version = $1 AND is_success = true)`, filename).Scan(&exists)
-		if err == nil && exists {
-			continue
-		}
-
-		slog.Info("Applying database migration", "file", filename)
-		start := time.Now()
-
 		content, err := migrationFS.ReadFile("migrations/" + filename)
 		if err != nil {
 			return fmt.Errorf("failed to read migration file %s: %w", filename, err)
@@ -78,6 +68,20 @@ func EnsureAllSchemas(db *sql.DB) error {
 		// Calculate SHA256 checksum of SQL content
 		h := sha256.Sum256(content)
 		checksum := hex.EncodeToString(h[:])
+
+		// Check if already applied and verify checksum integrity against tampering
+		var recordedChecksum string
+		var isSuccess bool
+		err = db.QueryRowContext(ctx, `SELECT checksum, is_success FROM database_migrations WHERE version = $1`, filename).Scan(&recordedChecksum, &isSuccess)
+		if err == nil && isSuccess {
+			if recordedChecksum != "" && recordedChecksum != checksum {
+				return fmt.Errorf("migration %s checksum mismatch: database recorded %s, current file is %s (possible tampering or divergence)", filename, recordedChecksum, checksum)
+			}
+			continue
+		}
+
+		slog.Info("Applying database migration", "file", filename)
+		start := time.Now()
 
 		// Execute migration SQL
 		if _, err := db.ExecContext(ctx, string(content)); err != nil {

@@ -36,6 +36,7 @@ type Website struct {
 
 type Database struct {
 	ID             uuid.UUID  `json:"id"`
+	OrganizationID uuid.UUID  `json:"organization_id,omitempty"`
 	ServerID       uuid.UUID  `json:"server_id"`
 	DBType         string     `json:"db_type"` // mysql, mariadb, postgresql, sqlserver, mongodb, redis
 	Name           string     `json:"name"`

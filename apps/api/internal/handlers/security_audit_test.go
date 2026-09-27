@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"hostvra/api/internal/audit"
@@ -403,3 +404,169 @@ func TestSecurityAudit_CronTenantUserIsolation(t *testing.T) {
 		t.Fatalf("Expected 403 Forbidden when scheduling cron as foreign tenant user, got %d", rec.Code)
 	}
 }
+
+func TestSecurityAudit_DatabaseMultiTenantIsolation(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-at-least-32-bytes-long-12345"}
+	memStore := store.NewMemoryStore()
+	slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, slogger)
+	dbHandler := NewDatabaseHandler(cfg, memStore, auditLogger)
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+	serverID := uuid.New()
+
+	// Register server for Org A
+	_ = memStore.CreateServer(context.Background(), &store.Server{
+		ID:             serverID,
+		OrganizationID: orgA,
+		Name:           "node-a",
+		Hostname:       "node-a.hostvra.io",
+		IPAddress:      "127.0.0.1",
+		Status:         "online",
+	})
+
+	// User A claims
+	userAClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		Email:          "user@org-a.com",
+		OrganizationID: orgA,
+		Role:           "customer",
+	}
+	ctxA := context.WithValue(context.Background(), auth.UserContextKey, userAClaims)
+
+	// User B claims
+	userBClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		Email:          "user@org-b.com",
+		OrganizationID: orgB,
+		Role:           "customer",
+	}
+	ctxB := context.WithValue(context.Background(), auth.UserContextKey, userBClaims)
+
+	// 1. User A creates database "app_db_a"
+	dbA := &store.Database{
+		ID:             uuid.New(),
+		OrganizationID: orgA,
+		ServerID:       serverID,
+		DBType:         "mysql",
+		Name:           "app_db_a",
+		CharacterSet:   "utf8mb4",
+		Collation:      "utf8mb4_unicode_ci",
+	}
+	_ = memStore.CreateDatabase(context.Background(), dbA)
+
+	// 2. User B tries to Update User A's database -> must receive 403 Forbidden
+	updatePayload := UpdateDatabaseRequest{
+		Note: "Hacked note by User B",
+	}
+	bPayload, _ := json.Marshal(updatePayload)
+	req := httptest.NewRequest("PUT", "/api/v1/databases/"+dbA.ID.String(), bytes.NewReader(bPayload)).WithContext(ctxB)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", dbA.ID.String())
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	rec := httptest.NewRecorder()
+	dbHandler.Update(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when User B updates User A's database, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. User B tries to Delete User A's database -> must receive 403 Forbidden
+	delReq := httptest.NewRequest("DELETE", "/api/v1/databases/"+dbA.ID.String(), nil).WithContext(ctxB)
+	delRctx := chi.NewRouteContext()
+	delRctx.URLParams.Add("id", dbA.ID.String())
+	delReq = delReq.WithContext(context.WithValue(delReq.Context(), chi.RouteCtxKey, delRctx))
+	delRec := httptest.NewRecorder()
+	dbHandler.Delete(delRec, delReq)
+	if delRec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when User B deletes User A's database, got %d: %s", delRec.Code, delRec.Body.String())
+	}
+
+	// 4. User B tries to execute SQL on User A's database -> must receive 403 Forbidden
+	queryPayload := map[string]string{
+		"database": "app_db_a",
+		"query":    "DROP TABLE users;",
+	}
+	bQuery, _ := json.Marshal(queryPayload)
+	queryReq := httptest.NewRequest("POST", "/api/v1/databases/query", bytes.NewReader(bQuery)).WithContext(ctxB)
+	queryRec := httptest.NewRecorder()
+	dbHandler.ExecuteQuery(queryRec, queryReq)
+	if queryRec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when User B runs SQL on User A's database, got %d: %s", queryRec.Code, queryRec.Body.String())
+	}
+
+	// 5. Non-admin User A tries to run SQL on internal MySQL system databases -> must receive 403 Forbidden
+	sysQueryPayload := map[string]string{
+		"database": "mysql",
+		"query":    "SELECT user, authentication_string FROM user;",
+	}
+	bSysQuery, _ := json.Marshal(sysQueryPayload)
+	sysQueryReq := httptest.NewRequest("POST", "/api/v1/databases/query", bytes.NewReader(bSysQuery)).WithContext(ctxA)
+	sysQueryRec := httptest.NewRecorder()
+	dbHandler.ExecuteQuery(sysQueryRec, sysQueryReq)
+	if sysQueryRec.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when non-admin queries internal mysql database, got %d: %s", sysQueryRec.Code, sysQueryRec.Body.String())
+	}
+}
+
+func TestSecurityAudit_DomainCaseInsensitiveUniqueness(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-at-least-32-bytes-long-12345"}
+	memStore := store.NewMemoryStore()
+	slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, slogger)
+	siteHandler := NewWebsiteHandler(cfg, memStore, auditLogger)
+
+	orgA := uuid.New()
+	orgB := uuid.New()
+
+	ctxA := context.WithValue(context.Background(), auth.UserContextKey, &auth.Claims{
+		UserID:         uuid.New(),
+		Email:          "admin@org-a.com",
+		OrganizationID: orgA,
+		Role:           "customer",
+	})
+
+	ctxB := context.WithValue(context.Background(), auth.UserContextKey, &auth.Claims{
+		UserID:         uuid.New(),
+		Email:          "admin@org-b.com",
+		OrganizationID: orgB,
+		Role:           "customer",
+	})
+
+	// 1. Org A creates "Example.com"
+	reqA := CreateWebsiteRequest{
+		PrimaryDomain: "Example.com",
+	}
+	bA, _ := json.Marshal(reqA)
+	httpReqA := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(bA)).WithContext(ctxA)
+	httpRecA := httptest.NewRecorder()
+	siteHandler.Create(httpRecA, httpReqA)
+	if httpRecA.Code != http.StatusCreated {
+		t.Fatalf("Expected 201 Created for Example.com by Org A, got %d: %s", httpRecA.Code, httpRecA.Body.String())
+	}
+
+	// 2. Org B attempts to create "example.com" -> must receive 409 Conflict
+	reqB1 := CreateWebsiteRequest{
+		PrimaryDomain: "example.com",
+	}
+	bB1, _ := json.Marshal(reqB1)
+	httpReqB1 := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(bB1)).WithContext(ctxB)
+	httpRecB1 := httptest.NewRecorder()
+	siteHandler.Create(httpRecB1, httpReqB1)
+	if httpRecB1.Code != http.StatusConflict {
+		t.Fatalf("Expected 409 Conflict for duplicate domain (lowercase) by Org B, got %d: %s", httpRecB1.Code, httpRecB1.Body.String())
+	}
+
+	// 3. Org B attempts to create "EXAMPLE.COM." (with trailing dot and uppercase) -> must receive 409 Conflict
+	reqB2 := CreateWebsiteRequest{
+		PrimaryDomain: "EXAMPLE.COM.",
+	}
+	bB2, _ := json.Marshal(reqB2)
+	httpReqB2 := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(bB2)).WithContext(ctxB)
+	httpRecB2 := httptest.NewRecorder()
+	siteHandler.Create(httpRecB2, httpReqB2)
+	if httpRecB2.Code != http.StatusConflict {
+		t.Fatalf("Expected 409 Conflict for duplicate domain with trailing dot by Org B, got %d: %s", httpRecB2.Code, httpRecB2.Body.String())
+	}
+}
+

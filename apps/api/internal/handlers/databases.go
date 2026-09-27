@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,13 +97,85 @@ type CreateDatabaseUserRequest struct {
 	HostAllow string `json:"host_allow"`
 }
 
+// verifyDatabaseAccess ensures the requested database belongs to the caller's organization
+func (h *DatabaseHandler) verifyDatabaseAccess(ctx context.Context, claims *auth.Claims, db *store.Database) error {
+	if claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin" {
+		return nil
+	}
+	if db == nil {
+		return fmt.Errorf("database not found")
+	}
+	if db.OrganizationID != uuid.Nil && db.OrganizationID == claims.OrganizationID {
+		return nil
+	}
+	if db.ServerID != uuid.Nil {
+		server, err := h.store.GetServerByID(ctx, db.ServerID)
+		if err == nil && server != nil && server.OrganizationID == claims.OrganizationID {
+			return nil
+		}
+	}
+	return fmt.Errorf("access denied: database does not belong to your organization")
+}
+
+// verifyDatabaseAccessByName ensures non-admin users cannot query or inspect databases
+// belonging to other tenants or internal MySQL system databases.
+func (h *DatabaseHandler) verifyDatabaseAccessByName(ctx context.Context, claims *auth.Claims, dbName string) (*store.Database, error) {
+	if claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin" {
+		return nil, nil
+	}
+	lower := strings.ToLower(strings.TrimSpace(dbName))
+	if lower == "mysql" || lower == "information_schema" || lower == "performance_schema" || lower == "sys" {
+		return nil, fmt.Errorf("access to internal database '%s' is restricted to administrators", dbName)
+	}
+
+	servers, err := h.store.ListServersByOrg(ctx, claims.OrganizationID)
+	var serverIDs []uuid.UUID
+	if err == nil {
+		for _, s := range servers {
+			serverIDs = append(serverIDs, s.ID)
+		}
+	}
+	serverIDs = append(serverIDs, uuid.Nil)
+
+	for _, sID := range serverIDs {
+		dbs, err := h.store.ListDatabasesByServer(ctx, sID)
+		if err != nil {
+			continue
+		}
+		for _, d := range dbs {
+			if strings.EqualFold(d.Name, dbName) && d.DeletedAt == nil {
+				if d.OrganizationID == claims.OrganizationID || d.ServerID == sID {
+					return d, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("access denied: database '%s' does not belong to your organization", dbName)
+}
+
 // List returns databases for the given server (or all active databases if server_id omitted)
 func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+
 	var serverID uuid.UUID
 	serverIDStr := r.URL.Query().Get("server_id")
 	if serverIDStr != "" {
 		if id, err := uuid.Parse(serverIDStr); err == nil {
 			serverID = id
+		}
+	}
+
+	allowedServers := make(map[uuid.UUID]bool)
+	if !isAdmin && claims != nil {
+		if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil {
+			for _, s := range servers {
+				allowedServers[s.ID] = true
+			}
+		}
+		if serverID != uuid.Nil && !allowedServers[serverID] {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access to this server is not permitted", nil, "")
+			return
 		}
 	}
 
@@ -118,6 +191,14 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, d := range dbs {
 		if d.InRecycleBin && !includeTrash {
 			continue
+		}
+		if !isAdmin && claims != nil {
+			if d.OrganizationID != uuid.Nil && d.OrganizationID != claims.OrganizationID {
+				continue
+			}
+			if d.OrganizationID == uuid.Nil && !allowedServers[d.ServerID] {
+				continue
+			}
 		}
 		filtered = append(filtered, d)
 	}
@@ -156,6 +237,30 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	if !isAdmin && claims != nil {
+		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
+		if err != nil || len(servers) == 0 {
+			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+			return
+		}
+		if serverID != uuid.Nil {
+			allowed := false
+			for _, s := range servers {
+				if s.ID == serverID {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cannot create database on an unauthorized server", nil, "")
+				return
+			}
+		} else {
+			serverID = servers[0].ID
+		}
+	}
+
 	if req.DBType == "" {
 		req.DBType = "mysql"
 	}
@@ -190,23 +295,29 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Quota = "Not set"
 	}
 
+	var orgID uuid.UUID
+	if claims != nil {
+		orgID = claims.OrganizationID
+	}
+
 	db := &store.Database{
-		ID:           uuid.New(),
-		ServerID:     serverID,
-		DBType:       req.DBType,
-		Name:         req.Name,
-		Username:     req.Username,
-		Password:     req.Password,
-		CharacterSet: req.CharacterSet,
-		Collation:    req.Collation,
-		Quota:        req.Quota,
-		BackupStatus: "Not exist",
-		BackupCount:  0,
-		Location:     "Localhost",
-		Note:         req.Note,
-		HostAllow:    req.HostAllow,
-		InRecycleBin: false,
-		CreatedAt:    time.Now().UTC(),
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		DBType:         req.DBType,
+		Name:           req.Name,
+		Username:       req.Username,
+		Password:       req.Password,
+		CharacterSet:   req.CharacterSet,
+		Collation:      req.Collation,
+		Quota:          req.Quota,
+		BackupStatus:   "Not exist",
+		BackupCount:    0,
+		Location:       "Localhost",
+		Note:           req.Note,
+		HostAllow:      req.HostAllow,
+		InRecycleBin:   false,
+		CreatedAt:      time.Now().UTC(),
 	}
 
 	if err := h.store.CreateDatabase(r.Context(), db); err != nil {
@@ -234,15 +345,21 @@ func (h *DatabaseHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req UpdateDatabaseRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid JSON payload", nil, "")
-		return
-	}
-
+	claims, _ := auth.GetClaims(r.Context())
 	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	var req UpdateDatabaseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid JSON payload", nil, "")
 		return
 	}
 
@@ -275,10 +392,17 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	idParam := strings.TrimSpace(chi.URLParam(r, "id"))
 	recycle := r.URL.Query().Get("recycle_bin") == "true"
 
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+
 	dbID, err := uuid.Parse(idParam)
 	if err == nil {
 		db, err := h.store.GetDatabaseByID(r.Context(), dbID)
 		if err == nil && db != nil {
+			if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+				return
+			}
 			if !recycle {
 				_ = h.dbMgr.ExecuteDropDatabase(r.Context(), db.Name)
 			}
@@ -298,6 +422,10 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	// If not a UUID, treat idParam as a database name to drop directly from live MySQL
 	if idParam != "" && !recycle {
+		if !isAdmin {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Dropping database by raw name requires administrator privileges", nil, "")
+			return
+		}
 		lower := strings.ToLower(idParam)
 		if lower == "mysql" || lower == "information_schema" || lower == "performance_schema" || lower == "sys" {
 			response.Error(w, http.StatusBadRequest, "PROTECTED_DATABASE", "Cannot drop system database", nil, "")
@@ -389,9 +517,14 @@ func (h *DatabaseHandler) RunTools(w http.ResponseWriter, r *http.Request) {
 		req.Action = "optimize"
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
 	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
+		return
+	}
+	if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -417,9 +550,14 @@ func (h *DatabaseHandler) Backup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
 	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
+		return
+	}
+	if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -457,6 +595,12 @@ func (h *DatabaseHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	if dbName == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_NAME", "Database name is required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -510,6 +654,12 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	if dbName == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_NAME", "Database name is required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -680,8 +830,15 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
-	if req.Username == "" || len(req.Password) < 6 {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Username and password (min 6 chars) required", nil, "")
+	if req.Username == "" || !dbUserRegex.MatchString(req.Username) || len(req.Password) < 6 {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Username must be alphanumeric/underscore (1-32 chars) and password min 6 chars", nil, "")
+		return
+	}
+
+	if req.HostAllow == "" {
+		req.HostAllow = "localhost"
+	} else if !dbHostRegex.MatchString(req.HostAllow) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid host allow pattern", nil, "")
 		return
 	}
 
@@ -692,9 +849,31 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if req.HostAllow == "" {
-		req.HostAllow = "localhost"
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	if !isAdmin && claims != nil {
+		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
+		if err != nil || len(servers) == 0 {
+			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+			return
+		}
+		if serverID != uuid.Nil {
+			allowed := false
+			for _, s := range servers {
+				if s.ID == serverID {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cannot create database user on an unauthorized server", nil, "")
+				return
+			}
+		} else {
+			serverID = servers[0].ID
+		}
 	}
+
 	if req.DBType == "" {
 		req.DBType = "mysql"
 	}
@@ -735,6 +914,12 @@ func (h *DatabaseHandler) GetTables(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	tables, err := h.dbMgr.GetDatabaseTables(r.Context(), dbName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "TABLES_ERROR", err.Error(), nil, "")
@@ -758,6 +943,12 @@ func (h *DatabaseHandler) ExecuteQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	res, err := h.dbMgr.ExecuteQuery(r.Context(), req.Database, req.Query)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "QUERY_ERROR", err.Error(), nil, "")
@@ -776,6 +967,12 @@ func (h *DatabaseHandler) GetColumns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	cols, err := h.dbMgr.GetDatabaseColumns(r.Context(), dbName, tableName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "COLUMNS_ERROR", err.Error(), nil, "")
@@ -791,11 +988,25 @@ func (h *DatabaseHandler) GetColumns(w http.ResponseWriter, r *http.Request) {
 
 // GetTree returns real-time database schema tree with tables, views, procedures, functions, events, triggers
 func (h *DatabaseHandler) GetTree(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	tree, err := h.dbMgr.GetDatabaseTree(r.Context())
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "TREE_ERROR", err.Error(), nil, "")
 		return
 	}
+
+	// Filter tree nodes for non-admin tenants
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	if !isAdmin && claims != nil {
+		var filteredTree []database.DatabaseTreeNode
+		for _, node := range tree {
+			if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, node.Name); err == nil {
+				filteredTree = append(filteredTree, node)
+			}
+		}
+		tree = filteredTree
+	}
+
 	response.JSON(w, http.StatusOK, tree, nil)
 }
 
@@ -812,6 +1023,12 @@ func (h *DatabaseHandler) GetTableDetails(w http.ResponseWriter, r *http.Request
 	}
 	if dbName == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name or ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -835,6 +1052,12 @@ func (h *DatabaseHandler) GetTableStructure(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	structure, err := h.dbMgr.GetLiveTableStructure(r.Context(), dbName, tableName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "STRUCTURE_ERROR", err.Error(), nil, "")
@@ -849,6 +1072,12 @@ func (h *DatabaseHandler) BrowseRows(w http.ResponseWriter, r *http.Request) {
 	tableName := strings.TrimSpace(r.URL.Query().Get("table"))
 	if dbName == "" || tableName == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database and table name required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -893,6 +1122,12 @@ func (h *DatabaseHandler) InsertRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	insertID, err := h.dbMgr.InsertTableRow(r.Context(), req.Database, req.Table, req.Values)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "INSERT_ERROR", err.Error(), nil, "")
@@ -918,6 +1153,12 @@ func (h *DatabaseHandler) UpdateRow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	affected, err := h.dbMgr.UpdateTableRow(r.Context(), req.Database, req.Table, req.PrimaryKeyCol, req.PrimaryVal, req.Values)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "UPDATE_ERROR", err.Error(), nil, "")
@@ -939,6 +1180,12 @@ func (h *DatabaseHandler) DeleteRows(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.PrimaryKeyCol == "" || len(req.PrimaryVals) == 0 {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, primary_key_col, and primary_key_vals required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -971,6 +1218,12 @@ func (h *DatabaseHandler) ModifyColumn(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Table == "" || req.Action == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database, table, and action required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1009,6 +1262,12 @@ func (h *DatabaseHandler) ModifyIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	var err error
 	switch req.Action {
 	case "add":
@@ -1039,6 +1298,12 @@ func (h *DatabaseHandler) TableOperations(w http.ResponseWriter, r *http.Request
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Database == "" || req.Action == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Database and action required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, req.Database); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1102,6 +1367,13 @@ func (h *DatabaseHandler) ListViews(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	views, err := h.dbMgr.GetViews(r.Context(), dbName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "VIEWS_ERROR", err.Error(), nil, "")
@@ -1116,6 +1388,13 @@ func (h *DatabaseHandler) ListRoutines(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	routines, err := h.dbMgr.GetRoutines(r.Context(), dbName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "ROUTINES_ERROR", err.Error(), nil, "")
@@ -1130,6 +1409,13 @@ func (h *DatabaseHandler) ListEvents(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	events, err := h.dbMgr.GetEvents(r.Context(), dbName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "EVENTS_ERROR", err.Error(), nil, "")
@@ -1144,6 +1430,13 @@ func (h *DatabaseHandler) ListTriggers(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyDatabaseAccessByName(r.Context(), claims, dbName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	triggers, err := h.dbMgr.GetTriggers(r.Context(), dbName)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "TRIGGERS_ERROR", err.Error(), nil, "")

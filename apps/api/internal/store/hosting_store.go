@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +20,7 @@ func (m *MemoryStore) CreateWebsite(ctx context.Context, site *Website) error {
 	defer m.mu.Unlock()
 
 	for _, s := range m.websites {
-		if s.ServerID == site.ServerID && s.PrimaryDomain == site.PrimaryDomain && s.DeletedAt == nil {
+		if strings.EqualFold(s.PrimaryDomain, site.PrimaryDomain) && s.DeletedAt == nil {
 			return ErrAlreadyExists
 		}
 	}
@@ -311,11 +312,18 @@ func (p *PostgresStore) CreateWebsite(ctx context.Context, site *Website) error 
 	if site.ID == uuid.Nil {
 		site.ID = uuid.New()
 	}
-	return p.db.QueryRowContext(ctx, query,
+	err := p.db.QueryRowContext(ctx, query,
 		site.ID, site.ServerID, site.OrganizationID, site.PrimaryDomain,
 		site.DocumentRoot, site.SystemUser, site.PHPVersion, site.AppType,
 		site.ProxyPort, site.Status, site.SSLEnabled,
 	).Scan(&site.CreatedAt, &site.UpdatedAt)
+	if err != nil {
+		if strings.Contains(err.Error(), "idx_websites_unique_lower_domain") || strings.Contains(err.Error(), "23505") || strings.Contains(err.Error(), "unique constraint") {
+			return ErrAlreadyExists
+		}
+		return err
+	}
+	return nil
 }
 
 func (p *PostgresStore) GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Website, error) {
@@ -399,27 +407,31 @@ func (p *PostgresStore) UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslE
 
 func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error {
 	query := `
-		INSERT INTO databases (id, server_id, db_type, name, character_set, collation)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO databases (id, server_id, organization_id, db_type, name, character_set, collation)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at
 	`
 	if db.ID == uuid.Nil {
 		db.ID = uuid.New()
 	}
+	var orgID *uuid.UUID
+	if db.OrganizationID != uuid.Nil {
+		orgID = &db.OrganizationID
+	}
 	return p.db.QueryRowContext(ctx, query,
-		db.ID, db.ServerID, db.DBType, db.Name, db.CharacterSet, db.Collation,
+		db.ID, db.ServerID, orgID, db.DBType, db.Name, db.CharacterSet, db.Collation,
 	).Scan(&db.CreatedAt)
 }
 
 func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error) {
 	query := `
-		SELECT id, server_id, db_type, name, character_set, collation, size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
 		FROM databases
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	d := &Database{}
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
-		&d.ID, &d.ServerID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt,
+		&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -429,7 +441,7 @@ func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Dat
 
 func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error) {
 	query := `
-		SELECT id, server_id, db_type, name, character_set, collation, size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
 		FROM databases
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -443,7 +455,7 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 	dbs := make([]*Database, 0)
 	for rows.Next() {
 		d := &Database{}
-		err := rows.Scan(&d.ID, &d.ServerID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt)
+		err := rows.Scan(&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
