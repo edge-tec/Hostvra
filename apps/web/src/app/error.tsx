@@ -25,7 +25,7 @@ export default function Error({
       setIsChunkError(true);
       const lastReload = sessionStorage.getItem('last_chunk_reload');
       const now = Date.now();
-      if (!lastReload || now - parseInt(lastReload, 10) > 6000) {
+      if (!lastReload || now - parseInt(lastReload, 10) > 8000) {
         sessionStorage.setItem('last_chunk_reload', now.toString());
         const cleanUrl = window.location.pathname.split('?')[0];
         window.location.replace(`${cleanUrl}?_r=${now}`);
@@ -35,8 +35,10 @@ export default function Error({
 
   const handleRetry = () => {
     if (isChunkError) {
+      sessionStorage.removeItem('last_chunk_reload');
+      // Force reload bypassing cache by appending timestamp and calling reload
       const cleanUrl = window.location.pathname.split('?')[0];
-      window.location.replace(`${cleanUrl}?_r=${Date.now()}`);
+      window.location.href = `${cleanUrl}?_reload=${Date.now()}`;
     } else {
       reset();
     }
@@ -58,14 +60,17 @@ export default function Error({
       <div className="flex items-center gap-3">
         <button
           onClick={handleRetry}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all"
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
         >
           {isChunkError ? <RefreshCw className="w-4 h-4" /> : <RotateCcw className="w-4 h-4" />}
           {isChunkError ? 'Reload Latest Version' : 'Try Again'}
         </button>
         <button
-          onClick={() => (window.location.href = '/login')}
-          className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all border border-slate-300 shadow-sm"
+          onClick={() => {
+            sessionStorage.removeItem('last_chunk_reload');
+            window.location.href = '/login';
+          }}
+          className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all border border-slate-300 shadow-sm cursor-pointer"
         >
           Go to Login
         </button>
