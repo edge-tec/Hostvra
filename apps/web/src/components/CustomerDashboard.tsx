@@ -125,21 +125,21 @@ export function CustomerDashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      {/* Top Banner / Welcome Card */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 p-6 sm:p-8 text-white shadow-xl">
-        <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-8 w-48 h-48 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+      {/* Top Banner / Welcome Card - Clean Light Theme */}
+      <div className="relative overflow-hidden rounded-2xl bg-white border border-slate-200/80 p-6 sm:p-8 text-slate-900 shadow-sm">
+        <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 bg-indigo-50/60 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-1/3 -mb-8 w-48 h-48 bg-emerald-50/50 rounded-full blur-2xl pointer-events-none" />
 
         <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               Hosting Account Active
             </div>
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
               Welcome back, {plan?.user_name || 'Customer'}
             </h1>
-            <p className="text-sm text-slate-300 max-w-xl">
+            <p className="text-sm text-slate-600 max-w-xl">
               Manage your websites, databases, webmail, files and security credentials from your high-performance cloud portal.
             </p>
           </div>
@@ -148,7 +148,7 @@ export function CustomerDashboard() {
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white transition-colors border border-white/10"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors border border-slate-200"
               title="Refresh Quota"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
@@ -156,7 +156,7 @@ export function CustomerDashboard() {
             </button>
             <Link
               href="/websites"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#16A34A] hover:bg-[#15803D] text-white shadow-lg shadow-emerald-600/30 transition-all hover:scale-105"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-[#16A34A] hover:bg-[#15803D] text-white shadow-sm transition-all hover:scale-105"
             >
               <Plus className="w-4 h-4" />
               Add Website
@@ -165,21 +165,21 @@ export function CustomerDashboard() {
         </div>
 
         {/* Plan Header Strip */}
-        <div className="mt-6 pt-6 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4 text-xs">
+        <div className="mt-6 pt-6 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs">
           <div className="flex items-center gap-4">
-            <span className="text-slate-400">Current Package:</span>
-            <span className="font-bold text-white px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-300">
+            <span className="text-slate-500 font-medium">Current Package:</span>
+            <span className="font-bold text-indigo-700 px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200">
               {plan?.plan_name || 'Starter Cloud'}
             </span>
             {plan?.subscription_status === 'trial' && (
-              <span className="font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+              <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
                 14-Day Free Trial
               </span>
             )}
           </div>
           <Link
             href="/billing"
-            className="inline-flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 text-indigo-600 hover:text-indigo-700 font-semibold transition-colors"
           >
             Upgrade or Extend Plan <ArrowRight className="w-3.5 h-3.5" />
           </Link>

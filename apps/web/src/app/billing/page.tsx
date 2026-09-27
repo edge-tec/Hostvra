@@ -1661,45 +1661,45 @@ export default function BillingPage() {
         {activeTab === 'gateways' && (
           <div className="space-y-6 sm:space-y-8 animate-in fade-in duration-300">
             {/* Payment Hub Executive Header */}
-            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950 border border-slate-800 p-6 sm:p-8 text-white shadow-xl">
-              <div className="absolute top-0 right-0 -mt-10 -mr-10 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
-              <div className="absolute bottom-0 left-1/4 -mb-10 w-64 h-64 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
+            <div className="relative overflow-hidden rounded-3xl bg-white border border-slate-200/80 p-6 sm:p-8 text-slate-900 shadow-sm">
+              <div className="absolute top-0 right-0 -mt-10 -mr-10 w-80 h-80 rounded-full bg-blue-50/50 blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-1/4 -mb-10 w-64 h-64 rounded-full bg-emerald-50/50 blur-3xl pointer-events-none" />
 
               <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="space-y-2 max-w-2xl">
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-[11px] font-bold text-blue-200 uppercase tracking-widest">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 border border-blue-200/60 text-[11px] font-bold text-blue-700 uppercase tracking-widest">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Secure Payment Orchestration Hub</span>
                   </div>
-                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                  <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900">
                     Payment Gateway Integration Hub
                   </h2>
-                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                    Connect local mobile financial services (<strong className="text-pink-400">bKash</strong>, <strong className="text-orange-400">Nagad</strong>), multi-channel banking (<strong className="text-sky-400">SSLCommerz</strong>), and global credit cards (<strong className="text-indigo-400">Stripe</strong>, <strong className="text-blue-400">PayPal</strong>) with automated IPN callbacks.
+                  <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                    Connect local mobile financial services (<strong className="text-pink-600">bKash</strong>, <strong className="text-orange-600">Nagad</strong>), multi-channel banking (<strong className="text-sky-600">SSLCommerz</strong>), and global credit cards (<strong className="text-indigo-600">Stripe</strong>, <strong className="text-blue-600">PayPal</strong>) with automated IPN callbacks.
                   </p>
                 </div>
 
                 {/* Quick Stats Pill */}
-                <div className="flex items-center gap-3 sm:gap-4 bg-white/5 backdrop-blur-md border border-white/10 p-3 sm:p-4 rounded-2xl flex-shrink-0 self-start md:self-auto">
+                <div className="flex items-center gap-3 sm:gap-4 bg-slate-50 border border-slate-200 p-3 sm:p-4 rounded-2xl flex-shrink-0 self-start md:self-auto">
                   <div className="text-center px-2 sm:px-3">
-                    <div className="text-2xl font-black text-emerald-400">
+                    <div className="text-2xl font-black text-emerald-600">
                       {gateways.filter(g => g.enabled).length}
                     </div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Active</div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Active</div>
                   </div>
-                  <div className="w-px h-8 bg-white/15" />
+                  <div className="w-px h-8 bg-slate-200" />
                   <div className="text-center px-2 sm:px-3">
-                    <div className="text-2xl font-black text-blue-300">
+                    <div className="text-2xl font-black text-blue-600">
                       {gateways.length}
                     </div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Total</div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Total</div>
                   </div>
-                  <div className="w-px h-8 bg-white/15" />
+                  <div className="w-px h-8 bg-slate-200" />
                   <div className="text-center px-2 sm:px-3">
-                    <div className="text-2xl font-black text-amber-400">
+                    <div className="text-2xl font-black text-amber-600">
                       {gateways.filter(g => g.test_mode).length}
                     </div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Sandbox</div>
+                    <div className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Sandbox</div>
                   </div>
                 </div>
               </div>
