@@ -56,18 +56,25 @@ export interface WebmailMessage {
   folder: string;
   from_name: string;
   from_email: string;
-  to_addresses: string[];
+  to_name?: string;
+  to_email?: string;
+  to_addresses?: string[];
+  cc?: string;
+  bcc?: string;
   cc_addresses?: string[];
   bcc_addresses?: string[];
   subject: string;
+  snippet?: string;
   body_text: string;
   body_html?: string;
   size_bytes: number;
-  is_read: boolean;
+  is_read?: boolean;
+  is_unread?: boolean;
   is_starred: boolean;
-  is_draft: boolean;
+  is_draft?: boolean;
   message_id?: string;
-  has_attachments: boolean;
+  has_attachments?: boolean;
+  has_attachment?: boolean;
   attachments?: WebmailAttachment[];
   created_at: string;
 }
@@ -172,9 +179,29 @@ export function WebmailClient({
         params.set('q', query.trim());
       }
 
-      const res = await apiFetch<WebmailMessage[]>(`/api/v1/webmail/messages?${params.toString()}`);
+      const res = await apiFetch<any>(`/api/v1/webmail/messages?${params.toString()}`);
       if (res.success && res.data) {
-        let list = res.data;
+        let rawList: any[] = [];
+        if (Array.isArray(res.data)) {
+          rawList = res.data;
+        } else if (res.data && Array.isArray(res.data.messages)) {
+          rawList = res.data.messages;
+        }
+
+        let list: WebmailMessage[] = rawList.map((m: any) => ({
+          ...m,
+          to_addresses: Array.isArray(m.to_addresses)
+            ? m.to_addresses
+            : m.to_email
+            ? [m.to_email]
+            : [],
+          is_read: typeof m.is_read === 'boolean' ? m.is_read : !m.is_unread,
+          has_attachments:
+            typeof m.has_attachments === 'boolean'
+              ? m.has_attachments
+              : Boolean(m.has_attachment),
+        }));
+
         if (folder === 'starred') {
           list = list.filter((m) => m.is_starred);
         }
@@ -197,9 +224,12 @@ export function WebmailClient({
           setActiveMessage(null);
           setSelectedMessageId(null);
         }
+      } else {
+        setMessages([]);
       }
     } catch (err) {
       console.error('Failed to fetch webmail messages:', err);
+      setMessages([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -211,8 +241,15 @@ export function WebmailClient({
     if (!activeMailbox.id) return;
     try {
       // Fetch inbox & all folders
-      const res = await apiFetch<WebmailMessage[]>(`/api/v1/webmail/messages?mailbox_id=${activeMailbox.id}`);
+      const res = await apiFetch<any>(`/api/v1/webmail/messages?mailbox_id=${activeMailbox.id}`);
       if (res.success && res.data) {
+        let rawList: any[] = [];
+        if (Array.isArray(res.data)) {
+          rawList = res.data;
+        } else if (res.data && Array.isArray(res.data.messages)) {
+          rawList = res.data.messages;
+        }
+
         const counts: { [key: string]: number } = {
           inbox: 0,
           inboxUnread: 0,
@@ -223,11 +260,12 @@ export function WebmailClient({
           trash: 0,
           archive: 0,
         };
-        res.data.forEach((m) => {
+        rawList.forEach((m: any) => {
+          const isUnread = typeof m.is_unread === 'boolean' ? m.is_unread : !m.is_read;
           if (m.is_starred) counts.starred++;
           if (m.folder === 'inbox') {
             counts.inbox++;
-            if (!m.is_read) counts.inboxUnread++;
+            if (isUnread) counts.inboxUnread++;
           } else if (m.folder === 'sent') counts.sent++;
           else if (m.folder === 'drafts') counts.drafts++;
           else if (m.folder === 'spam') counts.spam++;
@@ -268,12 +306,28 @@ export function WebmailClient({
     setSelectedMessageId(msgId);
     try {
       setLoadingDetail(true);
-      const res = await apiFetch<WebmailMessage>(`/api/v1/webmail/messages/${msgId}`);
+      const res = await apiFetch<any>(`/api/v1/webmail/messages/${msgId}`);
       if (res.success && res.data) {
-        setActiveMessage(res.data);
+        const d = res.data;
+        const normalizedMsg: WebmailMessage = {
+          ...d,
+          to_addresses: Array.isArray(d.to_addresses)
+            ? d.to_addresses
+            : d.to_email
+            ? [d.to_email]
+            : [],
+          is_read: typeof d.is_read === 'boolean' ? d.is_read : !d.is_unread,
+          has_attachments:
+            typeof d.has_attachments === 'boolean'
+              ? d.has_attachments
+              : Boolean(d.has_attachment),
+        };
+        setActiveMessage(normalizedMsg);
         // Mark locally as read
         setMessages((prev) =>
-          prev.map((m) => (m.id === msgId ? { ...m, is_read: true } : m))
+          (Array.isArray(prev) ? prev : []).map((m) =>
+            m.id === msgId ? { ...m, is_read: true, is_unread: false } : m
+          )
         );
         fetchCounts();
       }
@@ -294,7 +348,9 @@ export function WebmailClient({
       });
       if (res.success && res.data) {
         setMessages((prev) =>
-          prev.map((m) => (m.id === msgId ? { ...m, is_starred: !currentStarred } : m))
+          (Array.isArray(prev) ? prev : []).map((m) =>
+            m.id === msgId ? { ...m, is_starred: !currentStarred } : m
+          )
         );
         if (activeMessage?.id === msgId) {
           setActiveMessage((prev) => (prev ? { ...prev, is_starred: !currentStarred } : null));
@@ -315,7 +371,9 @@ export function WebmailClient({
       });
       if (res.success && res.data) {
         setMessages((prev) =>
-          prev.map((m) => (m.id === msgId ? { ...m, is_read: !currentRead } : m))
+          (Array.isArray(prev) ? prev : []).map((m) =>
+            m.id === msgId ? { ...m, is_read: !currentRead, is_unread: currentRead } : m
+          )
         );
         if (activeMessage?.id === msgId) {
           setActiveMessage((prev) => (prev ? { ...prev, is_read: !currentRead } : null));
@@ -499,11 +557,11 @@ export function WebmailClient({
 
   // Open Forward Modal
   const handleOpenForwardModal = (msg: WebmailMessage) => {
-    setComposeTo('');
-    setComposeCc('');
-    setComposeBcc('');
-    setComposeSubject(msg.subject.startsWith('Fwd:') ? msg.subject : `Fwd: ${msg.subject}`);
-    const forwardHeader = `\n\n---------- Forwarded message ---------\nFrom: ${msg.from_name} <${msg.from_email}>\nDate: ${new Date(msg.created_at).toLocaleString()}\nSubject: ${msg.subject}\nTo: ${msg.to_addresses.join(', ')}\n\n${msg.body_text}`;
+    const toRecipient =
+      Array.isArray(msg.to_addresses) && msg.to_addresses.length > 0
+        ? msg.to_addresses.join(', ')
+        : msg.to_email || '';
+    const forwardHeader = `\n\n---------- Forwarded message ---------\nFrom: ${msg.from_name} <${msg.from_email}>\nDate: ${new Date(msg.created_at).toLocaleString()}\nSubject: ${msg.subject}\nTo: ${toRecipient}\n\n${msg.body_text}`;
     setComposeBody(forwardHeader);
     setActiveDraftId(undefined);
     setShowComposeModal(true);
@@ -840,15 +898,19 @@ export function WebmailClient({
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-500 mb-2" />
                 <span>Reading Maildir messages...</span>
               </div>
-            ) : messages.length === 0 ? (
+            ) : !Array.isArray(messages) || messages.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs space-y-2">
                 <Inbox className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 stroke-[1.5]" />
                 <p className="font-semibold text-slate-600 dark:text-slate-300">No messages in {currentFolder}</p>
                 <p className="text-[11px] text-slate-400">Incoming messages will appear here in real-time.</p>
               </div>
             ) : (
-              messages.map((msg) => {
+              (Array.isArray(messages) ? messages : []).map((msg) => {
                 const isSelected = selectedMessageId === msg.id;
+                const toRecipient =
+                  Array.isArray(msg.to_addresses) && msg.to_addresses.length > 0
+                    ? msg.to_addresses.join(', ')
+                    : msg.to_email || '';
                 return (
                   <div
                     key={msg.id}
@@ -874,7 +936,7 @@ export function WebmailClient({
                           }`}
                         >
                           {currentFolder === 'sent'
-                            ? `To: ${msg.to_addresses.join(', ')}`
+                            ? `To: ${toRecipient}`
                             : msg.from_name || msg.from_email}
                         </span>
                         <span className="text-[10px] text-slate-400 shrink-0 font-mono">
@@ -962,7 +1024,7 @@ export function WebmailClient({
                   </button>
 
                   <button
-                    onClick={() => handleToggleRead(activeMessage.id, activeMessage.is_read)}
+                    onClick={() => handleToggleRead(activeMessage.id, Boolean(activeMessage.is_read))}
                     className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-surface-700 transition shadow-xs"
                     title={activeMessage.is_read ? 'Mark as Unread' : 'Mark as Read'}
                   >
@@ -1058,13 +1120,17 @@ export function WebmailClient({
                       <p className="text-slate-500 mt-0.5">
                         to{' '}
                         <span className="text-slate-700 dark:text-slate-300 font-mono">
-                          {activeMessage.to_addresses.join(', ')}
+                          {Array.isArray(activeMessage.to_addresses) && activeMessage.to_addresses.length > 0
+                            ? activeMessage.to_addresses.join(', ')
+                            : activeMessage.to_email || ''}
                         </span>
-                        {activeMessage.cc_addresses && activeMessage.cc_addresses.length > 0 && (
+                        {((Array.isArray(activeMessage.cc_addresses) && activeMessage.cc_addresses.length > 0) || activeMessage.cc) && (
                           <span className="ml-2">
                             cc:{' '}
                             <span className="text-slate-600 dark:text-slate-400 font-mono">
-                              {activeMessage.cc_addresses.join(', ')}
+                              {Array.isArray(activeMessage.cc_addresses) && activeMessage.cc_addresses.length > 0
+                                ? activeMessage.cc_addresses.join(', ')
+                                : activeMessage.cc || ''}
                             </span>
                           </span>
                         )}
