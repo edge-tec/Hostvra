@@ -226,14 +226,21 @@ interface DeliverabilityHealth {
 interface SMTPSettings {
   domain: string;
   mail_hostname: string;
-  incoming_server: string;
-  incoming_imap_port: number;
-  incoming_pop3_port: number;
-  outgoing_server: string;
-  outgoing_smtp_submission_port: number;
-  outgoing_smtp_ssl_port: number;
-  require_tls: boolean;
-  require_auth: boolean;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtps_port?: number;
+  imap_host?: string;
+  imap_port?: number;
+  pop3_host?: string;
+  pop3_port?: number;
+  incoming_server?: string;
+  incoming_imap_port?: number;
+  incoming_pop3_port?: number;
+  outgoing_server?: string;
+  outgoing_smtp_submission_port?: number;
+  outgoing_smtp_ssl_port?: number;
+  require_tls?: boolean;
+  require_auth?: boolean;
 }
 
 interface MailboxTestResult {
@@ -2122,10 +2129,10 @@ export default function EmailHostingPage() {
                         <span className="text-slate-500">Server Host:</span>
                         <div className="flex items-center gap-2">
                           <span className="text-slate-900 dark:text-white font-semibold">
-                            {smtpSettings.incoming_server}
+                            {smtpSettings.incoming_server || smtpSettings.imap_host || smtpSettings.mail_hostname || ('mail.' + (selectedSmtpDomain || 'hostvra.com'))}
                           </span>
                           <button
-                            onClick={() => copyToClipboard(smtpSettings.incoming_server, 'imap_host')}
+                            onClick={() => copyToClipboard(smtpSettings.incoming_server || smtpSettings.imap_host || smtpSettings.mail_hostname || ('mail.' + (selectedSmtpDomain || 'hostvra.com')), 'imap_host')}
                             className="text-slate-400 hover:text-slate-600"
                           >
                             {copiedKey === 'imap_host' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -2136,14 +2143,14 @@ export default function EmailHostingPage() {
                       <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800">
                         <span className="text-slate-500">IMAP Port (Recommended):</span>
                         <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
-                          {smtpSettings.incoming_imap_port} (SSL/TLS)
+                          {smtpSettings.incoming_imap_port || smtpSettings.imap_port || 993} (SSL/TLS)
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800">
                         <span className="text-slate-500">POP3 Port (Legacy):</span>
                         <span className="text-slate-700 dark:text-slate-300 font-semibold">
-                          {smtpSettings.incoming_pop3_port} (SSL/TLS)
+                          {smtpSettings.incoming_pop3_port || smtpSettings.pop3_port || 995} (SSL/TLS)
                         </span>
                       </div>
 
@@ -2166,10 +2173,10 @@ export default function EmailHostingPage() {
                         <span className="text-slate-500">Server Host:</span>
                         <div className="flex items-center gap-2">
                           <span className="text-slate-900 dark:text-white font-semibold">
-                            {smtpSettings.outgoing_server}
+                            {smtpSettings.outgoing_server || smtpSettings.smtp_host || smtpSettings.mail_hostname || ('mail.' + (selectedSmtpDomain || 'hostvra.com'))}
                           </span>
                           <button
-                            onClick={() => copyToClipboard(smtpSettings.outgoing_server, 'smtp_host')}
+                            onClick={() => copyToClipboard(smtpSettings.outgoing_server || smtpSettings.smtp_host || smtpSettings.mail_hostname || ('mail.' + (selectedSmtpDomain || 'hostvra.com')), 'smtp_host')}
                             className="text-slate-400 hover:text-slate-600"
                           >
                             {copiedKey === 'smtp_host' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -2180,14 +2187,14 @@ export default function EmailHostingPage() {
                       <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800">
                         <span className="text-slate-500">SMTP Submission (Standard):</span>
                         <span className="text-blue-600 dark:text-blue-400 font-semibold">
-                          {smtpSettings.outgoing_smtp_submission_port} (STARTTLS)
+                          {smtpSettings.outgoing_smtp_submission_port || smtpSettings.smtp_port || 587} (STARTTLS)
                         </span>
                       </div>
 
                       <div className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800">
                         <span className="text-slate-500">SMTPS Port (Direct SSL):</span>
                         <span className="text-slate-700 dark:text-slate-300 font-semibold">
-                          {smtpSettings.outgoing_smtp_ssl_port} (SSL/TLS)
+                          {smtpSettings.outgoing_smtp_ssl_port || smtpSettings.smtps_port || 465} (SSL/TLS)
                         </span>
                       </div>
 
@@ -2223,7 +2230,7 @@ export default function EmailHostingPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <a
-                    href={`/api/v1/email/clients/apple?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    href={`/api/v1/email/clients/apple?domain=${selectedSmtpDomain || domains[0]?.domain || 'hostvra.com'}`}
                     download
                     className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
                   >
@@ -2242,7 +2249,7 @@ export default function EmailHostingPage() {
                   </a>
 
                   <a
-                    href={`/api/v1/email/clients/thunderbird?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    href={`/api/v1/email/clients/thunderbird?domain=${selectedSmtpDomain || domains[0]?.domain || 'hostvra.com'}`}
                     download
                     className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
                   >
@@ -2261,7 +2268,7 @@ export default function EmailHostingPage() {
                   </a>
 
                   <a
-                    href={`/api/v1/email/clients/outlook?domain=${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
+                    href={`/api/v1/email/clients/outlook?domain=${selectedSmtpDomain || domains[0]?.domain || 'hostvra.com'}`}
                     download
                     className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 hover:border-indigo-400 dark:hover:border-indigo-600 transition flex flex-col justify-between group shadow-xs"
                   >
@@ -2289,7 +2296,7 @@ export default function EmailHostingPage() {
                     <span>Microsoft Outlook</span>
                   </div>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Choose <strong>Manual Setup &gt; IMAP</strong>. Set Incoming Host to <code className="font-mono font-bold text-slate-700 dark:text-slate-300">{smtpSettings?.incoming_server || 'mail.' + (selectedSmtpDomain || 'example.com')}</code> on port <strong>993 (SSL/TLS)</strong>, and Outgoing Host on port <strong>587 (STARTTLS)</strong>.
+                    Choose <strong>Manual Setup &gt; IMAP</strong>. Set Incoming Host to <code className="font-mono font-bold text-slate-700 dark:text-slate-300">{smtpSettings?.incoming_server || smtpSettings?.imap_host || smtpSettings?.mail_hostname || ('mail.' + (selectedSmtpDomain || domains[0]?.domain || 'hostvra.com'))}</code> on port <strong>{smtpSettings?.incoming_imap_port || smtpSettings?.imap_port || 993} (SSL/TLS)</strong>, and Outgoing Host on port <strong>{smtpSettings?.outgoing_smtp_submission_port || smtpSettings?.smtp_port || 587} (STARTTLS)</strong>.
                   </p>
                 </div>
 

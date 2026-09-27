@@ -83,7 +83,7 @@ func GenerateMainCF(opts ConfigOptions) string {
 	sb.WriteString("smtpd_sasl_path = private/auth\n")
 	sb.WriteString("smtpd_sasl_auth_enable = yes\n")
 	sb.WriteString("smtpd_sasl_security_options = noanonymous\n")
-	sb.WriteString("smtpd_sasl_local_domain = $myhostname\n")
+	sb.WriteString("smtpd_sasl_local_domain = \n")
 	sb.WriteString("broken_sasl_auth_clients = yes\n\n")
 
 	// STRICT ANTI-OPEN-RELAY RESTRICTIONS (Crucial Requirement)
@@ -139,8 +139,11 @@ submission inet n       -       y       -       -       smtpd
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_tls_auth_only=yes
   -o smtpd_reject_unlisted_recipient=no
-  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_client_restrictions=
+  -o smtpd_helo_restrictions=
+  -o smtpd_sender_restrictions=
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
   -o milter_macro_daemon_name=ORIGINATING
 
 # SMTPS (Port 465) with Implicit TLS
@@ -148,8 +151,12 @@ smtps     inet  n       -       y       -       -       smtpd
   -o syslog_name=postfix/smtps
   -o smtpd_tls_wrappermode=yes
   -o smtpd_sasl_auth_enable=yes
-  -o smtpd_client_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_reject_unlisted_recipient=no
+  -o smtpd_client_restrictions=
+  -o smtpd_helo_restrictions=
+  -o smtpd_sender_restrictions=
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
   -o milter_macro_daemon_name=ORIGINATING
 
 pickup    unix  n       -       y       60      1       pickup

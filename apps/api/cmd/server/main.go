@@ -700,6 +700,9 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autodiscover/{domain}", emailHandler.GetOutlookAutodiscover)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mobileconfig", emailHandler.GetAppleMobileConfig)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mobileconfig/{domain}", emailHandler.GetAppleMobileConfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/clients/thunderbird", emailHandler.GetThunderbirdAutoconfig)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/clients/outlook", emailHandler.GetOutlookAutodiscover)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/clients/apple", emailHandler.GetAppleMobileConfig)
 
 				// Signatures & Autoresponders
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}/signature", emailHandler.GetSignature)

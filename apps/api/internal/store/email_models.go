@@ -256,6 +256,16 @@ type SMTPSettings struct {
 	POP3Port     int    `json:"pop3_port"`
 	POP3SSL      string `json:"pop3_ssl"`
 	UsernameType string `json:"username_type"` // "Full Email Address"
+
+	// Full compatibility alias fields for frontend UI and client profiles
+	IncomingServer             string `json:"incoming_server"`
+	IncomingIMAPPort           int    `json:"incoming_imap_port"`
+	IncomingPOP3Port           int    `json:"incoming_pop3_port"`
+	OutgoingServer             string `json:"outgoing_server"`
+	OutgoingSMTPSubmissionPort int    `json:"outgoing_smtp_submission_port"`
+	OutgoingSMTPSSLPort        int    `json:"outgoing_smtp_ssl_port"`
+	RequireTLS                 bool   `json:"require_tls"`
+	RequireAuth                bool   `json:"require_auth"`
 }
 
 // ServiceStatus represents MTA/IMAP/Spam service health

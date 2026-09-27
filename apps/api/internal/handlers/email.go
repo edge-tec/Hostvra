@@ -1646,26 +1646,51 @@ func (h *EmailHandler) TestMailbox(w http.ResponseWriter, r *http.Request) {
 func (h *EmailHandler) GetSMTPSettings(w http.ResponseWriter, r *http.Request) {
 	domainName := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
 	if domainName == "" {
-		domainName = "example.com"
+		// Resolve from registered domains if no query param supplied
+		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		orgID := defaultOrgID
+		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.OrganizationID != uuid.Nil {
+			orgID = claims.OrganizationID
+		}
+		if domains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil && len(domains) > 0 {
+			domainName = domains[0].Domain
+		} else if domains, err := h.store.ListEmailDomainsByOrg(r.Context(), defaultOrgID); err == nil && len(domains) > 0 {
+			domainName = domains[0].Domain
+		}
 	}
-	mailHostname := "mail." + domainName
+	if domainName == "" {
+		domainName = "hostvra.com"
+	}
+
+	mailHostname := h.findDomainByName(r.Context(), domainName)
+	if mailHostname == "" {
+		mailHostname = "mail." + domainName
+	}
 
 	settings := store.SMTPSettings{
-		Domain:       domainName,
-		MailHostname: mailHostname,
-		SMTPHost:     mailHostname,
-		SMTPPort:     587,
-		SMTPAuth:     "Standard Password / SASL",
-		SMTPSSL:      "STARTTLS",
-		SMTPSPort:    465,
-		SMTPSSSL:     "SSL/TLS",
-		IMAPHost:     mailHostname,
-		IMAPPort:     993,
-		IMAPSSL:      "SSL/TLS",
-		POP3Host:     mailHostname,
-		POP3Port:     995,
-		POP3SSL:      "SSL/TLS",
-		UsernameType: "Full Email Address (e.g. user@" + domainName + ")",
+		Domain:                     domainName,
+		MailHostname:               mailHostname,
+		SMTPHost:                   mailHostname,
+		SMTPPort:                   587,
+		SMTPAuth:                   "Standard Password / SASL",
+		SMTPSSL:                    "STARTTLS",
+		SMTPSPort:                  465,
+		SMTPSSSL:                   "SSL/TLS",
+		IMAPHost:                   mailHostname,
+		IMAPPort:                   993,
+		IMAPSSL:                    "SSL/TLS",
+		POP3Host:                   mailHostname,
+		POP3Port:                   995,
+		POP3SSL:                    "SSL/TLS",
+		UsernameType:               "Full Email Address (e.g. user@" + domainName + ")",
+		IncomingServer:             mailHostname,
+		IncomingIMAPPort:           993,
+		IncomingPOP3Port:           995,
+		OutgoingServer:             mailHostname,
+		OutgoingSMTPSubmissionPort: 587,
+		OutgoingSMTPSSLPort:        465,
+		RequireTLS:                 true,
+		RequireAuth:                true,
 	}
 
 	response.JSON(w, http.StatusOK, settings, nil)
