@@ -2219,9 +2219,15 @@ func (h *EmailHandler) syncDovecotUserDB(ctx context.Context, serverID uuid.UUID
 		return
 	}
 
-	mailboxes, err := h.store.ListEmailMailboxesByServer(ctx, serverID)
-	if err != nil {
-		return
+	mailboxes, _ := h.store.ListEmailMailboxesByServer(ctx, serverID)
+	if len(mailboxes) == 0 {
+		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		domains, _ := h.store.ListEmailDomainsByOrg(ctx, defaultOrgID)
+		for _, d := range domains {
+			if mbs, err := h.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
+				mailboxes = append(mailboxes, mbs...)
+			}
+		}
 	}
 
 	accounts := make([]dovecot.UserAccount, 0, len(mailboxes))
