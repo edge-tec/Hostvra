@@ -70,8 +70,8 @@ func SendTestEmail(smtpHost string, smtpPort int, username, password, from, to, 
 	res.Trace = append(res.Trace, fmt.Sprintf("<< %s", strings.TrimSpace(banner)))
 
 	// Send EHLO
-	fmt.Fprintf(conn, "EHLO hostvra.local\r\n")
-	res.Trace = append(res.Trace, ">> EHLO hostvra.local")
+	fmt.Fprintf(conn, "EHLO hostvra.com\r\n")
+	res.Trace = append(res.Trace, ">> EHLO hostvra.com")
 
 	for {
 		line, err := reader.ReadString('\n')
@@ -148,7 +148,11 @@ func SendTestEmail(smtpHost string, smtpPort int, username, password, from, to, 
 	res.Trace = append(res.Trace, fmt.Sprintf("<< %s", strings.TrimSpace(line)))
 
 	// Message content
-	msgID := fmt.Sprintf("<%d.test@hostvra.local>", time.Now().UnixNano())
+	testDomain := "hostvra.com"
+	if parts := strings.Split(from, "@"); len(parts) == 2 && parts[1] != "" {
+		testDomain = strings.TrimSpace(parts[1])
+	}
+	msgID := fmt.Sprintf("<%d.test@%s>", time.Now().UnixNano(), testDomain)
 	payload := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nDate: %s\r\n\r\n%s\r\n.\r\n",
 		from, to, subject, msgID, time.Now().Format(time.RFC1123Z), body)
 

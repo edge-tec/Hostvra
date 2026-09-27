@@ -319,7 +319,11 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Transmit via Local Postfix MTA (Port 587 or 25)
-	msgID := fmt.Sprintf("<%d.%s@hostvra.local>", time.Now().UnixNano(), mb.ID.String()[:8])
+	msgDomain := "hostvra.com"
+	if parts := strings.Split(mb.Email, "@"); len(parts) == 2 && parts[1] != "" {
+		msgDomain = strings.TrimSpace(parts[1])
+	}
+	msgID := fmt.Sprintf("<%d.%s@%s>", time.Now().UnixNano(), mb.ID.String()[:8], msgDomain)
 	smtpServer := "127.0.0.1:25"
 	if custom := os.Getenv("POSTFIX_SUBMISSION_ADDR"); custom != "" {
 		smtpServer = custom
