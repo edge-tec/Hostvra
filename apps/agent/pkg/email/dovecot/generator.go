@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type ConfigOptions struct {
@@ -195,7 +197,13 @@ func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 	for _, acc := range accounts {
 		hash := acc.PasswordHash
 		if !strings.HasPrefix(hash, "{") {
-			hash = "{SHA512-CRYPT}" + hash
+			if strings.HasPrefix(hash, "$2a$") || strings.HasPrefix(hash, "$2b$") || strings.HasPrefix(hash, "$2y$") {
+				hash = "{BLF-CRYPT}" + hash
+			} else if strings.HasPrefix(hash, "$6$") {
+				hash = "{SHA512-CRYPT}" + hash
+			} else {
+				hash = "{CRYPT}" + hash
+			}
 		}
 		quotaMB := acc.QuotaBytes / (1024 * 1024)
 		if quotaMB <= 0 {
@@ -210,8 +218,26 @@ func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 	return sb.String()
 }
 
-// HashPassword generates a secure SHA512 password hash for Dovecot passwd-file
+// HashPassword generates a secure, Dovecot-compatible password hash
 func HashPassword(plainPassword string) string {
+	// If doveadm is available on the system (standard production Dovecot), use native SHA512-CRYPT
+	if doveadmPath, err := exec.LookPath("doveadm"); err == nil {
+		cmd := exec.Command(doveadmPath, "pw", "-s", "SHA512-CRYPT", "-p", plainPassword)
+		if out, err := cmd.Output(); err == nil {
+			trimmed := strings.TrimSpace(string(out))
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+
+	// Standard cryptographically secure fallback: BLF-CRYPT (bcrypt) which Dovecot natively supports
+	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), 10)
+	if err == nil {
+		return "{BLF-CRYPT}" + string(hash)
+	}
+
+	// Fallback to SHA512
 	saltBytes := make([]byte, 12)
 	_, _ = rand.Read(saltBytes)
 	salt := base64.RawStdEncoding.EncodeToString(saltBytes)[:16]
@@ -220,7 +246,7 @@ func HashPassword(plainPassword string) string {
 	h.Write([]byte(plainPassword + salt))
 	hashHex := fmt.Sprintf("%x", h.Sum(nil))
 
-	return fmt.Sprintf("$6$%s$%s", salt, hashHex)
+	return fmt.Sprintf("{SHA512-CRYPT}$6$%s$%s", salt, hashHex)
 }
 
 // ApplyDovecotConfig writes config files and users map, then reloads Dovecot safely

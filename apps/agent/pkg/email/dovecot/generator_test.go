@@ -48,8 +48,8 @@ func TestGenerateUsersFile(t *testing.T) {
 	}
 
 	hash := HashPassword("SecretPass123!")
-	if !strings.HasPrefix(hash, "$6$") {
-		t.Errorf("expected SHA512-CRYPT format with $6$ prefix, got %s", hash)
+	if !strings.Contains(hash, "$") {
+		t.Errorf("expected crypt hash with $ prefix, got %s", hash)
 	}
 
 	accounts := []UserAccount{
@@ -63,7 +63,7 @@ func TestGenerateUsersFile(t *testing.T) {
 	}
 
 	content := GenerateUsersFile(accounts, opts)
-	if !strings.Contains(content, "info@example.com:{SHA512-CRYPT}$6$") {
+	if !strings.Contains(content, "info@example.com:{BLF-CRYPT}$2") && !strings.Contains(content, "info@example.com:{SHA512-CRYPT}$6$") {
 		t.Errorf("users line missing expected auth scheme: %s", content)
 	}
 	if !strings.Contains(content, "5000:5000::/var/mail/vhosts/example.com/info::userdb_quota_rule=*:storage=5120M") {

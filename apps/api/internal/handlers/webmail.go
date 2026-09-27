@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 
 	"hostvra/agent/pkg/email/dkim"
 	"hostvra/api/internal/audit"
@@ -608,6 +609,14 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 func verifyPasswordHash(plainPassword, storedHash string) bool {
 	if storedHash == "" {
 		return false
+	}
+
+	// Support bcrypt / BLF-CRYPT
+	if strings.HasPrefix(storedHash, "{BLF-CRYPT}") || strings.HasPrefix(storedHash, "$2") {
+		cleanHash := strings.TrimPrefix(storedHash, "{BLF-CRYPT}")
+		if err := bcrypt.CompareHashAndPassword([]byte(cleanHash), []byte(plainPassword)); err == nil {
+			return true
+		}
 	}
 
 	// Dovecot SHA512-CRYPT format: "$6$<salt>$<hash>" or "{SHA512-CRYPT}$6$<salt>$<hash>"
