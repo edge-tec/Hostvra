@@ -312,11 +312,11 @@ func (h *EmailHandler) CreateMailServer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ipv4 := req.IPv4Address
-	if ipv4 == "" {
-		if s, err := h.store.GetServerByID(r.Context(), nodeServerID); err == nil && s != nil {
-			ipv4 = s.IPAddress
-		}
-		if ipv4 == "" {
+	if ipv4 == "" || ipv4 == "127.0.0.1" {
+		resolved := h.resolveServerIP(r.Context(), nodeServerID, nil)
+		if resolved != "" && resolved != "127.0.0.1" {
+			ipv4 = resolved
+		} else if ipv4 == "" {
 			ipv4 = "127.0.0.1"
 		}
 	}
@@ -603,7 +603,7 @@ func (h *EmailHandler) GetMailDiagnostics(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	serverIP := "127.0.0.1"
+	serverIP := h.resolveServerIP(r.Context(), uuid.Nil, nil)
 	selector := "default"
 
 	auditReport := health.AuditDomain(r.Context(), domainParam, selector, serverIP)
@@ -717,12 +717,20 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 			hostname = h
 		}
 		now := time.Now().UTC()
+		defaultIP := "127.0.0.1"
+		if settings, err := h.store.GetSystemSettings(r.Context()); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+			defaultIP = settings.ServerIP
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+			defaultIP = envIP
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+			defaultIP = envIP
+		}
 		server = &store.Server{
 			ID:              defaultServerID,
 			OrganizationID:  orgID,
 			Name:            "Hostvra Primary Mail Node",
 			Hostname:        hostname,
-			IPAddress:       "127.0.0.1",
+			IPAddress:       defaultIP,
 			OSName:          "Linux",
 			OSVersion:       "Ubuntu 22.04",
 			Architecture:    "x86_64",
@@ -814,10 +822,7 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	h.syncPostfixMaps(r.Context(), serverID)
 
 	// 7. Auto-configure DNS if local DNS provider present
-	serverIP := server.IPAddress
-	if serverIP == "" {
-		serverIP = "127.0.0.1"
-	}
+	serverIP := h.resolveServerIP(r.Context(), serverID, domain.MailServerID)
 	if h.dns != nil {
 		_ = h.dns.ConfigureEmailDNS(r.Context(), claims.OrganizationID, domainName, mailHostname, serverIP, selector, dkimKey.PublicKeyDNS)
 	}
@@ -977,6 +982,55 @@ func (h *EmailHandler) GenerateDKIM(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, emailDKIM, nil)
 }
 
+func (h *EmailHandler) resolveServerIP(ctx context.Context, serverID uuid.UUID, mailServerID *uuid.UUID) string {
+	// 1. If explicit MailServer is linked, check its IPv4 address
+	if mailServerID != nil && *mailServerID != uuid.Nil {
+		if ms, err := h.store.GetMailServerByID(ctx, *mailServerID); err == nil && ms != nil {
+			if ms.IPv4Address != "" && ms.IPv4Address != "127.0.0.1" {
+				return ms.IPv4Address
+			}
+		}
+	}
+
+	// 2. Check the server node's IP address
+	if serverID != uuid.Nil {
+		if s, err := h.store.GetServerByID(ctx, serverID); err == nil && s != nil {
+			if s.IPAddress != "" && s.IPAddress != "127.0.0.1" {
+				return s.IPAddress
+			}
+		}
+	}
+
+	// 3. Fallback to SystemSettings configured Server IP
+	if settings, err := h.store.GetSystemSettings(ctx); err == nil && settings != nil {
+		if settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+			return settings.ServerIP
+		}
+	}
+
+	// 4. Check environment variable overrides
+	if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+		return envIP
+	}
+	if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+		return envIP
+	}
+
+	// 5. If server node has an IP, use it
+	if serverID != uuid.Nil {
+		if s, err := h.store.GetServerByID(ctx, serverID); err == nil && s != nil && s.IPAddress != "" {
+			return s.IPAddress
+		}
+	}
+
+	// 6. If settings has an IP, use it
+	if settings, err := h.store.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" {
+		return settings.ServerIP
+	}
+
+	return "127.0.0.1"
+}
+
 func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -990,11 +1044,7 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server, _ := h.store.GetServerByID(r.Context(), domain.ServerID)
-	serverIP := "127.0.0.1"
-	if server != nil && server.IPAddress != "" {
-		serverIP = server.IPAddress
-	}
+	serverIP := h.resolveServerIP(r.Context(), domain.ServerID, domain.MailServerID)
 
 	selector := domain.DKIMSelector
 	if selector == "" {
@@ -1090,11 +1140,7 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server, _ := h.store.GetServerByID(r.Context(), domain.ServerID)
-	serverIP := ""
-	if server != nil {
-		serverIP = server.IPAddress
-	}
+	serverIP := h.resolveServerIP(r.Context(), domain.ServerID, domain.MailServerID)
 
 	auditReport := health.AuditDomain(r.Context(), domain.Domain, domain.DKIMSelector, serverIP)
 	response.JSON(w, http.StatusOK, auditReport, nil)

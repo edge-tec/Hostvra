@@ -8,7 +8,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
+
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -48,6 +51,22 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.UpdateSystemSettings(r.Context(), &s); err != nil {
 		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to update system settings", nil, "")
 		return
+	}
+
+	// Synchronize configured ServerIP to primary server nodes if provided
+	if s.ServerIP != "" && s.ServerIP != "127.0.0.1" {
+		defaultServerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		_ = h.store.UpdateServerIP(r.Context(), defaultServerID, s.ServerIP)
+
+		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil {
+			if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil {
+				for _, srv := range servers {
+					if srv.IPAddress == "127.0.0.1" || srv.IPAddress == "" {
+						_ = h.store.UpdateServerIP(r.Context(), srv.ID, s.ServerIP)
+					}
+				}
+			}
+		}
 	}
 
 	h.audit.Log(r.Context(), r, "system.settings.update", "system_settings", "global", "success", "", map[string]interface{}{

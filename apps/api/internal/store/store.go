@@ -50,6 +50,7 @@ type Store interface {
 	GetServerByID(ctx context.Context, id uuid.UUID) (*Server, error)
 	ListServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*Server, error)
 	UpdateServerHeartbeat(ctx context.Context, id uuid.UUID, uptime int64) error
+	UpdateServerIP(ctx context.Context, id uuid.UUID, ip string) error
 
 	// Enrollment Tokens
 	CreateEnrollmentToken(ctx context.Context, token *ServerEnrollmentToken) error
@@ -878,6 +879,20 @@ func (m *MemoryStore) UpdateServerHeartbeat(ctx context.Context, id uuid.UUID, u
 	return nil
 }
 
+func (m *MemoryStore) UpdateServerIP(ctx context.Context, id uuid.UUID, ip string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	server, exists := m.servers[id]
+	if !exists {
+		return ErrNotFound
+	}
+	server.IPAddress = ip
+	server.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
+	return nil
+}
+
 func (m *MemoryStore) CreateEnrollmentToken(ctx context.Context, token *ServerEnrollmentToken) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1452,6 +1467,16 @@ func (p *PostgresStore) UpdateServerHeartbeat(ctx context.Context, id uuid.UUID,
 		WHERE id = $1
 	`
 	_, err := p.db.ExecContext(ctx, query, id, uptime)
+	return err
+}
+
+func (p *PostgresStore) UpdateServerIP(ctx context.Context, id uuid.UUID, ip string) error {
+	query := `
+		UPDATE servers
+		SET ip_address = $2, updated_at = NOW()
+		WHERE id = $1
+	`
+	_, err := p.db.ExecContext(ctx, query, id, ip)
 	return err
 }
 

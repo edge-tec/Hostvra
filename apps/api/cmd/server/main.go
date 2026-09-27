@@ -997,13 +997,21 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 		if h, err := os.Hostname(); err == nil && h != "" {
 			hostname = h
 		}
+		defaultIP := "127.0.0.1"
+		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+			defaultIP = settings.ServerIP
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+			defaultIP = envIP
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+			defaultIP = envIP
+		}
 		now := time.Now().UTC()
 		defaultServer := &store.Server{
 			ID:              defaultServerID,
 			OrganizationID:  defaultOrgID,
 			Name:            "Hostvra Primary Node",
 			Hostname:        hostname,
-			IPAddress:       "127.0.0.1",
+			IPAddress:       defaultIP,
 			OSName:          "Linux",
 			OSVersion:       "Ubuntu 22.04",
 			Architecture:    "x86_64",
@@ -1021,7 +1029,18 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 		if err := s.CreateServer(ctx, defaultServer); err != nil {
 			logger.Warn("Failed to seed default server node", "error", err)
 		} else {
-			logger.Info("Seeded default primary server node", "server_id", defaultServerID)
+			logger.Info("Seeded default primary server node", "server_id", defaultServerID, "ip", defaultIP)
+		}
+	} else if existingServer, err := s.GetServerByID(ctx, defaultServerID); err == nil && existingServer != nil && existingServer.IPAddress == "127.0.0.1" {
+		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+			_ = s.UpdateServerIP(ctx, defaultServerID, settings.ServerIP)
+			logger.Info("Synchronized default primary server IP with system settings", "ip", settings.ServerIP)
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+			_ = s.UpdateServerIP(ctx, defaultServerID, envIP)
+			logger.Info("Synchronized default primary server IP with HOSTVRA_PUBLIC_IP", "ip", envIP)
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+			_ = s.UpdateServerIP(ctx, defaultServerID, envIP)
+			logger.Info("Synchronized default primary server IP with SERVER_IP", "ip", envIP)
 		}
 	}
 

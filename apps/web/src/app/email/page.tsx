@@ -375,11 +375,15 @@ export default function EmailHostingPage() {
   const fetchEmailData = async () => {
     try {
       setLoading(true);
-      const [domRes, mbRes, srvRes] = await Promise.all([
+      const [domRes, mbRes, srvRes, settingsRes] = await Promise.all([
         apiFetch<EmailDomain[]>('/api/v1/email/domains'),
         apiFetch<EmailMailbox[]>('/api/v1/email/mailboxes'),
         apiFetch<MailServer[]>('/api/v1/email/servers'),
+        apiFetch<{ server_ip?: string }>('/api/v1/settings').catch(() => null),
       ]);
+      if (settingsRes?.data?.server_ip && settingsRes.data.server_ip !== '127.0.0.1') {
+        setServerIPv4(settingsRes.data.server_ip);
+      }
       if (domRes.success && domRes.data) {
         setDomains(domRes.data);
         if (domRes.data.length > 0) {
@@ -396,6 +400,9 @@ export default function EmailHostingPage() {
       }
       if (srvRes.success && srvRes.data) {
         setMailServers(srvRes.data);
+        if (srvRes.data[0]?.ipv4_address && srvRes.data[0].ipv4_address !== '127.0.0.1') {
+          setServerIPv4(srvRes.data[0].ipv4_address);
+        }
       }
     } catch (err) {
       console.error('Failed to load email data:', err);
@@ -2700,7 +2707,7 @@ export default function EmailHostingPage() {
           <EmailUserGuide
             currentDomain={selectedSmtpDomain || domains[0]?.domain || 'example.com'}
             mailHostname={smtpSettings?.incoming_server || `mail.${selectedSmtpDomain || domains[0]?.domain || 'example.com'}`}
-            serverIPv4={mailServers[0]?.ipv4_address || '127.0.0.1'}
+            serverIPv4={mailServers[0]?.ipv4_address || serverIPv4 || '127.0.0.1'}
             imapPort={smtpSettings?.incoming_imap_port || 143}
             imapsPort={993}
             pop3Port={smtpSettings?.incoming_pop3_port || 110}
