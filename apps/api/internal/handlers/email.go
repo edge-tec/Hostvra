@@ -1191,7 +1191,9 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	auditReport := health.AuditDomain(r.Context(), domain.Domain, domain.DKIMSelector, serverIP)
+	dnsCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	auditReport := health.AuditDomainDNSOnly(dnsCtx, domain.Domain, domain.DKIMSelector, serverIP)
 
 	mxValid := auditReport.MX.Status == "pass"
 	aValid := auditReport.ForwardDNS.Status == "pass"

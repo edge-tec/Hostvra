@@ -472,7 +472,7 @@ async function executeFetch<T>(
         success: false,
         error: {
           code: 'TIMEOUT',
-          message: 'Connection timed out. The Hostvra API server did not respond within 10 seconds.',
+          message: 'Connection timed out. The Hostvra API server did not respond in time.',
         },
       };
     }

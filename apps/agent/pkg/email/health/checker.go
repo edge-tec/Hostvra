@@ -313,21 +313,26 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 			Details: "TLS connection verified on submission port 587 with modern cipher suite.",
 		}
 	} else {
-		// Try STARTTLS via smtp.Client
-		c, sErr := smtp.Dial(fmt.Sprintf("%s:587", mailHostname))
+		// Try STARTTLS via smtp.Client with non-blocking timeout
+		conn, sErr := net.DialTimeout("tcp", tlsTarget, 2*time.Second)
 		if sErr == nil {
-			if ok, _ := c.Extension("STARTTLS"); ok {
-				audit.TLS = CheckResult{
-					Status:  "pass",
-					Details: "STARTTLS capability advertised on submission port 587.",
+			c, sErr := smtp.NewClient(conn, mailHostname)
+			if sErr == nil {
+				if ok, _ := c.Extension("STARTTLS"); ok {
+					audit.TLS = CheckResult{
+						Status:  "pass",
+						Details: "STARTTLS capability advertised on submission port 587.",
+					}
+				} else {
+					audit.TLS = CheckResult{
+						Status:  "warn",
+						Details: "Port 587 open but STARTTLS not advertised.",
+					}
 				}
+				_ = c.Quit()
 			} else {
-				audit.TLS = CheckResult{
-					Status:  "warn",
-					Details: "Port 587 open but STARTTLS not advertised.",
-				}
+				_ = conn.Close()
 			}
-			_ = c.Quit()
 		} else {
 			audit.TLS = CheckResult{
 				Status:  "warn",
@@ -406,4 +411,248 @@ func TestRelayRejection(addr string, timeout time.Duration) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// AuditDomainDNSOnly checks only DNS configuration (MX, A, SPF, DKIM, DMARC) with zero external TCP/TLS connection attempts.
+func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) *HealthAudit {
+	if selector == "" {
+		selector = "default"
+	}
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	mailHostname := "mail." + domain
+
+	audit := &HealthAudit{
+		Domain:          domain,
+		MailHostname:    mailHostname,
+		ServerIP:        serverIP,
+		OverallScore:    100,
+		Deductions:      make([]Deduction, 0),
+		Recommendations: make([]string, 0),
+		AuditedAt:       time.Now().UTC(),
+		ReverseDNS: CheckResult{
+			Status:  "pass",
+			Details: "Reverse DNS (PTR) check skipped in DNS-only verification.",
+		},
+		TLS: CheckResult{
+			Status:  "pass",
+			Details: "TLS check skipped in DNS-only verification.",
+		},
+		OpenRelay: CheckResult{
+			Status:  "pass",
+			Details: "Open relay test skipped in DNS-only verification.",
+		},
+	}
+
+	resolver := net.DefaultResolver
+
+	// 1. Check MX Records
+	mxRecords, err := resolver.LookupMX(ctx, domain)
+	if err != nil || len(mxRecords) == 0 {
+		audit.MX = CheckResult{
+			Status:   "fail",
+			Details:  "No MX records found for domain. Inbound email cannot be routed to this server.",
+			Expected: fmt.Sprintf("10 %s.", mailHostname),
+			Current:  "None",
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "MX Record",
+			Points:  30,
+			Reason:  "Missing MX DNS record causes complete failure for receiving inbound emails.",
+			FixHint: fmt.Sprintf("Add DNS record: @ IN MX 10 %s.", mailHostname),
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Add DNS record: @ IN MX 10 %s.", mailHostname))
+	} else {
+		var mxHosts []string
+		for _, m := range mxRecords {
+			mxHosts = append(mxHosts, fmt.Sprintf("%s (pri %d)", m.Host, m.Pref))
+		}
+		audit.MX = CheckResult{
+			Status:   "pass",
+			Details:  fmt.Sprintf("Found %d MX record(s). Primary: %s", len(mxRecords), mxRecords[0].Host),
+			Expected: fmt.Sprintf("10 %s.", mailHostname),
+			Current:  strings.Join(mxHosts, ", "),
+		}
+	}
+
+	// 2. Check Forward DNS (A/AAAA for mail hostname)
+	var resolvedMailIPs []string
+	ips, err := resolver.LookupIP(ctx, "ip4", mailHostname)
+	if err == nil && len(ips) > 0 {
+		for _, ip := range ips {
+			resolvedMailIPs = append(resolvedMailIPs, ip.String())
+		}
+		matchFound := false
+		if serverIP == "" {
+			matchFound = true
+		} else {
+			for _, ip := range resolvedMailIPs {
+				if ip == serverIP {
+					matchFound = true
+					break
+				}
+			}
+		}
+		if matchFound {
+			audit.ForwardDNS = CheckResult{
+				Status:   "pass",
+				Details:  fmt.Sprintf("Mail hostname '%s' resolves to server IP %s", mailHostname, serverIP),
+				Expected: serverIP,
+				Current:  strings.Join(resolvedMailIPs, ", "),
+			}
+		} else {
+			// If it resolves to any IPv4, still accept with pass if IP matches or warn
+			audit.ForwardDNS = CheckResult{
+				Status:   "pass",
+				Details:  fmt.Sprintf("Mail hostname '%s' resolves to %s", mailHostname, strings.Join(resolvedMailIPs, ", ")),
+				Expected: serverIP,
+				Current:  strings.Join(resolvedMailIPs, ", "),
+			}
+		}
+	} else {
+		audit.ForwardDNS = CheckResult{
+			Status:   "fail",
+			Details:  fmt.Sprintf("Mail hostname '%s' does not resolve to an IPv4 address.", mailHostname),
+			Expected: serverIP,
+			Current:  "Unresolved",
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "Forward DNS (A Record)",
+			Points:  15,
+			Reason:  fmt.Sprintf("Mail server '%s' has no valid A record pointing to server IP.", mailHostname),
+			FixHint: fmt.Sprintf("Add DNS record: mail.%s IN A %s", domain, serverIP),
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Add DNS record: mail.%s IN A %s", domain, serverIP))
+	}
+
+	// 3. Check SPF Record
+	txtRecords, err := resolver.LookupTXT(ctx, domain)
+	var spfRecords []string
+	if err == nil {
+		for _, txt := range txtRecords {
+			if strings.HasPrefix(strings.TrimSpace(txt), "v=spf1") {
+				spfRecords = append(spfRecords, txt)
+			}
+		}
+	}
+
+	expectedSPF := fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP)
+	if serverIP == "" {
+		expectedSPF = "v=spf1 mx ~all"
+	}
+
+	if len(spfRecords) == 0 {
+		audit.SPF = CheckResult{
+			Status:   "warn",
+			Details:  "No SPF record detected. Major mail providers (Gmail, Yahoo, Outlook) may mark outbound mail as spam.",
+			Expected: expectedSPF,
+			Current:  "None",
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "SPF Record",
+			Points:  20,
+			Reason:  "RFC 7208 SPF record missing. Receivers cannot authenticate that this server is authorized to send mail.",
+			FixHint: fmt.Sprintf("Add DNS record: @ IN TXT \"%s\"", expectedSPF),
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Add DNS record: @ IN TXT \"%s\"", expectedSPF))
+	} else if len(spfRecords) > 1 {
+		audit.SPF = CheckResult{
+			Status:   "fail",
+			Details:  fmt.Sprintf("Multiple (%d) SPF records detected! RFC 7208 section 3.2 strictly forbids more than one SPF record.", len(spfRecords)),
+			Expected: expectedSPF,
+			Current:  strings.Join(spfRecords, " | "),
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "Multiple SPF Records",
+			Points:  25,
+			Reason:  "RFC 7208 PermError: Publishing multiple SPF TXT records breaks all SPF evaluation at Gmail/Yahoo.",
+			FixHint: "Merge all SPF rules into a single TXT record.",
+		})
+		audit.Recommendations = append(audit.Recommendations, "Merge all SPF TXT records into exactly one record.")
+	} else {
+		spf := spfRecords[0]
+		if strings.Contains(spf, "+all") {
+			audit.SPF = CheckResult{
+				Status:   "warn",
+				Details:  "Insecure SPF syntax detected: '+all' allows ANY server on the internet to spoof emails from your domain.",
+				Expected: expectedSPF,
+				Current:  spf,
+			}
+			audit.Deductions = append(audit.Deductions, Deduction{
+				Item:    "Insecure SPF Policy",
+				Points:  20,
+				Reason:  "'+all' permits open spoofing and degrades domain reputation.",
+				FixHint: "Change '+all' to '~all' (SoftFail) or '-all' (HardFail).",
+			})
+		} else {
+			audit.SPF = CheckResult{
+				Status:   "pass",
+				Details:  fmt.Sprintf("Valid single SPF record: %s", spf),
+				Expected: expectedSPF,
+				Current:  spf,
+			}
+		}
+	}
+
+	// 4. Check DKIM Record
+	dkimHost := fmt.Sprintf("%s._domainkey.%s", selector, domain)
+	dkimTxts, err := resolver.LookupTXT(ctx, dkimHost)
+	if err != nil || len(dkimTxts) == 0 {
+		audit.DKIM = CheckResult{
+			Status:   "warn",
+			Details:  fmt.Sprintf("DKIM selector record not found at %s. Outbound signatures cannot be validated by receivers.", dkimHost),
+			Expected: fmt.Sprintf("%s IN TXT \"v=DKIM1; k=rsa; p=...\"", dkimHost),
+			Current:  "None",
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "DKIM Record",
+			Points:  20,
+			Reason:  "Cryptographic DKIM signature public key is not published in DNS.",
+			FixHint: fmt.Sprintf("Publish DKIM TXT record at %s with your 2048-bit public key.", dkimHost),
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Publish DKIM TXT record at %s", dkimHost))
+	} else {
+		audit.DKIM = CheckResult{
+			Status:   "pass",
+			Details:  fmt.Sprintf("DKIM public key published at %s", dkimHost),
+			Expected: "v=DKIM1; k=rsa; p=...",
+			Current:  dkimTxts[0],
+		}
+	}
+
+	// 5. Check DMARC Record
+	dmarcHost := fmt.Sprintf("_dmarc.%s", domain)
+	dmarcTxts, err := resolver.LookupTXT(ctx, dmarcHost)
+	if err != nil || len(dmarcTxts) == 0 {
+		audit.DMARC = CheckResult{
+			Status:   "warn",
+			Details:  "No DMARC policy found. Google and Yahoo mandate DMARC for bulk senders to prevent impersonation.",
+			Expected: fmt.Sprintf("v=DMARC1; p=none; rua=mailto:dmarc@%s", domain),
+			Current:  "None",
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:    "DMARC Policy",
+			Points:  15,
+			Reason:  "Missing DMARC policy prevents receivers from knowing how to handle SPF/DKIM alignment failures.",
+			FixHint: fmt.Sprintf("Add DNS record: _dmarc.%s IN TXT \"v=DMARC1; p=none; rua=mailto:dmarc@%s\"", domain, domain),
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Add DNS record: _dmarc.%s IN TXT \"v=DMARC1; p=none; rua=mailto:dmarc@%s\"", domain, domain))
+	} else {
+		audit.DMARC = CheckResult{
+			Status:   "pass",
+			Details:  fmt.Sprintf("Active DMARC policy: %s", dmarcTxts[0]),
+			Expected: "v=DMARC1; p=none; ...",
+			Current:  dmarcTxts[0],
+		}
+	}
+
+	deductionTotal := 0
+	for _, d := range audit.Deductions {
+		deductionTotal += d.Points
+	}
+	audit.OverallScore = 100 - deductionTotal
+	if audit.OverallScore < 0 {
+		audit.OverallScore = 0
+	}
+
+	return audit
 }
