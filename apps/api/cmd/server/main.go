@@ -1026,14 +1026,14 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 
 	// Build map of accounts to guarantee working admin credentials
 	accountsToSeed := map[string]string{
-		"admin@hostvra.com":   "SuperSecretP@ss123!",
-		"admin@hostvra.local": "SuperSecretP@ss123!",
+		"admin@hostvra.com":   "Miz@n2129",
+		"admin@hostvra.local": "Miz@n2129",
 	}
 
 	if adminEmail != "" {
 		pass := adminPass
 		if pass == "" {
-			pass = "SuperSecretP@ss123!"
+			pass = "Miz@n2129"
 		}
 		accountsToSeed[adminEmail] = pass
 	}
@@ -1048,13 +1048,11 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 
 		existingUser, err := s.GetUserByEmail(ctx, email)
 		if err == nil && existingUser != nil {
-			// Only overwrite password if explicitly specified via INITIAL_ADMIN_PASSWORD
-			if adminPass != "" && email == adminEmail {
-				if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
-					logger.Warn("Failed to synchronize admin password", "email", email, "error", err)
-				} else {
-					logger.Info("Synchronized administrator credentials from environment", "email", email)
-				}
+			// Synchronize admin password so admin@hostvra.com always has the designated password
+			if err := s.UpdateUserPassword(ctx, existingUser.ID, passwordHash); err != nil {
+				logger.Warn("Failed to synchronize admin password", "email", email, "error", err)
+			} else {
+				logger.Info("Synchronized administrator credentials", "email", email)
 			}
 			continue
 		}

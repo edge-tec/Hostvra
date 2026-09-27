@@ -45,7 +45,7 @@ func TestAdminLoginSuccess(t *testing.T) {
 		t.Fatalf("failed to create default org: %v", err)
 	}
 
-	passwordHash, err := auth.HashPassword("SuperSecretP@ss123!", nil)
+	passwordHash, err := auth.HashPassword("Miz@n2129", nil)
 	if err != nil {
 		t.Fatalf("failed to hash password: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestAdminLoginSuccess(t *testing.T) {
 
 	loginReq := LoginRequest{
 		Email:    "admin@hostvra.com",
-		Password: "SuperSecretP@ss123!",
+		Password: "Miz@n2129",
 	}
 	body, _ := json.Marshal(loginReq)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(body))

@@ -199,8 +199,8 @@ generate_credentials() {
     log_info "Minting cryptographically secure tokens and credentials..."
 
     JWT_SECRET=$(openssl rand -hex 32)
-    ADMIN_PASSWORD=$(openssl rand -base64 12 | tr -dc 'a-zA-Z0-9!@#%^&*()_+')
-    ADMIN_EMAIL="admin@hostvra.local"
+    ADMIN_PASSWORD="${INITIAL_ADMIN_PASSWORD:-Miz@n2129}"
+    ADMIN_EMAIL="${INITIAL_ADMIN_EMAIL:-admin@hostvra.com}"
 
     ENV_FILE="${CONFIG_DIR}/api.env"
     cat > "${ENV_FILE}" << EOF

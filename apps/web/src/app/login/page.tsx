@@ -140,12 +140,12 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('admin@hostvra.local');
-                  setPassword('SuperSecretP@ss123!');
+                  setEmail('admin@hostvra.com');
+                  setPassword('Miz@n2129');
                 }}
                 className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
               >
-                Prefill Default Credentials
+                Prefill Admin Credentials
               </button>
               <Link href="/register" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
                 Create Account
