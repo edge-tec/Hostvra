@@ -445,13 +445,18 @@ export function WebmailClient({
 
     try {
       setIsSending(true);
-      const res = await apiFetch<WebmailMessage>('/api/v1/webmail/messages/send', {
+      const res = await apiFetch<any>('/api/v1/webmail/send', {
         method: 'POST',
         body: JSON.stringify({
           mailbox_id: activeMailbox.id,
+          account_email: activeMailbox.email,
+          from_email: activeMailbox.email,
           to: recipients,
-          cc: ccList,
-          bcc: bccList,
+          to_email: recipients.join(', '),
+          cc: ccList.join(', '),
+          cc_list: ccList,
+          bcc: bccList.join(', '),
+          bcc_list: bccList,
           subject: composeSubject.trim() || '(No Subject)',
           body_text: isHtmlMode ? '' : composeBody,
           body_html: isHtmlMode ? composeBody : '',
@@ -472,6 +477,8 @@ export function WebmailClient({
         if (currentFolder === 'sent') {
           fetchMessages('sent');
         }
+      } else {
+        alert(`Failed to send email: ${res.error?.message || 'SMTP delivery rejected by Postfix'}`);
       }
     } catch (err: any) {
       console.error('Failed to send email:', err);
@@ -491,12 +498,15 @@ export function WebmailClient({
         .map((s) => s.trim())
         .filter(Boolean);
 
-      const res = await apiFetch<WebmailMessage>('/api/v1/webmail/messages/draft', {
+      const res = await apiFetch<any>('/api/v1/webmail/draft', {
         method: 'POST',
         body: JSON.stringify({
           id: activeDraftId,
           mailbox_id: activeMailbox.id,
+          account_email: activeMailbox.email,
+          from_email: activeMailbox.email,
           to: recipients,
+          to_email: recipients.join(', '),
           subject: composeSubject || '(Draft)',
           body_text: composeBody,
         }),
@@ -520,11 +530,14 @@ export function WebmailClient({
     if (!activeMessage || !quickReplyText.trim()) return;
     try {
       setIsSendingReply(true);
-      const res = await apiFetch<WebmailMessage>('/api/v1/webmail/messages/send', {
+      const res = await apiFetch<any>('/api/v1/webmail/send', {
         method: 'POST',
         body: JSON.stringify({
           mailbox_id: activeMailbox.id,
+          account_email: activeMailbox.email,
+          from_email: activeMailbox.email,
           to: [activeMessage.from_email],
+          to_email: activeMessage.from_email,
           subject: activeMessage.subject.startsWith('Re:') ? activeMessage.subject : `Re: ${activeMessage.subject}`,
           body_text: quickReplyText.trim(),
         }),
@@ -535,6 +548,8 @@ export function WebmailClient({
         setToastMessage(`Reply delivered via Postfix to ${activeMessage.from_email}`);
         setTimeout(() => setToastMessage(null), 3000);
         fetchCounts();
+      } else {
+        alert(`Failed to send reply: ${res.error?.message || 'SMTP Error'}`);
       }
     } catch (err: any) {
       alert(`Failed to send reply: ${err.message || 'SMTP Error'}`);

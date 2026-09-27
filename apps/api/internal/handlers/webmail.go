@@ -42,13 +42,19 @@ func NewWebmailHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Webm
 // ----------------------------------------------------------------------------
 
 type SendWebmailMessageRequest struct {
-	AccountEmail string                    `json:"account_email"`
-	ToEmail      string                    `json:"to_email"`
+	ID           *uuid.UUID                `json:"id,omitempty"`
+	MailboxID    *uuid.UUID                `json:"mailbox_id,omitempty"`
+	AccountEmail string                    `json:"account_email,omitempty"`
+	FromEmail    string                    `json:"from_email,omitempty"`
+	ToEmail      string                    `json:"to_email,omitempty"`
+	To           []string                  `json:"to,omitempty"`
 	Cc           string                    `json:"cc,omitempty"`
+	CcList       []string                  `json:"cc_list,omitempty"`
 	Bcc          string                    `json:"bcc,omitempty"`
+	BccList      []string                  `json:"bcc_list,omitempty"`
 	Subject      string                    `json:"subject"`
-	BodyHTML     string                    `json:"body_html"`
-	BodyText     string                    `json:"body_text"`
+	BodyHTML     string                    `json:"body_html,omitempty"`
+	BodyText     string                    `json:"body_text,omitempty"`
 	Priority     string                    `json:"priority,omitempty"` // normal, high, low
 	Attachments  []store.WebmailAttachment `json:"attachments,omitempty"`
 }
@@ -227,16 +233,21 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fromClean := strings.ToLower(strings.TrimSpace(req.AccountEmail))
-	toClean := strings.ToLower(strings.TrimSpace(req.ToEmail))
+	var mb *store.EmailMailbox
+	var err error
 
-	if fromClean == "" || toClean == "" {
-		response.Error(w, http.StatusBadRequest, "MISSING_ADDRESSES", "From and To addresses required", nil, "")
-		return
+	fromClean := strings.ToLower(strings.TrimSpace(req.AccountEmail))
+	if fromClean == "" {
+		fromClean = strings.ToLower(strings.TrimSpace(req.FromEmail))
 	}
 
-	mb, err := h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
-	if err != nil {
+	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), *req.MailboxID)
+	} else if fromClean != "" {
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
+	}
+
+	if err != nil || mb == nil {
 		response.Error(w, http.StatusNotFound, "SENDER_MAILBOX_NOT_FOUND", "Sender mailbox does not exist", nil, "")
 		return
 	}
@@ -246,12 +257,63 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Extract all recipients
+	var recipients []string
+	if len(req.To) > 0 {
+		for _, t := range req.To {
+			clean := strings.ToLower(strings.TrimSpace(t))
+			if clean != "" {
+				recipients = append(recipients, clean)
+			}
+		}
+	} else if req.ToEmail != "" {
+		for _, t := range strings.Split(req.ToEmail, ",") {
+			clean := strings.ToLower(strings.TrimSpace(t))
+			if clean != "" {
+				recipients = append(recipients, clean)
+			}
+		}
+	}
+
+	if len(recipients) == 0 {
+		response.Error(w, http.StatusBadRequest, "MISSING_ADDRESSES", "At least one recipient email address required", nil, "")
+		return
+	}
+
+	primaryTo := recipients[0]
+
 	// 1. Check Suppression List (Prevent repeated sending to hard bounces)
-	isSuppressed, sErr := h.store.IsEmailSuppressed(r.Context(), mb.ServerID, toClean)
+	isSuppressed, sErr := h.store.IsEmailSuppressed(r.Context(), mb.ServerID, primaryTo)
 	if sErr == nil && isSuppressed {
 		response.Error(w, http.StatusBadRequest, "RECIPIENT_SUPPRESSED",
-			fmt.Sprintf("Delivery rejected: %s is on the suppression list due to prior hard bounces or spam complaints.", toClean), nil, "")
+			fmt.Sprintf("Delivery rejected: %s is on the suppression list due to prior hard bounces or spam complaints.", primaryTo), nil, "")
 		return
+	}
+
+	ccStr := req.Cc
+	if ccStr == "" && len(req.CcList) > 0 {
+		ccStr = strings.Join(req.CcList, ", ")
+	}
+	bccStr := req.Bcc
+	if bccStr == "" && len(req.BccList) > 0 {
+		bccStr = strings.Join(req.BccList, ", ")
+	}
+
+	allSMTPRecipients := make([]string, 0, len(recipients))
+	allSMTPRecipients = append(allSMTPRecipients, recipients...)
+	if ccStr != "" {
+		for _, c := range strings.Split(ccStr, ",") {
+			if clean := strings.ToLower(strings.TrimSpace(c)); clean != "" {
+				allSMTPRecipients = append(allSMTPRecipients, clean)
+			}
+		}
+	}
+	if bccStr != "" {
+		for _, b := range strings.Split(bccStr, ",") {
+			if clean := strings.ToLower(strings.TrimSpace(b)); clean != "" {
+				allSMTPRecipients = append(allSMTPRecipients, clean)
+			}
+		}
 	}
 
 	// 2. Transmit via Local Postfix MTA (Port 587 or 25)
@@ -262,16 +324,30 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mailBody := req.BodyText
-	if mailBody == "" {
-		mailBody = stripHTMLTags(req.BodyHTML)
+	var contentType string
+	var msgPayload string
+
+	if req.BodyHTML != "" {
+		contentType = "text/html; charset=UTF-8"
+		msgPayload = req.BodyHTML
+		if mailBody == "" {
+			mailBody = stripHTMLTags(req.BodyHTML)
+		}
+	} else {
+		contentType = "text/plain; charset=UTF-8"
+		msgPayload = mailBody
 	}
 
-	header := fmt.Sprintf("From: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n",
-		mb.Name, mb.Email, toClean, req.Subject, msgID, time.Now().Format(time.RFC1123Z))
-	fullMsg := header + req.BodyHTML
+	header := fmt.Sprintf("From: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\n",
+		mb.Name, mb.Email, strings.Join(recipients, ", "), req.Subject, msgID, time.Now().Format(time.RFC1123Z), contentType)
+	if ccStr != "" {
+		header += fmt.Sprintf("Cc: %s\r\n", ccStr)
+	}
+	header += "\r\n"
+	fullMsg := header + msgPayload
 
 	// Attempt real local SMTP delivery
-	deliveryErr := smtp.SendMail(smtpServer, nil, mb.Email, []string{toClean}, []byte(fullMsg))
+	deliveryErr := smtp.SendMail(smtpServer, nil, mb.Email, allSMTPRecipients, []byte(fullMsg))
 	deliveryStatus := "delivered"
 	failureReason := ""
 	if deliveryErr != nil {
@@ -289,10 +365,10 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		MessageID:     msgID,
 		FromName:      mb.Name,
 		FromEmail:     mb.Email,
-		ToName:        toClean,
-		ToEmail:       toClean,
-		Cc:            req.Cc,
-		Bcc:           req.Bcc,
+		ToName:        primaryTo,
+		ToEmail:       strings.Join(recipients, ", "),
+		Cc:            ccStr,
+		Bcc:           bccStr,
 		Subject:       req.Subject,
 		BodyText:      mailBody,
 		BodyHTML:      req.BodyHTML,
@@ -327,14 +403,14 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		DomainID:      &mb.DomainID,
 		MessageID:     msgID,
 		Sender:        mb.Email,
-		Recipient:     toClean,
+		Recipient:     primaryTo,
 		Status:        deliveryStatus,
 		FailureReason: failureReason,
 	})
 
 	h.audit.Log(r.Context(), r, "webmail.message.send", "webmail_message", sentMsg.ID.String(), "success", "", map[string]interface{}{
 		"from":      mb.Email,
-		"to":        toClean,
+		"to":        strings.Join(recipients, ", "),
 		"status":    deliveryStatus,
 		"messageID": msgID,
 	})
@@ -355,22 +431,44 @@ func (h *WebmailHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var mb *store.EmailMailbox
+	var err error
+
 	fromClean := strings.ToLower(strings.TrimSpace(req.AccountEmail))
-	mb, err := h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
-	if err != nil {
+	if fromClean == "" {
+		fromClean = strings.ToLower(strings.TrimSpace(req.FromEmail))
+	}
+
+	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), *req.MailboxID)
+	} else if fromClean != "" {
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
+	}
+
+	if err != nil || mb == nil {
 		response.Error(w, http.StatusNotFound, "MAILBOX_NOT_FOUND", "Mailbox not found", nil, "")
 		return
 	}
 
+	toClean := req.ToEmail
+	if toClean == "" && len(req.To) > 0 {
+		toClean = strings.Join(req.To, ", ")
+	}
+
+	draftID := uuid.New()
+	if req.ID != nil && *req.ID != uuid.Nil {
+		draftID = *req.ID
+	}
+
 	draftMsg := &store.WebmailMessage{
-		ID:            uuid.New(),
+		ID:            draftID,
 		MailboxID:     mb.ID,
 		AccountEmail:  mb.Email,
 		Folder:        "drafts",
 		FromName:      mb.Name,
 		FromEmail:     mb.Email,
-		ToName:        req.ToEmail,
-		ToEmail:       req.ToEmail,
+		ToName:        toClean,
+		ToEmail:       toClean,
 		Cc:            req.Cc,
 		Bcc:           req.Bcc,
 		Subject:       req.Subject,
@@ -379,7 +477,7 @@ func (h *WebmailHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		IsUnread:      false,
 		HasAttachment: len(req.Attachments) > 0,
 		Priority:      req.Priority,
-		SizeBytes:     int64(len(req.BodyHTML)),
+		SizeBytes:     int64(len(req.BodyHTML) + len(req.BodyText)),
 		Attachments:   req.Attachments,
 	}
 	if draftMsg.Priority == "" {
