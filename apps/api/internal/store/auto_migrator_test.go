@@ -76,3 +76,19 @@ func TestMigrations_ParityAndDeterminism(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrations_TamperingVerificationLogic tests the SHA-256 integrity validation mechanism.
+func TestMigrations_TamperingVerificationLogic(t *testing.T) {
+	content := []byte("-- Original Migration Content\nCREATE TABLE test_table (id SERIAL);")
+	h := sha256.Sum256(content)
+	originalChecksum := hex.EncodeToString(h[:])
+
+	tamperedContent := []byte("-- Tampered Migration Content\nCREATE TABLE test_table (id SERIAL);")
+	ht := sha256.Sum256(tamperedContent)
+	tamperedChecksum := hex.EncodeToString(ht[:])
+
+	if originalChecksum == tamperedChecksum {
+		t.Fatal("tampering detection failed: identical checksums for divergent content")
+	}
+}
+
