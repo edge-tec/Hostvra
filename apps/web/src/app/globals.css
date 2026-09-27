@@ -1248,16 +1248,19 @@ html:not(.dark) div[class*="absolute left-0"][class*="rounded-"] {
 }
 
 /* ==========================================================================
-   12. CODE EDITOR OVERRIDES
+   12. CODE EDITOR & CONFIG OVERRIDES (CRISP JET BLACK TEXT)
    ========================================================================== */
 .code-editor-textarea,
 textarea.code-editor-textarea,
 html:not(.dark) textarea.code-editor-textarea,
-html.dark textarea.code-editor-textarea {
+html.dark textarea.code-editor-textarea,
+textarea.config-textarea,
+.config-textarea {
   background-color: #FFFFFF !important;
   color: #000000 !important;
+  -webkit-text-fill-color: #000000 !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
   border: none !important;
-  border-radius: 0 !important;
   outline: none !important;
   box-shadow: none !important;
 }
@@ -1265,10 +1268,12 @@ html.dark textarea.code-editor-textarea {
 .code-editor-textarea:focus,
 textarea.code-editor-textarea:focus,
 html:not(.dark) textarea.code-editor-textarea:focus,
-html.dark textarea.code-editor-textarea:focus {
+html.dark textarea.code-editor-textarea:focus,
+textarea.config-textarea:focus,
+.config-textarea:focus {
   background-color: #FFFFFF !important;
   color: #000000 !important;
-  border: none !important;
+  -webkit-text-fill-color: #000000 !important;
   outline: none !important;
   box-shadow: none !important;
 }

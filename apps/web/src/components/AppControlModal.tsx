@@ -744,12 +744,13 @@ export function AppControlModal({
                   </button>
                 </div>
 
-                <div className="flex-1 bg-slate-950 rounded-xl overflow-hidden border border-slate-800 flex flex-col p-2">
+                <div className="flex-1 bg-white dark:bg-surface-900 rounded-xl overflow-hidden border border-slate-300 dark:border-surface-700 flex flex-col p-2 shadow-xs">
                   <textarea
                     value={configContent}
                     onChange={(e) => setConfigContent(e.target.value)}
                     spellCheck={false}
-                    className="w-full flex-1 bg-transparent text-slate-100 font-mono text-xs leading-relaxed p-3 focus:outline-none resize-none"
+                    className="code-editor-textarea config-textarea w-full flex-1 font-mono text-xs leading-relaxed p-3 focus:outline-none resize-none !text-black !bg-white"
+                    style={{ color: '#000000', backgroundColor: '#FFFFFF', WebkitTextFillColor: '#000000' }}
                     placeholder="Enter configuration directives here..."
                   />
                 </div>
@@ -964,13 +965,13 @@ export function AppControlModal({
                   </button>
                 </div>
 
-                <div className="flex-1 bg-slate-950 rounded-xl p-4 font-mono text-[11px] text-slate-300 overflow-y-auto space-y-1.5 border border-slate-800 shadow-inner">
-                  <p className="text-slate-500">[{new Date().toISOString()}] [notice] 3829#3829: using the "epoll" event method</p>
-                  <p className="text-slate-400">[{new Date().toISOString()}] [notice] 3829#3829: {app.name} v{app.version} daemon started</p>
-                  <p className="text-emerald-400">[{new Date().toISOString()}] [notice] 3829#3829: master process ready to handle connections</p>
-                  <p className="text-slate-500">[{new Date().toISOString()}] [notice] 3830#3830: start worker process 0</p>
-                  <p className="text-slate-500">[{new Date().toISOString()}] [notice] 3831#3831: start worker process 1</p>
-                  <p className="text-slate-300">[{new Date().toISOString()}] [info] 3830#3830: 0 client SSL handshakes completed</p>
+                <div className="flex-1 bg-slate-50 dark:bg-surface-900 rounded-xl p-4 font-mono text-[11px] text-slate-900 dark:text-slate-100 overflow-y-auto space-y-1.5 border border-slate-300 dark:border-surface-700 shadow-inner">
+                  <p className="text-slate-700 dark:text-slate-400">[{new Date().toISOString()}] [notice] 3829#3829: using the "epoll" event method</p>
+                  <p className="text-slate-800 dark:text-slate-300">[{new Date().toISOString()}] [notice] 3829#3829: {app.name} v{app.version} daemon started</p>
+                  <p className="text-emerald-700 dark:text-emerald-400 font-semibold">[{new Date().toISOString()}] [notice] 3829#3829: master process ready to handle connections</p>
+                  <p className="text-slate-700 dark:text-slate-400">[{new Date().toISOString()}] [notice] 3830#3830: start worker process 0</p>
+                  <p className="text-slate-700 dark:text-slate-400">[{new Date().toISOString()}] [notice] 3831#3831: start worker process 1</p>
+                  <p className="text-slate-900 dark:text-slate-200">[{new Date().toISOString()}] [info] 3830#3830: 0 client SSL handshakes completed</p>
                 </div>
               </div>
             )}
