@@ -428,6 +428,13 @@ func (m *Manager) ExecuteQuery(ctx context.Context, dbName, query string) (*Quer
 	return res, fmt.Errorf("no connection available to MySQL database engine")
 }
 
+// safeSQLString escapes single quotes and backslashes for MySQL string literals.
+func safeSQLString(val string) string {
+	val = strings.ReplaceAll(val, `\`, `\\`)
+	val = strings.ReplaceAll(val, `'`, `\'`)
+	return val
+}
+
 // ExecuteRealDatabaseCreation attempts to create real database and grant user privileges.
 func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset, collation, user, password, hostAllow string) error {
 	if path, err := exec.LookPath("mysql"); err == nil {
@@ -441,19 +448,27 @@ func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset
 			hostAllow = "localhost"
 		}
 
+		quotedDB := SafeQuoteIdentifier(name)
+		cleanCharset := strings.ReplaceAll(charset, ";", "")
+		cleanCollation := strings.ReplaceAll(collation, ";", "")
+
 		sqlScript := fmt.Sprintf(
-			"CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET %s COLLATE %s;\n",
-			name, charset, collation,
+			"CREATE DATABASE IF NOT EXISTS %s CHARACTER SET %s COLLATE %s;\n",
+			quotedDB, cleanCharset, cleanCollation,
 		)
 		if user != "" && password != "" {
+			escUser := safeSQLString(user)
+			escHost := safeSQLString(hostAllow)
+			escPass := safeSQLString(password)
+
 			sqlScript += fmt.Sprintf(
 				"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
 					"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n"+
-					"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%s';\n"+
+					"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n"+
 					"FLUSH PRIVILEGES;\n",
-				user, hostAllow, password,
-				user, hostAllow, password,
-				name, user, hostAllow,
+				escUser, escHost, escPass,
+				escUser, escHost, escPass,
+				quotedDB, escUser, escHost,
 			)
 		}
 
@@ -469,11 +484,12 @@ func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset
 
 // ExecuteDropDatabase drops the database from the live server.
 func (m *Manager) ExecuteDropDatabase(ctx context.Context, name string) error {
+	quotedDB := SafeQuoteIdentifier(name)
 	// 1. Direct connection via pool
 	if m.pool != nil {
 		db, err := m.pool.GetDB(ctx, "information_schema")
 		if err == nil {
-			if _, execErr := db.ExecContext(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)); execErr == nil {
+			if _, execErr := db.ExecContext(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %s;", quotedDB)); execErr == nil {
 				return nil
 			}
 		}
@@ -481,7 +497,7 @@ func (m *Manager) ExecuteDropDatabase(ctx context.Context, name string) error {
 
 	// 2. Fallback to mysql CLI
 	if path, err := exec.LookPath("mysql"); err == nil {
-		sqlScript := fmt.Sprintf("DROP DATABASE IF EXISTS `%s`;", name)
+		sqlScript := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", quotedDB)
 		var args []string
 		if m.rootPassword != "" {
 			args = []string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword), "-e", sqlScript}
@@ -500,9 +516,13 @@ func (m *Manager) ExecuteUpdatePassword(ctx context.Context, user, hostAllow, ne
 		if hostAllow == "" {
 			hostAllow = "localhost"
 		}
+		escUser := safeSQLString(user)
+		escHost := safeSQLString(hostAllow)
+		escPass := safeSQLString(newPassword)
+
 		sqlScript := fmt.Sprintf(
 			"ALTER USER '%s'@'%s' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
-			user, hostAllow, newPassword,
+			escUser, escHost, escPass,
 		)
 		args := []string{"-e", sqlScript}
 		if m.rootPassword != "" {
@@ -523,12 +543,17 @@ func (m *Manager) ExecuteUpdatePermission(ctx context.Context, user, oldHost, ne
 		if newHost == "" {
 			newHost = "localhost"
 		}
-		if dbName == "" {
-			dbName = "*"
+		escUser := safeSQLString(user)
+		escHost := safeSQLString(newHost)
+
+		targetDB := "*"
+		if dbName != "" && dbName != "*" {
+			targetDB = SafeQuoteIdentifier(dbName)
 		}
+
 		sqlScript := fmt.Sprintf(
-			"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			dbName, user, newHost,
+			"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
+			targetDB, escUser, escHost,
 		)
 		args := []string{"-e", sqlScript}
 		if m.rootPassword != "" {

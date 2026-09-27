@@ -3,6 +3,7 @@ package handlers
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -625,7 +626,9 @@ type RestartRequest struct {
 
 func (h *DashboardHandler) RestartTarget(w http.ResponseWriter, r *http.Request) {
 	var req RestartRequest
-	_ = r.Body // optionally decode target
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
 	if req.Target == "" {
 		req.Target = "panel"
 	}

@@ -492,9 +492,9 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.CreateWebsite(r.Context(), site); err != nil {
-		if allSites, lErr := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); lErr == nil {
+		if allSites, lErr := h.store.ListWebsitesByOrg(r.Context(), orgID); lErr == nil {
 			for _, s := range allSites {
-				if s != nil && strings.EqualFold(s.PrimaryDomain, req.PrimaryDomain) {
+				if s != nil && strings.EqualFold(s.PrimaryDomain, req.PrimaryDomain) && s.OrganizationID == orgID {
 					response.JSON(w, http.StatusOK, s, nil)
 					return
 				}

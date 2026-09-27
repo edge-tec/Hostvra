@@ -119,6 +119,11 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if claims.Role != "owner" && claims.Role != "admin" {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can execute system terminal commands", nil, "")
+		return
+	}
+
 	if h.quotaSvc != nil {
 		if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
 			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
@@ -136,6 +141,19 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	if req.Command == "" {
 		response.Error(w, http.StatusBadRequest, "EMPTY_COMMAND", "Command cannot be empty", nil, "")
 		return
+	}
+
+	// Guard against accidental catastrophic system destruction
+	lowerCmd := strings.ToLower(req.Command)
+	blockedDestructivePatterns := []string{
+		"rm -rf /", "rm -rf /*", "rm -rf --no-preserve-root /",
+		"> /dev/sda", "> /dev/nvme", "mkfs.", "dd if=/dev/zero of=/dev/sda",
+	}
+	for _, blocked := range blockedDestructivePatterns {
+		if strings.Contains(lowerCmd, blocked) {
+			response.Error(w, http.StatusBadRequest, "COMMAND_BLOCKED", "Execution of catastrophic command is strictly blocked for system safety", nil, "")
+			return
+		}
 	}
 
 	// Determine starting working directory

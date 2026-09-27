@@ -48,9 +48,14 @@ func NewFileHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FileHan
 // Non-admin roles (manager, developer) are strictly confined to /var/www, /home, or /tmp and
 // forbidden from reading, writing, or traversing sensitive system files (/etc, /root, /boot, etc.)
 func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string) error {
-	claims, _ := auth.GetClaims(r.Context())
-	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-		clean := filepath.Clean(targetPath)
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		return fmt.Errorf("unauthorized: missing authentication claims")
+	}
+
+	clean := filepath.Clean(targetPath)
+
+	if claims.Role != "owner" && claims.Role != "admin" {
 		restrictedRoots := []string{
 			"/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/run", "/var/run",
 			"/var/lib/hostvra", "/var/lib/docker", "/usr", "/bin", "/sbin", "/lib", "/lib64",
@@ -68,6 +73,34 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 			return fmt.Errorf("role '%s' is confined to web and home directories", claims.Role)
 		}
 
+		// Multi-Tenant Isolation: Ensure non-admin cannot access another tenant's /var/www domains
+		if strings.HasPrefix(clean, "/var/www") {
+			if clean == "/var/www" || clean == "/var/www/" {
+				return fmt.Errorf("direct access to root /var/www forbidden; select your domain directory")
+			}
+			sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
+			if err != nil || len(sites) == 0 {
+				return fmt.Errorf("no websites registered for your organization")
+			}
+			allowed := false
+			for _, s := range sites {
+				docRoot := filepath.Clean(s.DocumentRoot)
+				siteDir := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+				if clean == docRoot || strings.HasPrefix(clean, docRoot+"/") ||
+					clean == siteDir || strings.HasPrefix(clean, siteDir+"/") {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return fmt.Errorf("access denied: path '%s' does not belong to your organization's websites", clean)
+			}
+		}
+
+		if strings.HasPrefix(clean, "/home") && (clean == "/home" || clean == "/home/") {
+			return fmt.Errorf("direct access to root /home directory forbidden")
+		}
+
 		// Security: Prevent symlink escape traversal (resolve target if path exists)
 		if resolved, err := filepath.EvalSymlinks(clean); err == nil && resolved != clean {
 			for _, rr := range restrictedRoots {
@@ -77,6 +110,25 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 			}
 			if !strings.HasPrefix(resolved, "/var/www") && !strings.HasPrefix(resolved, "/home") && !strings.HasPrefix(resolved, "/tmp") {
 				return fmt.Errorf("symlink target '%s' escapes authorized user spaces", resolved)
+			}
+			if strings.HasPrefix(resolved, "/var/www") {
+				sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
+				if err != nil || len(sites) == 0 {
+					return fmt.Errorf("symlink target escapes your organization's websites")
+				}
+				allowed := false
+				for _, s := range sites {
+					docRoot := filepath.Clean(s.DocumentRoot)
+					siteDir := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+					if resolved == docRoot || strings.HasPrefix(resolved, docRoot+"/") ||
+						resolved == siteDir || strings.HasPrefix(resolved, siteDir+"/") {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					return fmt.Errorf("symlink target '%s' does not belong to your organization's websites", resolved)
+				}
 			}
 		}
 
@@ -1072,7 +1124,11 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	labels = validLabels
 
 	// Fetch websites/domains for My Domains section
-	sites, _ := h.store.ListWebsitesByOrg(ctx, uuid.Nil)
+	orgID := uuid.Nil
+	if claims, ok := auth.GetClaims(ctx); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+		orgID = claims.OrganizationID
+	}
+	sites, _ := h.store.ListWebsitesByOrg(ctx, orgID)
 	type DomainItem struct {
 		ID           string `json:"id"`
 		Domain       string `json:"domain"`
@@ -1581,7 +1637,11 @@ func (h *FileHandler) RestoreFromTrash(w http.ResponseWriter, r *http.Request) {
 		} else if req.RestoreTo == "domain" && req.TargetDomain != "" {
 			// Find domain's document root
 			targetPath = filepath.Join("/var/www", req.TargetDomain, item.Name)
-			if sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); err == nil {
+			orgID := uuid.Nil
+			if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+				orgID = claims.OrganizationID
+			}
+			if sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID); err == nil {
 				for _, s := range sites {
 					if s.PrimaryDomain == req.TargetDomain {
 						targetPath = filepath.Join(s.DocumentRoot, item.Name)
@@ -1814,7 +1874,11 @@ func (h *FileHandler) Search(w http.ResponseWriter, r *http.Request) {
 	var rootsToSearch []string
 
 	if allDomains {
-		if sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); err == nil && len(sites) > 0 {
+		orgID := uuid.Nil
+		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+			orgID = claims.OrganizationID
+		}
+		if sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID); err == nil && len(sites) > 0 {
 			for _, s := range sites {
 				if s.DeletedAt == nil && s.DocumentRoot != "" {
 					rootsToSearch = append(rootsToSearch, s.DocumentRoot)
@@ -2039,7 +2103,11 @@ func (h *FileHandler) ActivityLogs(w http.ResponseWriter, r *http.Request) {
 
 // ListDomains returns website domains for multi-domain directory switching
 func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
-	sites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
+	orgID := uuid.Nil
+	if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+		orgID = claims.OrganizationID
+	}
+	sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
 		return

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,14 @@ import (
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
+)
+
+var (
+	dbNameRegex      = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
+	dbUserRegex      = regexp.MustCompile(`^[a-zA-Z0-9_]{1,32}$`)
+	dbCharsetRegex   = regexp.MustCompile(`^[a-zA-Z0-9_]{1,32}$`)
+	dbCollationRegex = regexp.MustCompile(`^[a-zA-Z0-9_]{1,64}$`)
+	dbHostRegex      = regexp.MustCompile(`^[a-zA-Z0-9_.\-%]{1,128}$`)
 )
 
 type DatabaseHandler struct {
@@ -135,8 +144,8 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" {
-		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name is required", nil, "")
+	if req.Name == "" || !dbNameRegex.MatchString(req.Name) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database name is required and must contain only alphanumeric characters and underscores (1-64 chars)", nil, "")
 		return
 	}
 
@@ -152,15 +161,27 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CharacterSet == "" {
 		req.CharacterSet = "utf8mb4"
+	} else if !dbCharsetRegex.MatchString(req.CharacterSet) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid character set specified", nil, "")
+		return
 	}
 	if req.Collation == "" {
 		req.Collation = "utf8mb4_unicode_ci"
+	} else if !dbCollationRegex.MatchString(req.Collation) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid collation specified", nil, "")
+		return
 	}
 	if req.HostAllow == "" {
 		req.HostAllow = "localhost"
+	} else if !dbHostRegex.MatchString(req.HostAllow) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Invalid host allow specified", nil, "")
+		return
 	}
 	if req.Username == "" {
 		req.Username = req.Name
+	} else if !dbUserRegex.MatchString(req.Username) {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Database username must contain only alphanumeric characters and underscores (1-32 chars)", nil, "")
+		return
 	}
 	if req.Password == "" {
 		req.Password = uuid.New().String()[:12]
