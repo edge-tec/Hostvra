@@ -909,7 +909,7 @@ export default function DomainsPage() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search domain (e.g. hostvrademo.com)..."
+                    placeholder="Search domain (e.g. example.com)..."
                     className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600"
                   />
                 </div>

@@ -253,10 +253,8 @@ The following network ports must be allowed in your firewall:
 
 | Environment | Panel URL | Administrator Email | Password | Role |
 |---|---|---|---|---|
-| **Local Dev / Demo** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
-| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | Randomly generated during install | Super Admin / Owner |
-
-> 💡 **Tip for Local Testing**: On the Web UI login page, clicking the **"Prefill Demo Credentials"** button automatically populates `admin@hostvra.com` and `SuperSecretP@ss123!`.
+| **Local Dev / Testing** | `http://localhost:3000/login` | `admin@hostvra.com` | `Miz@n2129` | Super Admin |
+| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.com` | `Miz@n2129` | Super Admin |
 
 ### Retrieving Server Credentials
 On a production Linux server, your environment configuration and credentials are saved at `/etc/hostvra/api.env`:

@@ -2343,7 +2343,7 @@ export default function BillingPage() {
                             <tr key={tr.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors">
                               <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600 dark:text-slate-400">
                                 <div>{tr.id.substring(0, 13)}...</div>
-                                <div className="text-[10px] text-slate-400">User: {tr.user_id ? tr.user_id.substring(0, 8) : 'demo-user'}</div>
+                                <div className="text-[10px] text-slate-400">User: {tr.user_id ? tr.user_id.substring(0, 8) : 'client'}</div>
                               </td>
                               <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white">
                                 {tr.plan_name}

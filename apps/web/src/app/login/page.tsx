@@ -136,18 +136,8 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs pt-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setEmail('admin@hostvra.com');
-                  setPassword('Miz@n2129');
-                }}
-                className="text-indigo-600 dark:text-indigo-400 hover:underline font-semibold cursor-pointer"
-              >
-                Prefill Admin Credentials
-              </button>
-              <Link href="/register" className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+            <div className="flex items-center justify-end text-xs pt-1">
+              <Link href="/register" className="text-indigo-600 dark:text-indigo-400 font-semibold hover:underline">
                 Create Account
               </Link>
             </div>

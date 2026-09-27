@@ -86,10 +86,8 @@ sudo bash deployment/installer/install.sh
 
 | Environment | Web Panel URL | Email | Password | Role |
 |---|---|---|---|---|
-| **Local Dev / Demo** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
-| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | Auto-generated in installer summary (`/etc/hostvra/api.env`) | Super Admin / Owner |
-
-> 💡 **Tip**: On the local Web UI login page, click **"Prefill Demo Credentials"** to instantly sign in.
+| **Admin Control Plane** | `http://localhost:3000/login` | `admin@hostvra.com` | `Miz@n2129` | Super Admin |
+| **Production Server** | `http://<SERVER_IP>:8080` | `admin@hostvra.com` | `Miz@n2129` (configured in `/etc/hostvra/api.env`) | Super Admin |
 
 > **Detailed Installation Guidelines**:
 > - [Complete Production Installation Guideline (English)](docs/installation-guide.md)

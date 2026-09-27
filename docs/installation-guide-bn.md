@@ -161,10 +161,8 @@ sudo systemctl enable --now hostvra-agent.service
 
 | পরিবেশ (Environment) | প্যানেল URL | অ্যাডমিন ইমেইল | পাসওয়ার্ড | রোল |
 |---|---|---|---|---|
-| **লোকাল টেস্ট / ডেমো** | `http://localhost:3000/login` | `admin@hostvra.com` | `SuperSecretP@ss123!` | Super Admin / Owner |
-| **প্রোডাকশন সার্ভার** | `http://<SERVER_IP>:8080` | `admin@hostvra.local` | ইনস্টলেশন সামারিতে জেনারেট হওয়া পাসওয়ার্ড | Super Admin / Owner |
-
-> 💡 **ডেমো টিপস**: ব্রাউজারের লগইন পেজে সরাসরি **"Prefill Demo Credentials"** বাটনে ক্লিক করলে `admin@hostvra.com` এবং `SuperSecretP@ss123!` অটো-ফিল হয়ে যাবে।
+| **লোকাল টেস্ট / ডেভেলপমেন্ট** | `http://localhost:3000/login` | `admin@hostvra.com` | `Miz@n2129` | Super Admin |
+| **প্রোডাকশন সার্ভার** | `http://<SERVER_IP>:8080` | `admin@hostvra.com` | `Miz@n2129` | Super Admin |
 
 ### সার্ভার থেকে পাসওয়ার্ড দেখা
 প্রোডাকশন সার্ভারের এনভায়রনমেন্ট কনফিগারেশন দেখতে:
