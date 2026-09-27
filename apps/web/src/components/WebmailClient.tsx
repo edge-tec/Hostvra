@@ -591,9 +591,11 @@ export function WebmailClient({
     <div className="flex flex-col h-[calc(100vh-140px)] min-h-[640px] bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xl relative">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="absolute top-4 right-4 z-50 bg-indigo-600 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl shadow-indigo-600/30 flex items-center gap-2 animate-fadeIn border border-indigo-400/30">
-          <Check className="w-4 h-4 text-emerald-300" />
-          <span>{toastMessage}</span>
+        <div className="absolute top-4 right-4 z-50 bg-white border border-slate-300 text-black text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 animate-fadeIn">
+          <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+          </div>
+          <span className="text-black font-semibold">{toastMessage}</span>
         </div>
       )}
 
