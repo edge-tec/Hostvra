@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -144,18 +145,284 @@ type CreateWebsiteRequest struct {
 	ProxyPort     *int    `json:"proxy_port"`
 }
 
+func (h *WebsiteHandler) resolveServerID(ctx context.Context, requestedID string, orgID uuid.UUID) uuid.UUID {
+	if requestedID != "" {
+		if parsed, err := uuid.Parse(requestedID); err == nil && parsed != uuid.Nil {
+			if s, err := h.store.GetServerByID(ctx, parsed); err == nil && s != nil {
+				return s.ID
+			}
+		}
+	}
+
+	// 1. Try finding servers in this org
+	if orgID != uuid.Nil {
+		if servers, err := h.store.ListServersByOrg(ctx, orgID); err == nil && len(servers) > 0 {
+			return servers[0].ID
+		}
+	}
+
+	// 2. Try finding any server across system
+	if servers, err := h.store.ListServersByOrg(ctx, uuid.Nil); err == nil && len(servers) > 0 {
+		return servers[0].ID
+	}
+
+	// 3. Fallback to default server UUID or create one
+	defaultServerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if s, err := h.store.GetServerByID(ctx, defaultServerID); err == nil && s != nil {
+		return s.ID
+	}
+
+	// 4. Create local server record
+	newServer := &store.Server{
+		ID:             defaultServerID,
+		OrganizationID: orgID,
+		Name:           "Local Web Node",
+		Hostname:       "localhost",
+		IPAddress:      "127.0.0.1",
+		Status:         "online",
+		OSName:         "Linux",
+		OSVersion:      "Ubuntu 24.04",
+		Architecture:   "amd64",
+	}
+	_ = h.store.CreateServer(ctx, newServer)
+	return defaultServerID
+}
+
 func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
 
-	sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
+	orgID := uuid.Nil
+	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && claims.Role != "superadmin" {
+		orgID = claims.OrganizationID
+	}
+
+	sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve websites", nil, "")
 		return
 	}
 
+	// Auto-provision websites for existing email or registered domains if sites list is empty
+	if len(sites) == 0 {
+		targetOrgID := orgID
+		if targetOrgID == uuid.Nil && claims != nil {
+			targetOrgID = claims.OrganizationID
+		}
+		var candidates []string
+		if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
+			for _, ed := range emailDomains {
+				if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+					candidates = append(candidates, strings.ToLower(strings.TrimSpace(ed.Domain)))
+				}
+			}
+		}
+		if len(candidates) == 0 && claims != nil {
+			if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
+				for _, rd := range regDomains {
+					if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
+						candidates = append(candidates, strings.ToLower(strings.TrimSpace(rd.DomainName)))
+					}
+				}
+			}
+		}
+
+		if len(candidates) > 0 {
+			serverID := h.resolveServerID(r.Context(), "", targetOrgID)
+			defaultPHP := "8.3"
+			seen := make(map[string]bool)
+
+			for _, domain := range candidates {
+				if seen[domain] {
+					continue
+				}
+				seen[domain] = true
+				docRoot := "/var/www/" + domain + "/public_html"
+				systemUser := isolation.DeriveUsername(domain)
+				limits := isolation.DefaultResourceLimits()
+				if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), domain, defaultPHP, &limits); err == nil && isoInfo != nil {
+					systemUser = isoInfo.Username
+				}
+
+				site := &store.Website{
+					ID:             uuid.New(),
+					ServerID:       serverID,
+					OrganizationID: targetOrgID,
+					PrimaryDomain:  domain,
+					DocumentRoot:   docRoot,
+					SystemUser:     systemUser,
+					PHPVersion:     &defaultPHP,
+					AppType:        "php",
+					Status:         "active",
+					SSLEnabled:     false,
+				}
+
+				if err := h.store.CreateWebsite(r.Context(), site); err == nil {
+					_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, defaultPHP, site.AppType, nil)
+					sites = append(sites, site)
+				}
+			}
+		}
+	}
+
 	response.JSON(w, http.StatusOK, sites, &response.Meta{
 		Total: len(sites),
 	})
+}
+
+type AvailableDomainItem struct {
+	Domain     string `json:"domain"`
+	Source     string `json:"source"` // "email" | "registrar"
+	HasWebsite bool   `json:"has_website"`
+	WebsiteID  string `json:"website_id,omitempty"`
+}
+
+func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	orgID := uuid.Nil
+	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && claims.Role != "superadmin" {
+		orgID = claims.OrganizationID
+	}
+
+	// 1. Existing websites
+	sites, _ := h.store.ListWebsitesByOrg(r.Context(), orgID)
+	siteMap := make(map[string]*store.Website)
+	for _, s := range sites {
+		if s != nil && s.DeletedAt == nil {
+			siteMap[strings.ToLower(strings.TrimSpace(s.PrimaryDomain))] = s
+		}
+	}
+
+	domainMap := make(map[string]AvailableDomainItem)
+
+	// 2. Email domains
+	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
+		for _, ed := range emailDomains {
+			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+				d := strings.ToLower(strings.TrimSpace(ed.Domain))
+				item := AvailableDomainItem{
+					Domain: d,
+					Source: "email",
+				}
+				if site, ok := siteMap[d]; ok {
+					item.HasWebsite = true
+					item.WebsiteID = site.ID.String()
+				}
+				domainMap[d] = item
+			}
+		}
+	}
+
+	// 3. Registered domains
+	if claims != nil {
+		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
+			for _, rd := range regDomains {
+				if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
+					d := strings.ToLower(strings.TrimSpace(rd.DomainName))
+					if _, exists := domainMap[d]; !exists {
+						item := AvailableDomainItem{
+							Domain: d,
+							Source: "registrar",
+						}
+						if site, ok := siteMap[d]; ok {
+							item.HasWebsite = true
+							item.WebsiteID = site.ID.String()
+						}
+						domainMap[d] = item
+					}
+				}
+			}
+		}
+	}
+
+	res := make([]AvailableDomainItem, 0, len(domainMap))
+	for _, item := range domainMap {
+		res = append(res, item)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Domain < res[j].Domain
+	})
+
+	response.JSON(w, http.StatusOK, res, &response.Meta{Total: len(res)})
+}
+
+func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	orgID := uuid.Nil
+	if claims != nil {
+		orgID = claims.OrganizationID
+	}
+
+	// Find all candidate domains
+	sites, _ := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
+	siteMap := make(map[string]bool)
+	for _, s := range sites {
+		if s != nil && s.DeletedAt == nil {
+			siteMap[strings.ToLower(strings.TrimSpace(s.PrimaryDomain))] = true
+		}
+	}
+
+	var candidates []string
+	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
+		for _, ed := range emailDomains {
+			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+				d := strings.ToLower(strings.TrimSpace(ed.Domain))
+				if !siteMap[d] {
+					candidates = append(candidates, d)
+					siteMap[d] = true
+				}
+			}
+		}
+	}
+	if claims != nil {
+		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
+			for _, rd := range regDomains {
+				if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
+					d := strings.ToLower(strings.TrimSpace(rd.DomainName))
+					if !siteMap[d] {
+						candidates = append(candidates, d)
+						siteMap[d] = true
+					}
+				}
+			}
+		}
+	}
+
+	serverID := h.resolveServerID(r.Context(), "", orgID)
+	createdSites := make([]*store.Website, 0)
+	defaultPHP := "8.3"
+
+	for _, domain := range candidates {
+		docRoot := "/var/www/" + domain + "/public_html"
+		systemUser := isolation.DeriveUsername(domain)
+		limits := isolation.DefaultResourceLimits()
+		if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), domain, defaultPHP, &limits); err == nil && isoInfo != nil {
+			systemUser = isoInfo.Username
+		}
+
+		site := &store.Website{
+			ID:             uuid.New(),
+			ServerID:       serverID,
+			OrganizationID: orgID,
+			PrimaryDomain:  domain,
+			DocumentRoot:   docRoot,
+			SystemUser:     systemUser,
+			PHPVersion:     &defaultPHP,
+			AppType:        "php",
+			Status:         "active",
+			SSLEnabled:     false,
+		}
+
+		if err := h.store.CreateWebsite(r.Context(), site); err == nil {
+			_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, defaultPHP, site.AppType, nil)
+			createdSites = append(createdSites, site)
+			h.audit.Log(r.Context(), r, "website.sync", "website", site.ID.String(), "success", fmt.Sprintf("Auto-synced website for domain %s", domain), nil)
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"synced_count": len(createdSites),
+		"sites":        createdSites,
+	}, nil)
 }
 
 func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -180,17 +447,11 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverID, err := uuid.Parse(req.ServerID)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_SERVER_ID", "Invalid server UUID", nil, "")
-		return
+	orgID := uuid.Nil
+	if claims != nil {
+		orgID = claims.OrganizationID
 	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
-		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Specified server not found", nil, "")
-		return
-	}
+	serverID := h.resolveServerID(r.Context(), req.ServerID, orgID)
 
 	if req.AppType == "" {
 		req.AppType = "php"
@@ -219,7 +480,7 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	site := &store.Website{
 		ID:             uuid.New(),
 		ServerID:       serverID,
-		OrganizationID: claims.OrganizationID,
+		OrganizationID: orgID,
 		PrimaryDomain:  req.PrimaryDomain,
 		DocumentRoot:   req.DocumentRoot,
 		SystemUser:     systemUser,
@@ -231,6 +492,14 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.CreateWebsite(r.Context(), site); err != nil {
+		if allSites, lErr := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); lErr == nil {
+			for _, s := range allSites {
+				if s != nil && strings.EqualFold(s.PrimaryDomain, req.PrimaryDomain) {
+					response.JSON(w, http.StatusOK, s, nil)
+					return
+				}
+			}
+		}
 		response.Error(w, http.StatusConflict, "WEBSITE_EXISTS", "A website with this domain already exists on the server", nil, "")
 		return
 	}
@@ -1084,6 +1353,27 @@ func deployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 	_ = os.MkdirAll(sitesAvailable, 0755)
 	_ = os.MkdirAll(sitesEnabled, 0755)
 	_ = os.MkdirAll(docRoot, 0755)
+
+	indexFile := filepath.Join(docRoot, "index.html")
+	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
+		phpFile := filepath.Join(docRoot, "index.php")
+		if _, pErr := os.Stat(phpFile); os.IsNotExist(pErr) {
+			_ = os.WriteFile(indexFile, []byte(fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Welcome to %s</title>
+    <style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1120;color:#f8fafc;text-align:center}.card{padding:40px;background:#1e293b;border-radius:12px;border:1px solid #334155;box-shadow:0 10px 25px rgba(0,0,0,0.5)}h1{color:#10b981;margin-bottom:8px}p{color:#94a3b8}</style>
+</head>
+<body>
+    <div class="card">
+        <h1>Welcome to %s</h1>
+        <p>Your website is active and powered by <strong>Hostvra Control Panel</strong>.</p>
+    </div>
+</body>
+</html>`, domain, domain)), 0644)
+		}
+	}
 
 	phpSocket := fmt.Sprintf("unix:/run/php/php%s-fpm.sock", phpVer)
 	if _, err := os.Stat(fmt.Sprintf("/run/php/php%s-fpm.sock", phpVer)); err != nil {

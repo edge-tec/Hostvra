@@ -362,6 +362,8 @@ func main() {
 
 				// Realtime Conf, Logs, Backup, WAF, Batch, Statistics
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/statistics", websiteHandler.Statistics)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/available-domains", websiteHandler.AvailableDomains)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesCreate)).Post("/sync-domains", websiteHandler.SyncDomains)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/batch", websiteHandler.Batch)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/conf", websiteHandler.GetConf)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/conf", websiteHandler.UpdateConf)
@@ -509,11 +511,9 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
 			})
 
-			// Domain selector for multi-domain directory switcher
-			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/domains", fileHandler.ListDomains)
-
 			// File Manager Subsystem v3.0 (Enterprise)
 			mountFileManagerRoutes := func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/domains", fileHandler.ListDomains)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/list", fileHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/stat", fileHandler.Stat)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/content", fileHandler.GetContent)

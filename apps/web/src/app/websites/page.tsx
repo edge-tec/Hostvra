@@ -61,6 +61,8 @@ export default function WebsitesPage() {
   const [websites, setWebsites] = useState<Website[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [selectedServer, setSelectedServer] = useState('');
+  const [availableDomains, setAvailableDomains] = useState<Array<{ domain: string; source: string; has_website: boolean; website_id?: string }>>([]);
+  const [syncingDomains, setSyncingDomains] = useState(false);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All categories');
@@ -185,9 +187,10 @@ export default function WebsitesPage() {
   // Fetch websites from API
   const fetchData = useCallback(async () => {
     try {
-      const [sitesRes, serversRes] = await Promise.all([
+      const [sitesRes, serversRes, availRes] = await Promise.all([
         apiFetch<Website[]>('/api/v1/websites'),
         apiFetch<Server[]>('/api/v1/servers'),
+        apiFetch<Array<{ domain: string; source: string; has_website: boolean; website_id?: string }>>('/api/v1/websites/available-domains').catch(() => ({ success: false, data: [] })),
       ]);
 
       if (sitesRes.success && sitesRes.data) {
@@ -199,10 +202,37 @@ export default function WebsitesPage() {
           setSelectedServer(serversRes.data[0].id);
         }
       }
+      if (availRes.success && availRes.data) {
+        setAvailableDomains(availRes.data);
+      }
     } catch (err) {
       console.error('Failed to load websites', err);
     }
   }, [selectedServer]);
+
+  // Synchronize all domains added to Hostvra into websites
+  const handleSyncDomains = async () => {
+    try {
+      setSyncingDomains(true);
+      const res = await apiFetch<{ synced_count: number; sites: Website[] }>('/api/v1/websites/sync-domains', {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        if (res.data.synced_count > 0) {
+          showToast(`Synchronized ${res.data.synced_count} domain(s) into active websites!`);
+        } else {
+          showToast('All added domains are already active as websites.');
+        }
+        fetchData();
+      } else {
+        showToast(res.error?.message || 'Failed to sync domains', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error syncing domains', true);
+    } finally {
+      setSyncingDomains(false);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -252,7 +282,7 @@ export default function WebsitesPage() {
   const filteredWebsites = useMemo(() => {
     return websites.filter((site) => {
       // Tab filter
-      if (activeTab === 'php' && site.app_type !== 'php' && site.app_type !== 'static') {
+      if (activeTab === 'php' && site.app_type && site.app_type !== 'php' && site.app_type !== 'static') {
         return false;
       }
       if (activeTab === 'nodejs' && site.app_type !== 'nodejs') return false;
@@ -311,48 +341,37 @@ export default function WebsitesPage() {
     const domain = newDomain.trim().toLowerCase().split('\n')[0].trim();
     const remarks = newRemarks.trim() || domain.split('.')[0];
     const docRoot = newDocRoot.endsWith('/') ? newDocRoot + domain : newDocRoot;
+    const computedAppType = activeTab === 'nodejs' ? 'nodejs' : activeTab === 'python' ? 'python' : activeTab === 'go' ? 'go' : activeTab === 'proxy' ? 'proxy' : newPhpVer === 'Static' ? 'static' : 'php';
+    const effectiveServerID = selectedServer || (servers.length > 0 ? servers[0].id : undefined);
 
-    const newSite: Website = {
-      id: `site-${Date.now()}`,
-      server_id: selectedServer || 'srv-1',
-      primary_domain: domain,
-      remarks: remarks,
-      document_root: docRoot,
-      system_user: `u_${remarks.substring(0, 8)}`,
-      web_server_type: newWebServer,
-      app_type: activeTab === 'nodejs' ? 'nodejs' : activeTab === 'python' ? 'python' : activeTab === 'go' ? 'go' : activeTab === 'proxy' ? 'proxy' : newPhpVer === 'Static' ? 'static' : 'php',
-      php_version: newPhpVer,
-      status: 'active',
-      ssl_enabled: false,
-      ssl_days_left: 0,
-      backup_count: 0,
-      backup_status: '0 Backup',
-      category: newCategory,
-      expiration: 'Perpetual',
-      requests_count: 0,
-      waf_status: 'Active',
-      traffic_history: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      created_at: new Date().toISOString(),
-    };
+    try {
+      const res = await apiFetch<Website>('/api/v1/websites', {
+        method: 'POST',
+        body: JSON.stringify({
+          server_id: effectiveServerID,
+          primary_domain: domain,
+          document_root: docRoot,
+          php_version: newPhpVer === 'Static' ? undefined : newPhpVer,
+          app_type: computedAppType,
+          web_server_type: newWebServer,
+        }),
+      });
 
-    setWebsites((prev) => [newSite, ...prev]);
-    showToast(`Website '${domain}' created successfully! Virtual host and root directory configured.`);
-    setCreatingSite(false);
-    setAddSiteOpen(false);
-    setNewDomain('');
-    setNewRemarks('');
-
-    await apiFetch('/api/v1/websites', {
-      method: 'POST',
-      body: JSON.stringify({
-        server_id: selectedServer || 'srv-1',
-        primary_domain: domain,
-        document_root: docRoot,
-        php_version: newPhpVer,
-        app_type: newSite.app_type,
-        web_server_type: newWebServer,
-      }),
-    });
+      if (res.success && res.data) {
+        setWebsites((prev) => [res.data!, ...prev.filter((s) => s.id !== res.data!.id)]);
+        showToast(`Website '${domain}' created successfully! Virtual host and root directory configured.`);
+        setAddSiteOpen(false);
+        setNewDomain('');
+        setNewRemarks('');
+        fetchData();
+      } else {
+        showToast(res.error?.message || 'Failed to create website', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error creating website', true);
+    } finally {
+      setCreatingSite(false);
+    }
   };
 
   // Open VHost Conf Modal
@@ -693,6 +712,17 @@ export default function WebsitesPage() {
               <span>Add site</span>
             </button>
 
+            {/* Sync Configured Domains Button */}
+            <button
+              onClick={handleSyncDomains}
+              disabled={syncingDomains}
+              title="Automatically sync domains added in Hostvra into active Websites"
+              className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 font-semibold transition shadow-2xs flex items-center gap-1.5 cursor-pointer flex-shrink-0 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingDomains ? 'animate-spin' : ''}`} />
+              <span>{syncingDomains ? 'Syncing...' : 'Sync Domains'}</span>
+            </button>
+
             {/* Advanced Setup Dropdown */}
             <div className="relative">
               <button
@@ -817,6 +847,49 @@ export default function WebsitesPage() {
           </div>
         </div>
 
+        {/* Banner if unlinked domains exist in system */}
+        {availableDomains.some((d) => !d.has_website) && (
+          <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-emerald-900/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-600/10 dark:bg-emerald-400/10 flex items-center justify-center flex-shrink-0">
+                <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 dark:text-white">
+                  Configured domain(s) detected in Hostvra without a Website VirtualHost:
+                </p>
+                <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                  {availableDomains
+                    .filter((d) => !d.has_website)
+                    .map((d) => (
+                      <button
+                        key={d.domain}
+                        onClick={() => {
+                          setNewDomain(d.domain);
+                          setNewRemarks(d.domain.split('.')[0]);
+                          setNewDocRoot(`/var/www/${d.domain}/public_html`);
+                          setAddSiteOpen(true);
+                        }}
+                        className="px-2 py-0.5 rounded-md bg-white dark:bg-surface-800 border border-emerald-300 dark:border-emerald-700/80 font-mono text-[11px] font-bold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/50 transition cursor-pointer"
+                        title="Click to configure website"
+                      >
+                        + {d.domain} ({d.source})
+                      </button>
+                    ))}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleSyncDomains}
+              disabled={syncingDomains}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>1-Click Create All</span>
+            </button>
+          </div>
+        )}
+
         {/* =========================================================================
             3. HIGH-CONTRAST WEBSITES TABLE (aaPanel Style with Live Controls)
             ========================================================================= */}
@@ -869,7 +942,32 @@ export default function WebsitesPage() {
                 {filteredWebsites.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-medium">
-                      No websites found matching your search filter. Click &apos;Add site&apos; to create one.
+                      <div className="max-w-md mx-auto space-y-3">
+                        <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-surface-800 flex items-center justify-center text-slate-400">
+                          <Globe className="w-6 h-6" />
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                          No websites found matching your search filter.
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          You can click &apos;Add site&apos; to create a new virtual host, or click &apos;Sync Domains&apos; to import domains already added to Hostvra.
+                        </p>
+                        <div className="flex items-center justify-center gap-2 pt-1">
+                          <button
+                            onClick={() => setAddSiteOpen(true)}
+                            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition"
+                          >
+                            + Add site
+                          </button>
+                          <button
+                            onClick={handleSyncDomains}
+                            disabled={syncingDomains}
+                            className="px-3.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-xs transition"
+                          >
+                            {syncingDomains ? 'Syncing...' : 'Sync Configured Domains'}
+                          </button>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -1257,6 +1355,33 @@ export default function WebsitesPage() {
               </div>
 
               <form onSubmit={handleCreateWebsite} className="space-y-4 text-xs font-semibold">
+                {/* Available domains quick-picker */}
+                {availableDomains.length > 0 && (
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-surface-800/80 border border-slate-200 dark:border-surface-700 space-y-1.5">
+                    <span className="text-[11px] text-slate-500 font-medium">Quick-select from your added domains:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {availableDomains.map((ad) => (
+                        <button
+                          key={ad.domain}
+                          type="button"
+                          onClick={() => {
+                            setNewDomain(ad.domain);
+                            setNewRemarks(ad.domain.split('.')[0]);
+                            setNewDocRoot(`/var/www/${ad.domain}/public_html`);
+                          }}
+                          className={`px-2 py-0.5 rounded-md font-mono text-[11px] font-bold border transition cursor-pointer ${
+                            newDomain.includes(ad.domain)
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white dark:bg-surface-700 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-surface-600 hover:border-emerald-500'
+                          }`}
+                        >
+                          {ad.domain}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Domain Input */}
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 mb-1">
