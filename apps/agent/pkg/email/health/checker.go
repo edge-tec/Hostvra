@@ -17,29 +17,48 @@ type CheckResult struct {
 	Current  string `json:"current,omitempty"`
 }
 
+type CheckItem struct {
+	Name        string `json:"name"`
+	Passed      bool   `json:"passed"`
+	Detail      string `json:"detail"`
+	Remediation string `json:"remediation,omitempty"`
+}
+
 type Deduction struct {
-	Item    string `json:"item"`
-	Points  int    `json:"points"`
-	Reason  string `json:"reason"`
-	FixHint string `json:"fix_hint"`
+	Item        string `json:"item"`
+	Points      int    `json:"points"`
+	Reason      string `json:"reason"`
+	FixHint     string `json:"fix_hint"`
+	Remediation string `json:"remediation"`
 }
 
 type HealthAudit struct {
-	Domain          string      `json:"domain"`
-	MailHostname    string      `json:"mail_hostname"`
-	ServerIP        string      `json:"server_ip"`
-	OverallScore    int         `json:"overall_score"`
-	MX              CheckResult `json:"mx"`
-	SPF             CheckResult `json:"spf"`
-	DKIM            CheckResult `json:"dkim"`
-	DMARC           CheckResult `json:"dmarc"`
-	ForwardDNS      CheckResult `json:"forward_dns"`
-	ReverseDNS      CheckResult `json:"reverse_dns"`
-	TLS             CheckResult `json:"tls"`
-	OpenRelay       CheckResult `json:"open_relay"`
-	Deductions      []Deduction `json:"deductions"`
-	Recommendations []string    `json:"recommendations"`
-	AuditedAt       time.Time   `json:"audited_at"`
+	Score             int         `json:"score"`
+	OverallScore      int         `json:"overall_score"`
+	Rating            string      `json:"rating"`
+	Domain            string      `json:"domain"`
+	MailHostname      string      `json:"mail_hostname"`
+	ServerIP          string      `json:"server_ip"`
+	MXValid           bool        `json:"mx_valid"`
+	SPFValid          bool        `json:"spf_valid"`
+	DKIMValid         bool        `json:"dkim_valid"`
+	DMARCValid        bool        `json:"dmarc_valid"`
+	PTRValid          bool        `json:"ptr_valid"`
+	FCrDNSValid       bool        `json:"fcrdns_valid"`
+	TLSValid          bool        `json:"tls_valid"`
+	OpenRelayRejected bool        `json:"open_relay_rejected"`
+	MX                CheckResult `json:"mx"`
+	SPF               CheckResult `json:"spf"`
+	DKIM              CheckResult `json:"dkim"`
+	DMARC             CheckResult `json:"dmarc"`
+	ForwardDNS        CheckResult `json:"forward_dns"`
+	ReverseDNS        CheckResult `json:"reverse_dns"`
+	TLS               CheckResult `json:"tls"`
+	OpenRelay         CheckResult `json:"open_relay"`
+	Checks            []CheckItem `json:"checks"`
+	Deductions        []Deduction `json:"deductions"`
+	Recommendations   []string    `json:"recommendations"`
+	AuditedAt         time.Time   `json:"audited_at"`
 }
 
 // AuditDomain checks live DNS and MTA configuration for email deliverability
@@ -361,16 +380,7 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 		})
 	}
 
-	// Calculate overall score from deductions
-	deductionTotal := 0
-	for _, d := range audit.Deductions {
-		deductionTotal += d.Points
-	}
-	audit.OverallScore = 100 - deductionTotal
-	if audit.OverallScore < 0 {
-		audit.OverallScore = 0
-	}
-
+	populateSummaryAndChecks(audit, domain, mailHostname, serverIP, selector)
 	return audit
 }
 
@@ -645,6 +655,11 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 		}
 	}
 
+	populateSummaryAndChecks(audit, domain, mailHostname, serverIP, selector)
+	return audit
+}
+
+func populateSummaryAndChecks(audit *HealthAudit, domain, mailHostname, serverIP, selector string) {
 	deductionTotal := 0
 	for _, d := range audit.Deductions {
 		deductionTotal += d.Points
@@ -653,6 +668,79 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 	if audit.OverallScore < 0 {
 		audit.OverallScore = 0
 	}
+	audit.Score = audit.OverallScore
 
-	return audit
+	if audit.Score >= 90 {
+		audit.Rating = "Optimal"
+	} else if audit.Score >= 70 {
+		audit.Rating = "Action Needed"
+	} else {
+		audit.Rating = "Critical"
+	}
+
+	audit.MXValid = audit.MX.Status == "pass"
+	audit.SPFValid = audit.SPF.Status == "pass"
+	audit.DKIMValid = audit.DKIM.Status == "pass"
+	audit.DMARCValid = audit.DMARC.Status == "pass"
+	audit.PTRValid = audit.ReverseDNS.Status == "pass"
+	audit.FCrDNSValid = audit.ReverseDNS.Status == "pass"
+	audit.TLSValid = audit.TLS.Status == "pass"
+	audit.OpenRelayRejected = audit.OpenRelay.Status == "pass"
+
+	for i := range audit.Deductions {
+		if audit.Deductions[i].Remediation == "" {
+			audit.Deductions[i].Remediation = audit.Deductions[i].FixHint
+		}
+	}
+
+	audit.Checks = []CheckItem{
+		{
+			Name:        "MX Record (Inbound Mail Routing)",
+			Passed:      audit.MXValid,
+			Detail:      audit.MX.Details,
+			Remediation: audit.MX.Expected,
+		},
+		{
+			Name:        "Forward DNS (A Record)",
+			Passed:      audit.ForwardDNS.Status == "pass",
+			Detail:      audit.ForwardDNS.Details,
+			Remediation: fmt.Sprintf("Add DNS record: %s IN A %s", mailHostname, serverIP),
+		},
+		{
+			Name:        "SPF Policy (RFC 7208)",
+			Passed:      audit.SPFValid,
+			Detail:      audit.SPF.Details,
+			Remediation: audit.SPF.Expected,
+		},
+		{
+			Name:        "DKIM Signature Key (RFC 6376)",
+			Passed:      audit.DKIMValid,
+			Detail:      audit.DKIM.Details,
+			Remediation: fmt.Sprintf("Publish TXT at %s._domainkey.%s with your 2048-bit RSA public key", selector, domain),
+		},
+		{
+			Name:        "DMARC Protection (RFC 7489)",
+			Passed:      audit.DMARCValid,
+			Detail:      audit.DMARC.Details,
+			Remediation: fmt.Sprintf("Publish TXT at _dmarc.%s: v=DMARC1; p=none; rua=mailto:dmarc@%s", domain, domain),
+		},
+		{
+			Name:        "Reverse DNS (PTR / FCrDNS)",
+			Passed:      audit.PTRValid,
+			Detail:      audit.ReverseDNS.Details,
+			Remediation: fmt.Sprintf("Configure PTR for %s -> %s in your hosting provider panel", serverIP, mailHostname),
+		},
+		{
+			Name:        "TLS 587/465 & STARTTLS",
+			Passed:      audit.TLSValid,
+			Detail:      audit.TLS.Details,
+			Remediation: "Ensure Postfix has submission enabled and valid Let's Encrypt TLS certificate installed.",
+		},
+		{
+			Name:        "Zero Open Relay Guard",
+			Passed:      audit.OpenRelayRejected,
+			Detail:      audit.OpenRelay.Details,
+			Remediation: "Enforce smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination in main.cf",
+		},
+	}
 }

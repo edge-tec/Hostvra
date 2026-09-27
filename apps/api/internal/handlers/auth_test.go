@@ -61,6 +61,7 @@ func TestAdminLoginSuccess(t *testing.T) {
 	if err := memStore.CreateUser(context.Background(), adminUser, defaultOrgID, "owner"); err != nil {
 		if err == store.ErrAlreadyExists {
 			_ = memStore.UpdateUserPassword(context.Background(), adminUser.ID, passwordHash)
+			_ = memStore.UpdateUserEmail(context.Background(), adminUser.ID, "admin@hostvra.com")
 		} else {
 			t.Fatalf("failed to seed admin user: %v", err)
 		}

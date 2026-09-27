@@ -13,7 +13,7 @@ func TestAuditDomain_Structure(t *testing.T) {
 	defer cancel()
 
 	// Test non-existent domain audit returns structured recommendations
-	audit := AuditDomain(ctx, "nonexistent-domain-test-12345.xyz", "default")
+	audit := AuditDomain(ctx, "nonexistent-domain-test-12345.xyz", "default", "192.0.2.1")
 	if audit.Domain != "nonexistent-domain-test-12345.xyz" {
 		t.Errorf("domain mismatch: %s", audit.Domain)
 	}

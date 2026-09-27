@@ -680,6 +680,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/dns", emailHandler.GetDomainDNS)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/verify-dns", emailHandler.VerifyDomainDNS)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/domains/{id}/dns/verify", emailHandler.VerifyDomainDNS)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/health", emailHandler.GetDomainHealth)
 
 				// Mailboxes
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes", emailHandler.ListMailboxes)

@@ -1699,6 +1699,30 @@ func (h *EmailHandler) CheckHealth(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, auditReport, nil)
 }
 
+func (h *EmailHandler) GetDomainHealth(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	domID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain UUID", nil, "")
+		return
+	}
+
+	domain, err := h.store.GetEmailDomainByID(r.Context(), domID)
+	if err != nil || domain == nil {
+		response.Error(w, http.StatusNotFound, "DOMAIN_NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	serverIP, _ := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	selector := domain.DKIMSelector
+	if selector == "" {
+		selector = "default"
+	}
+
+	auditReport := health.AuditDomain(r.Context(), domain.Domain, selector, serverIP)
+	response.JSON(w, http.StatusOK, auditReport, nil)
+}
+
 // ----------------------------------------------------------------------------
 // MAIL QUEUE
 // ----------------------------------------------------------------------------

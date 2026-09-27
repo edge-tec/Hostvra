@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"net"
 	"net/smtp"
+	"os"
 	"strings"
 	"time"
+
+	"hostvra/agent/pkg/email/dkim"
 )
 
 type TestEmailResult struct {
@@ -153,10 +156,28 @@ func SendTestEmail(smtpHost string, smtpPort int, username, password, from, to, 
 		testDomain = strings.TrimSpace(parts[1])
 	}
 	msgID := fmt.Sprintf("<%d.test@%s>", time.Now().UnixNano(), testDomain)
-	payload := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nDate: %s\r\n\r\n%s\r\n.\r\n",
+	rawMsg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n%s\r\n",
 		from, to, subject, msgID, time.Now().Format(time.RFC1123Z), body)
 
-	fmt.Fprintf(conn, "%s", payload)
+	payloadBytes := []byte(rawMsg)
+	for _, fpath := range []string{
+		fmt.Sprintf("/var/lib/hostvra/dkim/%s/default.private", testDomain),
+		fmt.Sprintf("/var/lib/hostvra/dkim/%s/hostvra.private", testDomain),
+	} {
+		if data, err := os.ReadFile(fpath); err == nil && len(data) > 0 {
+			if signed, err := dkim.SignEmail(payloadBytes, dkim.SignOptions{
+				Domain:        testDomain,
+				Selector:      "default",
+				PrivateKeyPEM: string(data),
+			}); err == nil && len(signed) > 0 {
+				payloadBytes = signed
+				res.Trace = append(res.Trace, fmt.Sprintf(">> Appended valid RFC 6376 DKIM-Signature for %s", testDomain))
+				break
+			}
+		}
+	}
+
+	fmt.Fprintf(conn, "%s\r\n.\r\n", string(payloadBytes))
 	line, err = reader.ReadString('\n')
 	if err != nil || !strings.HasPrefix(line, "250") {
 		res.Success = false

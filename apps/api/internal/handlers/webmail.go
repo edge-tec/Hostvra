@@ -18,6 +18,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/email/dkim"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -352,8 +353,45 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	header += "\r\n"
 	fullMsg := header + msgPayload
 
+	// 2b. Automatically Sign with RFC 6376 DKIM (rsa-sha256)
+	payloadToDeliver := []byte(fullMsg)
+	var dkimPrivKey string
+	dkimSelector := "default"
+
+	if mb.DomainID != uuid.Nil {
+		if k, err := h.store.GetEmailDKIMKeyByDomain(r.Context(), mb.DomainID); err == nil && k != nil && k.PrivateKeyPEM != "" {
+			dkimPrivKey = k.PrivateKeyPEM
+			if k.Selector != "" {
+				dkimSelector = k.Selector
+			}
+		}
+	}
+	if dkimPrivKey == "" {
+		// Fallback to local DKIM file storage at /var/lib/hostvra/dkim/<domain>/<selector>.private
+		candidates := []string{
+			fmt.Sprintf("/var/lib/hostvra/dkim/%s/%s.private", msgDomain, dkimSelector),
+			fmt.Sprintf("/var/lib/hostvra/dkim/%s/default.private", msgDomain),
+		}
+		for _, fpath := range candidates {
+			if data, err := os.ReadFile(fpath); err == nil && len(data) > 0 {
+				dkimPrivKey = string(data)
+				break
+			}
+		}
+	}
+
+	if dkimPrivKey != "" {
+		if signedBytes, err := dkim.SignEmail([]byte(fullMsg), dkim.SignOptions{
+			Domain:        msgDomain,
+			Selector:      dkimSelector,
+			PrivateKeyPEM: dkimPrivKey,
+		}); err == nil && len(signedBytes) > 0 {
+			payloadToDeliver = signedBytes
+		}
+	}
+
 	// Attempt real local SMTP delivery via loopback-safe TLS client
-	deliveryErr := sendMailLocal(smtpServer, mb.Email, allSMTPRecipients, []byte(fullMsg))
+	deliveryErr := sendMailLocal(smtpServer, mb.Email, allSMTPRecipients, payloadToDeliver)
 	deliveryStatus := "delivered"
 	failureReason := ""
 	if deliveryErr != nil {
