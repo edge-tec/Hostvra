@@ -611,7 +611,7 @@ export function WebmailClient({
               <ArrowLeft className="w-4 h-4" />
             </button>
           )}
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#16A34A] to-emerald-600 flex items-center justify-center text-white shadow-md shadow-emerald-500/20">
             <Inbox className="w-5 h-5" />
           </div>
           <div>
@@ -623,7 +623,7 @@ export function WebmailClient({
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <span>Mailbox:</span>
-              <span className="font-mono text-indigo-600 dark:text-indigo-400 font-semibold">{activeMailbox.email}</span>
+              <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{activeMailbox.email}</span>
             </p>
           </div>
         </div>
@@ -636,7 +636,7 @@ export function WebmailClient({
               Select Mailbox
             </label>
             <div className="flex items-center bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 rounded-xl px-3 py-1.5 text-xs text-slate-700 dark:text-slate-200 shadow-xs">
-              <User className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 mr-2 shrink-0" />
+              <User className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 mr-2 shrink-0" />
               <select
                 id="mailbox-select"
                 value={activeMailbox.id}
@@ -667,7 +667,7 @@ export function WebmailClient({
             className="p-2 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-surface-700 transition shadow-xs"
             title="Refresh Mailbox"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-indigo-500' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-600' : ''}`} />
           </button>
 
           {/* Compose Button */}
@@ -681,7 +681,7 @@ export function WebmailClient({
               setActiveDraftId(undefined);
               setShowComposeModal(true);
             }}
-            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition active:scale-95"
+            className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold shadow-md shadow-emerald-600/25 transition active:scale-95"
           >
             <Plus className="w-4 h-4" />
             <span>Compose</span>
@@ -705,7 +705,7 @@ export function WebmailClient({
                 setActiveDraftId(undefined);
                 setShowComposeModal(true);
               }}
-              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/20 transition"
+              className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-[#16A34A] to-[#15803D] hover:from-[#15803D] hover:to-[#166534] text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition"
             >
               <Plus className="w-4 h-4" />
               <span>New Message</span>
@@ -718,16 +718,16 @@ export function WebmailClient({
                 onClick={() => setCurrentFolder('inbox')}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition ${
                   currentFolder === 'inbox'
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
-                  <Inbox className="w-4 h-4 text-indigo-500" />
+                  <Inbox className="w-4 h-4 text-emerald-600" />
                   <span>Inbox</span>
                 </div>
                 {folderCounts.inboxUnread > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white">
+                  <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#16A34A] text-white">
                     {folderCounts.inboxUnread}
                   </span>
                 )}
@@ -758,12 +758,12 @@ export function WebmailClient({
                 onClick={() => setCurrentFolder('sent')}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition ${
                   currentFolder === 'sent'
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
-                  <Send className="w-4 h-4 text-blue-500" />
+                  <Send className="w-4 h-4 text-emerald-600" />
                   <span>Sent</span>
                 </div>
                 {folderCounts.sent > 0 && (
@@ -778,7 +778,7 @@ export function WebmailClient({
                 onClick={() => setCurrentFolder('drafts')}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition ${
                   currentFolder === 'drafts'
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800'
                 }`}
               >
@@ -798,7 +798,7 @@ export function WebmailClient({
                 onClick={() => setCurrentFolder('archive')}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition ${
                   currentFolder === 'archive'
-                    ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-semibold'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-semibold'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800'
                 }`}
               >
@@ -864,7 +864,7 @@ export function WebmailClient({
             <div className="w-full h-1.5 bg-slate-200 dark:bg-surface-800 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
-                  quotaPercent > 85 ? 'bg-rose-500' : quotaPercent > 65 ? 'bg-amber-500' : 'bg-indigo-600'
+                  quotaPercent > 85 ? 'bg-rose-500' : quotaPercent > 65 ? 'bg-amber-500' : 'bg-[#16A34A]'
                 }`}
                 style={{ width: `${Math.max(quotaPercent, 2)}%` }}
               />
@@ -934,13 +934,13 @@ export function WebmailClient({
                     onClick={() => handleSelectMessage(msg.id)}
                     className={`p-3.5 cursor-pointer transition flex items-start gap-2.5 relative select-none ${
                       isSelected
-                        ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-l-4 border-indigo-600'
+                        ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-l-4 border-[#16A34A]'
                         : 'hover:bg-slate-50 dark:hover:bg-surface-900/60'
                     }`}
                   >
                     {/* Unread dot */}
                     {!msg.is_read && (
-                      <span className="w-2 h-2 rounded-full bg-indigo-600 absolute top-4 left-1.5" />
+                      <span className="w-2 h-2 rounded-full bg-[#16A34A] absolute top-4 left-1.5" />
                     )}
 
                     <div className="flex-1 min-w-0 pl-1">
@@ -1221,12 +1221,12 @@ export function WebmailClient({
                         handleSendQuickReply();
                       }
                     }}
-                    className="flex-1 px-4 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                    className="flex-1 px-4 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                   />
                   <button
                     onClick={handleSendQuickReply}
                     disabled={!quickReplyText.trim() || isSendingReply}
-                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-indigo-600/20 transition"
+                    className="px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{isSendingReply ? 'Sending...' : 'Reply'}</span>
@@ -1297,12 +1297,12 @@ export function WebmailClient({
                   required
                   value={composeTo}
                   onChange={(e) => setComposeTo(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                  className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                 />
                 <button
                   type="button"
                   onClick={() => setShowCcBcc(!showCcBcc)}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
                 >
                   {showCcBcc ? 'Hide Cc/Bcc' : 'Cc / Bcc'}
                 </button>
@@ -1318,7 +1318,7 @@ export function WebmailClient({
                       placeholder="cc@example.com"
                       value={composeCc}
                       onChange={(e) => setComposeCc(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                      className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                   <div className="flex items-center gap-3 text-xs">
@@ -1328,7 +1328,7 @@ export function WebmailClient({
                       placeholder="bcc@example.com"
                       value={composeBcc}
                       onChange={(e) => setComposeBcc(e.target.value)}
-                      className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                      className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
                 </>
@@ -1342,7 +1342,7 @@ export function WebmailClient({
                   placeholder="Subject line"
                   value={composeSubject}
                   onChange={(e) => setComposeSubject(e.target.value)}
-                  className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-medium"
+                  className="flex-1 px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-medium"
                 />
               </div>
 
@@ -1353,7 +1353,7 @@ export function WebmailClient({
                   <button
                     type="button"
                     onClick={() => setIsHtmlMode(!isHtmlMode)}
-                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                    className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
                   >
                     {isHtmlMode ? 'Switch to Plain Text' : 'Switch to Rich HTML'}
                   </button>
@@ -1363,7 +1363,7 @@ export function WebmailClient({
                   placeholder={isHtmlMode ? '<p>Write HTML message here...</p>' : 'Write your email here...'}
                   value={composeBody}
                   onChange={(e) => setComposeBody(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500 font-sans leading-relaxed resize-none"
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500 font-sans leading-relaxed resize-none"
                 />
               </div>
 
@@ -1387,7 +1387,7 @@ export function WebmailClient({
                   <button
                     type="submit"
                     disabled={isSending}
-                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-600/25 flex items-center gap-1.5 transition disabled:opacity-50"
+                    className="px-5 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs font-semibold shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 transition disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{isSending ? 'Sending...' : 'Send Message'}</span>
