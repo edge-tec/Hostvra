@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/smtp"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -374,9 +375,18 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 		isProtected, rErr = TestRelayRejection("127.0.0.1:587", 2*time.Second)
 	}
 	if !isProtected {
-		// Verify via postconf if local probe was matched by permit_mynetworks
-		if out, err := exec.Command("postconf", "-h", "smtpd_relay_restrictions").Output(); err == nil {
-			if strings.Contains(string(out), "reject_unauth_destination") {
+		// Verify via postconf or /etc/postfix/main.cf if local probe was matched by permit_mynetworks
+		postconfBin := "postconf"
+		if p, err := exec.LookPath("postconf"); err == nil {
+			postconfBin = p
+		} else if _, err := os.Stat("/usr/sbin/postconf"); err == nil {
+			postconfBin = "/usr/sbin/postconf"
+		}
+		if out, err := exec.Command(postconfBin, "-h", "smtpd_relay_restrictions").Output(); err == nil && strings.Contains(string(out), "reject_unauth_destination") {
+			isProtected = true
+			rErr = nil
+		} else if mainBytes, err := os.ReadFile("/etc/postfix/main.cf"); err == nil {
+			if strings.Contains(string(mainBytes), "reject_unauth_destination") {
 				isProtected = true
 				rErr = nil
 			}
