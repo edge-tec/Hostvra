@@ -105,6 +105,7 @@ type Store interface {
 	ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UUID) ([]*EmailDomain, error)
 	ListEmailDomainsByServer(ctx context.Context, serverID uuid.UUID) ([]*EmailDomain, error)
 	UpdateEmailDomain(ctx context.Context, domain *EmailDomain) error
+	UpdateEmailDomainDNSVerified(ctx context.Context, id uuid.UUID, verified bool) error
 	DeleteEmailDomain(ctx context.Context, id uuid.UUID) error
 
 	// Email Mailboxes

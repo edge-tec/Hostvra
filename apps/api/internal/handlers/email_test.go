@@ -431,4 +431,97 @@ func TestEmailHandler_GetDomainDNS_RejectsPrivateAndLoopbackIPs(t *testing.T) {
 	}
 }
 
+func TestEmailHandler_VerifyDomainDNS(t *testing.T) {
+	handler, memStore, _, orgID, _, serverID := setupEmailTestEnv(t)
+	ctx := context.Background()
+
+	domainID := uuid.New()
+	testDomain := "verifytest.org"
+
+	_ = memStore.CreateEmailDomain(ctx, &store.EmailDomain{
+		ID:             domainID,
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		Domain:         testDomain,
+		MailHostname:   "mail." + testDomain,
+		DKIMSelector:   "default",
+		IsDNSVerified:  false,
+	})
+
+	_ = memStore.UpdateSystemSettings(ctx, &store.SystemSettings{
+		ServerIP:           "185.193.17.42",
+		MailServerIPMode:   "manual",
+		MailServerPublicIP: "185.193.17.42",
+	})
+
+	// 1. Live Query (domain not propagated on public DNS)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", domainID.String())
+	req := httptest.NewRequest("GET", "/api/v1/email/domains/"+domainID.String()+"/verify-dns", nil)
+	req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	handler.VerifyDomainDNS(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var res struct {
+		Data struct {
+			Domain        string                        `json:"domain"`
+			AllVerified   bool                          `json:"all_verified"`
+			IsDNSVerified bool                          `json:"is_dns_verified"`
+			Records       []store.DNSVerificationResult `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode json: %v", err)
+	}
+
+	if res.Data.Domain != testDomain {
+		t.Errorf("expected domain %s, got %s", testDomain, res.Data.Domain)
+	}
+	if len(res.Data.Records) == 0 {
+		t.Errorf("expected records to be returned")
+	}
+
+	// 2. Force / Simulate Verify (Simulates all records passing and verify tick mark set)
+	reqForce := httptest.NewRequest("GET", "/api/v1/email/domains/"+domainID.String()+"/verify-dns?force=true", nil)
+	reqForce = reqForce.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	wForce := httptest.NewRecorder()
+
+	handler.VerifyDomainDNS(wForce, reqForce)
+	if wForce.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", wForce.Code, wForce.Body.String())
+	}
+
+	var resForce struct {
+		Data struct {
+			Domain        string                        `json:"domain"`
+			AllVerified   bool                          `json:"all_verified"`
+			IsDNSVerified bool                          `json:"is_dns_verified"`
+			MXValid       bool                          `json:"mx_valid"`
+			SPFValid      bool                          `json:"spf_valid"`
+			DKIMValid     bool                          `json:"dkim_valid"`
+			Records       []store.DNSVerificationResult `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(wForce.Body.Bytes(), &resForce); err != nil {
+		t.Fatalf("failed to decode json: %v", err)
+	}
+
+	if !resForce.Data.AllVerified {
+		t.Errorf("expected AllVerified to be true with force=true")
+	}
+	if !resForce.Data.IsDNSVerified {
+		t.Errorf("expected IsDNSVerified to be true with force=true")
+	}
+
+	// Verify that the domain in the database/store now has IsDNSVerified = true
+	savedDomain, err := memStore.GetEmailDomainByID(ctx, domainID)
+	if err != nil || !savedDomain.IsDNSVerified {
+		t.Errorf("expected domain in store to be marked IsDNSVerified=true, got err=%v, isDNSVerified=%v", err, savedDomain.IsDNSVerified)
+	}
+}
+
 

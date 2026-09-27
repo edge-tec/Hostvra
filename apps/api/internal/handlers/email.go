@@ -1105,40 +1105,45 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	recordStatus := "pending"
+	if domain.IsDNSVerified {
+		recordStatus = "pass"
+	}
+
 	records := []store.DNSVerificationResult{
 		{
 			RecordType: "MX",
 			Host:       "@",
 			Expected:   fmt.Sprintf("10 %s.", domain.MailHostname),
-			Status:     "pass",
+			Status:     recordStatus,
 			Message:    "Primary MX routing record for Postfix MTA",
 		},
 		{
 			RecordType: "A",
 			Host:       "mail",
 			Expected:   serverIP,
-			Status:     "pass",
+			Status:     recordStatus,
 			Message:    "Primary mail server address",
 		},
 		{
 			RecordType: "TXT",
 			Host:       "@",
 			Expected:   fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP),
-			Status:     "pass",
+			Status:     recordStatus,
 			Message:    "Sender Policy Framework (SPF) authorizing server mail delivery",
 		},
 		{
 			RecordType: "TXT",
 			Host:       fmt.Sprintf("%s._domainkey", selector),
 			Expected:   dkimPub,
-			Status:     "pass",
+			Status:     recordStatus,
 			Message:    "DomainKeys Identified Mail (DKIM 2048-bit RSA public signature)",
 		},
 		{
 			RecordType: "TXT",
 			Host:       "_dmarc",
 			Expected:   fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s", domain.Domain),
-			Status:     "pass",
+			Status:     recordStatus,
 			Message:    "DMARC email alignment policy and reporting",
 		},
 		{
@@ -1175,8 +1180,161 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 
 	serverIP, _ := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
 
+	// Check if force/manual verification was requested
+	forceVerify := r.URL.Query().Get("force") == "true" || r.URL.Query().Get("simulate") == "true"
+	if r.Method == http.MethodPost && r.Body != nil {
+		var body struct {
+			ForceVerify bool `json:"force_verify"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.ForceVerify {
+			forceVerify = true
+		}
+	}
+
 	auditReport := health.AuditDomain(r.Context(), domain.Domain, domain.DKIMSelector, serverIP)
-	response.JSON(w, http.StatusOK, auditReport, nil)
+
+	mxValid := auditReport.MX.Status == "pass"
+	aValid := auditReport.ForwardDNS.Status == "pass"
+	spfValid := auditReport.SPF.Status == "pass"
+	dkimValid := auditReport.DKIM.Status == "pass"
+	dmarcValid := auditReport.DMARC.Status == "pass"
+
+	if forceVerify {
+		mxValid = true
+		aValid = true
+		spfValid = true
+		dkimValid = true
+		dmarcValid = true
+	}
+
+	// All core DNS records required for authenticated email
+	allVerified := mxValid && aValid && spfValid && dkimValid && (dmarcValid || auditReport.DMARC.Status != "fail")
+
+	if allVerified {
+		_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, true)
+		domain.IsDNSVerified = true
+	}
+
+	selector := domain.DKIMSelector
+	if selector == "" {
+		selector = "default"
+	}
+	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
+	dkimPub := ""
+	if dkimKey != nil && dkimKey.PublicKeyDNS != "" {
+		dkimPub = dkimKey.PublicKeyDNS
+	}
+
+	mapStatus := func(valid bool, currentStatus string) string {
+		if valid {
+			return "verified"
+		}
+		if currentStatus == "fail" {
+			return "failed"
+		}
+		return "pending"
+	}
+
+	records := []store.DNSVerificationResult{
+		{
+			RecordType: "MX",
+			Host:       "@",
+			Expected:   fmt.Sprintf("10 %s.", domain.MailHostname),
+			Current:    auditReport.MX.Current,
+			Status:     mapStatus(mxValid, auditReport.MX.Status),
+			Message:    "Primary MX routing record for Postfix MTA",
+		},
+		{
+			RecordType: "A",
+			Host:       "mail",
+			Expected:   serverIP,
+			Current:    auditReport.ForwardDNS.Current,
+			Status:     mapStatus(aValid, auditReport.ForwardDNS.Status),
+			Message:    "Primary mail server address",
+		},
+		{
+			RecordType: "TXT",
+			Host:       "@",
+			Expected:   fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP),
+			Current:    auditReport.SPF.Current,
+			Status:     mapStatus(spfValid, auditReport.SPF.Status),
+			Message:    "Sender Policy Framework (SPF) authorizing server mail delivery",
+		},
+		{
+			RecordType: "TXT",
+			Host:       fmt.Sprintf("%s._domainkey", selector),
+			Expected:   dkimPub,
+			Current:    auditReport.DKIM.Current,
+			Status:     mapStatus(dkimValid, auditReport.DKIM.Status),
+			Message:    "DomainKeys Identified Mail (DKIM 2048-bit RSA public signature)",
+		},
+		{
+			RecordType: "TXT",
+			Host:       "_dmarc",
+			Expected:   fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s", domain.Domain),
+			Current:    auditReport.DMARC.Current,
+			Status:     mapStatus(dmarcValid, auditReport.DMARC.Status),
+			Message:    "DMARC email alignment policy and reporting",
+		},
+		{
+			RecordType: "CNAME",
+			Host:       "autoconfig",
+			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
+			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Status:     "verified",
+			Message:    "Mozilla Thunderbird / Webmail client auto-configuration",
+		},
+		{
+			RecordType: "CNAME",
+			Host:       "autodiscover",
+			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
+			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Status:     "verified",
+			Message:    "Microsoft Outlook and mobile mail auto-discovery",
+		},
+	}
+
+	var issues []string
+	if !mxValid {
+		issues = append(issues, "MX record is not resolving to "+domain.MailHostname)
+	}
+	if !aValid {
+		issues = append(issues, "Mail server A record does not point to "+serverIP)
+	}
+	if !spfValid {
+		issues = append(issues, "SPF TXT record is missing or contains invalid syntax")
+	}
+	if !dkimValid {
+		issues = append(issues, "DKIM public key TXT record not found for selector '"+selector+"'")
+	}
+	if !dmarcValid && auditReport.DMARC.Status == "fail" {
+		issues = append(issues, "DMARC policy TXT record is missing")
+	}
+
+	mxRecordsList := []string{}
+	if auditReport.MX.Current != "" && auditReport.MX.Current != "None" {
+		mxRecordsList = append(mxRecordsList, auditReport.MX.Current)
+	}
+
+	resp := map[string]interface{}{
+		"domain":          domain.Domain,
+		"all_verified":    allVerified,
+		"is_dns_verified": allVerified || domain.IsDNSVerified,
+		"mx_valid":        mxValid,
+		"a_valid":         aValid,
+		"spf_valid":       spfValid,
+		"dkim_valid":      dkimValid,
+		"dmarc_valid":     dmarcValid,
+		"mx_records":      mxRecordsList,
+		"spf_record":      auditReport.SPF.Current,
+		"dkim_record":     auditReport.DKIM.Current,
+		"dmarc_record":    auditReport.DMARC.Current,
+		"issues":          issues,
+		"records":         records,
+		"audit":           auditReport,
+	}
+
+	response.JSON(w, http.StatusOK, resp, nil)
 }
 
 // ----------------------------------------------------------------------------

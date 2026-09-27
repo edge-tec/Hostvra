@@ -73,6 +73,8 @@ type EmailDomain struct {
 	DKIMSelector      string     `json:"dkim_selector"`
 	IsCatchallEnabled bool       `json:"is_catchall_enabled"`
 	CatchallMailboxID *uuid.UUID `json:"catchall_mailbox_id,omitempty"`
+	IsDNSVerified     bool       `json:"is_dns_verified"`
+	DNSVerifiedAt     *time.Time `json:"dns_verified_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 	DeletedAt         *time.Time `json:"deleted_at,omitempty"`

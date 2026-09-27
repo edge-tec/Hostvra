@@ -295,6 +295,25 @@ func (m *MemoryStore) UpdateEmailDomain(ctx context.Context, domain *EmailDomain
 	return nil
 }
 
+func (m *MemoryStore) UpdateEmailDomainDNSVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	d, exists := m.emailDomains[id]
+	if !exists || d.DeletedAt != nil {
+		return ErrNotFound
+	}
+	now := time.Now().UTC()
+	d.IsDNSVerified = verified
+	if verified {
+		d.DNSVerifiedAt = &now
+	} else {
+		d.DNSVerifiedAt = nil
+	}
+	d.UpdatedAt = now
+	return nil
+}
+
 func (m *MemoryStore) DeleteEmailDomain(ctx context.Context, id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1227,8 +1246,9 @@ func (p *PostgresStore) CreateEmailDomain(ctx context.Context, domain *EmailDoma
 	query := `
 		INSERT INTO email_domains (
 			id, organization_id, server_id, domain, mail_hostname, status,
-			storage_limit_bytes, storage_used_bytes, spam_threshold, dkim_selector, is_catchall_enabled
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			storage_limit_bytes, storage_used_bytes, spam_threshold, dkim_selector, is_catchall_enabled,
+			is_dns_verified, dns_verified_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING created_at, updated_at
 	`
 	if domain.ID == uuid.Nil {
@@ -1251,7 +1271,7 @@ func (p *PostgresStore) CreateEmailDomain(ctx context.Context, domain *EmailDoma
 		domain.ID, domain.OrganizationID, domain.ServerID, domain.Domain,
 		domain.MailHostname, domain.Status, domain.StorageLimitBytes,
 		domain.StorageUsedBytes, domain.SpamThreshold, domain.DKIMSelector,
-		domain.IsCatchallEnabled,
+		domain.IsCatchallEnabled, domain.IsDNSVerified, domain.DNSVerifiedAt,
 	).Scan(&domain.CreatedAt, &domain.UpdatedAt)
 }
 
@@ -1259,7 +1279,8 @@ func (p *PostgresStore) GetEmailDomainByID(ctx context.Context, id uuid.UUID) (*
 	query := `
 		SELECT id, organization_id, server_id, domain, mail_hostname, status,
 		       storage_limit_bytes, storage_used_bytes, spam_threshold, dkim_selector,
-		       is_catchall_enabled, catchall_mailbox_id, created_at, updated_at, deleted_at
+		       is_catchall_enabled, catchall_mailbox_id, is_dns_verified, dns_verified_at,
+		       created_at, updated_at, deleted_at
 		FROM email_domains
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -1268,6 +1289,7 @@ func (p *PostgresStore) GetEmailDomainByID(ctx context.Context, id uuid.UUID) (*
 		&d.ID, &d.OrganizationID, &d.ServerID, &d.Domain, &d.MailHostname,
 		&d.Status, &d.StorageLimitBytes, &d.StorageUsedBytes, &d.SpamThreshold,
 		&d.DKIMSelector, &d.IsCatchallEnabled, &d.CatchallMailboxID,
+		&d.IsDNSVerified, &d.DNSVerifiedAt,
 		&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1280,7 +1302,8 @@ func (p *PostgresStore) GetEmailDomainByName(ctx context.Context, serverID uuid.
 	query := `
 		SELECT id, organization_id, server_id, domain, mail_hostname, status,
 		       storage_limit_bytes, storage_used_bytes, spam_threshold, dkim_selector,
-		       is_catchall_enabled, catchall_mailbox_id, created_at, updated_at, deleted_at
+		       is_catchall_enabled, catchall_mailbox_id, is_dns_verified, dns_verified_at,
+		       created_at, updated_at, deleted_at
 		FROM email_domains
 		WHERE server_id = $1 AND domain = $2 AND deleted_at IS NULL
 	`
@@ -1289,6 +1312,7 @@ func (p *PostgresStore) GetEmailDomainByName(ctx context.Context, serverID uuid.
 		&d.ID, &d.OrganizationID, &d.ServerID, &d.Domain, &d.MailHostname,
 		&d.Status, &d.StorageLimitBytes, &d.StorageUsedBytes, &d.SpamThreshold,
 		&d.DKIMSelector, &d.IsCatchallEnabled, &d.CatchallMailboxID,
+		&d.IsDNSVerified, &d.DNSVerifiedAt,
 		&d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1301,7 +1325,8 @@ func (p *PostgresStore) ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UU
 	query := `
 		SELECT d.id, d.organization_id, d.server_id, d.domain, d.mail_hostname, d.status,
 		       d.storage_limit_bytes, d.storage_used_bytes, d.spam_threshold, d.dkim_selector,
-		       d.is_catchall_enabled, d.catchall_mailbox_id, d.created_at, d.updated_at,
+		       d.is_catchall_enabled, d.catchall_mailbox_id, d.is_dns_verified, d.dns_verified_at,
+		       d.created_at, d.updated_at,
 		       (SELECT COUNT(*) FROM email_mailboxes m WHERE m.domain_id = d.id AND m.deleted_at IS NULL) as mailbox_count,
 		       (SELECT COUNT(*) FROM email_aliases a WHERE a.domain_id = d.id) as alias_count
 		FROM email_domains d
@@ -1321,6 +1346,7 @@ func (p *PostgresStore) ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UU
 			&d.ID, &d.OrganizationID, &d.ServerID, &d.Domain, &d.MailHostname,
 			&d.Status, &d.StorageLimitBytes, &d.StorageUsedBytes, &d.SpamThreshold,
 			&d.DKIMSelector, &d.IsCatchallEnabled, &d.CatchallMailboxID,
+			&d.IsDNSVerified, &d.DNSVerifiedAt,
 			&d.CreatedAt, &d.UpdatedAt, &d.MailboxCount, &d.AliasCount,
 		)
 		if err != nil {
@@ -1335,7 +1361,8 @@ func (p *PostgresStore) ListEmailDomainsByServer(ctx context.Context, serverID u
 	query := `
 		SELECT id, organization_id, server_id, domain, mail_hostname, status,
 		       storage_limit_bytes, storage_used_bytes, spam_threshold, dkim_selector,
-		       is_catchall_enabled, catchall_mailbox_id, created_at, updated_at
+		       is_catchall_enabled, catchall_mailbox_id, is_dns_verified, dns_verified_at,
+		       created_at, updated_at
 		FROM email_domains
 		WHERE server_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -1353,6 +1380,7 @@ func (p *PostgresStore) ListEmailDomainsByServer(ctx context.Context, serverID u
 			&d.ID, &d.OrganizationID, &d.ServerID, &d.Domain, &d.MailHostname,
 			&d.Status, &d.StorageLimitBytes, &d.StorageUsedBytes, &d.SpamThreshold,
 			&d.DKIMSelector, &d.IsCatchallEnabled, &d.CatchallMailboxID,
+			&d.IsDNSVerified, &d.DNSVerifiedAt,
 			&d.CreatedAt, &d.UpdatedAt,
 		)
 		if err != nil {
@@ -1375,6 +1403,25 @@ func (p *PostgresStore) UpdateEmailDomain(ctx context.Context, domain *EmailDoma
 		domain.ID, domain.Status, domain.StorageLimitBytes, domain.SpamThreshold,
 		domain.IsCatchallEnabled, domain.CatchallMailboxID,
 	).Scan(&domain.UpdatedAt)
+}
+
+func (p *PostgresStore) UpdateEmailDomainDNSVerified(ctx context.Context, id uuid.UUID, verified bool) error {
+	query := `
+		UPDATE email_domains
+		SET is_dns_verified = $2,
+		    dns_verified_at = CASE WHEN $2 THEN NOW() ELSE NULL END,
+		    updated_at = NOW()
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	res, err := p.db.ExecContext(ctx, query, id, verified)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) DeleteEmailDomain(ctx context.Context, id uuid.UUID) error {

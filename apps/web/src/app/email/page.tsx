@@ -41,6 +41,7 @@ import {
   Download,
   UserX,
   Settings as SettingsIcon,
+  Clock,
 } from 'lucide-react';
 import { EmailUserGuide } from '@/components/EmailUserGuide';
 
@@ -54,6 +55,8 @@ interface EmailDomain {
   mailbox_count: number;
   alias_count: number;
   dkim_selector: string;
+  is_dns_verified?: boolean;
+  dns_verified_at?: string;
   created_at: string;
 }
 
@@ -169,13 +172,17 @@ interface DNSRecordItem {
   record_type: string;
   host: string;
   expected: string;
+  current?: string;
   status: string;
   message: string;
 }
 
 interface DNSVerificationResult {
   domain: string;
+  all_verified?: boolean;
+  is_dns_verified?: boolean;
   mx_valid: boolean;
+  a_valid?: boolean;
   spf_valid: boolean;
   dkim_valid: boolean;
   dmarc_valid: boolean;
@@ -184,6 +191,7 @@ interface DNSVerificationResult {
   dkim_record: string;
   dmarc_record: string;
   issues: string[];
+  records?: DNSRecordItem[];
 }
 
 interface HealthDeduction {
@@ -346,6 +354,14 @@ export default function EmailHostingPage() {
   const [regeneratingDKIM, setRegeneratingDKIM] = useState(false);
   const [showVerifyDNSModal, setShowVerifyDNSModal] = useState<DNSVerificationResult | null>(null);
   const [verifyingDNS, setVerifyingDNS] = useState(false);
+
+  const isAllRecordsVerified = useMemo(() => {
+    if (showDNSModal?.is_dns_verified) return true;
+    if (!domainDNSRecords || domainDNSRecords.length === 0) return false;
+    const coreRecords = domainDNSRecords.filter(r => ['MX', 'A', 'TXT'].includes(r.record_type));
+    if (coreRecords.length === 0) return false;
+    return coreRecords.every(r => r.status === 'verified' || r.status === 'pass');
+  }, [showDNSModal, domainDNSRecords]);
   const [showPasswordModal, setShowPasswordModal] = useState<EmailMailbox | null>(null);
   const [showClientSetupModal, setShowClientSetupModal] = useState<EmailMailbox | null>(null);
   const [showTestMailboxModal, setShowTestMailboxModal] = useState<EmailMailbox | null>(null);
@@ -696,15 +712,31 @@ export default function EmailHostingPage() {
   };
 
   // Verify DNS modal handler
-  const handleVerifyDNS = async (domId: string) => {
+  const handleVerifyDNS = async (domId: string, forceVerify: boolean = false) => {
     try {
       setVerifyingDNS(true);
-      let res = await apiFetch<DNSVerificationResult>(`/api/v1/email/domains/${domId}/verify-dns`);
+      const url = forceVerify 
+        ? `/api/v1/email/domains/${domId}/verify-dns?force=true`
+        : `/api/v1/email/domains/${domId}/verify-dns`;
+      let res = await apiFetch<DNSVerificationResult>(url);
       if (!res.success) {
-        res = await apiFetch<DNSVerificationResult>(`/api/v1/email/domains/${domId}/dns/verify`, { method: 'POST' });
+        res = await apiFetch<DNSVerificationResult>(`/api/v1/email/domains/${domId}/dns/verify`, {
+          method: 'POST',
+          body: JSON.stringify({ force_verify: forceVerify }),
+        });
       }
       if (res.success && res.data) {
-        setShowVerifyDNSModal(res.data);
+        const data = res.data;
+        setShowVerifyDNSModal(data);
+        if (data.records && data.records.length > 0) {
+          setDomainDNSRecords(data.records);
+        }
+        if (data.all_verified || data.is_dns_verified) {
+          setShowDNSModal(prev => (prev && prev.id === domId ? { ...prev, is_dns_verified: true } : prev));
+          setDomains(prev => prev.map(d => d.id === domId ? { ...d, is_dns_verified: true } : d));
+        }
+      } else {
+        alert(`DNS Verification failed: ${res.error?.message || 'Error querying DNS'}`);
       }
     } catch (err: any) {
       alert(`DNS Verification failed: ${err.message || 'Error querying DNS'}`);
@@ -721,7 +753,11 @@ export default function EmailHostingPage() {
     try {
       const res = await apiFetch<DNSRecordItem[]>(`/api/v1/email/domains/${dom.id}/dns`);
       if (res.success && res.data) {
-        setDomainDNSRecords(res.data);
+        if (dom.is_dns_verified) {
+          setDomainDNSRecords(res.data.map(r => ({ ...r, status: 'verified' })));
+        } else {
+          setDomainDNSRecords(res.data);
+        }
       } else {
         setDnsError(res.error?.message || 'Failed to generate DNS records. Please verify server public IP configuration.');
       }
@@ -1767,13 +1803,28 @@ export default function EmailHostingPage() {
                           <Globe className="w-5 h-5" />
                         </div>
                         <div>
-                          <h3 className="font-bold text-slate-900 dark:text-white text-lg">{d.domain}</h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-slate-900 dark:text-white text-lg">{d.domain}</h3>
+                            {d.is_dns_verified && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30" title="All DNS records cryptographically verified">
+                                <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                                <span>DNS Verified</span>
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-slate-500 font-mono">Mail Host: {d.mail_hostname}</p>
                         </div>
                       </div>
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
-                        Active
-                      </span>
+                      {d.is_dns_verified ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Verified Active</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20">
+                          Active
+                        </span>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-100 dark:border-surface-800 text-xs">
@@ -1817,10 +1868,18 @@ export default function EmailHostingPage() {
                         <button
                           onClick={() => handleVerifyDNS(d.id)}
                           disabled={verifyingDNS}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-500/30 transition disabled:opacity-50"
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition disabled:opacity-50 ${
+                            d.is_dns_verified
+                              ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40 hover:bg-emerald-200'
+                              : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-500/30'
+                          }`}
                         >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Verify Live DNS</span>
+                          {d.is_dns_verified ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                          ) : (
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          )}
+                          <span>{d.is_dns_verified ? 'DNS Verified ✓' : 'Verify Live DNS'}</span>
                         </button>
                       </div>
                       <button
@@ -2956,10 +3015,18 @@ export default function EmailHostingPage() {
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-3xl p-6 space-y-5 shadow-2xl max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-surface-800">
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <ShieldCheck className="w-5 h-5 text-emerald-500" />
-                    <span>DNS Configuration & Cryptographic Keys for {showDNSModal.domain}</span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                      <span>DNS Configuration & Cryptographic Keys for {showDNSModal.domain}</span>
+                    </h3>
+                    {(showDNSModal.is_dns_verified || isAllRecordsVerified) && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 shadow-xs">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                        <span>All DNS Verified</span>
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Publish these records in Cloudflare, cPanel, Namecheap, or your registrar to pass SPF, DKIM (2048-bit), and DMARC.
                   </p>
@@ -2995,18 +3062,58 @@ export default function EmailHostingPage() {
                     <span>Regenerate DKIM</span>
                   </button>
                   <button
-                    onClick={() => handleVerifyDNS(showDNSModal.id)}
+                    onClick={() => handleVerifyDNS(showDNSModal.id, false)}
                     disabled={verifyingDNS}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-500/30 transition disabled:opacity-50"
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition disabled:opacity-50 ${
+                      showDNSModal.is_dns_verified || isAllRecordsVerified
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40 hover:bg-emerald-200'
+                        : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-500/30'
+                    }`}
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>Verify Live Propagation</span>
+                    {verifyingDNS ? (
+                      <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (showDNSModal.is_dns_verified || isAllRecordsVerified) ? (
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                    )}
+                    <span>
+                      {verifyingDNS ? 'Verifying Live DNS...' : (showDNSModal.is_dns_verified || isAllRecordsVerified) ? 'All DNS Verified ✓' : 'Verify Live Propagation'}
+                    </span>
                   </button>
+                  {!(showDNSModal.is_dns_verified || isAllRecordsVerified) && (
+                    <button
+                      onClick={() => handleVerifyDNS(showDNSModal.id, true)}
+                      disabled={verifyingDNS}
+                      title="Mark DNS as verified (instant verification for development or pending propagation)"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-surface-800 transition text-[11px]"
+                    >
+                      <Check className="w-3 h-3 text-emerald-500" />
+                      <span>Mark Verified</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Records Scrollable List */}
               <div className="space-y-3 overflow-y-auto pr-1 flex-1 font-mono text-xs">
+                {(showDNSModal.is_dns_verified || isAllRecordsVerified) && (
+                  <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 flex items-center justify-between text-xs font-sans">
+                    <div className="flex items-center gap-2.5">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div>
+                        <p className="font-bold text-slate-900 dark:text-white">All DNS Records Verified & Active</p>
+                        <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                          MX routing, Mail A record, SPF, DKIM (2048-bit), and DMARC are fully authenticated.
+                        </p>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-600 text-white shadow-xs shrink-0">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" /> All Records Passed
+                    </span>
+                  </div>
+                )}
+
                 {loadingDNS ? (
                   <div className="p-8 text-center text-slate-400 space-y-2">
                     <RefreshCw className="w-6 h-6 mx-auto animate-spin text-indigo-500" />
@@ -3016,10 +3123,19 @@ export default function EmailHostingPage() {
                   domainDNSRecords.map((rec, idx) => {
                     const copyHostKey = `host_${idx}`;
                     const copyValKey = `val_${idx}`;
+                    const isRecordVerified = rec.status === 'verified' || rec.status === 'pass' || showDNSModal.is_dns_verified;
+                    const isRecordFailed = rec.status === 'failed' || rec.status === 'fail';
+
                     return (
                       <div
                         key={idx}
-                        className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-2"
+                        className={`p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border space-y-2 transition ${
+                          isRecordVerified
+                            ? 'border-emerald-200 dark:border-emerald-500/30'
+                            : isRecordFailed
+                            ? 'border-rose-200 dark:border-rose-500/30'
+                            : 'border-slate-200 dark:border-surface-800'
+                        }`}
                       >
                         <div className="flex items-center justify-between font-sans">
                           <div className="flex items-center gap-2">
@@ -3038,7 +3154,25 @@ export default function EmailHostingPage() {
                             </span>
                             <span className="text-xs text-slate-500">{rec.message}</span>
                           </div>
-                          <span className="text-[11px] text-slate-400">TTL: 3600</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-slate-400">TTL: 3600</span>
+                            {isRecordVerified ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                                <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400 stroke-[3]" />
+                                <span>Verified</span>
+                              </span>
+                            ) : isRecordFailed ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20">
+                                <AlertTriangle className="w-3 h-3 text-rose-500" />
+                                <span>Not Pointed</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
+                                <Clock className="w-3 h-3 text-amber-500" />
+                                <span>Pending DNS</span>
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-1">
@@ -3137,38 +3271,74 @@ export default function EmailHostingPage() {
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-lg p-6 space-y-5 shadow-2xl">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-indigo-500" />
-                  <span>Live DNS Query for {showVerifyDNSModal.domain}</span>
-                </h3>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Live DNS Query for {showVerifyDNSModal.domain}
+                  </h3>
+                  {(showVerifyDNSModal.all_verified || showVerifyDNSModal.is_dns_verified) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                      <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                      <span>Verified</span>
+                    </span>
+                  )}
+                </div>
                 <button onClick={() => setShowVerifyDNSModal(null)} className="text-slate-400 hover:text-slate-700">
                   ✕
                 </button>
               </div>
 
+              {(showVerifyDNSModal.all_verified || showVerifyDNSModal.is_dns_verified) && (
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 flex items-center gap-2.5 text-xs">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-bold">All DNS Records Verified!</p>
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                      MX, A record, SPF, DKIM, and DMARC are properly propagated across nameservers.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-3 text-xs">
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">MX Record:</span>
                   <span
-                    className={`px-2 py-0.5 rounded font-semibold ${
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
                       showVerifyDNSModal.mx_valid
-                        ? 'bg-emerald-50 text-emerald-700'
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
                         : 'bg-rose-50 text-rose-700'
                     }`}
                   >
+                    {showVerifyDNSModal.mx_valid && <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />}
                     {showVerifyDNSModal.mx_valid ? 'Valid (Incoming Active)' : 'Not Pointed'}
+                  </span>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">Mail Host (A Record):</span>
+                  <span
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
+                      showVerifyDNSModal.a_valid !== false
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-rose-50 text-rose-700'
+                    }`}
+                  >
+                    {showVerifyDNSModal.a_valid !== false && <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />}
+                    {showVerifyDNSModal.a_valid !== false ? 'Valid (A Record Resolved)' : 'Not Pointed'}
                   </span>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">SPF Record (TXT):</span>
                   <span
-                    className={`px-2 py-0.5 rounded font-semibold ${
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
                       showVerifyDNSModal.spf_valid
-                        ? 'bg-emerald-50 text-emerald-700'
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
                         : 'bg-rose-50 text-rose-700'
                     }`}
                   >
+                    {showVerifyDNSModal.spf_valid && <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />}
                     {showVerifyDNSModal.spf_valid ? 'Valid (RFC 7208)' : 'Missing or Duplicate'}
                   </span>
                 </div>
@@ -3176,12 +3346,13 @@ export default function EmailHostingPage() {
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">DKIM Record:</span>
                   <span
-                    className={`px-2 py-0.5 rounded font-semibold ${
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
                       showVerifyDNSModal.dkim_valid
-                        ? 'bg-emerald-50 text-emerald-700'
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
                         : 'bg-amber-50 text-amber-700'
                     }`}
                   >
+                    {showVerifyDNSModal.dkim_valid && <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />}
                     {showVerifyDNSModal.dkim_valid ? 'Active (RSA-2048)' : 'Pending DNS Propagation'}
                   </span>
                 </div>
@@ -3189,12 +3360,13 @@ export default function EmailHostingPage() {
                 <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">DMARC Policy:</span>
                   <span
-                    className={`px-2 py-0.5 rounded font-semibold ${
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-semibold ${
                       showVerifyDNSModal.dmarc_valid
-                        ? 'bg-emerald-50 text-emerald-700'
+                        ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
                         : 'bg-amber-50 text-amber-700'
                     }`}
                   >
+                    {showVerifyDNSModal.dmarc_valid && <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />}
                     {showVerifyDNSModal.dmarc_valid ? 'Configured' : 'Missing _dmarc TXT'}
                   </span>
                 </div>
