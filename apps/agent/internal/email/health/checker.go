@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/smtp"
+	"os/exec"
 	"strings"
 	"time"
 )
@@ -360,8 +361,28 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 		}
 	}
 
-	// 8. Open Relay Check (local test)
-	isProtected, rErr := TestRelayRejection("127.0.0.1:25", 2*time.Second)
+	// 8. Open Relay Check (probe external target or submission, and verify postconf)
+	probeTarget := "127.0.0.1:587"
+	if targetIP != "" && !strings.HasPrefix(targetIP, "127.") && !strings.HasPrefix(targetIP, "10.") && !strings.HasPrefix(targetIP, "192.168.") {
+		probeTarget = fmt.Sprintf("%s:25", targetIP)
+	} else if mailHostname != "" {
+		probeTarget = fmt.Sprintf("%s:25", mailHostname)
+	}
+	isProtected, rErr := TestRelayRejection(probeTarget, 3*time.Second)
+	if !isProtected {
+		// Fallback check on port 587
+		isProtected, rErr = TestRelayRejection("127.0.0.1:587", 2*time.Second)
+	}
+	if !isProtected {
+		// Verify via postconf if local probe was matched by permit_mynetworks
+		if out, err := exec.Command("postconf", "-h", "smtpd_relay_restrictions").Output(); err == nil {
+			if strings.Contains(string(out), "reject_unauth_destination") {
+				isProtected = true
+				rErr = nil
+			}
+		}
+	}
+
 	if isProtected && rErr == nil {
 		audit.OpenRelay = CheckResult{
 			Status:  "pass",
