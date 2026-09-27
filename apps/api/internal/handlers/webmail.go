@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"crypto/sha512"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/smtp"
 	"os"
@@ -346,14 +348,15 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	header += "\r\n"
 	fullMsg := header + msgPayload
 
-	// Attempt real local SMTP delivery
-	deliveryErr := smtp.SendMail(smtpServer, nil, mb.Email, allSMTPRecipients, []byte(fullMsg))
+	// Attempt real local SMTP delivery via loopback-safe TLS client
+	deliveryErr := sendMailLocal(smtpServer, mb.Email, allSMTPRecipients, []byte(fullMsg))
 	deliveryStatus := "delivered"
 	failureReason := ""
 	if deliveryErr != nil {
-		// If local MTA port isn't running in testing/dev, record as queued
-		deliveryStatus = "queued"
+		deliveryStatus = "failed"
 		failureReason = deliveryErr.Error()
+		response.Error(w, http.StatusInternalServerError, "SMTP_DELIVERY_FAILED", fmt.Sprintf("Postfix local delivery error: %v", deliveryErr), nil, "")
+		return
 	}
 
 	// 3. Persist copy to sender's "sent" folder in DB and Maildir
@@ -606,4 +609,60 @@ func sanitizeEmailHTML(html string) string {
 func stripHTMLTags(html string) string {
 	re := regexp.MustCompile(`<[^>]*>`)
 	return strings.TrimSpace(re.ReplaceAllString(html, " "))
+}
+
+// sendMailLocal transmits email to local Postfix MTA with InsecureSkipVerify for loopback TLS
+func sendMailLocal(addr string, from string, to []string, msg []byte) error {
+	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("failed to connect to local MTA at %s: %w", addr, err)
+	}
+	defer conn.Close()
+
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	// If STARTTLS is advertised on local loopback, proceed with InsecureSkipVerify
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: true,
+			ServerName:         host,
+		}
+		if err := client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("STARTTLS negotiation failed: %w", err)
+		}
+	}
+
+	if err := client.Mail(from); err != nil {
+		return fmt.Errorf("SMTP MAIL FROM failed: %w", err)
+	}
+
+	for _, recipient := range to {
+		if err := client.Rcpt(recipient); err != nil {
+			return fmt.Errorf("SMTP RCPT TO <%s> failed: %w", recipient, err)
+		}
+	}
+
+	w, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("SMTP DATA command failed: %w", err)
+	}
+
+	if _, err := w.Write(msg); err != nil {
+		return fmt.Errorf("failed writing email message payload: %w", err)
+	}
+
+	if err := w.Close(); err != nil {
+		return fmt.Errorf("failed finalizing email message payload: %w", err)
+	}
+
+	return client.Quit()
 }
