@@ -29,6 +29,7 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/dns"
+	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -312,12 +313,15 @@ func (h *EmailHandler) CreateMailServer(w http.ResponseWriter, r *http.Request) 
 	}
 
 	ipv4 := req.IPv4Address
-	if ipv4 == "" || ipv4 == "127.0.0.1" {
-		resolved := h.resolveServerIP(r.Context(), nodeServerID, nil)
-		if resolved != "" && resolved != "127.0.0.1" {
+	if ipv4 != "" {
+		if err := iputil.ValidatePublicIPv4(ipv4); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_PUBLIC_IP", fmt.Sprintf("Invalid mail server IPv4 address: %s", err.Error()), nil, "")
+			return
+		}
+	} else {
+		resolved, err := h.resolvePublicMailServerIP(r.Context(), nodeServerID, nil)
+		if err == nil && iputil.IsPublicIPv4(resolved) {
 			ipv4 = resolved
-		} else if ipv4 == "" {
-			ipv4 = "127.0.0.1"
 		}
 	}
 
@@ -603,7 +607,7 @@ func (h *EmailHandler) GetMailDiagnostics(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	serverIP := h.resolveServerIP(r.Context(), uuid.Nil, nil)
+	serverIP, _ := h.resolvePublicMailServerIP(r.Context(), uuid.Nil, nil)
 	selector := "default"
 
 	auditReport := health.AuditDomain(r.Context(), domainParam, selector, serverIP)
@@ -717,13 +721,15 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 			hostname = h
 		}
 		now := time.Now().UTC()
-		defaultIP := "127.0.0.1"
-		if settings, err := h.store.GetSystemSettings(r.Context()); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+		defaultIP := ""
+		if settings, err := h.store.GetSystemSettings(r.Context()); err == nil && settings != nil && iputil.IsPublicIPv4(settings.ServerIP) {
 			defaultIP = settings.ServerIP
-		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); iputil.IsPublicIPv4(envIP) {
 			defaultIP = envIP
-		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); iputil.IsPublicIPv4(envIP) {
 			defaultIP = envIP
+		} else if detected, err := iputil.DetectPublicIPv4(r.Context()); err == nil && iputil.IsPublicIPv4(detected) {
+			defaultIP = detected
 		}
 		server = &store.Server{
 			ID:              defaultServerID,
@@ -822,8 +828,8 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	h.syncPostfixMaps(r.Context(), serverID)
 
 	// 7. Auto-configure DNS if local DNS provider present
-	serverIP := h.resolveServerIP(r.Context(), serverID, domain.MailServerID)
-	if h.dns != nil {
+	serverIP, _ := h.resolvePublicMailServerIP(r.Context(), serverID, domain.MailServerID)
+	if h.dns != nil && iputil.IsPublicIPv4(serverIP) {
 		_ = h.dns.ConfigureEmailDNS(r.Context(), claims.OrganizationID, domainName, mailHostname, serverIP, selector, dkimKey.PublicKeyDNS)
 	}
 
@@ -834,6 +840,17 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// 9. Prepare Required DNS Records for Customer
+	aStatus := "pass"
+	aExpected := serverIP
+	aMsg := "Primary mail server address"
+	spfExpected := fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP)
+	if !iputil.IsPublicIPv4(serverIP) {
+		aStatus = "warn"
+		aExpected = "Public IP required (configure in Settings)"
+		aMsg = "No public IPv4 detected; please configure under Settings -> Mail Server Public IP"
+		spfExpected = "v=spf1 mx ~all"
+	}
+
 	requiredDNS := []store.DNSVerificationResult{
 		{
 			RecordType: "MX",
@@ -845,14 +862,14 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 		{
 			RecordType: "A",
 			Host:       "mail",
-			Expected:   serverIP,
-			Status:     "pass",
-			Message:    "Directs mail hostname to this server IP",
+			Expected:   aExpected,
+			Status:     aStatus,
+			Message:    aMsg,
 		},
 		{
 			RecordType: "TXT",
 			Host:       "@",
-			Expected:   fmt.Sprintf("v=spf1 mx a ip4:%s ~all", serverIP),
+			Expected:   spfExpected,
 			Status:     "pass",
 			Message:    "Authorizes this server to send email (Sender Policy Framework)",
 		},
@@ -982,53 +999,65 @@ func (h *EmailHandler) GenerateDKIM(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, emailDKIM, nil)
 }
 
-func (h *EmailHandler) resolveServerIP(ctx context.Context, serverID uuid.UUID, mailServerID *uuid.UUID) string {
+func (h *EmailHandler) resolvePublicMailServerIP(ctx context.Context, serverID uuid.UUID, mailServerID *uuid.UUID) (string, error) {
 	// 1. If explicit MailServer is linked, check its IPv4 address
 	if mailServerID != nil && *mailServerID != uuid.Nil {
 		if ms, err := h.store.GetMailServerByID(ctx, *mailServerID); err == nil && ms != nil {
-			if ms.IPv4Address != "" && ms.IPv4Address != "127.0.0.1" {
-				return ms.IPv4Address
+			if iputil.IsPublicIPv4(ms.IPv4Address) {
+				return ms.IPv4Address, nil
 			}
 		}
 	}
 
-	// 2. Check the server node's IP address
+	// 2. Check SystemSettings configured Server IP (or manual override)
+	if settings, err := h.store.GetSystemSettings(ctx); err == nil && settings != nil {
+		if settings.MailServerIPMode == "manual" {
+			if iputil.IsPublicIPv4(settings.MailServerPublicIP) {
+				return settings.MailServerPublicIP, nil
+			}
+			return "", iputil.ErrInvalidPublicIP
+		}
+		if iputil.IsPublicIPv4(settings.MailServerPublicIP) {
+			return settings.MailServerPublicIP, nil
+		}
+		if iputil.IsPublicIPv4(settings.ServerIP) {
+			return settings.ServerIP, nil
+		}
+	}
+
+	// 3. Check the server node's IP address
 	if serverID != uuid.Nil {
 		if s, err := h.store.GetServerByID(ctx, serverID); err == nil && s != nil {
-			if s.IPAddress != "" && s.IPAddress != "127.0.0.1" {
-				return s.IPAddress
+			if iputil.IsPublicIPv4(s.IPAddress) {
+				return s.IPAddress, nil
 			}
-		}
-	}
-
-	// 3. Fallback to SystemSettings configured Server IP
-	if settings, err := h.store.GetSystemSettings(ctx); err == nil && settings != nil {
-		if settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
-			return settings.ServerIP
 		}
 	}
 
 	// 4. Check environment variable overrides
-	if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
-		return envIP
+	if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); iputil.IsPublicIPv4(envIP) {
+		return envIP, nil
 	}
-	if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
-		return envIP
+	if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); iputil.IsPublicIPv4(envIP) {
+		return envIP, nil
 	}
 
-	// 5. If server node has an IP, use it
-	if serverID != uuid.Nil {
-		if s, err := h.store.GetServerByID(ctx, serverID); err == nil && s != nil && s.IPAddress != "" {
-			return s.IPAddress
+	// 5. Dynamic detection of actual public IPv4 address
+	detected, err := iputil.DetectPublicIPv4(ctx)
+	if err == nil && iputil.IsPublicIPv4(detected) {
+		// Update primary server node in background for caching
+		if serverID != uuid.Nil {
+			_ = h.store.UpdateServerIP(ctx, serverID, detected)
 		}
+		return detected, nil
 	}
 
-	// 6. If settings has an IP, use it
-	if settings, err := h.store.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" {
-		return settings.ServerIP
-	}
+	return "", iputil.ErrNoPublicIPDetected
+}
 
-	return "127.0.0.1"
+func (h *EmailHandler) resolveServerIP(ctx context.Context, serverID uuid.UUID, mailServerID *uuid.UUID) string {
+	ip, _ := h.resolvePublicMailServerIP(ctx, serverID, mailServerID)
+	return ip
 }
 
 func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
@@ -1044,7 +1073,11 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIP := h.resolveServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	serverIP, err := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	if err != nil || !iputil.IsPublicIPv4(serverIP) {
+		response.Error(w, http.StatusUnprocessableEntity, "NO_PUBLIC_IP", "No valid public IPv4 address detected for mail server. Localhost (127.0.0.1) and private network IPs cannot be used for public email delivery. Please configure your public IP under Settings -> Mail Server Public IP.", nil, "")
+		return
+	}
 
 	selector := domain.DKIMSelector
 	if selector == "" {
@@ -1085,12 +1118,12 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 			Host:       "mail",
 			Expected:   serverIP,
 			Status:     "pass",
-			Message:    "Directs mail host domain to server public IP",
+			Message:    "Primary mail server address",
 		},
 		{
 			RecordType: "TXT",
 			Host:       "@",
-			Expected:   fmt.Sprintf("v=spf1 mx a ip4:%s ~all", serverIP),
+			Expected:   fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP),
 			Status:     "pass",
 			Message:    "Sender Policy Framework (SPF) authorizing server mail delivery",
 		},
@@ -1140,7 +1173,7 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIP := h.resolveServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	serverIP, _ := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
 
 	auditReport := health.AuditDomain(r.Context(), domain.Domain, domain.DKIMSelector, serverIP)
 	response.JSON(w, http.StatusOK, auditReport, nil)

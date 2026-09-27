@@ -42,7 +42,7 @@ func TestMailServerSubsystem_APIEndpoints(t *testing.T) {
 		Hostname:                 "mail.hostvra-enterprise.com",
 		PrimaryDomain:            "hostvra-enterprise.com",
 		AdditionalDomains:        []string{"smtp.hostvra-enterprise.com"},
-		IPv4Address:              "192.0.2.100",
+		IPv4Address:              "185.193.17.42",
 		Timezone:                 "UTC",
 		StorageLocation:          "/var/mail/vhosts",
 		MailboxStorageLimitBytes: 107374182400, // 100GB

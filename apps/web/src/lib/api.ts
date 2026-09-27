@@ -1097,6 +1097,9 @@ export interface SystemSettings {
   default_site_folder: string;
   default_backup_folder: string;
   server_ip: string;
+  mail_server_ip_mode?: 'auto' | 'manual';
+  mail_server_public_ip?: string;
+  detected_public_ip?: string;
   server_time: string;
   timezone_region: string;
   timezone_city: string;

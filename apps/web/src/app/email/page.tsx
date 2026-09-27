@@ -40,6 +40,7 @@ import {
   BookOpen,
   Download,
   UserX,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { EmailUserGuide } from '@/components/EmailUserGuide';
 
@@ -341,6 +342,7 @@ export default function EmailHostingPage() {
   const [showDNSModal, setShowDNSModal] = useState<EmailDomain | null>(null);
   const [domainDNSRecords, setDomainDNSRecords] = useState<DNSRecordItem[]>([]);
   const [loadingDNS, setLoadingDNS] = useState(false);
+  const [dnsError, setDnsError] = useState<string | null>(null);
   const [regeneratingDKIM, setRegeneratingDKIM] = useState(false);
   const [showVerifyDNSModal, setShowVerifyDNSModal] = useState<DNSVerificationResult | null>(null);
   const [verifyingDNS, setVerifyingDNS] = useState(false);
@@ -715,13 +717,17 @@ export default function EmailHostingPage() {
     setShowDNSModal(dom);
     setLoadingDNS(true);
     setDomainDNSRecords([]);
+    setDnsError(null);
     try {
       const res = await apiFetch<DNSRecordItem[]>(`/api/v1/email/domains/${dom.id}/dns`);
       if (res.success && res.data) {
         setDomainDNSRecords(res.data);
+      } else {
+        setDnsError(res.error?.message || 'Failed to generate DNS records. Please verify server public IP configuration.');
       }
     } catch (err: any) {
       console.error('Failed to load DNS records:', err);
+      setDnsError(err.message || 'Failed to load DNS records');
     } finally {
       setLoadingDNS(false);
     }
@@ -3079,50 +3085,34 @@ export default function EmailHostingPage() {
                       </div>
                     );
                   })
+                ) : dnsError ? (
+                  <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 space-y-3 font-sans">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">Public Mail Server IPv4 Required</h4>
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          {dnsError}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          Production mail servers cannot use loopback (127.0.0.1) or private IP addresses for public DNS records. Please configure your public IPv4 address or allow automatic detection in System Settings.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <a
+                        href="/settings"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs"
+                      >
+                        <SettingsIcon className="w-3.5 h-3.5" />
+                        <span>Configure Server Public IP</span>
+                      </a>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="space-y-3 font-mono text-xs">
-                    {/* Fallback Display */}
-                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-1">
-                      <div className="flex justify-between items-center text-slate-500 font-sans">
-                        <span className="font-semibold text-slate-900 dark:text-white">MX Record (Incoming Mail)</span>
-                        <button
-                          onClick={() => copyToClipboard(`10 ${showDNSModal.mail_hostname}.`, 'mx')}
-                          className="hover:text-indigo-600 flex items-center gap-1 text-[11px]"
-                        >
-                          {copiedKey === 'mx' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>Copy</span>
-                        </button>
-                      </div>
-                      <p className="text-indigo-600 dark:text-indigo-400">Host: @ | Priority: 10 | Target: 10 {showDNSModal.mail_hostname}.</p>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-1">
-                      <div className="flex justify-between items-center text-slate-500 font-sans">
-                        <span className="font-semibold text-slate-900 dark:text-white">SPF Record (Sender Policy Framework)</span>
-                        <button
-                          onClick={() => copyToClipboard('v=spf1 mx a ~all', 'spf')}
-                          className="hover:text-indigo-600 flex items-center gap-1 text-[11px]"
-                        >
-                          {copiedKey === 'spf' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>Copy</span>
-                        </button>
-                      </div>
-                      <p className="text-indigo-600 dark:text-indigo-400">Type: TXT | Host: @ | Value: v=spf1 mx a ~all</p>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-1">
-                      <div className="flex justify-between items-center text-slate-500 font-sans">
-                        <span className="font-semibold text-slate-900 dark:text-white">DMARC Policy Record</span>
-                        <button
-                          onClick={() => copyToClipboard(`v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@${showDNSModal.domain}`, 'dmarc')}
-                          className="hover:text-indigo-600 flex items-center gap-1 text-[11px]"
-                        >
-                          {copiedKey === 'dmarc' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          <span>Copy</span>
-                        </button>
-                      </div>
-                      <p className="text-indigo-600 dark:text-indigo-400">Type: TXT | Host: _dmarc | Value: v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@{showDNSModal.domain}</p>
-                    </div>
+                  <div className="p-8 text-center text-slate-400 space-y-2 font-sans">
+                    <AlertTriangle className="w-6 h-6 mx-auto text-amber-500" />
+                    <p className="text-xs">No DNS records returned. Please verify that a public server IPv4 is detected or manually configured in Settings.</p>
                   </div>
                 )}
               </div>

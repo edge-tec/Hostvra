@@ -131,7 +131,7 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 		}
 	}
 
-	expectedSPF := fmt.Sprintf("v=spf1 mx a ip4:%s ~all", serverIP)
+	expectedSPF := fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP)
 	if serverIP == "" {
 		expectedSPF = "v=spf1 mx ~all"
 	}

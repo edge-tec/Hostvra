@@ -25,6 +25,7 @@ import (
 	"hostvra/api/internal/domains"
 	"hostvra/api/internal/domains/resellerclub"
 	"hostvra/api/internal/handlers"
+	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/license"
 	"hostvra/api/internal/migration"
 	"hostvra/api/internal/quota"
@@ -929,6 +930,7 @@ func main() {
 				r.Get("/panel-cert", settingsHandler.GetPanelCert)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Put("/", settingsHandler.Update)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/sync-time", settingsHandler.SyncTime)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/detect-ip", settingsHandler.DetectPublicIP)
 			})
 
 			// Server Migration Engine
@@ -997,13 +999,15 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 		if h, err := os.Hostname(); err == nil && h != "" {
 			hostname = h
 		}
-		defaultIP := "127.0.0.1"
-		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
+		defaultIP := ""
+		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && iputil.IsPublicIPv4(settings.ServerIP) {
 			defaultIP = settings.ServerIP
-		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); iputil.IsPublicIPv4(envIP) {
 			defaultIP = envIP
-		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); iputil.IsPublicIPv4(envIP) {
 			defaultIP = envIP
+		} else if detected, err := iputil.DetectPublicIPv4(ctx); err == nil && iputil.IsPublicIPv4(detected) {
+			defaultIP = detected
 		}
 		now := time.Now().UTC()
 		defaultServer := &store.Server{
@@ -1031,16 +1035,21 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 		} else {
 			logger.Info("Seeded default primary server node", "server_id", defaultServerID, "ip", defaultIP)
 		}
-	} else if existingServer, err := s.GetServerByID(ctx, defaultServerID); err == nil && existingServer != nil && existingServer.IPAddress == "127.0.0.1" {
-		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && settings.ServerIP != "" && settings.ServerIP != "127.0.0.1" {
-			_ = s.UpdateServerIP(ctx, defaultServerID, settings.ServerIP)
-			logger.Info("Synchronized default primary server IP with system settings", "ip", settings.ServerIP)
-		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); envIP != "" {
-			_ = s.UpdateServerIP(ctx, defaultServerID, envIP)
-			logger.Info("Synchronized default primary server IP with HOSTVRA_PUBLIC_IP", "ip", envIP)
-		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); envIP != "" {
-			_ = s.UpdateServerIP(ctx, defaultServerID, envIP)
-			logger.Info("Synchronized default primary server IP with SERVER_IP", "ip", envIP)
+	} else if existingServer, err := s.GetServerByID(ctx, defaultServerID); err == nil && existingServer != nil && !iputil.IsPublicIPv4(existingServer.IPAddress) {
+		var resolvedPublicIP string
+		if settings, err := s.GetSystemSettings(ctx); err == nil && settings != nil && iputil.IsPublicIPv4(settings.ServerIP) {
+			resolvedPublicIP = settings.ServerIP
+		} else if envIP := strings.TrimSpace(os.Getenv("HOSTVRA_PUBLIC_IP")); iputil.IsPublicIPv4(envIP) {
+			resolvedPublicIP = envIP
+		} else if envIP := strings.TrimSpace(os.Getenv("SERVER_IP")); iputil.IsPublicIPv4(envIP) {
+			resolvedPublicIP = envIP
+		} else if detected, err := iputil.DetectPublicIPv4(ctx); err == nil && iputil.IsPublicIPv4(detected) {
+			resolvedPublicIP = detected
+		}
+
+		if resolvedPublicIP != "" {
+			_ = s.UpdateServerIP(ctx, defaultServerID, resolvedPublicIP)
+			logger.Info("Synchronized default primary server IP with detected public IP", "ip", resolvedPublicIP)
 		}
 	}
 

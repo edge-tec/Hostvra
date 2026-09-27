@@ -29,6 +29,9 @@ type SystemSettings struct {
 	DefaultSiteFolder   string    `json:"default_site_folder"`
 	DefaultBackupFolder string    `json:"default_backup_folder"`
 	ServerIP            string    `json:"server_ip"`
+	MailServerIPMode    string    `json:"mail_server_ip_mode"`     // "auto" or "manual"
+	MailServerPublicIP  string    `json:"mail_server_public_ip"`   // Manual override if set
+	DetectedPublicIP    string    `json:"detected_public_ip"`      // Currently detected public IP
 	ServerTime          string    `json:"server_time"`
 	TimezoneRegion      string    `json:"timezone_region"`
 	TimezoneCity        string    `json:"timezone_city"`

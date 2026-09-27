@@ -4,8 +4,10 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +15,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
@@ -38,6 +41,18 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Always probe or supply the live detected public IPv4 address
+	if detected, err := iputil.DetectPublicIPv4(r.Context()); err == nil && iputil.IsPublicIPv4(detected) {
+		settings.DetectedPublicIP = detected
+		if settings.MailServerIPMode == "auto" || settings.MailServerIPMode == "" {
+			settings.ServerIP = detected
+		}
+	}
+
+	if settings.MailServerIPMode == "manual" && settings.MailServerPublicIP != "" {
+		settings.ServerIP = settings.MailServerPublicIP
+	}
+
 	response.JSON(w, http.StatusOK, settings, nil)
 }
 
@@ -48,20 +63,46 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate & resolve Mail Server Public IP
+	if s.MailServerIPMode == "manual" {
+		if strings.TrimSpace(s.MailServerPublicIP) == "" {
+			response.Error(w, http.StatusBadRequest, "INVALID_PUBLIC_IP", "Manual mail server public IP is required when mode is set to manual", nil, "")
+			return
+		}
+		if err := iputil.ValidatePublicIPv4(s.MailServerPublicIP); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_PUBLIC_IP", fmt.Sprintf("Invalid manual mail server public IP: %s", err.Error()), nil, "")
+			return
+		}
+		s.ServerIP = strings.TrimSpace(s.MailServerPublicIP)
+	} else {
+		s.MailServerIPMode = "auto"
+		if detected, err := iputil.DetectPublicIPv4(r.Context()); err == nil && iputil.IsPublicIPv4(detected) {
+			s.DetectedPublicIP = detected
+			s.ServerIP = detected
+		}
+	}
+
+	// Also validate if user provided an override directly via ServerIP
+	if s.ServerIP != "" && s.ServerIP != "127.0.0.1" && s.MailServerIPMode != "manual" {
+		if err := iputil.ValidatePublicIPv4(s.ServerIP); err == nil {
+			s.MailServerPublicIP = s.ServerIP
+		}
+	}
+
 	if err := h.store.UpdateSystemSettings(r.Context(), &s); err != nil {
 		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to update system settings", nil, "")
 		return
 	}
 
-	// Synchronize configured ServerIP to primary server nodes if provided
-	if s.ServerIP != "" && s.ServerIP != "127.0.0.1" {
+	// Synchronize valid public ServerIP to primary server nodes if provided
+	if iputil.IsPublicIPv4(s.ServerIP) {
 		defaultServerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 		_ = h.store.UpdateServerIP(r.Context(), defaultServerID, s.ServerIP)
 
 		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil {
 			if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil {
 				for _, srv := range servers {
-					if srv.IPAddress == "127.0.0.1" || srv.IPAddress == "" {
+					if !iputil.IsPublicIPv4(srv.IPAddress) {
 						_ = h.store.UpdateServerIP(r.Context(), srv.ID, s.ServerIP)
 					}
 				}
@@ -73,9 +114,23 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"panel_port":        s.PanelPort,
 		"panel_domain":      s.PanelDomain,
 		"security_entrance": s.SecurityEntrance,
+		"server_ip":         s.ServerIP,
+		"mail_ip_mode":      s.MailServerIPMode,
 	})
 
 	response.JSON(w, http.StatusOK, s, nil)
+}
+
+func (h *SettingsHandler) DetectPublicIP(w http.ResponseWriter, r *http.Request) {
+	detected, err := iputil.ForceDetectPublicIPv4(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusUnprocessableEntity, "DETECTION_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{
+		"detected_public_ip": detected,
+	}, nil)
 }
 
 func (h *SettingsHandler) SyncTime(w http.ResponseWriter, r *http.Request) {

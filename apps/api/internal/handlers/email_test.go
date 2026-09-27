@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -217,10 +219,17 @@ func TestEmailHandler_CreateDomainWithoutServerID_AndDNSResolution(t *testing.T)
 		Role:           "owner",
 	}
 	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
+	_ = st.UpdateSystemSettings(ctx, &store.SystemSettings{
+		ServerIP:           "185.193.17.42",
+		MailServerIPMode:   "manual",
+		MailServerPublicIP: "185.193.17.42",
+	})
+
+	testDomain := fmt.Sprintf("dns-test-%s.com", uuid.New().String()[:8])
 
 	// 1. Create Domain without ServerID and with no servers pre-enrolled (UI behavior)
 	reqBody, _ := json.Marshal(CreateEmailDomainRequest{
-		Domain: "enterprise-mail.com",
+		Domain: testDomain,
 	})
 	req := httptest.NewRequest("POST", "/api/v1/email/domains", bytes.NewReader(reqBody)).WithContext(ctx)
 	w := httptest.NewRecorder()
@@ -242,8 +251,8 @@ func TestEmailHandler_CreateDomainWithoutServerID_AndDNSResolution(t *testing.T)
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if resp.Data.Domain != "enterprise-mail.com" {
-		t.Errorf("expected domain enterprise-mail.com, got %s", resp.Data.Domain)
+	if resp.Data.Domain != testDomain {
+		t.Errorf("expected domain %s, got %s", testDomain, resp.Data.Domain)
 	}
 	if resp.Data.PublicDKIM == "" || !strings.Contains(resp.Data.PublicDKIM, "v=DKIM1; k=rsa; p=") {
 		t.Errorf("expected valid 2048-bit RSA DKIM public key, got: %s", resp.Data.PublicDKIM)
@@ -269,11 +278,23 @@ func TestEmailHandler_CreateDomainWithoutServerID_AndDNSResolution(t *testing.T)
 	dnsRecords = dnsResp.Data
 
 	recordTypes := make(map[string]bool)
+	var foundARecord, foundSPFRecord bool
 	for _, rec := range dnsRecords {
 		recordTypes[rec.RecordType] = true
+		if rec.RecordType == "A" && rec.Host == "mail" {
+			foundARecord = true
+			if rec.Expected != "185.193.17.42" {
+				t.Errorf("expected mail A record to be 185.193.17.42, got %s", rec.Expected)
+			}
+			if rec.Message != "Primary mail server address" {
+				t.Errorf("expected mail A record message to be 'Primary mail server address', got %s", rec.Message)
+			}
+		}
 		if rec.RecordType == "TXT" && strings.HasPrefix(rec.Expected, "v=spf1") {
-			if !strings.Contains(rec.Expected, "ip4:") {
-				t.Errorf("SPF record missing server IP: %s", rec.Expected)
+			foundSPFRecord = true
+			expectedSPF := "v=spf1 mx ip4:185.193.17.42 ~all"
+			if rec.Expected != expectedSPF {
+				t.Errorf("expected SPF %q, got %q", expectedSPF, rec.Expected)
 			}
 		}
 		if rec.RecordType == "TXT" && strings.HasPrefix(rec.Expected, "v=DKIM1") {
@@ -282,14 +303,132 @@ func TestEmailHandler_CreateDomainWithoutServerID_AndDNSResolution(t *testing.T)
 			}
 		}
 		if rec.RecordType == "TXT" && strings.HasPrefix(rec.Expected, "v=DMARC1") {
-			if !strings.Contains(rec.Expected, "rua=mailto:dmarc@enterprise-mail.com") {
+			if !strings.Contains(rec.Expected, fmt.Sprintf("rua=mailto:dmarc@%s", testDomain)) {
 				t.Errorf("DMARC record missing rua report: %s", rec.Expected)
 			}
 		}
 	}
 
+	if !foundARecord {
+		t.Errorf("expected mail A record to be present in DNS records")
+	}
+	if !foundSPFRecord {
+		t.Errorf("expected SPF record to be present in DNS records")
+	}
 	if !recordTypes["MX"] || !recordTypes["TXT"] || !recordTypes["A"] || !recordTypes["CNAME"] {
 		t.Errorf("expected MX, TXT, A, and CNAME records, got types: %+v", recordTypes)
 	}
 }
+
+func TestEmailHandler_GetDomainDNS_RejectsPrivateAndLoopbackIPs(t *testing.T) {
+	st := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditLogger := audit.NewLogger(st, logger)
+	dnsSvc := dns.NewService()
+	cfg := &config.Config{JWTSecret: "test-secret"}
+	handler := NewEmailHandler(cfg, st, dnsSvc, auditLogger)
+
+	orgID := uuid.New()
+	userID := uuid.New()
+	claims := &auth.Claims{
+		UserID:         userID,
+		OrganizationID: orgID,
+		Role:           "owner",
+	}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
+
+	// Create domain first with valid public IP setting
+	_ = st.UpdateSystemSettings(ctx, &store.SystemSettings{
+		ServerIP:           "185.193.17.42",
+		MailServerIPMode:   "manual",
+		MailServerPublicIP: "185.193.17.42",
+	})
+
+	testDomain := fmt.Sprintf("reject-test-%s.com", uuid.New().String()[:8])
+	reqBody, _ := json.Marshal(CreateEmailDomainRequest{Domain: testDomain})
+	req := httptest.NewRequest("POST", "/api/v1/email/domains", bytes.NewReader(reqBody)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.CreateDomain(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("failed to create domain: %d: %s", w.Code, w.Body.String())
+	}
+
+	var createResp struct {
+		Data struct {
+			ID uuid.UUID `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &createResp)
+	domainID := createResp.Data.ID
+
+	// Test invalid IPs: loopback, RFC1918 private, link-local, 0.0.0.0
+	invalidIPs := []string{
+		"127.0.0.1",
+		"127.0.1.1",
+		"0.0.0.0",
+		"10.0.0.1",
+		"172.16.0.1",
+		"192.168.1.100",
+		"169.254.1.1",
+	}
+
+	for _, invalidIP := range invalidIPs {
+		_ = st.UpdateSystemSettings(ctx, &store.SystemSettings{
+			ServerIP:           invalidIP,
+			MailServerIPMode:   "manual",
+			MailServerPublicIP: invalidIP,
+		})
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", domainID.String())
+		dnsReq := httptest.NewRequest("GET", "/api/v1/email/domains/"+domainID.String()+"/dns", nil)
+		dnsReq = dnsReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+		dnsRec := httptest.NewRecorder()
+
+		handler.GetDomainDNS(dnsRec, dnsReq)
+		if dnsRec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("expected 422 Unprocessable Entity for invalid IP %q, got %d: %s", invalidIP, dnsRec.Code, dnsRec.Body.String())
+		}
+		if !strings.Contains(dnsRec.Body.String(), "NO_PUBLIC_IP") {
+			t.Errorf("expected NO_PUBLIC_IP error code in response for IP %q, got: %s", invalidIP, dnsRec.Body.String())
+		}
+	}
+
+	// Now update to a valid public IP and verify it succeeds
+	validIP := "185.193.17.50"
+	_ = st.UpdateSystemSettings(ctx, &store.SystemSettings{
+		ServerIP:           validIP,
+		MailServerIPMode:   "manual",
+		MailServerPublicIP: validIP,
+	})
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", domainID.String())
+	dnsReq := httptest.NewRequest("GET", "/api/v1/email/domains/"+domainID.String()+"/dns", nil)
+	dnsReq = dnsReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	dnsRec := httptest.NewRecorder()
+
+	handler.GetDomainDNS(dnsRec, dnsReq)
+	if dnsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for valid public IP %s, got %d: %s", validIP, dnsRec.Code, dnsRec.Body.String())
+	}
+
+	var okResp struct {
+		Data []store.DNSVerificationResult `json:"data"`
+	}
+	_ = json.Unmarshal(dnsRec.Body.Bytes(), &okResp)
+	var foundMailA bool
+	for _, r := range okResp.Data {
+		if r.RecordType == "A" && r.Host == "mail" {
+			foundMailA = true
+			if r.Expected != validIP {
+				t.Errorf("expected A record to point to %s, got %s", validIP, r.Expected)
+			}
+		}
+	}
+	if !foundMailA {
+		t.Errorf("mail A record not found in DNS response")
+	}
+}
+
 

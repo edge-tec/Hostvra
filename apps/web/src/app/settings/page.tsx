@@ -108,6 +108,10 @@ export default function SettingsPage() {
   const [defaultSiteFolder, setDefaultSiteFolder] = useState('/www/wwwroot');
   const [defaultBackupFolder, setDefaultBackupFolder] = useState('/www/backup');
   const [serverIp, setServerIp] = useState('127.0.0.1');
+  const [mailServerIpMode, setMailServerIpMode] = useState<'auto' | 'manual'>('auto');
+  const [mailServerPublicIp, setMailServerPublicIp] = useState('');
+  const [detectedPublicIp, setDetectedPublicIp] = useState('');
+  const [isDetectingIp, setIsDetectingIp] = useState(false);
   const [serverTime, setServerTime] = useState('');
   const [timezoneRegion, setTimezoneRegion] = useState('Etc');
   const [timezoneCity, setTimezoneCity] = useState('UTC');
@@ -166,6 +170,9 @@ export default function SettingsPage() {
           if (s.default_site_folder) setDefaultSiteFolder(s.default_site_folder);
           if (s.default_backup_folder) setDefaultBackupFolder(s.default_backup_folder);
           if (s.server_ip) setServerIp(s.server_ip);
+          if (s.mail_server_ip_mode) setMailServerIpMode(s.mail_server_ip_mode);
+          if (s.mail_server_public_ip) setMailServerPublicIp(s.mail_server_public_ip);
+          if (s.detected_public_ip) setDetectedPublicIp(s.detected_public_ip);
           if (s.server_time) setServerTime(s.server_time);
           if (s.timezone_region) setTimezoneRegion(s.timezone_region);
           if (s.timezone_city) setTimezoneCity(s.timezone_city);
@@ -237,6 +244,8 @@ export default function SettingsPage() {
       default_site_folder: defaultSiteFolder,
       default_backup_folder: defaultBackupFolder,
       server_ip: serverIp,
+      mail_server_ip_mode: mailServerIpMode,
+      mail_server_public_ip: mailServerPublicIp,
       server_time: serverTime,
       timezone_region: timezoneRegion,
       timezone_city: timezoneCity,
@@ -259,6 +268,43 @@ export default function SettingsPage() {
       }
     } catch (err: any) {
       showToast(err.message || 'Error communicating with settings service', true);
+    }
+  };
+
+  const isValidPublicIPv4 = (ip: string) => {
+    const parts = ip.trim().split('.');
+    if (parts.length !== 4) return false;
+    for (const p of parts) {
+      if (!/^\d+$/.test(p)) return false;
+      const n = parseInt(p, 10);
+      if (n < 0 || n > 255) return false;
+    }
+    const n0 = parseInt(parts[0], 10);
+    const n1 = parseInt(parts[1], 10);
+    if (n0 === 127 || n0 === 0 || n0 === 10) return false;
+    if (n0 === 172 && n1 >= 16 && n1 <= 31) return false;
+    if (n0 === 192 && n1 === 168) return false;
+    if (n0 === 169 && n1 === 254) return false;
+    return true;
+  };
+
+  const handleDetectPublicIP = async () => {
+    try {
+      setIsDetectingIp(true);
+      const res = await apiFetch<{ detected_ip: string }>('/api/v1/settings/detect-ip', { method: 'POST' });
+      if (res.success && res.data?.detected_ip) {
+        setDetectedPublicIp(res.data.detected_ip);
+        if (mailServerIpMode === 'auto') {
+          setMailServerPublicIp(res.data.detected_ip);
+        }
+        showToast(`Detected public IP: ${res.data.detected_ip}`);
+      } else {
+        showToast(res.error?.message || 'Could not detect public IPv4 address', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Detection failed', true);
+    } finally {
+      setIsDetectingIp(false);
     }
   };
 
@@ -1360,6 +1406,107 @@ export default function SettingsPage() {
                     <span className="text-slate-400 font-normal">
                       Default IP is Internet IP. If you need use local virtual machine to test, please input Intranet IP
                     </span>
+                  </div>
+                </div>
+
+                {/* 15b. Mail Server Public IP */}
+                <div className="py-4 border-t border-b border-slate-200/60 dark:border-surface-800 flex flex-col md:flex-row md:items-start justify-between gap-4">
+                  <div className="w-44">
+                    <span className="text-slate-800 dark:text-slate-200 font-semibold block">Mail Server Public IP</span>
+                    <span className="text-xs text-slate-400">DNS A & SPF Canonical IP</span>
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* Mode selection: Auto / Manual */}
+                      <div className="inline-flex rounded-lg border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 p-0.5 text-xs font-medium">
+                        <button
+                          type="button"
+                          onClick={() => setMailServerIpMode('auto')}
+                          className={`px-3 py-1 rounded-md transition ${
+                            mailServerIpMode === 'auto'
+                              ? 'bg-white dark:bg-surface-700 text-indigo-600 dark:text-indigo-400 shadow-xs font-semibold'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Automatic Detection
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMailServerIpMode('manual')}
+                          className={`px-3 py-1 rounded-md transition ${
+                            mailServerIpMode === 'manual'
+                              ? 'bg-white dark:bg-surface-700 text-indigo-600 dark:text-indigo-400 shadow-xs font-semibold'
+                              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          Manual Override
+                        </button>
+                      </div>
+
+                      {/* Detected IP indicator */}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-slate-500 dark:text-slate-400">Detected Public IP:</span>
+                        <span className="font-mono font-semibold px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/20">
+                          {detectedPublicIp || 'Detecting...'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleDetectPublicIP}
+                          disabled={isDetectingIp}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-medium transition disabled:opacity-50"
+                          title="Re-query external discovery services"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${isDetectingIp ? 'animate-spin' : ''}`} />
+                          <span>Re-detect</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Manual override input or auto active notice */}
+                    {mailServerIpMode === 'manual' ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          type="text"
+                          placeholder="e.g. 109.123.45.67"
+                          value={mailServerPublicIp}
+                          onChange={(e) => setMailServerPublicIp(e.target.value)}
+                          className="w-64 px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!isValidPublicIPv4(mailServerPublicIp)) {
+                              showToast('Invalid public IPv4 address. 127.0.0.1 and private RFC1918 IPs are rejected.', true);
+                              return;
+                            }
+                            await persistSettings({ mail_server_ip_mode: 'manual', mail_server_public_ip: mailServerPublicIp.trim() });
+                            showToast(`Mail Server IP overridden to ${mailServerPublicIp.trim()}`);
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs text-xs"
+                        >
+                          Save Override
+                        </button>
+                        <span className="text-xs text-slate-400">
+                          Must be a valid, externally reachable public IPv4 address. Loopback (127.0.0.1) and private subnets are prohibited.
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await persistSettings({ mail_server_ip_mode: 'auto', mail_server_public_ip: detectedPublicIp });
+                            showToast('Mail Server IP set to Automatic Detection');
+                          }}
+                          className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-xs text-xs"
+                        >
+                          Save Auto Setting
+                        </button>
+                        <span className="text-xs text-slate-400">
+                          Hostvra dynamically discovers the server&apos;s real public IPv4 from network interfaces and external routing for mail A, SPF (<code className="font-mono text-indigo-500">v=spf1 mx ip4:... ~all</code>), and MX records.
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
