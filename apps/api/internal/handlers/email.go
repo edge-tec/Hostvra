@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -2272,6 +2273,18 @@ func (h *EmailHandler) syncPostfixMaps(ctx context.Context, serverID uuid.UUID) 
 	domains, _ := h.store.ListEmailDomainsByServer(ctx, serverID)
 	mailboxes, _ := h.store.ListEmailMailboxesByServer(ctx, serverID)
 
+	if len(domains) == 0 {
+		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		domains, _ = h.store.ListEmailDomainsByOrg(ctx, defaultOrgID)
+	}
+	if len(mailboxes) == 0 {
+		for _, d := range domains {
+			if mbs, err := h.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
+				mailboxes = append(mailboxes, mbs...)
+			}
+		}
+	}
+
 	vDomains := make([]postfix.VirtualDomain, 0, len(domains))
 	for _, d := range domains {
 		if d.Status == "active" {
@@ -2319,6 +2332,17 @@ func (h *EmailHandler) syncPostfixMaps(ctx context.Context, serverID uuid.UUID) 
 	}
 
 	_ = postfix.ApplyMaps(postfixDir, vDomains, vMailboxes, vAliases)
+
+	// Ensure Postfix main.cf has virtual configuration and does NOT treat hosted domains as local Unix accounts
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if _, err := exec.LookPath("postconf"); err == nil {
+			_ = exec.Command("postconf", "-e", "mydestination = localhost.$mydomain, localhost").Run()
+			_ = exec.Command("postconf", "-e", "virtual_mailbox_domains = hash:/etc/postfix/vdomains").Run()
+			_ = exec.Command("postconf", "-e", "virtual_mailbox_maps = hash:/etc/postfix/vmailbox").Run()
+			_ = exec.Command("postconf", "-e", "virtual_alias_maps = hash:/etc/postfix/valias").Run()
+			_ = exec.Command("postconf", "-e", "virtual_transport = lmtp:unix:private/dovecot-lmtp").Run()
+		}
+	}
 }
 
 // findDomainByName looks up the configured mail hostname for a domain
