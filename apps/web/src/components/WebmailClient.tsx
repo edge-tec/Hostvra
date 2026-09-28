@@ -30,6 +30,9 @@ import {
   Clock,
   Sparkles,
   ChevronDown,
+  CheckSquare,
+  Square,
+  Bookmark,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 
@@ -132,6 +135,10 @@ export function WebmailClient({
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [activeMessage, setActiveMessage] = useState<WebmailMessage | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Multi-message batch selection
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showMarkDropdown, setShowMarkDropdown] = useState(false);
 
   // Folder Counts
   const [folderCounts, setFolderCounts] = useState<{ [key: string]: number }>({
@@ -311,6 +318,7 @@ export function WebmailClient({
 
   useEffect(() => {
     if (activeMailbox.id) {
+      setSelectedIds([]);
       fetchMessages(currentFolder, searchQuery);
       fetchCounts();
       fetchSignature();
@@ -381,19 +389,22 @@ export function WebmailClient({
   // Toggle read status
   const handleToggleRead = async (msgId: string, currentRead: boolean) => {
     try {
+      const nextRead = !currentRead;
       const res = await apiFetch<WebmailMessage>(`/api/v1/webmail/messages/${msgId}/flag`, {
         method: 'PUT',
-        body: JSON.stringify({ is_read: !currentRead }),
+        body: JSON.stringify({ is_read: nextRead, is_unread: !nextRead }),
       });
-      if (res.success && res.data) {
+      if (res.success) {
         setMessages((prev) =>
           (Array.isArray(prev) ? prev : []).map((m) =>
-            m.id === msgId ? { ...m, is_read: !currentRead, is_unread: currentRead } : m
+            m.id === msgId ? { ...m, is_read: nextRead, is_unread: !nextRead } : m
           )
         );
         if (activeMessage?.id === msgId) {
-          setActiveMessage((prev) => (prev ? { ...prev, is_read: !currentRead } : null));
+          setActiveMessage((prev) => (prev ? { ...prev, is_read: nextRead, is_unread: !nextRead } : null));
         }
+        setToastMessage(nextRead ? 'Marked as read' : 'Marked as unread');
+        setTimeout(() => setToastMessage(null), 2500);
         fetchCounts();
       }
     } catch (err) {
@@ -404,19 +415,26 @@ export function WebmailClient({
   // Move message folder (trash, archive, spam, inbox)
   const handleMoveFolder = async (msgId: string, targetFolder: string) => {
     try {
-      const res = await apiFetch<WebmailMessage>(`/api/v1/webmail/messages/${msgId}/folder`, {
+      const res = await apiFetch<any>(`/api/v1/webmail/messages/${msgId}/folder`, {
         method: 'PUT',
-        body: JSON.stringify({ folder: targetFolder }),
+        body: JSON.stringify({ folder: targetFolder, target_folder: targetFolder }),
       });
       if (res.success) {
         setToastMessage(`Message moved to ${targetFolder}`);
         setTimeout(() => setToastMessage(null), 3000);
-        // Refresh list and counts
+        setMessages((prev) => (Array.isArray(prev) ? prev : []).filter((m) => m.id !== msgId));
+        if (selectedMessageId === msgId) {
+          setActiveMessage(null);
+          setSelectedMessageId(null);
+        }
         fetchMessages();
         fetchCounts();
+      } else {
+        alert(`Failed to move message: ${res.error?.message || 'Server error'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to move message:', err);
+      alert(`Error moving message: ${err.message || 'Server error'}`);
     }
   };
 
@@ -424,15 +442,154 @@ export function WebmailClient({
   const handlePermanentDelete = async (msgId: string) => {
     if (!confirm('Permanently delete this message? This action cannot be undone.')) return;
     try {
-      const res = await apiFetch(`/api/v1/webmail/messages/${msgId}`, { method: 'DELETE' });
+      const res = await apiFetch<any>(`/api/v1/webmail/messages/${msgId}`, { method: 'DELETE' });
       if (res.success) {
         setToastMessage('Message permanently deleted');
         setTimeout(() => setToastMessage(null), 3000);
+        setMessages((prev) => (Array.isArray(prev) ? prev : []).filter((m) => m.id !== msgId));
+        if (selectedMessageId === msgId) {
+          setActiveMessage(null);
+          setSelectedMessageId(null);
+        }
         fetchMessages();
         fetchCounts();
+      } else {
+        alert(`Failed to delete message: ${res.error?.message || 'Server error'}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete message:', err);
+      alert(`Error deleting message: ${err.message || 'Server error'}`);
+    }
+  };
+
+  // Toggle selection for a single message in list
+  const handleToggleSelectOne = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Select all or deselect all
+  const handleToggleSelectAll = () => {
+    if (selectedIds.length === messages.length && messages.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(messages.map((m) => m.id));
+    }
+  };
+
+  // Batch mark read/unread
+  const handleBatchMarkRead = async (isRead: boolean) => {
+    if (selectedIds.length === 0) return;
+    try {
+      await Promise.all(
+        selectedIds.map((id) =>
+          apiFetch(`/api/v1/webmail/messages/${id}/flag`, {
+            method: 'PUT',
+            body: JSON.stringify({ is_read: isRead, is_unread: !isRead }),
+          })
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          selectedIds.includes(m.id) ? { ...m, is_read: isRead, is_unread: !isRead } : m
+        )
+      );
+      if (activeMessage && selectedIds.includes(activeMessage.id)) {
+        setActiveMessage((prev) => (prev ? { ...prev, is_read: isRead, is_unread: !isRead } : null));
+      }
+      setToastMessage(isRead ? `Marked ${selectedIds.length} as read` : `Marked ${selectedIds.length} as unread`);
+      setTimeout(() => setToastMessage(null), 3000);
+      setSelectedIds([]);
+      setShowMarkDropdown(false);
+      fetchCounts();
+    } catch (err) {
+      console.error('Failed batch mark read:', err);
+    }
+  };
+
+  // Batch star/unstar
+  const handleBatchStar = async (isStarred: boolean) => {
+    if (selectedIds.length === 0) return;
+    try {
+      await Promise.all(
+        selectedIds.map((id) =>
+          apiFetch(`/api/v1/webmail/messages/${id}/flag`, {
+            method: 'PUT',
+            body: JSON.stringify({ is_starred: isStarred }),
+          })
+        )
+      );
+      setMessages((prev) =>
+        prev.map((m) =>
+          selectedIds.includes(m.id) ? { ...m, is_starred: isStarred } : m
+        )
+      );
+      if (activeMessage && selectedIds.includes(activeMessage.id)) {
+        setActiveMessage((prev) => (prev ? { ...prev, is_starred: isStarred } : null));
+      }
+      setToastMessage(isStarred ? `Starred ${selectedIds.length} messages` : `Unstarred ${selectedIds.length} messages`);
+      setTimeout(() => setToastMessage(null), 3000);
+      setSelectedIds([]);
+      setShowMarkDropdown(false);
+      fetchCounts();
+    } catch (err) {
+      console.error('Failed batch star:', err);
+    }
+  };
+
+  // Batch move folder
+  const handleBatchMoveFolder = async (targetFolder: string) => {
+    if (selectedIds.length === 0) return;
+    try {
+      await Promise.all(
+        selectedIds.map((id) =>
+          apiFetch(`/api/v1/webmail/messages/${id}/folder`, {
+            method: 'PUT',
+            body: JSON.stringify({ folder: targetFolder, target_folder: targetFolder }),
+          })
+        )
+      );
+      setToastMessage(`Moved ${selectedIds.length} messages to ${targetFolder}`);
+      setTimeout(() => setToastMessage(null), 3000);
+      setMessages((prev) => prev.filter((m) => !selectedIds.includes(m.id)));
+      if (activeMessage && selectedIds.includes(activeMessage.id)) {
+        setActiveMessage(null);
+        setSelectedMessageId(null);
+      }
+      setSelectedIds([]);
+      fetchMessages();
+      fetchCounts();
+    } catch (err) {
+      console.error('Failed batch move:', err);
+    }
+  };
+
+  // Batch delete
+  const handleBatchDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (currentFolder === 'trash') {
+      if (!confirm(`Permanently delete ${selectedIds.length} messages? This action cannot be undone.`)) return;
+      try {
+        await Promise.all(
+          selectedIds.map((id) => apiFetch(`/api/v1/webmail/messages/${id}`, { method: 'DELETE' }))
+        );
+        setToastMessage(`Permanently deleted ${selectedIds.length} messages`);
+        setTimeout(() => setToastMessage(null), 3000);
+        setMessages((prev) => prev.filter((m) => !selectedIds.includes(m.id)));
+        if (activeMessage && selectedIds.includes(activeMessage.id)) {
+          setActiveMessage(null);
+          setSelectedMessageId(null);
+        }
+        setSelectedIds([]);
+        fetchMessages();
+        fetchCounts();
+      } catch (err) {
+        console.error('Failed batch delete:', err);
+      }
+    } else {
+      await handleBatchMoveFolder('trash');
     }
   };
 
@@ -548,6 +705,13 @@ export function WebmailClient({
   // Quick reply
   const handleSendQuickReply = async () => {
     if (!activeMessage || !quickReplyText.trim()) return;
+    const recipient =
+      currentFolder === 'sent'
+        ? (Array.isArray(activeMessage.to_addresses) && activeMessage.to_addresses.length > 0
+            ? activeMessage.to_addresses[0]
+            : activeMessage.to_email || activeMessage.from_email)
+        : activeMessage.from_email;
+
     try {
       setIsSendingReply(true);
       const res = await apiFetch<any>('/api/v1/webmail/send', {
@@ -556,8 +720,8 @@ export function WebmailClient({
           mailbox_id: activeMailbox.id,
           account_email: activeMailbox.email,
           from_email: activeMailbox.email,
-          to: [activeMessage.from_email],
-          to_email: activeMessage.from_email,
+          to: [recipient],
+          to_email: recipient,
           subject: activeMessage.subject.startsWith('Re:') ? activeMessage.subject : `Re: ${activeMessage.subject}`,
           body_text: quickReplyText.trim(),
         }),
@@ -565,7 +729,7 @@ export function WebmailClient({
 
       if (res.success) {
         setQuickReplyText('');
-        setToastMessage(`Reply delivered via Postfix to ${activeMessage.from_email}`);
+        setToastMessage(`Reply delivered via Postfix to ${recipient}`);
         setTimeout(() => setToastMessage(null), 3000);
         fetchCounts();
       } else {
@@ -580,11 +744,18 @@ export function WebmailClient({
 
   // Open Reply Modal
   const handleOpenReplyModal = (msg: WebmailMessage) => {
-    setComposeTo(msg.from_email);
+    const replyTo =
+      currentFolder === 'sent'
+        ? (Array.isArray(msg.to_addresses) && msg.to_addresses.length > 0
+            ? msg.to_addresses[0]
+            : msg.to_email || msg.from_email)
+        : msg.from_email;
+    setComposeTo(replyTo);
     setComposeCc('');
     setComposeBcc('');
     setComposeSubject(msg.subject.startsWith('Re:') ? msg.subject : `Re: ${msg.subject}`);
-    const quote = `\n\n--- On ${new Date(msg.created_at).toLocaleString()}, ${msg.from_name} <${msg.from_email}> wrote: ---\n> ${msg.body_text.replace(/\n/g, '\n> ')}`;
+    const senderLabel = msg.from_name ? `${msg.from_name} <${msg.from_email}>` : msg.from_email;
+    const quote = `\n\n--- On ${new Date(msg.created_at).toLocaleString()}, ${senderLabel} wrote: ---\n> ${(msg.body_text || '').replace(/\n/g, '\n> ')}`;
     setComposeBody(signature ? `${quote}\n\n-- \n${signature}` : quote);
     setActiveDraftId(undefined);
     setShowComposeModal(true);
@@ -928,6 +1099,82 @@ export function WebmailClient({
             </div>
           </div>
 
+          {/* Batch Actions & Folder Stats Bar */}
+          <div className="px-3.5 py-2 border-b border-slate-200 dark:border-surface-800 bg-slate-50/80 dark:bg-surface-900/60 flex items-center justify-between text-xs shrink-0 select-none">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleToggleSelectAll}
+                className="text-slate-500 hover:text-slate-800 dark:hover:text-white p-0.5 rounded transition"
+                title={selectedIds.length === messages.length && messages.length > 0 ? 'Deselect all' : 'Select all'}
+              >
+                {selectedIds.length > 0 && selectedIds.length === messages.length ? (
+                  <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                ) : selectedIds.length > 0 ? (
+                  <div className="w-4 h-4 rounded border-2 border-emerald-600 bg-emerald-600/20 flex items-center justify-center text-[10px] font-bold text-emerald-600 leading-none">
+                    -
+                  </div>
+                ) : (
+                  <Square className="w-4 h-4 text-slate-400 hover:text-slate-600" />
+                )}
+              </button>
+              <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                {selectedIds.length > 0
+                  ? `${selectedIds.length} selected`
+                  : `${messages.length} ${messages.length === 1 ? 'message' : 'messages'}`}
+              </span>
+            </div>
+
+            {selectedIds.length > 0 ? (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleBatchMarkRead(true)}
+                  className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-surface-800 transition"
+                  title="Mark as read"
+                >
+                  <CheckCheck className="w-3.5 h-3.5 text-emerald-600" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchMarkRead(false)}
+                  className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-surface-800 transition"
+                  title="Mark as unread"
+                >
+                  <Mail className="w-3.5 h-3.5 text-blue-500" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchStar(true)}
+                  className="p-1 rounded text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition"
+                  title="Star selected"
+                >
+                  <Star className="w-3.5 h-3.5 fill-amber-500" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleBatchMoveFolder('archive')}
+                  className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-surface-800 transition"
+                  title="Archive selected"
+                >
+                  <Archive className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBatchDelete}
+                  className="p-1 rounded text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                  title={currentFolder === 'trash' ? 'Delete permanently' : 'Move to trash'}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                {currentFolder}
+              </span>
+            )}
+          </div>
+
           {/* Messages Scroll Area */}
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-surface-800/60">
             {loading ? (
@@ -944,6 +1191,7 @@ export function WebmailClient({
             ) : (
               (Array.isArray(messages) ? messages : []).map((msg) => {
                 const isSelected = selectedMessageId === msg.id;
+                const isChecked = selectedIds.includes(msg.id);
                 const toRecipient =
                   Array.isArray(msg.to_addresses) && msg.to_addresses.length > 0
                     ? msg.to_addresses.join(', ')
@@ -952,18 +1200,34 @@ export function WebmailClient({
                   <div
                     key={msg.id}
                     onClick={() => handleSelectMessage(msg.id)}
-                    className={`p-3.5 cursor-pointer transition flex items-start gap-2.5 relative select-none ${
+                    className={`p-3.5 cursor-pointer transition flex items-start gap-2.5 relative select-none group ${
                       isSelected
                         ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-l-4 border-[#16A34A]'
+                        : isChecked
+                        ? 'bg-slate-50 dark:bg-surface-900 border-l-4 border-slate-400'
                         : 'hover:bg-slate-50 dark:hover:bg-surface-900/60'
                     }`}
                   >
-                    {/* Unread dot */}
+                    {/* Selection Checkbox */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleToggleSelectOne(e, msg.id)}
+                      className="mt-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 shrink-0 p-0.5 rounded transition"
+                      title={isChecked ? 'Deselect message' : 'Select message'}
+                    >
+                      {isChecked ? (
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 group-hover:text-slate-400" />
+                      )}
+                    </button>
+
+                    {/* Unread indicator */}
                     {!msg.is_read && (
-                      <span className="w-2 h-2 rounded-full bg-[#16A34A] absolute top-4 left-1.5" />
+                      <span className="w-2 h-2 rounded-full bg-[#16A34A] absolute top-4 left-1" />
                     )}
 
-                    <div className="flex-1 min-w-0 pl-1">
+                    <div className="flex-1 min-w-0 pl-0.5">
                       <div className="flex items-center justify-between gap-1 mb-0.5">
                         <span
                           className={`text-xs truncate ${
@@ -1009,18 +1273,21 @@ export function WebmailClient({
                           </span>
                         </div>
 
-                        {/* Star Button */}
-                        <button
-                          onClick={(e) => handleToggleStar(e, msg.id, msg.is_starred)}
-                          className="p-1 text-slate-400 hover:text-amber-500 transition"
-                          title={msg.is_starred ? 'Unstar' : 'Star'}
-                        >
-                          <Star
-                            className={`w-3.5 h-3.5 ${
-                              msg.is_starred ? 'text-amber-500 fill-amber-500' : 'text-slate-300 dark:text-slate-600'
-                            }`}
-                          />
-                        </button>
+                        {/* Card Action Shortcuts */}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleStar(e, msg.id, msg.is_starred)}
+                            className="p-1 text-slate-400 hover:text-amber-500 transition"
+                            title={msg.is_starred ? 'Unstar' : 'Star'}
+                          >
+                            <Star
+                              className={`w-3.5 h-3.5 ${
+                                msg.is_starred ? 'text-amber-500 fill-amber-500' : 'text-slate-300 dark:text-slate-600'
+                              }`}
+                            />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1041,67 +1308,202 @@ export function WebmailClient({
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Message Header Action Bar */}
               <div className="h-14 px-6 border-b border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-900/40 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Reply */}
                   <button
+                    type="button"
                     onClick={() => handleOpenReplyModal(activeMessage)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-surface-700 transition shadow-xs"
-                    title="Reply"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                    title="Reply to sender"
                   >
                     <Reply className="w-3.5 h-3.5 text-indigo-500" />
                     <span>Reply</span>
                   </button>
 
+                  {/* Forward */}
                   <button
+                    type="button"
                     onClick={() => handleOpenForwardModal(activeMessage)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-surface-700 transition shadow-xs"
-                    title="Forward"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                    title="Forward email"
                   >
                     <Forward className="w-3.5 h-3.5 text-indigo-500" />
                     <span>Forward</span>
                   </button>
 
+                  {/* Dedicated Mark Dropdown Button */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowMarkDropdown((prev) => !prev)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                      title="Mark options"
+                    >
+                      <Bookmark className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>Mark</span>
+                      <ChevronDown className="w-3 h-3 text-slate-400" />
+                    </button>
+
+                    {showMarkDropdown && (
+                      <div
+                        className="absolute top-full left-0 mt-1 w-48 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-750 rounded-xl shadow-xl py-1 z-30 animate-fadeIn"
+                        onMouseLeave={() => setShowMarkDropdown(false)}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleToggleRead(activeMessage.id, Boolean(activeMessage.is_read));
+                            setShowMarkDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 font-medium"
+                        >
+                          {activeMessage.is_read ? (
+                            <>
+                              <Mail className="w-3.5 h-3.5 text-blue-500" />
+                              <span>Mark as Unread</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                              <span>Mark as Read</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            handleToggleStar(e, activeMessage.id, Boolean(activeMessage.is_starred));
+                            setShowMarkDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 font-medium"
+                        >
+                          <Star className={`w-3.5 h-3.5 ${activeMessage.is_starred ? 'text-amber-500 fill-amber-500' : 'text-slate-400'}`} />
+                          <span>{activeMessage.is_starred ? 'Remove Star' : 'Mark as Starred'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleMoveFolder(activeMessage.id, 'archive');
+                            setShowMarkDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 font-medium"
+                        >
+                          <Archive className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Move to Archive</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleMoveFolder(activeMessage.id, 'spam');
+                            setShowMarkDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 font-medium"
+                        >
+                          <AlertOctagon className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Mark as Spam</span>
+                        </button>
+
+                        <div className="border-t border-slate-100 dark:border-surface-800 my-1" />
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (activeMessage.folder === 'trash') {
+                              handlePermanentDelete(activeMessage.id);
+                            } else {
+                              handleMoveFolder(activeMessage.id, 'trash');
+                            }
+                            setShowMarkDropdown(false);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-medium"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>{activeMessage.folder === 'trash' ? 'Delete Permanently' : 'Move to Trash'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Direct Toggle Read / Unread Button */}
                   <button
+                    type="button"
                     onClick={() => handleToggleRead(activeMessage.id, Boolean(activeMessage.is_read))}
-                    className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
                     title={activeMessage.is_read ? 'Mark as Unread' : 'Mark as Read'}
                   >
-                    <CheckCheck className="w-3.5 h-3.5" />
+                    {activeMessage.is_read ? (
+                      <>
+                        <Mail className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Mark Unread</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCheck className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>Mark Read</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Direct Toggle Star Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleStar(e, activeMessage.id, Boolean(activeMessage.is_starred))}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition shadow-xs ${
+                      activeMessage.is_starred
+                        ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                        : 'bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-surface-700'
+                    }`}
+                    title={activeMessage.is_starred ? 'Unstar message' : 'Star message'}
+                  >
+                    <Star className={`w-3.5 h-3.5 ${activeMessage.is_starred ? 'text-amber-500 fill-amber-500' : 'text-slate-400'}`} />
+                    <span>{activeMessage.is_starred ? 'Starred' : 'Star'}</span>
                   </button>
 
                   {/* Move to Archive */}
                   <button
+                    type="button"
                     onClick={() => handleMoveFolder(activeMessage.id, 'archive')}
-                    className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 text-xs border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
                     title="Move to Archive"
                   >
-                    <Archive className="w-3.5 h-3.5" />
+                    <Archive className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Archive</span>
                   </button>
 
                   {/* Move to Spam */}
                   <button
+                    type="button"
                     onClick={() => handleMoveFolder(activeMessage.id, 'spam')}
-                    className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-slate-600 dark:text-slate-300 hover:text-rose-600 text-xs border border-slate-200 dark:border-surface-700 transition shadow-xs"
-                    title="Mark as Spam / Junk"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-slate-700 dark:text-slate-200 hover:text-rose-600 text-xs font-semibold border border-slate-200 dark:border-surface-700 transition shadow-xs"
+                    title="Report as Spam"
                   >
-                    <AlertOctagon className="w-3.5 h-3.5" />
+                    <AlertOctagon className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Spam</span>
                   </button>
 
-                  {/* Trash / Delete */}
+                  {/* Trash / Delete Button (Prominent & Clear) */}
                   {activeMessage.folder === 'trash' ? (
                     <button
+                      type="button"
                       onClick={() => handlePermanentDelete(activeMessage.id)}
-                      className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-rose-500/20 text-rose-600 text-xs border border-rose-300 dark:border-rose-900 transition shadow-xs"
-                      title="Delete Permanently"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold shadow-md shadow-rose-600/25 transition active:scale-95"
+                      title="Permanently delete this email"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Permanently</span>
                     </button>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => handleMoveFolder(activeMessage.id, 'trash')}
-                      className="p-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-slate-600 dark:text-slate-300 hover:text-rose-600 text-xs border border-slate-200 dark:border-surface-700 transition shadow-xs"
-                      title="Move to Trash"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 text-xs font-bold border border-rose-200 dark:border-rose-800/80 transition shadow-xs active:scale-95"
+                      title="Move this email to trash"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                      <span>Delete</span>
                     </button>
                   )}
                 </div>
@@ -1232,7 +1634,13 @@ export function WebmailClient({
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={`Reply to ${activeMessage.from_name || activeMessage.from_email}...`}
+                    placeholder={`Reply to ${
+                      currentFolder === 'sent'
+                        ? (Array.isArray(activeMessage.to_addresses) && activeMessage.to_addresses.length > 0
+                            ? activeMessage.to_addresses[0]
+                            : activeMessage.to_email || activeMessage.from_email)
+                        : (activeMessage.from_name || activeMessage.from_email)
+                    }...`}
                     value={quickReplyText}
                     onChange={(e) => setQuickReplyText(e.target.value)}
                     onKeyDown={(e) => {

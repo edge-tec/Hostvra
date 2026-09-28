@@ -65,12 +65,14 @@ type SendWebmailMessageRequest struct {
 
 type UpdateMessageFlagsRequest struct {
 	IsUnread    *bool `json:"is_unread,omitempty"`
+	IsRead      *bool `json:"is_read,omitempty"`
 	IsStarred   *bool `json:"is_starred,omitempty"`
 	IsImportant *bool `json:"is_important,omitempty"`
 }
 
 type MoveMessageRequest struct {
 	TargetFolder string `json:"target_folder"` // inbox, sent, drafts, trash, spam, archive
+	Folder       string `json:"folder"`
 }
 
 type WebmailAuthRequest struct {
@@ -588,12 +590,21 @@ func (h *WebmailHandler) UpdateMessageFlags(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.store.UpdateWebmailMessageFlags(r.Context(), msgID, req.IsUnread, req.IsStarred, req.IsImportant); err != nil {
+	isUnread := req.IsUnread
+	if req.IsRead != nil && isUnread == nil {
+		val := !(*req.IsRead)
+		isUnread = &val
+	}
+
+	if err := h.store.UpdateWebmailMessageFlags(r.Context(), msgID, isUnread, req.IsStarred, req.IsImportant); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update flags", nil, "")
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]string{"message": "Flags updated successfully"}, nil)
+	// Fetch updated message to return
+	updatedMsg, _ := h.store.GetWebmailMessageByID(r.Context(), msgID)
+
+	response.JSON(w, http.StatusOK, updatedMsg, nil)
 }
 
 func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
@@ -604,12 +615,21 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req MoveMessageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetFolder == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
+		return
+	}
+
+	targetFolder := strings.ToLower(strings.TrimSpace(req.TargetFolder))
+	if targetFolder == "" {
+		targetFolder = strings.ToLower(strings.TrimSpace(req.Folder))
+	}
+	if targetFolder == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Target folder required", nil, "")
 		return
 	}
 
-	switch req.TargetFolder {
+	switch targetFolder {
 	case "inbox", "sent", "drafts", "trash", "spam", "archive":
 	default:
 		response.Error(w, http.StatusBadRequest, "INVALID_FOLDER", "Invalid destination folder", nil, "")
@@ -625,16 +645,20 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 		msgIdentifier = existing.MessageID
 	}
 
-	if err := h.store.MoveWebmailMessage(r.Context(), msgID, req.TargetFolder); err != nil {
+	if err := h.store.MoveWebmailMessage(r.Context(), msgID, targetFolder); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to move message", nil, "")
 		return
 	}
 
 	if msgAccount != "" && msgIdentifier != "" && srcFolder != "" {
-		moveMaildirFile(msgAccount, msgIdentifier, srcFolder, req.TargetFolder)
+		moveMaildirFile(msgAccount, msgIdentifier, srcFolder, targetFolder)
 	}
 
-	response.JSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Message moved to %s", req.TargetFolder)}, nil)
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message":       fmt.Sprintf("Message moved to %s", targetFolder),
+		"target_folder": targetFolder,
+		"folder":        targetFolder,
+	}, nil)
 }
 
 func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -646,7 +670,7 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 
 	if existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID); err == nil && existing != nil {
 		if existing.Folder == "trash" {
-			moveMaildirFile(existing.AccountEmail, existing.MessageID, "trash", "")
+			moveMaildirFile(existing.AccountEmail, existing.MessageID, "trash", "delete")
 		} else {
 			moveMaildirFile(existing.AccountEmail, existing.MessageID, existing.Folder, "trash")
 		}

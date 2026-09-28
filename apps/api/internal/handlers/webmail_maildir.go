@@ -469,6 +469,11 @@ func moveMaildirFile(email, messageID, sourceFolder, targetFolder string) {
 		return
 	}
 
+	if targetFolder == "" || targetFolder == "delete" {
+		_ = os.Remove(foundPath)
+		return
+	}
+
 	destDirs := getSubdirCandidates(mbDir, targetFolder)
 	if len(destDirs) == 0 {
 		return
