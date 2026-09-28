@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"hostvra/agent/pkg/ftp"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -51,6 +53,62 @@ type UpdateFTPUserRequest struct {
 	DownloadBandwidth int    `json:"download_bandwidth_kbps"`
 }
 
+// ----------------------------------------------------------------------------
+// TENANT ISOLATION HELPERS
+// ----------------------------------------------------------------------------
+
+// getTenantAllowedPaths returns the set of filesystem paths owned by the authenticated tenant.
+func (h *FTPHandler) getTenantAllowedPaths(r *http.Request) []string {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return nil // nil = unrestricted (superadmin)
+	}
+
+	var paths []string
+	websites, _ := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
+	for _, w := range websites {
+		if w != nil && w.DocumentRoot != "" {
+			paths = append(paths, w.DocumentRoot)
+		}
+		if w != nil && w.PrimaryDomain != "" {
+			paths = append(paths, "/var/www/"+w.PrimaryDomain)
+		}
+	}
+	return paths
+}
+
+// isTenantPath checks if a path is within any of the tenant's allowed directories.
+func (h *FTPHandler) isTenantPath(homeDir string, allowedPaths []string) bool {
+	if allowedPaths == nil {
+		return true // superadmin has no restrictions
+	}
+	for _, p := range allowedPaths {
+		if strings.HasPrefix(homeDir, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyFTPUserOwnership checks whether the FTP user's home directory belongs to the caller's tenant.
+func (h *FTPHandler) verifyFTPUserOwnership(r *http.Request, username string) error {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return nil
+	}
+
+	user, err := h.ftpMgr.GetUser(username)
+	if err != nil {
+		return errors.New("FTP user not found")
+	}
+
+	allowedPaths := h.getTenantAllowedPaths(r)
+	if !h.isTenantPath(user.HomeDir, allowedPaths) {
+		return errors.New("FTP user does not belong to your organization")
+	}
+	return nil
+}
+
 // GetStatus checks daemon operational state
 func (h *FTPHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := h.ftpMgr.GetStatus()
@@ -61,20 +119,33 @@ func (h *FTPHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, status, nil)
 }
 
-// ListUsers retrieves all FTP virtual accounts
+// ListUsers retrieves FTP virtual accounts scoped to the tenant's websites
 func (h *FTPHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.ftpMgr.ListUsers()
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "FTP_LIST_ERROR", err.Error(), nil, "")
 		return
 	}
+
+	// Filter to only show FTP users within the tenant's allowed paths
+	allowedPaths := h.getTenantAllowedPaths(r)
+	if allowedPaths != nil {
+		var filtered []ftp.FTPUser
+		for _, u := range users {
+			if h.isTenantPath(u.HomeDir, allowedPaths) {
+				filtered = append(filtered, u)
+			}
+		}
+		users = filtered
+	}
+
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"users": users,
 		"count": len(users),
 	}, nil)
 }
 
-// CreateUser registers a new FTP virtual user
+// CreateUser registers a new FTP virtual user with tenant path validation
 func (h *FTPHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateFTPUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -84,6 +155,13 @@ func (h *FTPHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if req.Username == "" || req.Password == "" || req.HomeDir == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_FIELDS", "Username, password, and home directory are required", nil, "")
+		return
+	}
+
+	// Validate that the home directory is within the tenant's allowed paths
+	allowedPaths := h.getTenantAllowedPaths(r)
+	if !h.isTenantPath(req.HomeDir, allowedPaths) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Home directory does not belong to your organization's websites", nil, "")
 		return
 	}
 
@@ -116,11 +194,16 @@ func (h *FTPHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, user, nil)
 }
 
-// ChangePassword updates user password
+// ChangePassword updates user password with tenant ownership check
 func (h *FTPHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "username")
 	if username == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_USERNAME", "Username is required", nil, "")
+		return
+	}
+
+	if err := h.verifyFTPUserOwnership(r, username); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -153,7 +236,7 @@ func (h *FTPHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// UpdateUser modifies home dir, quota, and bandwidth
+// UpdateUser modifies home dir, quota, and bandwidth with tenant ownership check
 func (h *FTPHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "username")
 	if username == "" {
@@ -161,10 +244,24 @@ func (h *FTPHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyFTPUserOwnership(r, username); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	var req UpdateFTPUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON request body", nil, "")
 		return
+	}
+
+	// If updating home dir, ensure it's within tenant paths
+	if req.HomeDir != "" {
+		allowedPaths := h.getTenantAllowedPaths(r)
+		if !h.isTenantPath(req.HomeDir, allowedPaths) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "New home directory does not belong to your organization's websites", nil, "")
+			return
+		}
 	}
 
 	err := h.ftpMgr.UpdateUser(
@@ -194,11 +291,16 @@ func (h *FTPHandler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// DeleteUser removes an FTP user
+// DeleteUser removes an FTP user with tenant ownership check
 func (h *FTPHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "username")
 	if username == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_USERNAME", "Username is required", nil, "")
+		return
+	}
+
+	if err := h.verifyFTPUserOwnership(r, username); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -220,11 +322,16 @@ func (h *FTPHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// ToggleUser enables or disables an FTP user
+// ToggleUser enables or disables an FTP user with tenant ownership check
 func (h *FTPHandler) ToggleUser(w http.ResponseWriter, r *http.Request) {
 	username := chi.URLParam(r, "username")
 	if username == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_USERNAME", "Username is required", nil, "")
+		return
+	}
+
+	if err := h.verifyFTPUserOwnership(r, username); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -244,3 +351,4 @@ func (h *FTPHandler) ToggleUser(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, target, nil)
 }
+

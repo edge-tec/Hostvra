@@ -258,6 +258,21 @@ func (fm *FTPManager) CreateUser(username, password, homeDir string, quotaMB, up
 	return &newUser, nil
 }
 
+// GetUser retrieves a specific FTP user by username
+func (fm *FTPManager) GetUser(username string) (*FTPUser, error) {
+	users, err := fm.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	for _, u := range users {
+		if strings.EqualFold(u.Username, username) {
+			userCopy := u
+			return &userCopy, nil
+		}
+	}
+	return nil, ErrUserNotFound
+}
+
 // ChangePassword updates an FTP user's password
 func (fm *FTPManager) ChangePassword(username, newPassword string) error {
 	if len(newPassword) < 6 {

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -55,6 +56,50 @@ func NewEmailHandler(cfg *config.Config, s store.Store, d *dns.Service, a *audit
 
 func (h *EmailHandler) SetQuotaService(q *quota.Service) {
 	h.quotaSvc = q
+}
+
+// ----------------------------------------------------------------------------
+// TENANT ISOLATION HELPERS
+// ----------------------------------------------------------------------------
+
+// verifyMailServerOwnership ensures the mail server belongs to the caller's organization.
+func (h *EmailHandler) verifyMailServerOwnership(r *http.Request, server *store.MailServer) error {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return nil
+	}
+	if server.OrganizationID != claims.OrganizationID {
+		return errors.New("mail server does not belong to your organization")
+	}
+	return nil
+}
+
+// verifyDomainOwnership ensures the email domain belongs to the caller's organization.
+func (h *EmailHandler) verifyDomainOwnership(r *http.Request, domain *store.EmailDomain) error {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return nil
+	}
+	if domain.OrganizationID != claims.OrganizationID {
+		return errors.New("email domain does not belong to your organization")
+	}
+	return nil
+}
+
+// verifyMailboxOwnership ensures the mailbox's parent domain belongs to the caller's organization.
+func (h *EmailHandler) verifyMailboxOwnership(r *http.Request, mb *store.EmailMailbox) error {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return nil
+	}
+	domain, err := h.store.GetEmailDomainByID(r.Context(), mb.DomainID)
+	if err != nil {
+		return errors.New("failed to verify mailbox ownership")
+	}
+	if domain.OrganizationID != claims.OrganizationID {
+		return errors.New("mailbox does not belong to your organization")
+	}
+	return nil
 }
 
 // ----------------------------------------------------------------------------
@@ -471,6 +516,11 @@ func (h *EmailHandler) GetMailServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyMailServerOwnership(r, server); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	response.JSON(w, http.StatusOK, server, nil)
 }
 
@@ -484,6 +534,11 @@ func (h *EmailHandler) UpdateMailServer(w http.ResponseWriter, r *http.Request) 
 	server, err := h.store.GetMailServerByID(r.Context(), id)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mail server not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailServerOwnership(r, server); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -573,6 +628,11 @@ func (h *EmailHandler) DeleteMailServer(w http.ResponseWriter, r *http.Request) 
 	server, err := h.store.GetMailServerByID(r.Context(), id)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mail server not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailServerOwnership(r, server); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -918,6 +978,11 @@ func (h *EmailHandler) GetDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
 
 	data := map[string]interface{}{
@@ -938,6 +1003,11 @@ func (h *EmailHandler) DeleteDomain(w http.ResponseWriter, r *http.Request) {
 	domain, err := h.store.GetEmailDomainByID(r.Context(), domainID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -966,6 +1036,11 @@ func (h *EmailHandler) GenerateDKIM(w http.ResponseWriter, r *http.Request) {
 	domain, err := h.store.GetEmailDomainByID(r.Context(), domainID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1074,6 +1149,11 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	serverIP, err := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
 	if err != nil || !iputil.IsPublicIPv4(serverIP) {
 		response.Error(w, http.StatusUnprocessableEntity, "NO_PUBLIC_IP", "No valid public IPv4 address detected for mail server. Localhost (127.0.0.1) and private network IPs cannot be used for public email delivery. Please configure your public IP under Settings -> Mail Server Public IP.", nil, "")
@@ -1176,6 +1256,11 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 	domain, err := h.store.GetEmailDomainByID(r.Context(), domainID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1424,6 +1509,11 @@ func (h *EmailHandler) CreateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	localPart := strings.ToLower(strings.TrimSpace(req.LocalPart))
 	if localPart == "" || strings.ContainsAny(localPart, " @:;/\\") {
 		response.Error(w, http.StatusBadRequest, "INVALID_LOCAL_PART", "Invalid username/local-part for email address", nil, "")
@@ -1491,6 +1581,11 @@ func (h *EmailHandler) GetMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	ar, _ := h.store.GetEmailAutoresponderByMailbox(r.Context(), mb.ID)
 	sig, _ := h.store.GetEmailSignature(r.Context(), mb.ID)
 
@@ -1513,6 +1608,11 @@ func (h *EmailHandler) UpdateMailbox(w http.ResponseWriter, r *http.Request) {
 	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1556,6 +1656,11 @@ func (h *EmailHandler) ChangeMailboxPassword(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	var req ChangeMailboxPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 8 {
 		response.Error(w, http.StatusBadRequest, "WEAK_PASSWORD", "Password must be at least 8 characters long", nil, "")
@@ -1591,6 +1696,11 @@ func (h *EmailHandler) DeleteMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.store.DeleteEmailMailbox(r.Context(), mbID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete mailbox", nil, "")
 		return
@@ -1622,6 +1732,11 @@ func (h *EmailHandler) TestMailbox(w http.ResponseWriter, r *http.Request) {
 	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -1736,6 +1851,11 @@ func (h *EmailHandler) GetDomainHealth(w http.ResponseWriter, r *http.Request) {
 	domain, err := h.store.GetEmailDomainByID(r.Context(), domID)
 	if err != nil || domain == nil {
 		response.Error(w, http.StatusNotFound, "DOMAIN_NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -2066,6 +2186,17 @@ func (h *EmailHandler) ListAliases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify domain ownership before listing aliases
+	domain, dErr := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if dErr != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	aliases, err := h.store.ListEmailAliasesByDomain(r.Context(), domainID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve aliases", nil, "")
@@ -2088,6 +2219,17 @@ func (h *EmailHandler) CreateAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify domain ownership before creating alias
+	domain, dErr := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if dErr != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	alias := &store.EmailAlias{
 		DomainID:            domainID,
 		SourceAddress:       strings.ToLower(strings.TrimSpace(req.SourceAddress)),
@@ -2103,7 +2245,7 @@ func (h *EmailHandler) CreateAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domain, _ := h.store.GetEmailDomainByID(r.Context(), domainID)
+	domain, _ = h.store.GetEmailDomainByID(r.Context(), domainID)
 	if domain != nil {
 		h.syncPostfixMaps(r.Context(), domain.ServerID)
 	}
@@ -2138,6 +2280,17 @@ func (h *EmailHandler) ListForwarders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify domain ownership before listing forwarders
+	domain, dErr := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if dErr != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	fwdList, err := h.store.ListEmailForwardersByDomain(r.Context(), domainID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve forwarders", nil, "")
@@ -2157,6 +2310,17 @@ func (h *EmailHandler) CreateForwarder(w http.ResponseWriter, r *http.Request) {
 	domainID, err := uuid.Parse(req.DomainID)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_DOMAIN_ID", "Invalid domain UUID", nil, "")
+		return
+	}
+
+	// Verify domain ownership before creating forwarder
+	domain, dErr := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if dErr != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -2181,7 +2345,7 @@ func (h *EmailHandler) CreateForwarder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domain, _ := h.store.GetEmailDomainByID(r.Context(), domainID)
+	domain, _ = h.store.GetEmailDomainByID(r.Context(), domainID)
 	if domain != nil {
 		h.syncPostfixMaps(r.Context(), domain.ServerID)
 	}
@@ -2585,6 +2749,11 @@ func (h *EmailHandler) ToggleMailboxSuspended(w http.ResponseWriter, r *http.Req
 	mb, err := h.store.GetEmailMailboxByID(r.Context(), mailboxID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
