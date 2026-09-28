@@ -1221,9 +1221,30 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	recordStatus := "pending"
-	if domain.IsDNSVerified {
-		recordStatus = "pass"
+	dnsCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	auditReport := health.AuditDomainDNSWithExpected(dnsCtx, domain.Domain, selector, serverIP, dkimPub)
+
+	mxValid := auditReport.MX.Status == "pass"
+	aValid := auditReport.ForwardDNS.Status == "pass"
+	spfValid := auditReport.SPF.Status == "pass"
+	dkimValid := auditReport.DKIM.Status == "pass"
+	dmarcValid := auditReport.DMARC.Status == "pass"
+
+	mapStatus := func(valid bool, currentStatus string) string {
+		if valid {
+			return "verified"
+		}
+		if currentStatus == "fail" {
+			return "failed"
+		}
+		return "pending"
+	}
+
+	allVerified := mxValid && aValid && spfValid && dkimValid && (dmarcValid || auditReport.DMARC.Status != "fail")
+	if allVerified != domain.IsDNSVerified {
+		_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, allVerified)
+		domain.IsDNSVerified = allVerified
 	}
 
 	records := []store.DNSVerificationResult{
@@ -1231,49 +1252,56 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 			RecordType: "MX",
 			Host:       "@",
 			Expected:   fmt.Sprintf("10 %s.", domain.MailHostname),
-			Status:     recordStatus,
+			Current:    auditReport.MX.Current,
+			Status:     mapStatus(mxValid, auditReport.MX.Status),
 			Message:    "Primary MX routing record for Postfix MTA",
 		},
 		{
 			RecordType: "A",
 			Host:       "mail",
 			Expected:   serverIP,
-			Status:     recordStatus,
+			Current:    auditReport.ForwardDNS.Current,
+			Status:     mapStatus(aValid, auditReport.ForwardDNS.Status),
 			Message:    "Primary mail server address",
 		},
 		{
 			RecordType: "TXT",
 			Host:       "@",
 			Expected:   fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP),
-			Status:     recordStatus,
+			Current:    auditReport.SPF.Current,
+			Status:     mapStatus(spfValid, auditReport.SPF.Status),
 			Message:    "Sender Policy Framework (SPF) authorizing server mail delivery",
 		},
 		{
 			RecordType: "TXT",
 			Host:       fmt.Sprintf("%s._domainkey", selector),
 			Expected:   dkimPub,
-			Status:     recordStatus,
+			Current:    auditReport.DKIM.Current,
+			Status:     mapStatus(dkimValid, auditReport.DKIM.Status),
 			Message:    "DomainKeys Identified Mail (DKIM 2048-bit RSA public signature)",
 		},
 		{
 			RecordType: "TXT",
 			Host:       "_dmarc",
 			Expected:   fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s", domain.Domain),
-			Status:     recordStatus,
+			Current:    auditReport.DMARC.Current,
+			Status:     mapStatus(dmarcValid, auditReport.DMARC.Status),
 			Message:    "DMARC email alignment policy and reporting",
 		},
 		{
 			RecordType: "CNAME",
 			Host:       "autoconfig",
 			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Status:     "pass",
+			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Status:     "verified",
 			Message:    "Mozilla Thunderbird / Webmail client auto-configuration",
 		},
 		{
 			RecordType: "CNAME",
 			Host:       "autodiscover",
 			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Status:     "pass",
+			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Status:     "verified",
 			Message:    "Microsoft Outlook and mobile mail auto-discovery",
 		},
 	}
@@ -1312,9 +1340,19 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	selector := domain.DKIMSelector
+	if selector == "" {
+		selector = "default"
+	}
+	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
+	dkimPub := ""
+	if dkimKey != nil && dkimKey.PublicKeyDNS != "" {
+		dkimPub = dkimKey.PublicKeyDNS
+	}
+
 	dnsCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	auditReport := health.AuditDomainDNSOnly(dnsCtx, domain.Domain, domain.DKIMSelector, serverIP)
+	auditReport := health.AuditDomainDNSWithExpected(dnsCtx, domain.Domain, selector, serverIP, dkimPub)
 
 	mxValid := auditReport.MX.Status == "pass"
 	aValid := auditReport.ForwardDNS.Status == "pass"
@@ -1333,20 +1371,8 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 	// All core DNS records required for authenticated email
 	allVerified := mxValid && aValid && spfValid && dkimValid && (dmarcValid || auditReport.DMARC.Status != "fail")
 
-	if allVerified {
-		_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, true)
-		domain.IsDNSVerified = true
-	}
-
-	selector := domain.DKIMSelector
-	if selector == "" {
-		selector = "default"
-	}
-	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
-	dkimPub := ""
-	if dkimKey != nil && dkimKey.PublicKeyDNS != "" {
-		dkimPub = dkimKey.PublicKeyDNS
-	}
+	_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, allVerified)
+	domain.IsDNSVerified = allVerified
 
 	mapStatus := func(valid bool, currentStatus string) string {
 		if valid {

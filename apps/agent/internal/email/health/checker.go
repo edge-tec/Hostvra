@@ -454,8 +454,73 @@ func TestRelayRejection(addr string, timeout time.Duration) (bool, error) {
 	return true, nil
 }
 
-// AuditDomainDNSOnly checks only DNS configuration (MX, A, SPF, DKIM, DMARC) with zero external TCP/TLS connection attempts.
-func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) *HealthAudit {
+func extractDKIMPublicKey(txt string) string {
+	cleaned := strings.ReplaceAll(txt, " ", "")
+	cleaned = strings.ReplaceAll(cleaned, "\t", "")
+	cleaned = strings.ReplaceAll(cleaned, "\n", "")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+	cleaned = strings.ReplaceAll(cleaned, "\"", "")
+	cleaned = strings.ReplaceAll(cleaned, "'", "")
+
+	for _, part := range strings.Split(cleaned, ";") {
+		if strings.HasPrefix(part, "p=") {
+			return strings.TrimPrefix(part, "p=")
+		}
+	}
+	return cleaned
+}
+
+func getPublicResolver() *net.Resolver {
+	return &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 2 * time.Second}
+			conn, err := d.DialContext(ctx, "udp", "1.1.1.1:53")
+			if err != nil {
+				conn, err = d.DialContext(ctx, "udp", "8.8.8.8:53")
+			}
+			return conn, err
+		},
+	}
+}
+
+func lookupTXTWithFallback(ctx context.Context, host string) ([]string, error) {
+	txts, err := net.DefaultResolver.LookupTXT(ctx, host)
+	if err == nil && len(txts) > 0 {
+		return txts, nil
+	}
+	publicRes := getPublicResolver()
+	pTxts, pErr := publicRes.LookupTXT(ctx, host)
+	if pErr == nil && len(pTxts) > 0 {
+		return pTxts, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return pTxts, pErr
+}
+
+func lookupMXWithFallback(ctx context.Context, host string) ([]*net.MX, error) {
+	mxs, err := net.DefaultResolver.LookupMX(ctx, host)
+	if err == nil && len(mxs) > 0 {
+		return mxs, nil
+	}
+	publicRes := getPublicResolver()
+	return publicRes.LookupMX(ctx, host)
+}
+
+func lookupIPWithFallback(ctx context.Context, host string) ([]net.IP, error) {
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", host)
+	if err == nil && len(ips) > 0 {
+		return ips, nil
+	}
+	publicRes := getPublicResolver()
+	return publicRes.LookupIP(ctx, "ip4", host)
+}
+
+// AuditDomainDNSWithExpected checks only DNS configuration (MX, A, SPF, DKIM, DMARC) with zero external TCP/TLS connection attempts,
+// and cryptographically compares the DKIM public key published in DNS against the active server key.
+func AuditDomainDNSWithExpected(ctx context.Context, domain, selector, serverIP, expectedDKIMPub string) *HealthAudit {
 	if selector == "" {
 		selector = "default"
 	}
@@ -484,10 +549,8 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 		},
 	}
 
-	resolver := net.DefaultResolver
-
 	// 1. Check MX Records
-	mxRecords, err := resolver.LookupMX(ctx, domain)
+	mxRecords, err := lookupMXWithFallback(ctx, domain)
 	if err != nil || len(mxRecords) == 0 {
 		audit.MX = CheckResult{
 			Status:   "fail",
@@ -517,7 +580,7 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 
 	// 2. Check Forward DNS (A/AAAA for mail hostname)
 	var resolvedMailIPs []string
-	ips, err := resolver.LookupIP(ctx, "ip4", mailHostname)
+	ips, err := lookupIPWithFallback(ctx, mailHostname)
 	if err == nil && len(ips) > 0 {
 		for _, ip := range ips {
 			resolvedMailIPs = append(resolvedMailIPs, ip.String())
@@ -541,10 +604,9 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 				Current:  strings.Join(resolvedMailIPs, ", "),
 			}
 		} else {
-			// If it resolves to any IPv4, still accept with pass if IP matches or warn
 			audit.ForwardDNS = CheckResult{
-				Status:   "pass",
-				Details:  fmt.Sprintf("Mail hostname '%s' resolves to %s", mailHostname, strings.Join(resolvedMailIPs, ", ")),
+				Status:   "warn",
+				Details:  fmt.Sprintf("Mail hostname '%s' resolves to %s (expected %s)", mailHostname, strings.Join(resolvedMailIPs, ", "), serverIP),
 				Expected: serverIP,
 				Current:  strings.Join(resolvedMailIPs, ", "),
 			}
@@ -566,7 +628,7 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 	}
 
 	// 3. Check SPF Record
-	txtRecords, err := resolver.LookupTXT(ctx, domain)
+	txtRecords, err := lookupTXTWithFallback(ctx, domain)
 	var spfRecords []string
 	if err == nil {
 		for _, txt := range txtRecords {
@@ -583,7 +645,7 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 
 	if len(spfRecords) == 0 {
 		audit.SPF = CheckResult{
-			Status:   "warn",
+			Status:   "fail",
 			Details:  "No SPF record detected. Major mail providers (Gmail, Yahoo, Outlook) may mark outbound mail as spam.",
 			Expected: expectedSPF,
 			Current:  "None",
@@ -636,10 +698,12 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 
 	// 4. Check DKIM Record
 	dkimHost := fmt.Sprintf("%s._domainkey.%s", selector, domain)
-	dkimTxts, err := resolver.LookupTXT(ctx, dkimHost)
+	dkimTxts, err := lookupTXTWithFallback(ctx, dkimHost)
+	expectedKey := extractDKIMPublicKey(expectedDKIMPub)
+
 	if err != nil || len(dkimTxts) == 0 {
 		audit.DKIM = CheckResult{
-			Status:   "warn",
+			Status:   "fail",
 			Details:  fmt.Sprintf("DKIM selector record not found at %s. Outbound signatures cannot be validated by receivers.", dkimHost),
 			Expected: fmt.Sprintf("%s IN TXT \"v=DKIM1; k=rsa; p=...\"", dkimHost),
 			Current:  "None",
@@ -652,17 +716,53 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 		})
 		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Publish DKIM TXT record at %s", dkimHost))
 	} else {
-		audit.DKIM = CheckResult{
-			Status:   "pass",
-			Details:  fmt.Sprintf("DKIM public key published at %s", dkimHost),
-			Expected: "v=DKIM1; k=rsa; p=...",
-			Current:  dkimTxts[0],
+		foundDKIM := strings.Join(dkimTxts, "")
+		foundKey := extractDKIMPublicKey(foundDKIM)
+
+		if expectedKey != "" {
+			if foundKey == expectedKey {
+				audit.DKIM = CheckResult{
+					Status:   "pass",
+					Details:  fmt.Sprintf("DKIM 2048-bit RSA public key at %s matches active server signing key.", dkimHost),
+					Expected: expectedDKIMPub,
+					Current:  foundDKIM,
+				}
+			} else {
+				audit.DKIM = CheckResult{
+					Status:   "fail",
+					Details:  fmt.Sprintf("DKIM public key in DNS does NOT match the active server private key! Outbound emails will fail DKIM verification at Gmail/Yahoo."),
+					Expected: expectedDKIMPub,
+					Current:  foundDKIM,
+				}
+				audit.Deductions = append(audit.Deductions, Deduction{
+					Item:    "DKIM Key Mismatch",
+					Points:  20,
+					Reason:  "The public key published in DNS does not match the private key on the mail server.",
+					FixHint: fmt.Sprintf("Update DNS TXT record at %s with the exact public key displayed in Hostvra.", dkimHost),
+				})
+			}
+		} else {
+			if len(foundKey) > 100 {
+				audit.DKIM = CheckResult{
+					Status:   "pass",
+					Details:  fmt.Sprintf("DKIM public key published at %s", dkimHost),
+					Expected: "v=DKIM1; k=rsa; p=...",
+					Current:  foundDKIM,
+				}
+			} else {
+				audit.DKIM = CheckResult{
+					Status:   "fail",
+					Details:  fmt.Sprintf("DKIM record at %s found but public key (p=) is invalid or too short.", dkimHost),
+					Expected: "v=DKIM1; k=rsa; p=...",
+					Current:  foundDKIM,
+				}
+			}
 		}
 	}
 
 	// 5. Check DMARC Record
 	dmarcHost := fmt.Sprintf("_dmarc.%s", domain)
-	dmarcTxts, err := resolver.LookupTXT(ctx, dmarcHost)
+	dmarcTxts, err := lookupTXTWithFallback(ctx, dmarcHost)
 	if err != nil || len(dmarcTxts) == 0 {
 		audit.DMARC = CheckResult{
 			Status:   "warn",
@@ -688,6 +788,11 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 
 	populateSummaryAndChecks(audit, domain, mailHostname, serverIP, selector)
 	return audit
+}
+
+// AuditDomainDNSOnly checks only DNS configuration (MX, A, SPF, DKIM, DMARC) with zero external TCP/TLS connection attempts.
+func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) *HealthAudit {
+	return AuditDomainDNSWithExpected(ctx, domain, selector, serverIP, "")
 }
 
 func populateSummaryAndChecks(audit *HealthAudit, domain, mailHostname, serverIP, selector string) {
