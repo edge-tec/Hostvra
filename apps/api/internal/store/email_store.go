@@ -1004,6 +1004,231 @@ func (m *MemoryStore) ListWebmailAttachments(ctx context.Context, messageID uuid
 	return list, nil
 }
 
+func (m *MemoryStore) GetWebmailAttachmentByID(ctx context.Context, id uuid.UUID) (*WebmailAttachment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	att, ok := m.webmailAttachments[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	res := *att
+	return &res, nil
+}
+
+// Webmail Filters
+func (m *MemoryStore) ListMailFilters(ctx context.Context, mailboxID uuid.UUID) ([]*MailFilter, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	list := make([]*MailFilter, 0)
+	for _, f := range m.mailFilters {
+		if f.MailboxID == mailboxID {
+			res := *f
+			list = append(list, &res)
+		}
+	}
+	return list, nil
+}
+
+func (m *MemoryStore) GetMailFilterByID(ctx context.Context, id uuid.UUID) (*MailFilter, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	f, ok := m.mailFilters[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	res := *f
+	return &res, nil
+}
+
+func (m *MemoryStore) CreateMailFilter(ctx context.Context, filter *MailFilter) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if filter.ID == uuid.Nil {
+		filter.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	filter.CreatedAt = now
+	filter.UpdatedAt = now
+	m.mailFilters[filter.ID] = filter
+	return nil
+}
+
+func (m *MemoryStore) UpdateMailFilter(ctx context.Context, filter *MailFilter) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	filter.UpdatedAt = time.Now().UTC()
+	m.mailFilters[filter.ID] = filter
+	return nil
+}
+
+func (m *MemoryStore) DeleteMailFilter(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mailFilters, id)
+	return nil
+}
+
+// Webmail Contacts
+func (m *MemoryStore) ListMailContacts(ctx context.Context, mailboxID uuid.UUID, search string) ([]*MailContact, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	search = strings.ToLower(strings.TrimSpace(search))
+	list := make([]*MailContact, 0)
+	for _, c := range m.mailContacts {
+		if c.MailboxID == mailboxID {
+			if search != "" {
+				if !strings.Contains(strings.ToLower(c.Name), search) &&
+					!strings.Contains(strings.ToLower(c.Email), search) &&
+					!strings.Contains(strings.ToLower(c.Company), search) {
+					continue
+				}
+			}
+			res := *c
+			list = append(list, &res)
+		}
+	}
+	return list, nil
+}
+
+func (m *MemoryStore) GetMailContactByID(ctx context.Context, id uuid.UUID) (*MailContact, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	c, ok := m.mailContacts[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	res := *c
+	return &res, nil
+}
+
+func (m *MemoryStore) CreateMailContact(ctx context.Context, contact *MailContact) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if contact.ID == uuid.Nil {
+		contact.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	contact.CreatedAt = now
+	contact.UpdatedAt = now
+	m.mailContacts[contact.ID] = contact
+	return nil
+}
+
+func (m *MemoryStore) UpdateMailContact(ctx context.Context, contact *MailContact) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	contact.UpdatedAt = time.Now().UTC()
+	m.mailContacts[contact.ID] = contact
+	return nil
+}
+
+func (m *MemoryStore) DeleteMailContact(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mailContacts, id)
+	return nil
+}
+
+// Webmail Identities & Preferences
+func (m *MemoryStore) ListMailIdentities(ctx context.Context, mailboxID uuid.UUID) ([]*MailIdentity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	list := make([]*MailIdentity, 0)
+	for _, iden := range m.mailIdentities {
+		if iden.MailboxID == mailboxID {
+			res := *iden
+			list = append(list, &res)
+		}
+	}
+	return list, nil
+}
+
+func (m *MemoryStore) SaveMailIdentity(ctx context.Context, identity *MailIdentity) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if identity.ID == uuid.Nil {
+		identity.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if identity.CreatedAt.IsZero() {
+		identity.CreatedAt = now
+	}
+	identity.UpdatedAt = now
+	m.mailIdentities[identity.ID] = identity
+	return nil
+}
+
+func (m *MemoryStore) DeleteMailIdentity(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mailIdentities, id)
+	return nil
+}
+
+func (m *MemoryStore) GetWebmailPreferences(ctx context.Context, mailboxID uuid.UUID) (*WebmailPreferences, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	prefs, ok := m.webmailPreferences[mailboxID]
+	if !ok {
+		return &WebmailPreferences{
+			MailboxID:            mailboxID,
+			Theme:                "system",
+			PageSize:             50,
+			SoundNotifications:   true,
+			DesktopNotifications: true,
+			AutoRefreshSeconds:   30,
+		}, nil
+	}
+	res := *prefs
+	return &res, nil
+}
+
+func (m *MemoryStore) SaveWebmailPreferences(ctx context.Context, prefs *WebmailPreferences) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now().UTC()
+	if prefs.CreatedAt.IsZero() {
+		prefs.CreatedAt = now
+	}
+	prefs.UpdatedAt = now
+	m.webmailPreferences[prefs.MailboxID] = prefs
+	return nil
+}
+
+// Webmail Forwarding Rules
+func (m *MemoryStore) GetMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) (*MailForwardingRule, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rule, ok := m.mailForwardingRules[mailboxID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	res := *rule
+	return &res, nil
+}
+
+func (m *MemoryStore) SaveMailForwardingRule(ctx context.Context, rule *MailForwardingRule) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if rule.ID == uuid.Nil {
+		rule.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if rule.CreatedAt.IsZero() {
+		rule.CreatedAt = now
+	}
+	rule.UpdatedAt = now
+	m.mailForwardingRules[rule.MailboxID] = rule
+	return nil
+}
+
+func (m *MemoryStore) DeleteMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.mailForwardingRules, mailboxID)
+	return nil
+}
+
 // ============================================================================
 // POSTGRES STORE EMAIL IMPLEMENTATION
 // ============================================================================
@@ -2403,5 +2628,384 @@ func (p *PostgresStore) ListWebmailAttachments(ctx context.Context, messageID uu
 		list = append(list, att)
 	}
 	return list, nil
+}
+
+func (p *PostgresStore) GetWebmailAttachmentByID(ctx context.Context, id uuid.UUID) (*WebmailAttachment, error) {
+	query := `
+		SELECT id, message_id, filename, content_type, size_bytes, storage_path, created_at
+		FROM webmail_attachments
+		WHERE id = $1
+	`
+	att := &WebmailAttachment{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&att.ID, &att.MessageID, &att.Filename, &att.ContentType, &att.SizeBytes, &att.StoragePath, &att.CreatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return att, nil
+}
+
+// Postgres Webmail Filters
+func (p *PostgresStore) ListMailFilters(ctx context.Context, mailboxID uuid.UUID) ([]*MailFilter, error) {
+	query := `
+		SELECT id, mailbox_id, name, field, predicate, value, action, action_value, is_active, priority, created_at, updated_at
+		FROM mail_filters
+		WHERE mailbox_id = $1
+		ORDER BY priority DESC, created_at ASC
+	`
+	rows, err := p.db.QueryContext(ctx, query, mailboxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*MailFilter, 0)
+	for rows.Next() {
+		f := &MailFilter{}
+		err := rows.Scan(
+			&f.ID, &f.MailboxID, &f.Name, &f.Field, &f.Predicate, &f.Value,
+			&f.Action, &f.ActionValue, &f.IsActive, &f.Priority, &f.CreatedAt, &f.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, f)
+	}
+	return list, nil
+}
+
+func (p *PostgresStore) GetMailFilterByID(ctx context.Context, id uuid.UUID) (*MailFilter, error) {
+	query := `
+		SELECT id, mailbox_id, name, field, predicate, value, action, action_value, is_active, priority, created_at, updated_at
+		FROM mail_filters
+		WHERE id = $1
+	`
+	f := &MailFilter{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&f.ID, &f.MailboxID, &f.Name, &f.Field, &f.Predicate, &f.Value,
+		&f.Action, &f.ActionValue, &f.IsActive, &f.Priority, &f.CreatedAt, &f.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return f, nil
+}
+
+func (p *PostgresStore) CreateMailFilter(ctx context.Context, filter *MailFilter) error {
+	if filter.ID == uuid.Nil {
+		filter.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	filter.CreatedAt = now
+	filter.UpdatedAt = now
+
+	query := `
+		INSERT INTO mail_filters (id, mailbox_id, name, field, predicate, value, action, action_value, is_active, priority, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		filter.ID, filter.MailboxID, filter.Name, filter.Field, filter.Predicate, filter.Value,
+		filter.Action, filter.ActionValue, filter.IsActive, filter.Priority, filter.CreatedAt, filter.UpdatedAt,
+	)
+	return err
+}
+
+func (p *PostgresStore) UpdateMailFilter(ctx context.Context, filter *MailFilter) error {
+	filter.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE mail_filters
+		SET name = $1, field = $2, predicate = $3, value = $4, action = $5, action_value = $6, is_active = $7, priority = $8, updated_at = $9
+		WHERE id = $10
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		filter.Name, filter.Field, filter.Predicate, filter.Value,
+		filter.Action, filter.ActionValue, filter.IsActive, filter.Priority, filter.UpdatedAt, filter.ID,
+	)
+	return err
+}
+
+func (p *PostgresStore) DeleteMailFilter(ctx context.Context, id uuid.UUID) error {
+	_, err := p.db.ExecContext(ctx, `DELETE FROM mail_filters WHERE id = $1`, id)
+	return err
+}
+
+// Postgres Webmail Contacts
+func (p *PostgresStore) ListMailContacts(ctx context.Context, mailboxID uuid.UUID, search string) ([]*MailContact, error) {
+	search = strings.TrimSpace(search)
+	var rows *sql.Rows
+	var err error
+	if search != "" {
+		pattern := "%" + strings.ToLower(search) + "%"
+		query := `
+			SELECT id, mailbox_id, name, email, phone, company, group_name, notes, is_favorite, created_at, updated_at
+			FROM mail_contacts
+			WHERE mailbox_id = $1 AND (LOWER(name) LIKE $2 OR LOWER(email) LIKE $2 OR LOWER(company) LIKE $2)
+			ORDER BY name ASC
+		`
+		rows, err = p.db.QueryContext(ctx, query, mailboxID, pattern)
+	} else {
+		query := `
+			SELECT id, mailbox_id, name, email, phone, company, group_name, notes, is_favorite, created_at, updated_at
+			FROM mail_contacts
+			WHERE mailbox_id = $1
+			ORDER BY name ASC
+		`
+		rows, err = p.db.QueryContext(ctx, query, mailboxID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*MailContact, 0)
+	for rows.Next() {
+		c := &MailContact{}
+		err := rows.Scan(
+			&c.ID, &c.MailboxID, &c.Name, &c.Email, &c.Phone, &c.Company,
+			&c.GroupName, &c.Notes, &c.IsFavorite, &c.CreatedAt, &c.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, c)
+	}
+	return list, nil
+}
+
+func (p *PostgresStore) GetMailContactByID(ctx context.Context, id uuid.UUID) (*MailContact, error) {
+	query := `
+		SELECT id, mailbox_id, name, email, phone, company, group_name, notes, is_favorite, created_at, updated_at
+		FROM mail_contacts
+		WHERE id = $1
+	`
+	c := &MailContact{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&c.ID, &c.MailboxID, &c.Name, &c.Email, &c.Phone, &c.Company,
+		&c.GroupName, &c.Notes, &c.IsFavorite, &c.CreatedAt, &c.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return c, nil
+}
+
+func (p *PostgresStore) CreateMailContact(ctx context.Context, contact *MailContact) error {
+	if contact.ID == uuid.Nil {
+		contact.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	contact.CreatedAt = now
+	contact.UpdatedAt = now
+
+	query := `
+		INSERT INTO mail_contacts (id, mailbox_id, name, email, phone, company, group_name, notes, is_favorite, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		contact.ID, contact.MailboxID, contact.Name, contact.Email, contact.Phone, contact.Company,
+		contact.GroupName, contact.Notes, contact.IsFavorite, contact.CreatedAt, contact.UpdatedAt,
+	)
+	return err
+}
+
+func (p *PostgresStore) UpdateMailContact(ctx context.Context, contact *MailContact) error {
+	contact.UpdatedAt = time.Now().UTC()
+	query := `
+		UPDATE mail_contacts
+		SET name = $1, email = $2, phone = $3, company = $4, group_name = $5, notes = $6, is_favorite = $7, updated_at = $8
+		WHERE id = $9
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		contact.Name, contact.Email, contact.Phone, contact.Company,
+		contact.GroupName, contact.Notes, contact.IsFavorite, contact.UpdatedAt, contact.ID,
+	)
+	return err
+}
+
+func (p *PostgresStore) DeleteMailContact(ctx context.Context, id uuid.UUID) error {
+	_, err := p.db.ExecContext(ctx, `DELETE FROM mail_contacts WHERE id = $1`, id)
+	return err
+}
+
+// Postgres Webmail Identities & Preferences
+func (p *PostgresStore) ListMailIdentities(ctx context.Context, mailboxID uuid.UUID) ([]*MailIdentity, error) {
+	query := `
+		SELECT id, mailbox_id, display_name, reply_to_email, signature_id, is_default, created_at, updated_at
+		FROM mail_identities
+		WHERE mailbox_id = $1
+		ORDER BY is_default DESC, created_at ASC
+	`
+	rows, err := p.db.QueryContext(ctx, query, mailboxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	list := make([]*MailIdentity, 0)
+	for rows.Next() {
+		iden := &MailIdentity{}
+		err := rows.Scan(
+			&iden.ID, &iden.MailboxID, &iden.DisplayName, &iden.ReplyToEmail,
+			&iden.SignatureID, &iden.IsDefault, &iden.CreatedAt, &iden.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, iden)
+	}
+	return list, nil
+}
+
+func (p *PostgresStore) SaveMailIdentity(ctx context.Context, identity *MailIdentity) error {
+	if identity.ID == uuid.Nil {
+		identity.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if identity.CreatedAt.IsZero() {
+		identity.CreatedAt = now
+	}
+	identity.UpdatedAt = now
+
+	query := `
+		INSERT INTO mail_identities (id, mailbox_id, display_name, reply_to_email, signature_id, is_default, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (id) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			reply_to_email = EXCLUDED.reply_to_email,
+			signature_id = EXCLUDED.signature_id,
+			is_default = EXCLUDED.is_default,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		identity.ID, identity.MailboxID, identity.DisplayName, identity.ReplyToEmail,
+		identity.SignatureID, identity.IsDefault, identity.CreatedAt, identity.UpdatedAt,
+	)
+	return err
+}
+
+func (p *PostgresStore) DeleteMailIdentity(ctx context.Context, id uuid.UUID) error {
+	_, err := p.db.ExecContext(ctx, `DELETE FROM mail_identities WHERE id = $1`, id)
+	return err
+}
+
+func (p *PostgresStore) GetWebmailPreferences(ctx context.Context, mailboxID uuid.UUID) (*WebmailPreferences, error) {
+	query := `
+		SELECT mailbox_id, display_name, reply_to, theme, page_size, sound_notifications, desktop_notifications, auto_refresh_seconds, default_reply_all, created_at, updated_at
+		FROM webmail_preferences
+		WHERE mailbox_id = $1
+	`
+	prefs := &WebmailPreferences{}
+	err := p.db.QueryRowContext(ctx, query, mailboxID).Scan(
+		&prefs.MailboxID, &prefs.DisplayName, &prefs.ReplyTo, &prefs.Theme, &prefs.PageSize,
+		&prefs.SoundNotifications, &prefs.DesktopNotifications, &prefs.AutoRefreshSeconds,
+		&prefs.DefaultReplyAll, &prefs.CreatedAt, &prefs.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return &WebmailPreferences{
+				MailboxID:            mailboxID,
+				Theme:                "system",
+				PageSize:             50,
+				SoundNotifications:   true,
+				DesktopNotifications: true,
+				AutoRefreshSeconds:   30,
+			}, nil
+		}
+		return nil, err
+	}
+	return prefs, nil
+}
+
+func (p *PostgresStore) SaveWebmailPreferences(ctx context.Context, prefs *WebmailPreferences) error {
+	now := time.Now().UTC()
+	if prefs.CreatedAt.IsZero() {
+		prefs.CreatedAt = now
+	}
+	prefs.UpdatedAt = now
+
+	query := `
+		INSERT INTO webmail_preferences (mailbox_id, display_name, reply_to, theme, page_size, sound_notifications, desktop_notifications, auto_refresh_seconds, default_reply_all, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (mailbox_id) DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			reply_to = EXCLUDED.reply_to,
+			theme = EXCLUDED.theme,
+			page_size = EXCLUDED.page_size,
+			sound_notifications = EXCLUDED.sound_notifications,
+			desktop_notifications = EXCLUDED.desktop_notifications,
+			auto_refresh_seconds = EXCLUDED.auto_refresh_seconds,
+			default_reply_all = EXCLUDED.default_reply_all,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		prefs.MailboxID, prefs.DisplayName, prefs.ReplyTo, prefs.Theme, prefs.PageSize,
+		prefs.SoundNotifications, prefs.DesktopNotifications, prefs.AutoRefreshSeconds,
+		prefs.DefaultReplyAll, prefs.CreatedAt, prefs.UpdatedAt,
+	)
+	return err
+}
+
+// Postgres Webmail Forwarding Rules
+func (p *PostgresStore) GetMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) (*MailForwardingRule, error) {
+	query := `
+		SELECT id, mailbox_id, forward_to, keep_copy, is_active, is_verified, verification_code, created_at, updated_at
+		FROM mail_forwarding_rules
+		WHERE mailbox_id = $1
+	`
+	rule := &MailForwardingRule{}
+	err := p.db.QueryRowContext(ctx, query, mailboxID).Scan(
+		&rule.ID, &rule.MailboxID, &rule.ForwardTo, &rule.KeepCopy,
+		&rule.IsActive, &rule.IsVerified, &rule.VerificationCode, &rule.CreatedAt, &rule.UpdatedAt,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return rule, nil
+}
+
+func (p *PostgresStore) SaveMailForwardingRule(ctx context.Context, rule *MailForwardingRule) error {
+	if rule.ID == uuid.Nil {
+		rule.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if rule.CreatedAt.IsZero() {
+		rule.CreatedAt = now
+	}
+	rule.UpdatedAt = now
+
+	query := `
+		INSERT INTO mail_forwarding_rules (id, mailbox_id, forward_to, keep_copy, is_active, is_verified, verification_code, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		ON CONFLICT (id) DO UPDATE SET
+			forward_to = EXCLUDED.forward_to,
+			keep_copy = EXCLUDED.keep_copy,
+			is_active = EXCLUDED.is_active,
+			is_verified = EXCLUDED.is_verified,
+			verification_code = EXCLUDED.verification_code,
+			updated_at = EXCLUDED.updated_at
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		rule.ID, rule.MailboxID, rule.ForwardTo, rule.KeepCopy,
+		rule.IsActive, rule.IsVerified, rule.VerificationCode, rule.CreatedAt, rule.UpdatedAt,
+	)
+	return err
+}
+
+func (p *PostgresStore) DeleteMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) error {
+	_, err := p.db.ExecContext(ctx, `DELETE FROM mail_forwarding_rules WHERE mailbox_id = $1`, mailboxID)
+	return err
 }
 

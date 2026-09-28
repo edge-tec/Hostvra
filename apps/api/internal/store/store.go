@@ -160,6 +160,33 @@ type Store interface {
 	DeleteWebmailMessage(ctx context.Context, id uuid.UUID) error
 	CreateWebmailAttachment(ctx context.Context, att *WebmailAttachment) error
 	ListWebmailAttachments(ctx context.Context, messageID uuid.UUID) ([]*WebmailAttachment, error)
+	GetWebmailAttachmentByID(ctx context.Context, id uuid.UUID) (*WebmailAttachment, error)
+
+	// Webmail Filters
+	ListMailFilters(ctx context.Context, mailboxID uuid.UUID) ([]*MailFilter, error)
+	GetMailFilterByID(ctx context.Context, id uuid.UUID) (*MailFilter, error)
+	CreateMailFilter(ctx context.Context, filter *MailFilter) error
+	UpdateMailFilter(ctx context.Context, filter *MailFilter) error
+	DeleteMailFilter(ctx context.Context, id uuid.UUID) error
+
+	// Webmail Contacts
+	ListMailContacts(ctx context.Context, mailboxID uuid.UUID, search string) ([]*MailContact, error)
+	GetMailContactByID(ctx context.Context, id uuid.UUID) (*MailContact, error)
+	CreateMailContact(ctx context.Context, contact *MailContact) error
+	UpdateMailContact(ctx context.Context, contact *MailContact) error
+	DeleteMailContact(ctx context.Context, id uuid.UUID) error
+
+	// Webmail Identities & Preferences
+	ListMailIdentities(ctx context.Context, mailboxID uuid.UUID) ([]*MailIdentity, error)
+	SaveMailIdentity(ctx context.Context, identity *MailIdentity) error
+	DeleteMailIdentity(ctx context.Context, id uuid.UUID) error
+	GetWebmailPreferences(ctx context.Context, mailboxID uuid.UUID) (*WebmailPreferences, error)
+	SaveWebmailPreferences(ctx context.Context, prefs *WebmailPreferences) error
+
+	// Webmail Forwarding Rules
+	GetMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) (*MailForwardingRule, error)
+	SaveMailForwardingRule(ctx context.Context, rule *MailForwardingRule) error
+	DeleteMailForwardingRule(ctx context.Context, mailboxID uuid.UUID) error
 
 	// PHP Management
 	UpsertPHPVersion(ctx context.Context, v *PHPInstalledVersion) error
@@ -373,6 +400,11 @@ type MemoryStore struct {
 	emailSuppressions   map[uuid.UUID]*EmailSuppression // key: id
 	webmailMessages     map[uuid.UUID]*WebmailMessage   // key: id
 	webmailAttachments  map[uuid.UUID]*WebmailAttachment // key: id
+	mailFilters         map[uuid.UUID]*MailFilter       // key: id
+	mailContacts        map[uuid.UUID]*MailContact      // key: id
+	mailIdentities      map[uuid.UUID]*MailIdentity     // key: id
+	webmailPreferences  map[uuid.UUID]*WebmailPreferences // key: mailboxID
+	mailForwardingRules map[uuid.UUID]*MailForwardingRule // key: mailboxID
 	phpVersions         map[string]*PHPInstalledVersion // key: serverID:version
 	phpExtensions       map[string]*PHPExtension        // key: serverID:version:name
 	phpPools            map[uuid.UUID]*PHPFPMPool
@@ -634,6 +666,11 @@ func NewMemoryStore() *MemoryStore {
 		emailSuppressions:   make(map[uuid.UUID]*EmailSuppression),
 		webmailMessages:     make(map[uuid.UUID]*WebmailMessage),
 		webmailAttachments:  make(map[uuid.UUID]*WebmailAttachment),
+		mailFilters:         make(map[uuid.UUID]*MailFilter),
+		mailContacts:        make(map[uuid.UUID]*MailContact),
+		mailIdentities:      make(map[uuid.UUID]*MailIdentity),
+		webmailPreferences:  make(map[uuid.UUID]*WebmailPreferences),
+		mailForwardingRules: make(map[uuid.UUID]*MailForwardingRule),
 		phpVersions:         make(map[string]*PHPInstalledVersion),
 		phpExtensions:       make(map[string]*PHPExtension),
 		phpPools:            make(map[uuid.UUID]*PHPFPMPool),

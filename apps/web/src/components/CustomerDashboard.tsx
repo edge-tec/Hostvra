@@ -384,6 +384,8 @@ export function CustomerDashboard() {
 
           <Link
             href="/webmail"
+            target="_blank"
+            rel="noopener noreferrer"
             className="group p-5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500/50 hover:shadow-md transition-all flex flex-col justify-between"
           >
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">

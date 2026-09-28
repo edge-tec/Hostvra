@@ -538,3 +538,154 @@ func TestWebmailHandler_MaildirSync(t *testing.T) {
 	}
 }
 
+func TestWebmailHandler_FiltersLifecycleAndExecution(t *testing.T) {
+	wmHandler, _, st, _, _, _, mb := setupWebmailTestEnv(t)
+	ctx := context.Background()
+
+	// 1. Create a filter rule: if from contains "invoice", move to "archive" and mark_read
+	filterPayload := map[string]interface{}{
+		"mailbox_id":   mb.ID,
+		"name":         "Archive Invoices",
+		"field":        "from",
+		"predicate":    "contains",
+		"value":        "billing@partner.com",
+		"action":       "move_to",
+		"action_value": "archive",
+	}
+	bodyBytes, _ := json.Marshal(filterPayload)
+	req := httptest.NewRequest("POST", "/api/v1/webmail/filters", bytes.NewReader(bodyBytes)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	wmHandler.CreateFilter(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateFilter failed: %d - %s", w.Code, w.Body.String())
+	}
+
+	var createdFilter struct {
+		Data store.MailFilter `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &createdFilter)
+	filterID := createdFilter.Data.ID
+
+	// 2. List filters
+	listReq := httptest.NewRequest("GET", "/api/v1/webmail/filters?mailbox_id="+mb.ID.String(), nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.ListFilters(w, listReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListFilters failed: %s", w.Body.String())
+	}
+
+	// 3. Test applyFiltersToMessage
+	testMsg := &store.WebmailMessage{
+		ID:           uuid.New(),
+		MailboxID:    mb.ID,
+		AccountEmail: mb.Email,
+		Folder:       "inbox",
+		FromEmail:    "billing@partner.com",
+		FromName:     "Partner Billing",
+		Subject:      "Monthly Hosting Invoice",
+		BodyText:     "Please find your invoice attached.",
+		IsUnread:     true,
+	}
+	_ = st.CreateWebmailMessage(ctx, testMsg)
+
+	wmHandler.applyFiltersToMessage(ctx, testMsg)
+	if testMsg.Folder != "archive" {
+		t.Fatalf("Expected message to be moved to 'archive' by filter, got '%s'", testMsg.Folder)
+	}
+
+	// 4. Delete filter
+	delReq := httptest.NewRequest("DELETE", "/api/v1/webmail/filters/"+filterID.String(), nil).WithContext(ctx)
+	rCtx := chi.NewRouteContext()
+	rCtx.URLParams.Add("id", filterID.String())
+	delReq = delReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+	w = httptest.NewRecorder()
+	wmHandler.DeleteFilter(w, delReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DeleteFilter failed: %s", w.Body.String())
+	}
+}
+
+func TestWebmailHandler_ContactsAndBatchOperations(t *testing.T) {
+	wmHandler, _, st, _, _, _, mb := setupWebmailTestEnv(t)
+	ctx := context.Background()
+
+	// 1. Create Contact
+	contactPayload := map[string]interface{}{
+		"mailbox_id": mb.ID,
+		"name":       "Alex Mercer",
+		"email":      "alex@example.org",
+		"phone":      "+1234567890",
+		"company":    "Dev Ops Corp",
+		"group_name": "Vendors",
+	}
+	cBytes, _ := json.Marshal(contactPayload)
+	req := httptest.NewRequest("POST", "/api/v1/webmail/contacts", bytes.NewReader(cBytes)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	wmHandler.CreateContact(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateContact failed: %d - %s", w.Code, w.Body.String())
+	}
+
+	// 2. List Contacts with Search query
+	listReq := httptest.NewRequest("GET", "/api/v1/webmail/contacts?mailbox_id="+mb.ID.String()+"&q=alex", nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.ListContacts(w, listReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListContacts failed: %s", w.Body.String())
+	}
+
+	var contactsResp struct {
+		Data []*store.MailContact `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &contactsResp)
+	if len(contactsResp.Data) != 1 || contactsResp.Data[0].Email != "alex@example.org" {
+		t.Fatalf("Expected 1 contact for 'alex', got %+v", contactsResp.Data)
+	}
+
+	// 3. Batch Update Messages
+	msg1 := &store.WebmailMessage{ID: uuid.New(), MailboxID: mb.ID, AccountEmail: mb.Email, Folder: "inbox", IsUnread: true}
+	msg2 := &store.WebmailMessage{ID: uuid.New(), MailboxID: mb.ID, AccountEmail: mb.Email, Folder: "inbox", IsUnread: true}
+	_ = st.CreateWebmailMessage(ctx, msg1)
+	_ = st.CreateWebmailMessage(ctx, msg2)
+
+	batchPayload := map[string]interface{}{
+		"ids":    []uuid.UUID{msg1.ID, msg2.ID},
+		"action": "star",
+	}
+	bBytes, _ := json.Marshal(batchPayload)
+	batchReq := httptest.NewRequest("POST", "/api/v1/webmail/messages/batch", bytes.NewReader(bBytes)).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.BatchUpdateMessages(w, batchReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateMessages failed: %s", w.Body.String())
+	}
+
+	updated1, _ := st.GetWebmailMessageByID(ctx, msg1.ID)
+	if !updated1.IsStarred {
+		t.Fatalf("Expected msg1 to be starred")
+	}
+
+	// 4. Forwarding Rule Test
+	fwdPayload := map[string]interface{}{
+		"mailbox_id": mb.ID,
+		"forward_to": "external-backup@gmail.com",
+		"keep_copy":  true,
+		"is_active":  true,
+	}
+	fwdBytes, _ := json.Marshal(fwdPayload)
+	fwdReq := httptest.NewRequest("POST", "/api/v1/webmail/forwarding", bytes.NewReader(fwdBytes)).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.SaveForwarding(w, fwdReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SaveForwarding failed: %s", w.Body.String())
+	}
+
+	getFwdReq := httptest.NewRequest("GET", "/api/v1/webmail/forwarding?mailbox_id="+mb.ID.String(), nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.GetForwarding(w, getFwdReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetForwarding failed: %s", w.Body.String())
+	}
+}
+
+

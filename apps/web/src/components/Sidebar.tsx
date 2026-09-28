@@ -45,6 +45,7 @@ interface NavItem {
   icon: React.ElementType;
   badge?: string;
   badgeColor?: 'emerald' | 'blue' | 'purple' | 'amber';
+  target?: string;
 }
 
 interface NavGroup {
@@ -68,7 +69,7 @@ const adminNavGroups: NavGroup[] = [
       { label: 'Databases', href: '/databases', icon: Database },
       { label: 'phpMyAdmin', href: '/phpmyadmin', icon: Database, badge: 'MySQL', badgeColor: 'amber' },
       { label: 'Mail Server', href: '/email', icon: Mail, badge: 'Cluster', badgeColor: 'blue' },
-      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald' },
+      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald', target: '_blank' },
     ],
   },
   {
@@ -120,7 +121,7 @@ const customerNavGroups: NavGroup[] = [
       { label: 'Databases (MySQL)', href: '/databases', icon: Database },
       { label: 'phpMyAdmin', href: '/phpmyadmin', icon: Database, badge: 'SQL', badgeColor: 'amber' },
       { label: 'Email Accounts', href: '/email', icon: Mail },
-      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald' },
+      { label: 'Webmail', href: '/webmail', icon: Inbox, badge: 'Web', badgeColor: 'emerald', target: '_blank' },
       { label: 'SSL Certificates', href: '/ssl', icon: ShieldCheck },
     ],
   },
@@ -240,6 +241,8 @@ export function Sidebar() {
                 <Link
                   key={item.label}
                   href={item.href}
+                  target={item.target}
+                  rel={item.target === '_blank' ? 'noopener noreferrer' : undefined}
                   onClick={() => isMobileView && setMobileOpen(false)}
                   title={!isMobileView && collapsed ? item.label : undefined}
                   className={`flex items-center ${

@@ -387,6 +387,7 @@ func (h *WebmailHandler) syncMaildirFolder(ctx context.Context, mb *store.EmailM
 				parsed.CreatedAt = fi.ModTime().UTC()
 			}
 
+			h.applyFiltersToMessage(ctx, parsed)
 			_ = h.store.CreateWebmailMessage(ctx, parsed)
 		}
 	}

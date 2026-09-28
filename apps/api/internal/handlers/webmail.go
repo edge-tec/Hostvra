@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha512"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/smtp"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -462,8 +465,20 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 				SizeBytes:     int64(len(fullMsg)),
 				Attachments:   req.Attachments,
 			}
+
+			// Apply mailbox automated filters
+			h.applyFiltersToMessage(r.Context(), inboxMsg)
+
+			// Handle automated email forwarding rule
+			if fwd, fwdErr := h.store.GetMailForwardingRule(r.Context(), recipMb.ID); fwdErr == nil && fwd != nil && fwd.IsActive && fwd.ForwardTo != "" {
+				_ = sendMailLocal(smtpServer, recipMb.Email, []string{fwd.ForwardTo}, payloadToDeliver)
+				if !fwd.KeepCopy {
+					continue // Do not retain copy in recipient inbox when keep_copy is disabled
+				}
+			}
+
 			_ = h.store.CreateWebmailMessage(r.Context(), inboxMsg)
-			writeEmailToMaildir(recipMb.Email, "inbox", payloadToDeliver, false)
+			writeEmailToMaildir(recipMb.Email, inboxMsg.Folder, payloadToDeliver, false)
 		}
 	}
 
@@ -773,6 +788,611 @@ func (h *WebmailHandler) SetSignature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.JSON(w, http.StatusOK, sig, nil)
+}
+
+// ----------------------------------------------------------------------------
+// BATCH OPERATIONS
+// ----------------------------------------------------------------------------
+
+type BatchMessagesRequest struct {
+	IDs          []uuid.UUID `json:"ids"`
+	Action       string      `json:"action"` // read, unread, star, unstar, move, delete
+	TargetFolder string      `json:"target_folder,omitempty"`
+}
+
+func (h *WebmailHandler) BatchUpdateMessages(w http.ResponseWriter, r *http.Request) {
+	var req BatchMessagesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "IDs array required", nil, "")
+		return
+	}
+
+	isRead := true
+	isUnread := false
+
+	for _, id := range req.IDs {
+		switch req.Action {
+		case "read":
+			_ = h.store.UpdateWebmailMessageFlags(r.Context(), id, &isUnread, nil, nil)
+		case "unread":
+			_ = h.store.UpdateWebmailMessageFlags(r.Context(), id, &isRead, nil, nil)
+		case "star":
+			_ = h.store.UpdateWebmailMessageFlags(r.Context(), id, nil, &isRead, nil)
+		case "unstar":
+			_ = h.store.UpdateWebmailMessageFlags(r.Context(), id, nil, &isUnread, nil)
+		case "move":
+			if req.TargetFolder != "" {
+				_ = h.store.MoveWebmailMessage(r.Context(), id, req.TargetFolder)
+			}
+		case "delete":
+			_ = h.store.DeleteWebmailMessage(r.Context(), id)
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"action":  req.Action,
+		"count":   len(req.IDs),
+	}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// ATTACHMENTS UPLOAD & DOWNLOAD
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) UploadAttachment(w http.ResponseWriter, r *http.Request) {
+	// Max 25 MB
+	if err := r.ParseMultipartForm(25 << 20); err != nil {
+		response.Error(w, http.StatusBadRequest, "FILE_TOO_LARGE", "File size exceeds 25MB limit", nil, "")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_FILE", "Failed to retrieve form file", nil, "")
+		return
+	}
+	defer file.Close()
+
+	storageDir := "/var/mail/attachments"
+	if _, err := os.Stat(storageDir); os.IsNotExist(err) {
+		storageDir = filepath.Join(os.TempDir(), "hostvra_webmail_attachments")
+	}
+	_ = os.MkdirAll(storageDir, 0750)
+
+	attID := uuid.New()
+	cleanFilename := filepath.Base(header.Filename)
+	safeDiskName := fmt.Sprintf("%s_%s", attID.String(), cleanFilename)
+	dstPath := filepath.Join(storageDir, safeDiskName)
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "IO_ERROR", "Failed to store attachment file", nil, "")
+		return
+	}
+	defer dst.Close()
+
+	size, err := io.Copy(dst, file)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "IO_ERROR", "Failed to write attachment data", nil, "")
+		return
+	}
+
+	contentType := header.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	att := &store.WebmailAttachment{
+		ID:          attID,
+		MessageID:   uuid.Nil,
+		Filename:    cleanFilename,
+		ContentType: contentType,
+		SizeBytes:   size,
+		StoragePath: dstPath,
+		CreatedAt:   time.Now().UTC(),
+	}
+
+	_ = h.store.CreateWebmailAttachment(r.Context(), att)
+
+	response.JSON(w, http.StatusOK, att, nil)
+}
+
+func (h *WebmailHandler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
+	attID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid attachment UUID", nil, "")
+		return
+	}
+
+	att, err := h.store.GetWebmailAttachmentByID(r.Context(), attID)
+	if err != nil || att == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Attachment not found", nil, "")
+		return
+	}
+
+	if att.StoragePath != "" {
+		if _, err := os.Stat(att.StoragePath); err == nil {
+			w.Header().Set("Content-Type", att.ContentType)
+			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, att.Filename))
+			http.ServeFile(w, r, att.StoragePath)
+			return
+		}
+	}
+
+	response.Error(w, http.StatusNotFound, "FILE_NOT_FOUND", "Attachment payload not found on disk", nil, "")
+}
+
+func (h *WebmailHandler) DownloadMessageEML(w http.ResponseWriter, r *http.Request) {
+	msgID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid message UUID", nil, "")
+		return
+	}
+
+	msg, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
+	if err != nil || msg == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "message/rfc822")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.eml"`, msg.Subject))
+
+	emlContent := fmt.Sprintf("From: %s <%s>\r\nTo: %s <%s>\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		msg.FromName, msg.FromEmail, msg.ToName, msg.ToEmail, msg.Subject, msg.CreatedAt.Format(time.RFC1123Z), msg.MessageID, msg.BodyHTML)
+	_, _ = w.Write([]byte(emlContent))
+}
+
+// ----------------------------------------------------------------------------
+// REAL-TIME NOTIFICATIONS (SSE)
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) WebmailEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		response.Error(w, http.StatusInternalServerError, "STREAM_UNSUPPORTED", "Streaming unsupported", nil, "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
+	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
+
+	var mb *store.EmailMailbox
+	if accountEmail != "" {
+		mb, _ = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
+	} else if mailboxIDStr != "" {
+		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
+			mb, _ = h.store.GetEmailMailboxByID(r.Context(), mbID)
+		}
+	}
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"connected\",\"timestamp\":%d}\n\n", time.Now().Unix())
+	flusher.Flush()
+
+	lastUnread := -1
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			if mb != nil {
+				h.syncMaildirFolder(r.Context(), mb, "inbox")
+				counts, err := h.store.GetWebmailFolderCounts(r.Context(), mb.ID)
+				if err == nil {
+					unread := counts["inboxUnread"]
+					if unread != lastUnread {
+						lastUnread = unread
+						dataBytes, _ := json.Marshal(map[string]interface{}{
+							"mailbox_id":   mb.ID,
+							"unread_count": unread,
+							"counts":       counts,
+							"timestamp":    time.Now().Unix(),
+						})
+						fmt.Fprintf(w, "event: count_update\ndata: %s\n\n", string(dataBytes))
+						flusher.Flush()
+					}
+				}
+			} else {
+				fmt.Fprintf(w, "event: ping\ndata: {\"time\":%d}\n\n", time.Now().Unix())
+				flusher.Flush()
+			}
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// FILTERS HANDLERS
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) ListFilters(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	filters, err := h.store.ListMailFilters(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve filters", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, filters, nil)
+}
+
+func (h *WebmailHandler) CreateFilter(w http.ResponseWriter, r *http.Request) {
+	var f store.MailFilter
+	if err := json.NewDecoder(r.Body).Decode(&f); err != nil || f.MailboxID == uuid.Nil || f.Name == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid mailbox_id, name, field, and value required", nil, "")
+		return
+	}
+
+	f.ID = uuid.New()
+	if f.Predicate == "" {
+		f.Predicate = "contains"
+	}
+	f.IsActive = true
+
+	if err := h.store.CreateMailFilter(r.Context(), &f); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to create filter", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "webmail.filter.create", "mail_filter", f.ID.String(), "success", "", map[string]interface{}{
+		"name":  f.Name,
+		"field": f.Field,
+		"value": f.Value,
+	})
+
+	response.JSON(w, http.StatusCreated, f, nil)
+}
+
+func (h *WebmailHandler) UpdateFilter(w http.ResponseWriter, r *http.Request) {
+	fID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid filter UUID", nil, "")
+		return
+	}
+
+	var f store.MailFilter
+	if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
+		return
+	}
+	f.ID = fID
+
+	if err := h.store.UpdateMailFilter(r.Context(), &f); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update filter", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, f, nil)
+}
+
+func (h *WebmailHandler) DeleteFilter(w http.ResponseWriter, r *http.Request) {
+	fID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid filter UUID", nil, "")
+		return
+	}
+
+	if err := h.store.DeleteMailFilter(r.Context(), fID); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete filter", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Filter deleted successfully"}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// CONTACTS HANDLERS
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) ListContacts(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	search := r.URL.Query().Get("q")
+	contacts, err := h.store.ListMailContacts(r.Context(), mbID, search)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to list contacts", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, contacts, nil)
+}
+
+func (h *WebmailHandler) CreateContact(w http.ResponseWriter, r *http.Request) {
+	var c store.MailContact
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil || c.MailboxID == uuid.Nil || c.Email == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid mailbox_id and email required", nil, "")
+		return
+	}
+
+	c.ID = uuid.New()
+	if c.Name == "" {
+		c.Name = c.Email
+	}
+
+	if err := h.store.CreateMailContact(r.Context(), &c); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save contact", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusCreated, c, nil)
+}
+
+func (h *WebmailHandler) UpdateContact(w http.ResponseWriter, r *http.Request) {
+	cID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid contact UUID", nil, "")
+		return
+	}
+
+	var c store.MailContact
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
+		return
+	}
+	c.ID = cID
+
+	if err := h.store.UpdateMailContact(r.Context(), &c); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update contact", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, c, nil)
+}
+
+func (h *WebmailHandler) DeleteContact(w http.ResponseWriter, r *http.Request) {
+	cID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid contact UUID", nil, "")
+		return
+	}
+
+	if err := h.store.DeleteMailContact(r.Context(), cID); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete contact", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Contact deleted successfully"}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// IDENTITIES & PREFERENCES & FORWARDING HANDLERS
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) ListIdentities(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	identities, err := h.store.ListMailIdentities(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to list identities", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, identities, nil)
+}
+
+func (h *WebmailHandler) SaveIdentity(w http.ResponseWriter, r *http.Request) {
+	var iden store.MailIdentity
+	if err := json.NewDecoder(r.Body).Decode(&iden); err != nil || iden.MailboxID == uuid.Nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID required", nil, "")
+		return
+	}
+
+	if iden.ID == uuid.Nil {
+		iden.ID = uuid.New()
+	}
+
+	if err := h.store.SaveMailIdentity(r.Context(), &iden); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save identity", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, iden, nil)
+}
+
+func (h *WebmailHandler) DeleteIdentity(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid identity UUID", nil, "")
+		return
+	}
+
+	if err := h.store.DeleteMailIdentity(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete identity", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Identity deleted"}, nil)
+}
+
+func (h *WebmailHandler) GetPreferences(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	prefs, err := h.store.GetWebmailPreferences(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to get preferences", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, prefs, nil)
+}
+
+func (h *WebmailHandler) SavePreferences(w http.ResponseWriter, r *http.Request) {
+	var prefs store.WebmailPreferences
+	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil || prefs.MailboxID == uuid.Nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID required", nil, "")
+		return
+	}
+
+	if err := h.store.SaveWebmailPreferences(r.Context(), &prefs); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save preferences", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, prefs, nil)
+}
+
+func (h *WebmailHandler) GetForwarding(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	fwd, err := h.store.GetMailForwardingRule(r.Context(), mbID)
+	if err != nil {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"is_active": false,
+		}, nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, fwd, nil)
+}
+
+func (h *WebmailHandler) SaveForwarding(w http.ResponseWriter, r *http.Request) {
+	var fwd store.MailForwardingRule
+	if err := json.NewDecoder(r.Body).Decode(&fwd); err != nil || fwd.MailboxID == uuid.Nil || fwd.ForwardTo == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID and forwarding address required", nil, "")
+		return
+	}
+
+	if fwd.ID == uuid.Nil {
+		fwd.ID = uuid.New()
+	}
+	fwd.IsVerified = true
+
+	if err := h.store.SaveMailForwardingRule(r.Context(), &fwd); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save forwarding rule", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "webmail.forwarding.update", "mail_forwarding_rule", fwd.ID.String(), "success", "", map[string]interface{}{
+		"forward_to": fwd.ForwardTo,
+		"keep_copy":  fwd.KeepCopy,
+		"is_active":  fwd.IsActive,
+	})
+
+	response.JSON(w, http.StatusOK, fwd, nil)
+}
+
+func (h *WebmailHandler) DeleteForwarding(w http.ResponseWriter, r *http.Request) {
+	mbIDStr := r.URL.Query().Get("mailbox_id")
+	mbID, err := uuid.Parse(mbIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	_ = h.store.DeleteMailForwardingRule(r.Context(), mbID)
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Forwarding disabled"}, nil)
+}
+
+// applyFiltersToMessage evaluates mailbox filter rules and executes matching actions
+func (h *WebmailHandler) applyFiltersToMessage(ctx context.Context, msg *store.WebmailMessage) {
+	filters, err := h.store.ListMailFilters(ctx, msg.MailboxID)
+	if err != nil || len(filters) == 0 {
+		return
+	}
+
+	for _, f := range filters {
+		if !f.IsActive {
+			continue
+		}
+
+		var targetText string
+		switch f.Field {
+		case "from":
+			targetText = strings.ToLower(msg.FromEmail + " " + msg.FromName)
+		case "to":
+			targetText = strings.ToLower(msg.ToEmail + " " + msg.ToName)
+		case "subject":
+			targetText = strings.ToLower(msg.Subject)
+		case "body":
+			targetText = strings.ToLower(msg.BodyText + " " + msg.BodyHTML)
+		case "has_attachment":
+			if msg.HasAttachment {
+				targetText = "true"
+			} else {
+				targetText = "false"
+			}
+		default:
+			targetText = strings.ToLower(msg.Subject + " " + msg.BodyText)
+		}
+
+		filterVal := strings.ToLower(strings.TrimSpace(f.Value))
+		matched := false
+		switch f.Predicate {
+		case "contains":
+			matched = strings.Contains(targetText, filterVal)
+		case "not_contains":
+			matched = !strings.Contains(targetText, filterVal)
+		case "equals":
+			matched = (targetText == filterVal)
+		case "starts_with":
+			matched = strings.HasPrefix(targetText, filterVal)
+		case "ends_with":
+			matched = strings.HasSuffix(targetText, filterVal)
+		default:
+			matched = strings.Contains(targetText, filterVal)
+		}
+
+		if matched {
+			isTrue := true
+			isFalse := false
+			switch f.Action {
+			case "mark_read":
+				msg.IsUnread = false
+				_ = h.store.UpdateWebmailMessageFlags(ctx, msg.ID, &isFalse, nil, nil)
+			case "star":
+				msg.IsStarred = true
+				_ = h.store.UpdateWebmailMessageFlags(ctx, msg.ID, nil, &isTrue, nil)
+			case "move_to":
+				if f.ActionValue != "" {
+					msg.Folder = f.ActionValue
+					_ = h.store.MoveWebmailMessage(ctx, msg.ID, f.ActionValue)
+				}
+			case "skip_inbox":
+				msg.Folder = "archive"
+				_ = h.store.MoveWebmailMessage(ctx, msg.ID, "archive")
+			case "mark_spam":
+				msg.Folder = "spam"
+				_ = h.store.MoveWebmailMessage(ctx, msg.ID, "spam")
+			case "delete":
+				msg.Folder = "trash"
+				_ = h.store.MoveWebmailMessage(ctx, msg.ID, "trash")
+			}
+		}
+	}
 }
 
 // ----------------------------------------------------------------------------

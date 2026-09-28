@@ -308,3 +308,75 @@ type DNSVerificationResult struct {
 	Status     string `json:"status"` // pass, warn, fail
 	Message    string `json:"message"`
 }
+
+// MailFilter represents an automated mailbox processing rule
+type MailFilter struct {
+	ID          uuid.UUID `json:"id"`
+	MailboxID   uuid.UUID `json:"mailbox_id"`
+	Name        string    `json:"name"`
+	Field       string    `json:"field"`       // from, to, cc, subject, body, has_attachment
+	Predicate   string    `json:"predicate"`   // contains, not_contains, equals, starts_with, ends_with
+	Value       string    `json:"value"`
+	Action      string    `json:"action"`      // mark_read, star, move_to, delete, skip_inbox, mark_spam, forward
+	ActionValue string    `json:"action_value"`// target folder or forwarding email address
+	IsActive    bool      `json:"is_active"`
+	Priority    int       `json:"priority"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// MailContact represents an address book entry for autocomplete and contact management
+type MailContact struct {
+	ID         uuid.UUID `json:"id"`
+	MailboxID  uuid.UUID `json:"mailbox_id"`
+	Name       string    `json:"name"`
+	Email      string    `json:"email"`
+	Phone      string    `json:"phone,omitempty"`
+	Company    string    `json:"company,omitempty"`
+	GroupName  string    `json:"group_name,omitempty"`
+	Notes      string    `json:"notes,omitempty"`
+	IsFavorite bool      `json:"is_favorite"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// MailIdentity represents a custom sending identity / persona
+type MailIdentity struct {
+	ID           uuid.UUID  `json:"id"`
+	MailboxID    uuid.UUID  `json:"mailbox_id"`
+	DisplayName  string     `json:"display_name"`
+	ReplyToEmail string     `json:"reply_to_email,omitempty"`
+	SignatureID  *uuid.UUID `json:"signature_id,omitempty"`
+	IsDefault    bool       `json:"is_default"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+}
+
+// WebmailPreferences represents mailbox-specific UI and notification preferences
+type WebmailPreferences struct {
+	MailboxID            uuid.UUID `json:"mailbox_id"`
+	DisplayName          string    `json:"display_name"`
+	ReplyTo              string    `json:"reply_to"`
+	Theme                string    `json:"theme"`
+	PageSize             int       `json:"page_size"`
+	SoundNotifications   bool      `json:"sound_notifications"`
+	DesktopNotifications bool      `json:"desktop_notifications"`
+	AutoRefreshSeconds   int       `json:"auto_refresh_seconds"`
+	DefaultReplyAll      bool      `json:"default_reply_all"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
+
+// MailForwardingRule represents an explicit mailbox forwarding configuration
+type MailForwardingRule struct {
+	ID               uuid.UUID `json:"id"`
+	MailboxID        uuid.UUID `json:"mailbox_id"`
+	ForwardTo        string    `json:"forward_to"`
+	KeepCopy         bool      `json:"keep_copy"`
+	IsActive         bool      `json:"is_active"`
+	IsVerified       bool      `json:"is_verified"`
+	VerificationCode string    `json:"verification_code,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+

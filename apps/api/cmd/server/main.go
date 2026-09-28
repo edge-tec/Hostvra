@@ -245,6 +245,7 @@ func main() {
 
 			loginLimiter := auth.NewLoginRateLimiter(5, 60*time.Second) // 5 login attempts per minute per IP
 			r.With(loginLimiter.RateLimitMiddleware).Post("/login", authHandler.Login)
+			r.With(loginLimiter.RateLimitMiddleware).Post("/webmail", webmailHandler.DirectAuth)
 
 			// Authenticated User Info & Profile Updates
 			r.Group(func(r chi.Router) {
@@ -807,8 +808,16 @@ func main() {
 
 			// Webmail Operations
 			r.Route("/webmail", func(r chi.Router) {
+				// Standalone Auth
+				r.Post("/auth", webmailHandler.DirectAuth)
+
+				// Real-time events (SSE stream)
+				r.Get("/events", webmailHandler.WebmailEvents)
+
+				// Messages & Mailbox Operations
 				r.Get("/messages", webmailHandler.ListMessages)
 				r.Get("/messages/{id}", webmailHandler.GetMessage)
+				r.Get("/messages/{id}/eml", webmailHandler.DownloadMessageEML)
 				r.Post("/send", webmailHandler.SendMessage)
 				r.Post("/messages/send", webmailHandler.SendMessage)
 				r.Patch("/messages/{id}", webmailHandler.UpdateMessageFlags)
@@ -821,9 +830,38 @@ func main() {
 				r.Post("/draft", webmailHandler.SaveDraft)
 				r.Post("/messages/draft", webmailHandler.SaveDraft)
 				r.Delete("/messages/{id}", webmailHandler.DeleteMessage)
+				r.Post("/messages/batch", webmailHandler.BatchUpdateMessages)
 				r.Get("/counts", webmailHandler.GetFolderCounts)
+
+				// Attachments
+				r.Post("/attachments/upload", webmailHandler.UploadAttachment)
+				r.Get("/attachments/{id}", webmailHandler.DownloadAttachment)
+
+				// Signatures
 				r.Get("/signatures", webmailHandler.GetSignature)
 				r.Post("/signatures", webmailHandler.SetSignature)
+
+				// Filters
+				r.Get("/filters", webmailHandler.ListFilters)
+				r.Post("/filters", webmailHandler.CreateFilter)
+				r.Put("/filters/{id}", webmailHandler.UpdateFilter)
+				r.Delete("/filters/{id}", webmailHandler.DeleteFilter)
+
+				// Contacts
+				r.Get("/contacts", webmailHandler.ListContacts)
+				r.Post("/contacts", webmailHandler.CreateContact)
+				r.Put("/contacts/{id}", webmailHandler.UpdateContact)
+				r.Delete("/contacts/{id}", webmailHandler.DeleteContact)
+
+				// Identities & Preferences & Forwarding
+				r.Get("/identities", webmailHandler.ListIdentities)
+				r.Post("/identities", webmailHandler.SaveIdentity)
+				r.Delete("/identities/{id}", webmailHandler.DeleteIdentity)
+				r.Get("/preferences", webmailHandler.GetPreferences)
+				r.Put("/preferences", webmailHandler.SavePreferences)
+				r.Get("/forwarding", webmailHandler.GetForwarding)
+				r.Post("/forwarding", webmailHandler.SaveForwarding)
+				r.Delete("/forwarding", webmailHandler.DeleteForwarding)
 			})
 
 			// Enterprise Hosting Billing, Subscriptions, Invoices & Payment Gateways

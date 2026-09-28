@@ -1,0 +1,769 @@
+'use client';
+
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { apiFetch, getStoredToken } from '@/lib/api';
+
+export interface WebmailAccount {
+  id: string;
+  email: string;
+  name: string;
+  token?: string;
+  quotaBytes?: number;
+  usedBytes?: number;
+}
+
+export interface ComposeInitialData {
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  replyTo?: string;
+  subject?: string;
+  bodyHTML?: string;
+  bodyText?: string;
+  replyToMessageId?: string;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    content_type: string;
+    size_bytes: number;
+  }>;
+}
+
+export interface MailFilter {
+  id: string;
+  mailbox_id: string;
+  name: string;
+  criteria_field: string;
+  criteria_pattern: string;
+  action_type: string;
+  action_target?: string;
+  is_active: boolean;
+  priority: number;
+}
+
+export interface MailContact {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  company?: string;
+  group_name?: string;
+  notes?: string;
+}
+
+export interface MailIdentity {
+  id?: string;
+  mailbox_id?: string;
+  email: string;
+  display_name: string;
+  reply_to?: string;
+  signature_html?: string;
+  signature_text?: string;
+  is_default: boolean;
+}
+
+export interface MailForwardingRule {
+  id?: string;
+  mailbox_id?: string;
+  forward_to: string;
+  keep_copy: boolean;
+  is_active: boolean;
+}
+
+interface WebmailContextType {
+  accounts: WebmailAccount[];
+  activeAccount: WebmailAccount | null;
+  activeEmail: string;
+  folderCounts: Record<string, number>;
+  isSyncing: boolean;
+  searchQuery: string;
+  setSearchQuery: React.Dispatch<React.SetStateAction<string>>;
+  switchAccount: (email: string) => void;
+  addAccount: (acc: WebmailAccount) => void;
+  loginWithCredentials: (email: string, password: string) => Promise<boolean>;
+  removeAccount: (email: string) => void;
+  logoutCurrentAccount: () => void;
+  logoutAllAccounts: () => void;
+  refreshFolderCounts: () => Promise<void>;
+  // Compose
+  isComposeOpen: boolean;
+  composeInitial: ComposeInitialData | null;
+  openCompose: (initial?: ComposeInitialData) => void;
+  closeCompose: () => void;
+  // Add Account Modal
+  isAddAccountOpen: boolean;
+  openAddAccount: () => void;
+  closeAddAccount: () => void;
+  // Audio & Desktop alerts
+  soundEnabled: boolean;
+  setSoundEnabled: (v: boolean) => void;
+  toggleSound: () => void;
+  desktopNotifications: boolean;
+  desktopNotificationsEnabled: boolean;
+  requestNotificationPermission: () => Promise<void>;
+  requestDesktopNotifications: () => Promise<void>;
+  // Identities
+  identities: MailIdentity[];
+  fetchIdentities: () => Promise<void>;
+  saveIdentity: (identity: MailIdentity) => Promise<boolean>;
+  deleteIdentity: (id: string) => Promise<boolean>;
+  // Filters
+  filters: MailFilter[];
+  fetchFilters: () => Promise<void>;
+  saveFilter: (filter: Partial<MailFilter>) => Promise<boolean>;
+  deleteFilter: (id: string) => Promise<boolean>;
+  // Forwarding
+  forwardingRule: MailForwardingRule | null;
+  fetchForwarding: () => Promise<void>;
+  saveForwarding: (forwardTo: string, keepCopy: boolean) => Promise<boolean>;
+  deleteForwarding: () => Promise<boolean>;
+  // Contacts
+  contacts: MailContact[];
+  fetchContacts: (q?: string) => Promise<void>;
+  saveContact: (contact: Partial<MailContact>) => Promise<boolean>;
+  deleteContact: (id: string) => Promise<boolean>;
+}
+
+const WebmailContext = createContext<WebmailContextType | null>(null);
+
+const STORAGE_ACCOUNTS_KEY = 'hostvra_webmail_accounts';
+const STORAGE_ACTIVE_KEY = 'hostvra_webmail_active_account';
+const STORAGE_SOUND_KEY = 'hostvra_webmail_sound_enabled';
+
+// Elegant Web Audio API gentle notification chime (no external asset needed)
+function playGentleChime() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    osc1.frequency.exponentialRampToValueAtTime(880.0, now + 0.15); // A5
+
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(880.0, now + 0.15); // A5
+    osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.35); // D6
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc1.start(now);
+    osc2.start(now + 0.12);
+    osc1.stop(now + 0.35);
+    osc2.stop(now + 0.65);
+  } catch (err) {
+    console.debug('Audio chime skipped:', err);
+  }
+}
+
+export function WebmailProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [accounts, setAccounts] = useState<WebmailAccount[]>([]);
+  const [activeAccount, setActiveAccount] = useState<WebmailAccount | null>(null);
+  const [folderCounts, setFolderCounts] = useState<Record<string, number>>({});
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  // Compose modal state
+  const [isComposeOpen, setIsComposeOpen] = useState<boolean>(false);
+  const [composeInitial, setComposeInitial] = useState<ComposeInitialData | null>(null);
+  
+  // Add Account modal
+  const [isAddAccountOpen, setIsAddAccountOpen] = useState<boolean>(false);
+
+  // Sound and Desktop alerts
+  const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
+  const [desktopNotifications, setDesktopNotifications] = useState<boolean>(false);
+
+  // Settings & entities state
+  const [identities, setIdentities] = useState<MailIdentity[]>([]);
+  const [filters, setFilters] = useState<MailFilter[]>([]);
+  const [forwardingRule, setForwardingRule] = useState<MailForwardingRule | null>(null);
+  const [contacts, setContacts] = useState<MailContact[]>([]);
+
+  const prevUnreadRef = useRef<number>(-1);
+
+  // Initialize accounts and check permission
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      setDesktopNotifications(true);
+    }
+
+    const soundPref = localStorage.getItem(STORAGE_SOUND_KEY);
+    if (soundPref !== null) {
+      setSoundEnabledState(soundPref === 'true');
+    }
+
+    let storedList: WebmailAccount[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_ACCOUNTS_KEY);
+      if (raw) {
+        storedList = JSON.parse(raw);
+      }
+    } catch (e) {
+      console.error('Failed reading webmail accounts from storage:', e);
+    }
+
+    async function discoverMailboxes() {
+      const mainToken = getStoredToken();
+      if (!mainToken) return;
+
+      try {
+        const res = await apiFetch<Array<{
+          id: string;
+          email: string;
+          name: string;
+          quota_bytes: number;
+          used_bytes: number;
+        }>>('/api/v1/email/mailboxes');
+
+        if (res.data && res.data.length > 0) {
+          const map = new Map<string, WebmailAccount>();
+          storedList.forEach(a => map.set(a.email.toLowerCase(), a));
+
+          res.data.forEach(mb => {
+            const clean = mb.email.toLowerCase();
+            const existing = map.get(clean);
+            map.set(clean, {
+              id: mb.id,
+              email: mb.email,
+              name: mb.name || mb.email.split('@')[0],
+              token: existing?.token,
+              quotaBytes: mb.quota_bytes,
+              usedBytes: mb.used_bytes,
+            });
+          });
+
+          const merged = Array.from(map.values());
+          storedList = merged;
+          localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
+          setAccounts(merged);
+
+          const savedActive = localStorage.getItem(STORAGE_ACTIVE_KEY);
+          const found = merged.find(a => a.email.toLowerCase() === savedActive?.toLowerCase()) || merged[0];
+          setActiveAccount(found);
+          if (found) {
+            localStorage.setItem(STORAGE_ACTIVE_KEY, found.email);
+          }
+        }
+      } catch (err) {
+        console.debug('No control panel mailbox discovery available:', err);
+      }
+    }
+
+    if (storedList.length > 0) {
+      setAccounts(storedList);
+      const savedActive = localStorage.getItem(STORAGE_ACTIVE_KEY);
+      const found = storedList.find(a => a.email.toLowerCase() === savedActive?.toLowerCase()) || storedList[0];
+      setActiveAccount(found);
+      if (found) {
+        localStorage.setItem(STORAGE_ACTIVE_KEY, found.email);
+      }
+    }
+
+    discoverMailboxes();
+  }, []);
+
+  // Update document title with unread badge e.g. "(3) Hostvra Webmail"
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const unread = folderCounts['inboxUnread'] || 0;
+    if (unread > 0) {
+      document.title = `(${unread}) Hostvra Webmail - ${activeAccount?.email || ''}`;
+    } else {
+      document.title = activeAccount ? `Hostvra Webmail - ${activeAccount.email}` : 'Hostvra Webmail';
+    }
+  }, [folderCounts, activeAccount]);
+
+  // Refresh counts
+  const refreshFolderCounts = useCallback(async () => {
+    if (!activeAccount) return;
+    setIsSyncing(true);
+    try {
+      const res = await apiFetch<Record<string, number>>(
+        `/api/v1/webmail/counts?mailbox_id=${activeAccount.id}&account_email=${encodeURIComponent(activeAccount.email)}`
+      );
+      if (res.data) {
+        setFolderCounts(res.data);
+      }
+    } catch (err) {
+      console.error('Failed refreshing folder counts:', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [activeAccount]);
+
+  // Periodic refresh & SSE
+  useEffect(() => {
+    if (!activeAccount) return;
+    refreshFolderCounts();
+
+    const interval = setInterval(() => {
+      refreshFolderCounts();
+    }, 45000);
+
+    let eventSource: EventSource | null = null;
+    try {
+      const sseUrl = `/api/v1/webmail/events?mailbox_id=${activeAccount.id}&account_email=${encodeURIComponent(activeAccount.email)}`;
+      eventSource = new EventSource(sseUrl);
+
+      eventSource.addEventListener('message_count', (e: MessageEvent) => {
+        try {
+          const counts = JSON.parse(e.data);
+          setFolderCounts(counts);
+          const newInboxUnread = counts.inboxUnread || 0;
+          if (prevUnreadRef.current !== -1 && newInboxUnread > prevUnreadRef.current) {
+            if (soundEnabled) {
+              playGentleChime();
+            }
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification(`New email for ${activeAccount.email}`, {
+                body: `You have new messages in your inbox.`,
+                icon: '/favicon.ico',
+              });
+            }
+          }
+          prevUnreadRef.current = newInboxUnread;
+        } catch (err) {
+          console.error('Failed parsing SSE message_count:', err);
+        }
+      });
+
+      eventSource.addEventListener('new_mail', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (soundEnabled) {
+            playGentleChime();
+          }
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification(`New Email: ${data.subject || 'No Subject'}`, {
+              body: `From: ${data.from || 'Unknown Sender'}`,
+              icon: '/favicon.ico',
+            });
+          }
+          refreshFolderCounts();
+        } catch (err) {
+          console.error('Failed parsing new_mail event:', err);
+        }
+      });
+    } catch (err) {
+      console.debug('SSE connection skipped or unsupported:', err);
+    }
+
+    return () => {
+      clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+      }
+    };
+  }, [activeAccount, refreshFolderCounts, soundEnabled]);
+
+  // Account switching
+  const switchAccount = useCallback((email: string) => {
+    const target = accounts.find(a => a.email.toLowerCase() === email.toLowerCase());
+    if (target) {
+      setActiveAccount(target);
+      localStorage.setItem(STORAGE_ACTIVE_KEY, target.email);
+      prevUnreadRef.current = -1;
+    }
+  }, [accounts]);
+
+  // Add account object
+  const addAccount = useCallback((newAcc: WebmailAccount) => {
+    setAccounts(prev => {
+      const filtered = prev.filter(a => a.email.toLowerCase() !== newAcc.email.toLowerCase());
+      const updated = [...filtered, newAcc];
+      localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+      return updated;
+    });
+    setActiveAccount(newAcc);
+    localStorage.setItem(STORAGE_ACTIVE_KEY, newAcc.email);
+    setIsAddAccountOpen(false);
+  }, []);
+
+  // Login with credentials directly
+  const loginWithCredentials = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const res = await apiFetch<{
+        token: string;
+        mailbox: {
+          id: string;
+          email: string;
+          name: string;
+          quota_bytes: number;
+          used_bytes: number;
+        };
+      }>('/api/v1/webmail/auth', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      if (res.data && res.data.mailbox) {
+        addAccount({
+          id: res.data.mailbox.id,
+          email: res.data.mailbox.email,
+          name: res.data.mailbox.name || res.data.mailbox.email.split('@')[0],
+          token: res.data.token,
+          quotaBytes: res.data.mailbox.quota_bytes,
+          usedBytes: res.data.mailbox.used_bytes,
+        });
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Login error:', err);
+      return false;
+    }
+  }, [addAccount]);
+
+  // Remove saved account
+  const removeAccount = useCallback((email: string) => {
+    setAccounts(prev => {
+      const updated = prev.filter(a => a.email.toLowerCase() !== email.toLowerCase());
+      localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(updated));
+      if (activeAccount?.email.toLowerCase() === email.toLowerCase()) {
+        const next = updated[0] || null;
+        setActiveAccount(next);
+        if (next) {
+          localStorage.setItem(STORAGE_ACTIVE_KEY, next.email);
+        } else {
+          localStorage.removeItem(STORAGE_ACTIVE_KEY);
+        }
+      }
+      return updated;
+    });
+  }, [activeAccount]);
+
+  // Logout current account
+  const logoutCurrentAccount = useCallback(() => {
+    if (!activeAccount) return;
+    const emailToLogOut = activeAccount.email;
+    setAccounts(prev => {
+      const remaining = prev.filter(a => a.email.toLowerCase() !== emailToLogOut.toLowerCase());
+      localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(remaining));
+      if (remaining.length > 0) {
+        setActiveAccount(remaining[0]);
+        localStorage.setItem(STORAGE_ACTIVE_KEY, remaining[0].email);
+      } else {
+        setActiveAccount(null);
+        localStorage.removeItem(STORAGE_ACTIVE_KEY);
+        router.push('/webmail/login');
+      }
+      return remaining;
+    });
+  }, [activeAccount, router]);
+
+  // Logout all accounts
+  const logoutAllAccounts = useCallback(() => {
+    setAccounts([]);
+    setActiveAccount(null);
+    localStorage.removeItem(STORAGE_ACCOUNTS_KEY);
+    localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    router.push('/webmail/login');
+  }, [router]);
+
+  // Compose actions
+  const openCompose = useCallback((initial?: ComposeInitialData) => {
+    setComposeInitial(initial || null);
+    setIsComposeOpen(true);
+  }, []);
+
+  const closeCompose = useCallback(() => {
+    setIsComposeOpen(false);
+    setComposeInitial(null);
+  }, []);
+
+  // Add Account modal actions
+  const openAddAccount = useCallback(() => {
+    setIsAddAccountOpen(true);
+  }, []);
+
+  const closeAddAccount = useCallback(() => {
+    setIsAddAccountOpen(false);
+  }, []);
+
+  // Audio chime toggle
+  const toggleSound = useCallback(() => {
+    setSoundEnabledState(prev => {
+      const next = !prev;
+      localStorage.setItem(STORAGE_SOUND_KEY, String(next));
+      if (next) {
+        playGentleChime();
+      }
+      return next;
+    });
+  }, []);
+
+  const setSoundEnabled = useCallback((v: boolean) => {
+    setSoundEnabledState(v);
+    localStorage.setItem(STORAGE_SOUND_KEY, String(v));
+    if (v) playGentleChime();
+  }, []);
+
+  // Request desktop notification permission
+  const requestNotificationPermission = useCallback(async () => {
+    if (!('Notification' in window)) return;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') {
+        setDesktopNotifications(true);
+        new Notification('Hostvra Webmail Notifications Active', {
+          body: 'You will receive instant desktop alerts for incoming messages.',
+          icon: '/favicon.ico',
+        });
+      }
+    } catch (e) {
+      console.error('Error requesting notification permission:', e);
+    }
+  }, []);
+
+  // --- Identities ---
+  const fetchIdentities = useCallback(async () => {
+    if (!activeAccount) return;
+    try {
+      const res = await apiFetch<MailIdentity[]>(`/api/v1/webmail/identities?mailbox_id=${activeAccount.id}`);
+      if (res.data) setIdentities(res.data);
+    } catch (e) {
+      console.error('Failed fetching identities:', e);
+    }
+  }, [activeAccount]);
+
+  const saveIdentity = useCallback(async (identity: MailIdentity): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      const res = await apiFetch<{ identity: MailIdentity }>(`/api/v1/webmail/identities?mailbox_id=${activeAccount.id}`, {
+        method: 'POST',
+        body: JSON.stringify(identity),
+      });
+      if (res.data) {
+        await fetchIdentities();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('Failed saving identity:', e);
+      return false;
+    }
+  }, [activeAccount, fetchIdentities]);
+
+  const deleteIdentity = useCallback(async (id: string): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      await apiFetch(`/api/v1/webmail/identities?mailbox_id=${activeAccount.id}&id=${id}`, {
+        method: 'DELETE',
+      });
+      await fetchIdentities();
+      return true;
+    } catch (e) {
+      console.error('Failed deleting identity:', e);
+      return false;
+    }
+  }, [activeAccount, fetchIdentities]);
+
+  // --- Filters ---
+  const fetchFilters = useCallback(async () => {
+    if (!activeAccount) return;
+    try {
+      const res = await apiFetch<MailFilter[]>(`/api/v1/webmail/filters?mailbox_id=${activeAccount.id}`);
+      if (res.data) setFilters(res.data);
+    } catch (e) {
+      console.error('Failed fetching filters:', e);
+    }
+  }, [activeAccount]);
+
+  const saveFilter = useCallback(async (rule: Partial<MailFilter>): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      const res = await apiFetch<{ filter: MailFilter }>(`/api/v1/webmail/filters?mailbox_id=${activeAccount.id}`, {
+        method: 'POST',
+        body: JSON.stringify(rule),
+      });
+      if (res.data) {
+        await fetchFilters();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('Failed saving filter:', e);
+      return false;
+    }
+  }, [activeAccount, fetchFilters]);
+
+  const deleteFilter = useCallback(async (id: string): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      await apiFetch(`/api/v1/webmail/filters?mailbox_id=${activeAccount.id}&id=${id}`, {
+        method: 'DELETE',
+      });
+      await fetchFilters();
+      return true;
+    } catch (e) {
+      console.error('Failed deleting filter:', e);
+      return false;
+    }
+  }, [activeAccount, fetchFilters]);
+
+  // --- Forwarding ---
+  const fetchForwarding = useCallback(async () => {
+    if (!activeAccount) return;
+    try {
+      const res = await apiFetch<MailForwardingRule>(`/api/v1/webmail/forwarding?mailbox_id=${activeAccount.id}`);
+      if (res.data) setForwardingRule(res.data);
+    } catch (e) {
+      setForwardingRule(null);
+    }
+  }, [activeAccount]);
+
+  const saveForwarding = useCallback(async (forwardTo: string, keepCopy: boolean): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      const res = await apiFetch<{ rule: MailForwardingRule }>(`/api/v1/webmail/forwarding?mailbox_id=${activeAccount.id}`, {
+        method: 'POST',
+        body: JSON.stringify({ forward_to: forwardTo, keep_copy: keepCopy, is_active: true }),
+      });
+      if (res.data) {
+        setForwardingRule(res.data.rule);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('Failed saving forwarding:', e);
+      return false;
+    }
+  }, [activeAccount]);
+
+  const deleteForwarding = useCallback(async (): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      await apiFetch(`/api/v1/webmail/forwarding?mailbox_id=${activeAccount.id}`, {
+        method: 'DELETE',
+      });
+      setForwardingRule(null);
+      return true;
+    } catch (e) {
+      console.error('Failed deleting forwarding:', e);
+      return false;
+    }
+  }, [activeAccount]);
+
+  // --- Contacts ---
+  const fetchContacts = useCallback(async (q?: string) => {
+    if (!activeAccount) return;
+    try {
+      const url = q
+        ? `/api/v1/webmail/contacts?mailbox_id=${activeAccount.id}&q=${encodeURIComponent(q)}`
+        : `/api/v1/webmail/contacts?mailbox_id=${activeAccount.id}`;
+      const res = await apiFetch<MailContact[]>(url);
+      if (res.data) setContacts(res.data);
+    } catch (e) {
+      console.error('Failed fetching contacts:', e);
+    }
+  }, [activeAccount]);
+
+  const saveContact = useCallback(async (contact: Partial<MailContact>): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      const res = await apiFetch<{ contact: MailContact }>(`/api/v1/webmail/contacts?mailbox_id=${activeAccount.id}`, {
+        method: 'POST',
+        body: JSON.stringify(contact),
+      });
+      if (res.data) {
+        await fetchContacts();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error('Failed saving contact:', e);
+      return false;
+    }
+  }, [activeAccount, fetchContacts]);
+
+  const deleteContact = useCallback(async (id: string): Promise<boolean> => {
+    if (!activeAccount) return false;
+    try {
+      await apiFetch(`/api/v1/webmail/contacts?mailbox_id=${activeAccount.id}&id=${id}`, {
+        method: 'DELETE',
+      });
+      await fetchContacts();
+      return true;
+    } catch (e) {
+      console.error('Failed deleting contact:', e);
+      return false;
+    }
+  }, [activeAccount, fetchContacts]);
+
+  return (
+    <WebmailContext.Provider
+      value={{
+        accounts,
+        activeAccount,
+        activeEmail: activeAccount?.email || '',
+        folderCounts,
+        isSyncing,
+        searchQuery,
+        setSearchQuery,
+        switchAccount,
+        addAccount,
+        loginWithCredentials,
+        removeAccount,
+        logoutCurrentAccount,
+        logoutAllAccounts,
+        refreshFolderCounts,
+        isComposeOpen,
+        composeInitial,
+        openCompose,
+        closeCompose,
+        isAddAccountOpen,
+        openAddAccount,
+        closeAddAccount,
+        soundEnabled,
+        setSoundEnabled,
+        toggleSound,
+        desktopNotifications,
+        desktopNotificationsEnabled: desktopNotifications,
+        requestNotificationPermission,
+        requestDesktopNotifications: requestNotificationPermission,
+        identities,
+        fetchIdentities,
+        saveIdentity,
+        deleteIdentity,
+        filters,
+        fetchFilters,
+        saveFilter,
+        deleteFilter,
+        forwardingRule,
+        fetchForwarding,
+        saveForwarding,
+        deleteForwarding,
+        contacts,
+        fetchContacts,
+        saveContact,
+        deleteContact,
+      }}
+    >
+      {children}
+    </WebmailContext.Provider>
+  );
+}
+
+export function useWebmail() {
+  const ctx = useContext(WebmailContext);
+  if (!ctx) {
+    throw new Error('useWebmail must be used within a WebmailProvider');
+  }
+  return ctx;
+}
