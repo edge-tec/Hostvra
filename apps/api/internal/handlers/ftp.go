@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -12,15 +13,17 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type FTPHandler struct {
-	cfg    *config.Config
-	store  store.Store
-	audit  *audit.Logger
-	ftpMgr *ftp.FTPManager
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	ftpMgr   *ftp.FTPManager
+	quotaSvc *quota.Service
 }
 
 func NewFTPHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FTPHandler {
@@ -30,6 +33,10 @@ func NewFTPHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FTPHandl
 		audit:  a,
 		ftpMgr: ftp.NewFTPManager(),
 	}
+}
+
+func (h *FTPHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // Request DTOs
@@ -82,8 +89,13 @@ func (h *FTPHandler) isTenantPath(homeDir string, allowedPaths []string) bool {
 	if allowedPaths == nil {
 		return true // superadmin has no restrictions
 	}
+	clean := filepath.Clean(strings.TrimSpace(homeDir))
+	if strings.Contains(clean, "/../") || strings.HasPrefix(clean, "../") || clean == ".." {
+		return false
+	}
 	for _, p := range allowedPaths {
-		if strings.HasPrefix(homeDir, p) {
+		cleanP := filepath.Clean(strings.TrimSpace(p))
+		if clean == cleanP || strings.HasPrefix(clean, cleanP+"/") {
 			return true
 		}
 	}
@@ -158,9 +170,21 @@ func (h *FTPHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && h.quotaSvc != nil {
+		unlock := h.quotaSvc.LockUser(claims.UserID)
+		defer unlock()
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "ftp"); err != nil {
+			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
+
+	cleanHomeDir := filepath.Clean(strings.TrimSpace(req.HomeDir))
+
 	// Validate that the home directory is within the tenant's allowed paths
 	allowedPaths := h.getTenantAllowedPaths(r)
-	if !h.isTenantPath(req.HomeDir, allowedPaths) {
+	if !h.isTenantPath(cleanHomeDir, allowedPaths) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Home directory does not belong to your organization's websites", nil, "")
 		return
 	}
@@ -168,7 +192,7 @@ func (h *FTPHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	user, err := h.ftpMgr.CreateUser(
 		req.Username,
 		req.Password,
-		req.HomeDir,
+		cleanHomeDir,
 		req.QuotaMB,
 		req.UploadBandwidth,
 		req.DownloadBandwidth,

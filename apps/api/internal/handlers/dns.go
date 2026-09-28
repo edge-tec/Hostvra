@@ -85,11 +85,31 @@ func (h *DNSHandler) CreateZone(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, zone, nil)
 }
 
+func (h *DNSHandler) verifyZoneAccess(r *http.Request, zoneID uuid.UUID) (*dns.Zone, error) {
+	zone, err := h.dnsService.GetZone(r.Context(), zoneID)
+	if err != nil {
+		return nil, err
+	}
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+		return zone, nil
+	}
+	if zone.OrganizationID != claims.OrganizationID {
+		return nil, fmt.Errorf("zone does not belong to your organization")
+	}
+	return zone, nil
+}
+
 func (h *DNSHandler) DeleteZone(w http.ResponseWriter, r *http.Request) {
 	zoneIDStr := chi.URLParam(r, "zoneID")
 	zoneID, err := uuid.Parse(zoneIDStr)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid zone ID", nil, "")
+		return
+	}
+
+	if _, err := h.verifyZoneAccess(r, zoneID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -111,6 +131,11 @@ func (h *DNSHandler) ListRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, err := h.verifyZoneAccess(r, zoneID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	records, err := h.dnsService.ListRecords(r.Context(), zoneID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil, "")
@@ -125,6 +150,11 @@ func (h *DNSHandler) CreateRecord(w http.ResponseWriter, r *http.Request) {
 	zoneID, err := uuid.Parse(zoneIDStr)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid zone ID", nil, "")
+		return
+	}
+
+	if _, err := h.verifyZoneAccess(r, zoneID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -166,6 +196,11 @@ func (h *DNSHandler) DeleteRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, err := h.verifyZoneAccess(r, zoneID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	recordIDStr := chi.URLParam(r, "recordID")
 	recordID, err := uuid.Parse(recordIDStr)
 	if err != nil {
@@ -188,6 +223,11 @@ func (h *DNSHandler) ExportBindZone(w http.ResponseWriter, r *http.Request) {
 	zoneID, err := uuid.Parse(zoneIDStr)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid zone ID", nil, "")
+		return
+	}
+
+	if _, err := h.verifyZoneAccess(r, zoneID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 

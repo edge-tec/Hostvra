@@ -212,6 +212,8 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
 	if claims != nil && h.quotaSvc != nil {
+		unlock := h.quotaSvc.LockUser(claims.UserID)
+		defer unlock()
 		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "databases"); err != nil {
 			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
 			return
@@ -699,11 +701,21 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 // RootPassword gets or sets root database password
 func (h *DatabaseHandler) GetRootPassword(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to access root password", nil, "")
+		return
+	}
 	pass := h.dbMgr.GetRootPassword()
 	response.JSON(w, http.StatusOK, map[string]string{"root_password": pass}, nil)
 }
 
 func (h *DatabaseHandler) SetRootPassword(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to modify root password", nil, "")
+		return
+	}
 	var req RootPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 6 {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Password must be at least 6 characters", nil, "")
@@ -720,11 +732,21 @@ func (h *DatabaseHandler) SetRootPassword(w http.ResponseWriter, r *http.Request
 
 // AutoBackup gets or sets auto backup setting
 func (h *DatabaseHandler) GetAutoBackup(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required", nil, "")
+		return
+	}
 	enabled := h.dbMgr.GetAutoBackup()
 	response.JSON(w, http.StatusOK, map[string]bool{"enabled": enabled}, nil)
 }
 
 func (h *DatabaseHandler) SetAutoBackup(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required", nil, "")
+		return
+	}
 	var req AutoBackupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid payload", nil, "")
@@ -737,11 +759,21 @@ func (h *DatabaseHandler) SetAutoBackup(w http.ResponseWriter, r *http.Request) 
 
 // AdvancedSetup gets or sets advanced MySQL config
 func (h *DatabaseHandler) GetAdvancedSetup(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required", nil, "")
+		return
+	}
 	cfg := h.dbMgr.GetAdvancedConfig()
 	response.JSON(w, http.StatusOK, cfg, nil)
 }
 
 func (h *DatabaseHandler) SetAdvancedSetup(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required", nil, "")
+		return
+	}
 	var cfg database.AdvancedConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid payload", nil, "")
@@ -754,6 +786,9 @@ func (h *DatabaseHandler) SetAdvancedSetup(w http.ResponseWriter, r *http.Reques
 
 // RecycleBin lists soft-deleted databases or restores them
 func (h *DatabaseHandler) ListRecycleBin(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner"
+
 	dbs, err := h.store.ListDatabasesByServer(r.Context(), uuid.Nil)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to list databases", nil, "")
@@ -763,6 +798,9 @@ func (h *DatabaseHandler) ListRecycleBin(w http.ResponseWriter, r *http.Request)
 	var inTrash []*store.Database
 	for _, d := range dbs {
 		if d.InRecycleBin {
+			if !isAdmin && claims != nil && d.OrganizationID != claims.OrganizationID {
+				continue
+			}
 			inTrash = append(inTrash, d)
 		}
 	}
@@ -777,6 +815,18 @@ func (h *DatabaseHandler) RestoreRecycleBin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	db, err := h.store.GetDatabaseByID(r.Context(), dbID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.store.RestoreDatabase(r.Context(), dbID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to restore database", nil, "")
 		return
@@ -787,6 +837,7 @@ func (h *DatabaseHandler) RestoreRecycleBin(w http.ResponseWriter, r *http.Reque
 
 // Batch performs bulk operations
 func (h *DatabaseHandler) Batch(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	var req BatchOperationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.IDs) == 0 {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "IDs required", nil, "")
@@ -796,23 +847,26 @@ func (h *DatabaseHandler) Batch(w http.ResponseWriter, r *http.Request) {
 	affected := 0
 	for _, idStr := range req.IDs {
 		if id, err := uuid.Parse(idStr); err == nil {
+			db, err := h.store.GetDatabaseByID(r.Context(), id)
+			if err != nil {
+				continue
+			}
+			if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+				continue
+			}
 			switch req.Action {
 			case "delete":
 				if err := h.store.DeleteDatabase(r.Context(), id); err == nil {
 					affected++
 				}
 			case "backup":
-				if db, err := h.store.GetDatabaseByID(r.Context(), id); err == nil {
-					db.BackupCount++
-					db.BackupStatus = "1 Backup"
-					_ = h.store.UpdateDatabase(r.Context(), db)
-					affected++
-				}
+				db.BackupCount++
+				db.BackupStatus = "1 Backup"
+				_ = h.store.UpdateDatabase(r.Context(), db)
+				affected++
 			case "optimize":
-				if db, err := h.store.GetDatabaseByID(r.Context(), id); err == nil {
-					_, _ = h.dbMgr.RunDatabaseTools(r.Context(), db.Name, "optimize")
-					affected++
-				}
+				_, _ = h.dbMgr.RunDatabaseTools(r.Context(), db.Name, "optimize")
+				affected++
 			}
 		}
 	}

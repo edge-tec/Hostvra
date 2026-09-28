@@ -493,6 +493,17 @@ func (m *MemoryStore) ListEmailAliasesByDomain(ctx context.Context, domainID uui
 	return list, nil
 }
 
+func (m *MemoryStore) GetEmailAliasByID(ctx context.Context, id uuid.UUID) (*EmailAlias, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	a, exists := m.emailAliases[id]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return a, nil
+}
+
 func (m *MemoryStore) DeleteEmailAlias(ctx context.Context, id uuid.UUID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -531,6 +542,17 @@ func (m *MemoryStore) ListEmailForwardersByDomain(ctx context.Context, domainID 
 		}
 	}
 	return list, nil
+}
+
+func (m *MemoryStore) GetEmailForwarderByID(ctx context.Context, id uuid.UUID) (*EmailForwarder, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	f, exists := m.emailForwarders[id]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return f, nil
 }
 
 func (m *MemoryStore) DeleteEmailForwarder(ctx context.Context, id uuid.UUID) error {
@@ -1656,6 +1678,25 @@ func (p *PostgresStore) ListEmailAliasesByDomain(ctx context.Context, domainID u
 	return list, nil
 }
 
+func (p *PostgresStore) GetEmailAliasByID(ctx context.Context, id uuid.UUID) (*EmailAlias, error) {
+	query := `
+		SELECT id, domain_id, source_address, destination_address, is_active, created_at, updated_at
+		FROM email_aliases
+		WHERE id = $1
+	`
+	a := &EmailAlias{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&a.ID, &a.DomainID, &a.SourceAddress, &a.DestinationAddress, &a.IsActive, &a.CreatedAt, &a.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return a, nil
+}
+
 func (p *PostgresStore) DeleteEmailAlias(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM email_aliases WHERE id = $1`
 	res, err := p.db.ExecContext(ctx, query, id)
@@ -1708,6 +1749,25 @@ func (p *PostgresStore) ListEmailForwardersByDomain(ctx context.Context, domainI
 		list = append(list, f)
 	}
 	return list, nil
+}
+
+func (p *PostgresStore) GetEmailForwarderByID(ctx context.Context, id uuid.UUID) (*EmailForwarder, error) {
+	query := `
+		SELECT id, domain_id, mailbox_id, source_address, forward_address, keep_copy, is_active, created_at
+		FROM email_forwarders
+		WHERE id = $1
+	`
+	f := &EmailForwarder{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&f.ID, &f.DomainID, &f.MailboxID, &f.SourceAddress, &f.ForwardAddress, &f.KeepCopy, &f.IsActive, &f.CreatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return f, nil
 }
 
 func (p *PostgresStore) DeleteEmailForwarder(ctx context.Context, id uuid.UUID) error {

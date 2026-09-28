@@ -21,13 +21,28 @@ var (
 // Service provides thread-safe, centralized resolution of effective limits,
 // feature permissions, usage tracking, and admin overrides.
 type Service struct {
-	store store.Store
-	mu    sync.RWMutex
+	store     store.Store
+	mu        sync.RWMutex
+	userLocks sync.Map // map of uuid.UUID -> *sync.Mutex
 }
 
 func NewService(s store.Store) *Service {
 	return &Service{
 		store: s,
+	}
+}
+
+func (s *Service) getUserMutex(userID uuid.UUID) *sync.Mutex {
+	val, _ := s.userLocks.LoadOrStore(userID, &sync.Mutex{})
+	return val.(*sync.Mutex)
+}
+
+// LockUser locks resource creation for a specific user to serialize concurrent creation and prevent race condition quota bypasses.
+func (s *Service) LockUser(userID uuid.UUID) func() {
+	m := s.getUserMutex(userID)
+	m.Lock()
+	return func() {
+		m.Unlock()
 	}
 }
 
@@ -321,7 +336,7 @@ func (s *Service) getUsageUnchecked(ctx context.Context, userID, orgID uuid.UUID
 	}
 
 	// 2. Databases count
-	if dbs, err := s.store.ListDatabasesByServer(ctx, uuid.Nil); err == nil {
+	if dbs, err := s.store.ListDatabasesByOrg(ctx, orgID); err == nil {
 		// Count active non-recycle databases
 		for _, db := range dbs {
 			if !db.InRecycleBin {

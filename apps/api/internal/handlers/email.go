@@ -102,6 +102,15 @@ func (h *EmailHandler) verifyMailboxOwnership(r *http.Request, mb *store.EmailMa
 	return nil
 }
 
+// isEmailAdmin checks whether the caller is a superadmin, owner, or admin.
+func (h *EmailHandler) isEmailAdmin(r *http.Request) bool {
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		return false
+	}
+	return claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner"
+}
+
 // ----------------------------------------------------------------------------
 // REQUEST & RESPONSE DTOs
 // ----------------------------------------------------------------------------
@@ -292,6 +301,11 @@ func (h *EmailHandler) ListMailServers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) RunMailServerPreflight(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can run mail preflight checks", nil, "")
+		return
+	}
+
 	var req MailPreflightRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		req.Hostname = "mail.hostvra.local"
@@ -305,6 +319,11 @@ func (h *EmailHandler) RunMailServerPreflight(w http.ResponseWriter, r *http.Req
 }
 
 func (h *EmailHandler) CreateMailServer(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can create mail servers", nil, "")
+		return
+	}
+
 	claims, _ := auth.GetClaims(r.Context())
 	var req CreateMailServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -525,6 +544,11 @@ func (h *EmailHandler) GetMailServer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) UpdateMailServer(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can update mail servers", nil, "")
+		return
+	}
+
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mail server UUID", nil, "")
@@ -619,6 +643,11 @@ func (h *EmailHandler) UpdateMailServer(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *EmailHandler) DeleteMailServer(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can delete mail servers", nil, "")
+		return
+	}
+
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mail server UUID", nil, "")
@@ -753,6 +782,12 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	if req.ServerID != "" {
 		if sID, pErr := uuid.Parse(req.ServerID); pErr == nil {
 			if s, gErr := h.store.GetServerByID(r.Context(), sID); gErr == nil && s != nil {
+				if claims != nil && !claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner" {
+					if s.OrganizationID != claims.OrganizationID {
+						response.Error(w, http.StatusForbidden, "FORBIDDEN", "Server does not belong to your organization", nil, "")
+						return
+					}
+				}
 				server = s
 				serverID = s.ID
 			}
@@ -1485,6 +1520,8 @@ func (h *EmailHandler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
 func (h *EmailHandler) CreateMailbox(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
 	if claims != nil && h.quotaSvc != nil {
+		unlock := h.quotaSvc.LockUser(claims.UserID)
+		defer unlock()
 		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "mailboxes"); err != nil {
 			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
 			return
@@ -1874,6 +1911,11 @@ func (h *EmailHandler) GetDomainHealth(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *EmailHandler) ListQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can view the mail queue", nil, "")
+		return
+	}
+
 	messages, err := queue.ListQueue()
 	if err != nil {
 		if strings.Contains(err.Error(), "mail system is down") || strings.Contains(err.Error(), "executable file not found") {
@@ -1888,6 +1930,11 @@ func (h *EmailHandler) ListQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) FlushQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can flush the mail queue", nil, "")
+		return
+	}
+
 	if err := queue.FlushQueue(); err != nil {
 		if strings.Contains(err.Error(), "mail system is down") || strings.Contains(err.Error(), "executable file not found") {
 			response.JSON(w, http.StatusOK, map[string]string{"message": "Mail system is down or queue is empty; flush requested"}, nil)
@@ -1902,6 +1949,11 @@ func (h *EmailHandler) FlushQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *EmailHandler) DeleteQueueItem(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can delete mail queue items", nil, "")
+		return
+	}
+
 	queueID := chi.URLParam(r, "id")
 	if queueID == "" {
 		response.Error(w, http.StatusBadRequest, "MISSING_QUEUE_ID", "Queue ID required", nil, "")
@@ -2023,11 +2075,21 @@ func (h *EmailHandler) DeleteSuppression(w http.ResponseWriter, r *http.Request)
 // ----------------------------------------------------------------------------
 
 func (h *EmailHandler) ListServices(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can view email services", nil, "")
+		return
+	}
+
 	statusList := services.GetEmailServicesStatus()
 	response.JSON(w, http.StatusOK, statusList, nil)
 }
 
 func (h *EmailHandler) ManageService(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can manage email services", nil, "")
+		return
+	}
+
 	serviceName := chi.URLParam(r, "name")
 
 	var req ServiceActionRequest
@@ -2053,6 +2115,11 @@ func (h *EmailHandler) ManageService(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *EmailHandler) SendTestEmail(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can use the SMTP test tool", nil, "")
+		return
+	}
+
 	var req SendTestEmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.From == "" || req.To == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "From and To email addresses required", nil, "")
@@ -2092,6 +2159,16 @@ func (h *EmailHandler) GetSignature(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	sig, err := h.store.GetEmailSignature(r.Context(), mbID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve signature", nil, "")
@@ -2105,6 +2182,16 @@ func (h *EmailHandler) SetSignature(w http.ResponseWriter, r *http.Request) {
 	mbID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -2136,6 +2223,16 @@ func (h *EmailHandler) GetAutoresponder(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	ar, err := h.store.GetEmailAutoresponderByMailbox(r.Context(), mbID)
 	if err != nil && err != store.ErrNotFound {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve autoresponder", nil, "")
@@ -2149,6 +2246,16 @@ func (h *EmailHandler) SetAutoresponder(w http.ResponseWriter, r *http.Request) 
 	mbID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mbID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -2265,10 +2372,29 @@ func (h *EmailHandler) DeleteAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	alias, err := h.store.GetEmailAliasByID(r.Context(), aliasID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email alias not found", nil, "")
+		return
+	}
+
+	domain, err := h.store.GetEmailDomainByID(r.Context(), alias.DomainID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.store.DeleteEmailAlias(r.Context(), aliasID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete alias", nil, "")
 		return
 	}
+
+	h.syncPostfixMaps(r.Context(), domain.ServerID)
 
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Alias deleted successfully"}, nil)
 }
@@ -2360,10 +2486,29 @@ func (h *EmailHandler) DeleteForwarder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fwd, err := h.store.GetEmailForwarderByID(r.Context(), id)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email forwarder not found", nil, "")
+		return
+	}
+
+	domain, err := h.store.GetEmailDomainByID(r.Context(), fwd.DomainID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
 	if err := h.store.DeleteEmailForwarder(r.Context(), id); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete forwarder", nil, "")
 		return
 	}
+
+	h.syncPostfixMaps(r.Context(), domain.ServerID)
 
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Forwarder deleted successfully"}, nil)
 }

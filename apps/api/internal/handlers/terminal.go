@@ -67,6 +67,12 @@ type ExecuteCommandResponse struct {
 
 // GetInfo returns system environment metadata for the Web Terminal
 func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil || (claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can access terminal metadata", nil, "")
+		return
+	}
+
 	hostname, _ := os.Hostname()
 	if hostname == "" {
 		hostname = "hostvra-node"

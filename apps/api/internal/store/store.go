@@ -122,9 +122,11 @@ type Store interface {
 
 	// Email Aliases & Forwarders
 	CreateEmailAlias(ctx context.Context, alias *EmailAlias) error
+	GetEmailAliasByID(ctx context.Context, id uuid.UUID) (*EmailAlias, error)
 	ListEmailAliasesByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailAlias, error)
 	DeleteEmailAlias(ctx context.Context, id uuid.UUID) error
 	CreateEmailForwarder(ctx context.Context, fwd *EmailForwarder) error
+	GetEmailForwarderByID(ctx context.Context, id uuid.UUID) (*EmailForwarder, error)
 	ListEmailForwardersByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailForwarder, error)
 	DeleteEmailForwarder(ctx context.Context, id uuid.UUID) error
 

@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"sync"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -20,6 +22,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/dns"
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/store"
 )
@@ -966,5 +969,657 @@ func TestSecurityAudit_EnterpriseCrossTenantCustomerIsolation(t *testing.T) {
 		t.Fatalf("Vector 7 Failed: Tenant Beta exceeding website limit returned %d, expected 409 Conflict: %s", httpRecB2.Code, httpRecB2.Body.String())
 	}
 }
+
+func TestAdversarialMultiTenantSecurityVerification(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_STORE_FILE", filepath.Join(tempDir, "store.json"))
+	jwtSecret := "super-secure-production-ready-jwt-secret-key-32-chars-long"
+	cfg := &config.Config{
+		JWTSecret: jwtSecret,
+	}
+	memStore := store.NewMemoryStore()
+	slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, slogger)
+	quotaSvc := quota.NewService(memStore)
+	dnsSvc := dns.NewService()
+
+	// Setup handlers
+	emailHandler := NewEmailHandler(cfg, memStore, dnsSvc, auditLogger)
+	emailHandler.SetQuotaService(quotaSvc)
+
+	ftpHandler := NewFTPHandler(cfg, memStore, auditLogger)
+	ftpHandler.SetQuotaService(quotaSvc)
+
+	siteHandler := NewWebsiteHandler(cfg, memStore, auditLogger)
+	siteHandler.SetQuotaService(quotaSvc)
+
+	dbHandler := NewDatabaseHandler(cfg, memStore, auditLogger)
+	dbHandler.SetQuotaService(quotaSvc)
+
+	cronHandler := NewCronHandler(cfg, memStore, auditLogger)
+	cronHandler.SetQuotaService(quotaSvc)
+
+	fileHandler := NewFileHandler(cfg, memStore, auditLogger)
+
+	termHandler := NewTerminalHandler(cfg, memStore, auditLogger)
+	termHandler.SetQuotaService(quotaSvc)
+
+	dnsHandler := NewDNSHandler(cfg, dnsSvc, auditLogger)
+
+	auditHandler := NewAuditHandler(memStore)
+
+	instHandler := NewInstallerHandler(cfg, memStore, auditLogger)
+
+	// Setup Tenant Alpha & Tenant Beta
+	orgA := uuid.New()
+	userA := uuid.New()
+	orgB := uuid.New()
+	userB := uuid.New()
+
+	_ = memStore.CreateOrganization(context.Background(), &store.Organization{
+		ID: orgA, Name: "Tenant Alpha Corp", Slug: "tenant-alpha", PlanTier: "starter",
+	})
+	_ = memStore.CreateOrganization(context.Background(), &store.Organization{
+		ID: orgB, Name: "Tenant Beta Ltd", Slug: "tenant-beta", PlanTier: "starter",
+	})
+
+	_ = memStore.CreateUser(context.Background(), &store.User{
+		ID: userA, Email: "admin@tenant-alpha.com", Role: "customer",
+	}, orgA, "customer")
+	_ = memStore.CreateUser(context.Background(), &store.User{
+		ID: userB, Email: "attacker@tenant-beta.com", Role: "customer",
+	}, orgB, "customer")
+
+	serverA := &store.Server{
+		ID: uuid.New(), OrganizationID: orgA, Name: "Node Alpha", Hostname: "node-a.hostvra.internal",
+	}
+	_ = memStore.CreateServer(context.Background(), serverA)
+
+	serverB := &store.Server{
+		ID: uuid.New(), OrganizationID: orgB, Name: "Node Beta", Hostname: "node-b.hostvra.internal",
+	}
+	_ = memStore.CreateServer(context.Background(), serverB)
+
+	siteA := &store.Website{
+		ID:             uuid.New(),
+		ServerID:       serverA.ID,
+		OrganizationID: orgA,
+		PrimaryDomain:  "alpha-corp.com",
+		DocumentRoot:   "/var/www/alpha-corp.com/public_html",
+		SystemUser:     "alpha_sys",
+		Status:         "active",
+	}
+	_ = memStore.CreateWebsite(context.Background(), siteA)
+
+	siteB := &store.Website{
+		ID:             uuid.New(),
+		ServerID:       serverB.ID,
+		OrganizationID: orgB,
+		PrimaryDomain:  "beta-ltd.com",
+		DocumentRoot:   "/var/www/beta-ltd.com/public_html",
+		SystemUser:     "beta_sys",
+		Status:         "active",
+	}
+	_ = memStore.CreateWebsite(context.Background(), siteB)
+
+	claimsA := &auth.Claims{UserID: userA, OrganizationID: orgA, Role: "customer"}
+	ctxA := context.WithValue(context.Background(), auth.UserContextKey, claimsA)
+
+	claimsB := &auth.Claims{UserID: userB, OrganizationID: orgB, Role: "customer"}
+	ctxB := context.WithValue(context.Background(), auth.UserContextKey, claimsB)
+
+	// ------------------------------------------------------------------------
+	// 1. EMAIL SECURITY AUDIT
+	// ------------------------------------------------------------------------
+	// Tenant A creates domain, mailbox, alias, forwarder
+	domA := &store.EmailDomain{
+		ID:             uuid.New(),
+		OrganizationID: orgA,
+		ServerID:       serverA.ID,
+		Domain:         "alpha-corp.com",
+		MailHostname:   "mail.alpha-corp.com",
+		Status:         "active",
+	}
+	_ = memStore.CreateEmailDomain(context.Background(), domA)
+
+	mbA := &store.EmailMailbox{
+		ID:           uuid.New(),
+		DomainID:     domA.ID,
+		ServerID:     serverA.ID,
+		LocalPart:    "ceo",
+		Email:        "ceo@alpha-corp.com",
+		PasswordHash: "hashed",
+		IsActive:     true,
+	}
+	_ = memStore.CreateEmailMailbox(context.Background(), mbA)
+
+	aliasA := &store.EmailAlias{
+		ID:                 uuid.New(),
+		DomainID:           domA.ID,
+		SourceAddress:      "contact@alpha-corp.com",
+		DestinationAddress: "ceo@alpha-corp.com",
+	}
+	_ = memStore.CreateEmailAlias(context.Background(), aliasA)
+
+	fwdA := &store.EmailForwarder{
+		ID:             uuid.New(),
+		DomainID:       domA.ID,
+		SourceAddress:  "sales@alpha-corp.com",
+		ForwardAddress: "external@gmail.com",
+		IsActive:       true,
+	}
+	_ = memStore.CreateEmailForwarder(context.Background(), fwdA)
+
+	t.Run("Email_DeleteAlias_CrossTenantForbidden", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/v1/email/aliases/"+aliasA.ID.String(), nil).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", aliasA.ID.String())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		emailHandler.DeleteAlias(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant DeleteAlias, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Email_DeleteForwarder_CrossTenantForbidden", func(t *testing.T) {
+		req := httptest.NewRequest("DELETE", "/api/v1/email/forwarders/"+fwdA.ID.String(), nil).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", fwdA.ID.String())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		emailHandler.DeleteForwarder(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant DeleteForwarder, got %d", rec.Code)
+		}
+	})
+
+	t.Run("Email_Signature_CrossTenantForbidden", func(t *testing.T) {
+		reqGet := httptest.NewRequest("GET", "/api/v1/email/mailboxes/"+mbA.ID.String()+"/signature", nil).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", mbA.ID.String())
+		reqGet = reqGet.WithContext(context.WithValue(reqGet.Context(), chi.RouteCtxKey, rctx))
+		recGet := httptest.NewRecorder()
+		emailHandler.GetSignature(recGet, reqGet)
+		if recGet.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant GetSignature, got %d", recGet.Code)
+		}
+
+		sigBody, _ := json.Marshal(SetSignatureRequest{PlainText: "Hacked signature"})
+		reqSet := httptest.NewRequest("POST", "/api/v1/email/mailboxes/"+mbA.ID.String()+"/signature", bytes.NewReader(sigBody)).WithContext(ctxB)
+		reqSet = reqSet.WithContext(context.WithValue(reqSet.Context(), chi.RouteCtxKey, rctx))
+		recSet := httptest.NewRecorder()
+		emailHandler.SetSignature(recSet, reqSet)
+		if recSet.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant SetSignature, got %d", recSet.Code)
+		}
+	})
+
+	t.Run("Email_Autoresponder_CrossTenantForbidden", func(t *testing.T) {
+		reqGet := httptest.NewRequest("GET", "/api/v1/email/mailboxes/"+mbA.ID.String()+"/autoresponder", nil).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", mbA.ID.String())
+		reqGet = reqGet.WithContext(context.WithValue(reqGet.Context(), chi.RouteCtxKey, rctx))
+		recGet := httptest.NewRecorder()
+		emailHandler.GetAutoresponder(recGet, reqGet)
+		if recGet.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant GetAutoresponder, got %d", recGet.Code)
+		}
+
+		arBody, _ := json.Marshal(SetAutoresponderRequest{Subject: "Hacked", Body: "Hacked", IsEnabled: true})
+		reqSet := httptest.NewRequest("POST", "/api/v1/email/mailboxes/"+mbA.ID.String()+"/autoresponder", bytes.NewReader(arBody)).WithContext(ctxB)
+		reqSet = reqSet.WithContext(context.WithValue(reqSet.Context(), chi.RouteCtxKey, rctx))
+		recSet := httptest.NewRecorder()
+		emailHandler.SetAutoresponder(recSet, reqSet)
+		if recSet.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for cross-tenant SetAutoresponder, got %d", recSet.Code)
+		}
+	})
+
+	t.Run("Email_AdminInfrastructure_CustomerBlocked", func(t *testing.T) {
+		// ListQueue
+		reqQueue := httptest.NewRequest("GET", "/api/v1/email/queue", nil).WithContext(ctxB)
+		recQueue := httptest.NewRecorder()
+		emailHandler.ListQueue(recQueue, reqQueue)
+		if recQueue.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer ListQueue, got %d", recQueue.Code)
+		}
+
+		// FlushQueue
+		reqFlush := httptest.NewRequest("POST", "/api/v1/email/queue/flush", nil).WithContext(ctxB)
+		recFlush := httptest.NewRecorder()
+		emailHandler.FlushQueue(recFlush, reqFlush)
+		if recFlush.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer FlushQueue, got %d", recFlush.Code)
+		}
+
+		// ManageService
+		actBody, _ := json.Marshal(ServiceActionRequest{Action: "restart"})
+		reqSvc := httptest.NewRequest("POST", "/api/v1/email/services/postfix/action", bytes.NewReader(actBody)).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("name", "postfix")
+		reqSvc = reqSvc.WithContext(context.WithValue(reqSvc.Context(), chi.RouteCtxKey, rctx))
+		recSvc := httptest.NewRecorder()
+		emailHandler.ManageService(recSvc, reqSvc)
+		if recSvc.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer ManageService, got %d", recSvc.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 2. FTP ISOLATION & PATH TRAVERSAL
+	// ------------------------------------------------------------------------
+	t.Run("FTP_PathIsolation_DirectAndTraversal", func(t *testing.T) {
+		// Direct target of Tenant A document root
+		ftpBody1, _ := json.Marshal(CreateFTPUserRequest{
+			Username: "hacker1",
+			Password: "Password123!",
+			HomeDir:  "/var/www/alpha-corp.com/public_html",
+		})
+		reqFTP1 := httptest.NewRequest("POST", "/api/v1/ftp/users", bytes.NewReader(ftpBody1)).WithContext(ctxB)
+		recFTP1 := httptest.NewRecorder()
+		ftpHandler.CreateUser(recFTP1, reqFTP1)
+		if recFTP1.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for FTP user on Tenant A root, got %d: %s", recFTP1.Code, recFTP1.Body.String())
+		}
+
+		// Directory traversal target
+		ftpBody2, _ := json.Marshal(CreateFTPUserRequest{
+			Username: "hacker2",
+			Password: "Password123!",
+			HomeDir:  "/var/www/beta-ltd.com/public_html/../../alpha-corp.com/public_html",
+		})
+		reqFTP2 := httptest.NewRequest("POST", "/api/v1/ftp/users", bytes.NewReader(ftpBody2)).WithContext(ctxB)
+		recFTP2 := httptest.NewRecorder()
+		ftpHandler.CreateUser(recFTP2, reqFTP2)
+		if recFTP2.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for FTP user with traversal, got %d", recFTP2.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 3. BACKUP ISOLATION & SCHEDULE SECURITY
+	// ------------------------------------------------------------------------
+	t.Run("Backup_ScheduleAndTargetIsolation", func(t *testing.T) {
+		tempDir := t.TempDir()
+		t.Setenv("HOSTVRA_BACKUP_DIR", filepath.Join(tempDir, "backups"))
+		t.Setenv("HOSTVRA_CONFIG_DIR", filepath.Join(tempDir, "config"))
+		t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+		bkHandler := NewBackupHandler(cfg, memStore, auditLogger)
+
+		// Tenant B attempts to schedule backup targeting Tenant A's website
+		schedBody1, _ := json.Marshal(backup.ScheduleConfig{
+			Name:       "Sneaky Alpha Backup",
+			Scope:      "website",
+			TargetName: "alpha-corp.com",
+			Frequency:  "daily",
+		})
+		reqSched1 := httptest.NewRequest("POST", "/api/v1/backups/schedules", bytes.NewReader(schedBody1)).WithContext(ctxB)
+		recSched1 := httptest.NewRecorder()
+		bkHandler.SaveSchedule(recSched1, reqSched1)
+		if recSched1.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for scheduling backup on Tenant A website, got %d", recSched1.Code)
+		}
+
+		// Tenant B attempts full_config scope (admin only)
+		schedBody2, _ := json.Marshal(backup.ScheduleConfig{
+			Name:       "Full System Config",
+			Scope:      "full_config",
+			TargetName: "hostvra",
+			Frequency:  "daily",
+		})
+		reqSched2 := httptest.NewRequest("POST", "/api/v1/backups/schedules", bytes.NewReader(schedBody2)).WithContext(ctxB)
+		recSched2 := httptest.NewRecorder()
+		bkHandler.SaveSchedule(recSched2, reqSched2)
+		if recSched2.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer scheduling full_config backup, got %d", recSched2.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 4. DATABASE ISOLATION & ADMIN RESTRICTION
+	// ------------------------------------------------------------------------
+	dbA := &store.Database{
+		ID:             uuid.New(),
+		OrganizationID: orgA,
+		ServerID:       serverA.ID,
+		DBType:         "mysql",
+		Name:           "alpha_db",
+		Username:       "alpha_user",
+		InRecycleBin:   false,
+	}
+	_ = memStore.CreateDatabase(context.Background(), dbA)
+
+	t.Run("Database_AdminEndpoints_CustomerBlocked", func(t *testing.T) {
+		// Root password
+		reqRoot := httptest.NewRequest("GET", "/api/v1/databases/root-password", nil).WithContext(ctxB)
+		recRoot := httptest.NewRecorder()
+		dbHandler.GetRootPassword(recRoot, reqRoot)
+		if recRoot.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer GetRootPassword, got %d", recRoot.Code)
+		}
+
+		// Auto backup
+		reqAuto := httptest.NewRequest("GET", "/api/v1/databases/auto-backup", nil).WithContext(ctxB)
+		recAuto := httptest.NewRecorder()
+		dbHandler.GetAutoBackup(recAuto, reqAuto)
+		if recAuto.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer GetAutoBackup, got %d", recAuto.Code)
+		}
+
+		// Advanced setup
+		reqAdv := httptest.NewRequest("GET", "/api/v1/databases/advanced-setup", nil).WithContext(ctxB)
+		recAdv := httptest.NewRecorder()
+		dbHandler.GetAdvancedSetup(recAdv, reqAdv)
+		if recAdv.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer GetAdvancedSetup, got %d", recAdv.Code)
+		}
+	})
+
+	t.Run("Database_RecycleBinAndBatchIsolation", func(t *testing.T) {
+		// Soft delete Tenant A's database
+		dbA.InRecycleBin = true
+		_ = memStore.UpdateDatabase(context.Background(), dbA)
+
+		// Tenant B lists recycle bin -> must not see dbA
+		reqTrash := httptest.NewRequest("GET", "/api/v1/databases/recycle-bin", nil).WithContext(ctxB)
+		recTrash := httptest.NewRecorder()
+		dbHandler.ListRecycleBin(recTrash, reqTrash)
+		var trashEnv struct {
+			Data []*store.Database `json:"data"`
+		}
+		_ = json.NewDecoder(recTrash.Body).Decode(&trashEnv)
+		for _, d := range trashEnv.Data {
+			if d.ID == dbA.ID {
+				t.Fatalf("Tenant B received Tenant A's database in recycle bin!")
+			}
+		}
+
+		// Tenant B tries to restore Tenant A's database -> 403 Forbidden
+		reqRestore := httptest.NewRequest("POST", "/api/v1/databases/recycle-bin/"+dbA.ID.String()+"/restore", nil).WithContext(ctxB)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", dbA.ID.String())
+		reqRestore = reqRestore.WithContext(context.WithValue(reqRestore.Context(), chi.RouteCtxKey, rctx))
+		recRestore := httptest.NewRecorder()
+		dbHandler.RestoreRecycleBin(recRestore, reqRestore)
+		if recRestore.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for restoring Tenant A's database, got %d", recRestore.Code)
+		}
+
+		// Tenant B attempts Batch delete of Tenant A's database -> 0 affected
+		batchBody, _ := json.Marshal(BatchOperationRequest{
+			Action: "delete",
+			IDs:    []string{dbA.ID.String()},
+		})
+		reqBatch := httptest.NewRequest("POST", "/api/v1/databases/batch", bytes.NewReader(batchBody)).WithContext(ctxB)
+		recBatch := httptest.NewRecorder()
+		dbHandler.Batch(recBatch, reqBatch)
+		var batchResp struct {
+			Data struct {
+				Affected int `json:"affected"`
+			} `json:"data"`
+		}
+		_ = json.NewDecoder(recBatch.Body).Decode(&batchResp)
+		if batchResp.Data.Affected != 0 {
+			t.Fatalf("Expected 0 affected for cross-tenant Batch delete, got %d", batchResp.Data.Affected)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 5. CRON ISOLATION & ROOT/SYSTEM USER GUARDS
+	// ------------------------------------------------------------------------
+	t.Run("Cron_RootAndCrossTenantUserBlocking", func(t *testing.T) {
+		// Tenant B attempts to schedule cron as root
+		cronBodyRoot, _ := json.Marshal(CreateCronJobRequest{
+			Schedule:   "* * * * *",
+			Command:    "echo 'root owned'",
+			SystemUser: "root",
+		})
+		reqCron1 := httptest.NewRequest("POST", "/api/v1/cron/jobs", bytes.NewReader(cronBodyRoot)).WithContext(ctxB)
+		recCron1 := httptest.NewRecorder()
+		cronHandler.CreateJob(recCron1, reqCron1)
+		if recCron1.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden when scheduling cron as root, got %d: %s", recCron1.Code, recCron1.Body.String())
+		}
+
+		// Tenant B attempts to schedule cron as Tenant A's system user
+		cronBodyA, _ := json.Marshal(CreateCronJobRequest{
+			Schedule:   "* * * * *",
+			Command:    "echo 'impersonate'",
+			SystemUser: "alpha_sys",
+		})
+		reqCron2 := httptest.NewRequest("POST", "/api/v1/cron/jobs", bytes.NewReader(cronBodyA)).WithContext(ctxB)
+		recCron2 := httptest.NewRecorder()
+		cronHandler.CreateJob(recCron2, reqCron2)
+		if recCron2.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden when scheduling cron under Tenant A user, got %d", recCron2.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 6. FILESYSTEM ATTACK VECTORS
+	// ------------------------------------------------------------------------
+	t.Run("Filesystem_Security_AttackVectors", func(t *testing.T) {
+		vectors := []struct {
+			name string
+			path string
+		}{
+			{"NullByte", "/var/www/beta-ltd.com/public_html%00/etc/passwd"},
+			{"DoubleTraversal", "/var/www/beta-ltd.com/public_html/../../etc/passwd"},
+			{"TripleTraversal", "/var/www/beta-ltd.com/public_html/../../../etc/shadow"},
+			{"EncodedTraversal", "/var/www/beta-ltd.com/public_html/%2e%2e/%2e%2e/etc/passwd"},
+			{"DoubleEncoded", "/var/www/beta-ltd.com/public_html/%252e%252e/%252e%252e/etc/shadow"},
+			{"KernelDevice", "/dev/mem"},
+			{"ProcKcore", "/proc/kcore"},
+			{"SystemRestricted", "/etc/shadow"},
+			{"CrossTenantRoot", "/var/www/alpha-corp.com/public_html/index.php"},
+		}
+
+		for _, v := range vectors {
+			req := httptest.NewRequest("GET", "/api/v1/files/content?path="+v.path, nil).WithContext(ctxB)
+			if err := fileHandler.checkPathAuthorization(req, v.path); err == nil {
+				t.Fatalf("Filesystem attack vector '%s' allowed unexpectedly for path: %s", v.name, v.path)
+			}
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 7. TERMINAL ACCESS CONTROLS
+	// ------------------------------------------------------------------------
+	t.Run("Terminal_GetInfoAndExecute_CustomerBlocked", func(t *testing.T) {
+		reqInfo := httptest.NewRequest("GET", "/api/v1/terminal/info", nil).WithContext(ctxB)
+		recInfo := httptest.NewRecorder()
+		termHandler.GetInfo(recInfo, reqInfo)
+		if recInfo.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer terminal GetInfo, got %d", recInfo.Code)
+		}
+
+		execBody, _ := json.Marshal(ExecuteCommandRequest{Command: "cat /etc/passwd"})
+		reqExec := httptest.NewRequest("POST", "/api/v1/terminal/execute", bytes.NewReader(execBody)).WithContext(ctxB)
+		recExec := httptest.NewRecorder()
+		termHandler.Execute(recExec, reqExec)
+		if recExec.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for customer terminal Execute, got %d", recExec.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 8. DNS MULTI-TENANT ISOLATION
+	// ------------------------------------------------------------------------
+	zoneA, err := dnsSvc.CreateZone(context.Background(), orgA, "alpha-corp.com", "local")
+	if err != nil {
+		t.Fatalf("Failed to create DNS zone: %v", err)
+	}
+
+	t.Run("DNS_ZoneAndRecordIsolation", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("zoneID", zoneA.ID.String())
+
+		// Tenant B attempts to delete Tenant A's zone
+		reqDel := httptest.NewRequest("DELETE", "/api/v1/dns/zones/"+zoneA.ID.String(), nil).WithContext(ctxB)
+		reqDel = reqDel.WithContext(context.WithValue(reqDel.Context(), chi.RouteCtxKey, rctx))
+		recDel := httptest.NewRecorder()
+		dnsHandler.DeleteZone(recDel, reqDel)
+		if recDel.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for deleting Tenant A DNS zone, got %d", recDel.Code)
+		}
+
+		// Tenant B attempts to list records of Tenant A's zone
+		reqList := httptest.NewRequest("GET", "/api/v1/dns/zones/"+zoneA.ID.String()+"/records", nil).WithContext(ctxB)
+		reqList = reqList.WithContext(context.WithValue(reqList.Context(), chi.RouteCtxKey, rctx))
+		recList := httptest.NewRecorder()
+		dnsHandler.ListRecords(recList, reqList)
+		if recList.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for listing Tenant A DNS records, got %d", recList.Code)
+		}
+
+		// Tenant B attempts to create record in Tenant A's zone
+		recBody, _ := json.Marshal(CreateRecordRequest{Type: "A", Name: "sub", Content: "1.2.3.4", TTL: 300})
+		reqAdd := httptest.NewRequest("POST", "/api/v1/dns/zones/"+zoneA.ID.String()+"/records", bytes.NewReader(recBody)).WithContext(ctxB)
+		reqAdd = reqAdd.WithContext(context.WithValue(reqAdd.Context(), chi.RouteCtxKey, rctx))
+		recAdd := httptest.NewRecorder()
+		dnsHandler.CreateRecord(recAdd, reqAdd)
+		if recAdd.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden for creating record in Tenant A zone, got %d", recAdd.Code)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 9. QUOTA RACE CONDITION PREVENTION
+	// ------------------------------------------------------------------------
+	t.Run("Quota_RaceCondition_SerializedLocking", func(t *testing.T) {
+		// New user with package limit: 1 website
+		raceOrg := uuid.New()
+		raceUser := uuid.New()
+		_ = memStore.CreateOrganization(context.Background(), &store.Organization{
+			ID: raceOrg, Name: "Race Org", Slug: "race-org", PlanTier: "starter",
+		})
+		_ = memStore.CreateUser(context.Background(), &store.User{
+			ID: raceUser, Email: "race@starter.com", Role: "customer",
+		}, raceOrg, "customer")
+		_ = memStore.CreateServer(context.Background(), &store.Server{
+			ID: uuid.New(), OrganizationID: raceOrg, Name: "Race Node",
+		})
+
+		raceClaims := &auth.Claims{UserID: raceUser, OrganizationID: raceOrg, Role: "customer"}
+		raceCtx := context.WithValue(context.Background(), auth.UserContextKey, raceClaims)
+
+		// Fire 15 concurrent requests to create a website
+		concurrency := 15
+		var wg sync.WaitGroup
+		wg.Add(concurrency)
+		successCount := 0
+		conflictCount := 0
+		var mu sync.Mutex
+
+		for i := 0; i < concurrency; i++ {
+			go func(idx int) {
+				defer wg.Done()
+				body, _ := json.Marshal(CreateWebsiteRequest{
+					PrimaryDomain: "racewebsite" + uuid.New().String()[:6] + ".com",
+				})
+				req := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(body)).WithContext(raceCtx)
+				rec := httptest.NewRecorder()
+				siteHandler.Create(rec, req)
+
+				mu.Lock()
+				defer mu.Unlock()
+				if rec.Code == http.StatusCreated {
+					successCount++
+				} else if rec.Code == http.StatusConflict {
+					conflictCount++
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		if successCount != 1 {
+			t.Fatalf("Quota race condition failed: expected exactly 1 website creation to succeed, got %d successes, %d conflicts", successCount, conflictCount)
+		}
+		if conflictCount != concurrency-1 {
+			t.Fatalf("Expected %d requests rejected by quota, got %d", concurrency-1, conflictCount)
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 10. JWT BOUNDARY & CLAIMS TAMPERING
+	// ------------------------------------------------------------------------
+	t.Run("JWT_SignatureAndClaimsTampering", func(t *testing.T) {
+		pair, _, err := auth.GenerateTokenPair(userA, orgA, "admin@alpha.com", "customer", false, jwtSecret, 1*time.Hour, 24*time.Hour)
+		if err != nil {
+			t.Fatalf("Failed to generate token pair: %v", err)
+		}
+
+		// Valid token succeeds
+		claims, err := auth.ValidateAccessToken(pair.AccessToken, jwtSecret)
+		if err != nil || claims.OrganizationID != orgA {
+			t.Fatalf("Expected valid token to pass, got err: %v", err)
+		}
+
+		// Token validated against wrong secret fails
+		_, err = auth.ValidateAccessToken(pair.AccessToken, "attacker-secret-wrong-key-32-chars")
+		if err == nil {
+			t.Fatalf("Expected validation against wrong secret to fail, but succeeded")
+		}
+
+		// Expired token fails
+		expiredPair, _, _ := auth.GenerateTokenPair(userA, orgA, "admin@alpha.com", "customer", false, jwtSecret, -1*time.Hour, 24*time.Hour)
+		_, err = auth.ValidateAccessToken(expiredPair.AccessToken, jwtSecret)
+		if err == nil {
+			t.Fatalf("Expected expired token to be rejected, but succeeded")
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 11. AUDIT LOG ISOLATION
+	// ------------------------------------------------------------------------
+	t.Run("AuditLog_OrganizationScoping", func(t *testing.T) {
+		// Log an action for Alpha and an action for Beta
+		auditLogger.Log(ctxA, httptest.NewRequest("GET", "/", nil), "alpha.action", "resource", "id1", "success", "", nil)
+		auditLogger.Log(ctxB, httptest.NewRequest("GET", "/", nil), "beta.action", "resource", "id2", "success", "", nil)
+
+		reqAudit := httptest.NewRequest("GET", "/api/v1/audit/logs", nil).WithContext(ctxB)
+		recAudit := httptest.NewRecorder()
+		auditHandler.List(recAudit, reqAudit)
+
+		var logsEnv struct {
+			Data []*store.AuditLog `json:"data"`
+		}
+		_ = json.NewDecoder(recAudit.Body).Decode(&logsEnv)
+		for _, log := range logsEnv.Data {
+			if log.OrganizationID != nil && *log.OrganizationID == orgA {
+				t.Fatalf("Tenant B received Tenant A's audit logs!")
+			}
+		}
+	})
+
+	// ------------------------------------------------------------------------
+	// 12. APPLICATION INSTALLER ISOLATION
+	// ------------------------------------------------------------------------
+	t.Run("Installer_CrossTenantWebsiteBlocked", func(t *testing.T) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", siteA.ID.String())
+
+		// Tenant B attempts to inspect Tenant A's installed apps
+		reqGet := httptest.NewRequest("GET", "/api/v1/installer/websites/"+siteA.ID.String()+"/app", nil).WithContext(ctxB)
+		reqGet = reqGet.WithContext(context.WithValue(reqGet.Context(), chi.RouteCtxKey, rctx))
+		recGet := httptest.NewRecorder()
+		instHandler.GetWebsiteApp(recGet, reqGet)
+		if recGet.Code != http.StatusNotFound {
+			t.Fatalf("Expected 404 Not Found for cross-tenant GetWebsiteApp, got %d", recGet.Code)
+		}
+
+		// Tenant B attempts to install application on Tenant A's website
+		instBody, _ := json.Marshal(map[string]interface{}{"app_id": "wordpress", "db_name": "wp_hacked"})
+		reqInst := httptest.NewRequest("POST", "/api/v1/installer/websites/"+siteA.ID.String()+"/install", bytes.NewReader(instBody)).WithContext(ctxB)
+		reqInst = reqInst.WithContext(context.WithValue(reqInst.Context(), chi.RouteCtxKey, rctx))
+		recInst := httptest.NewRecorder()
+		instHandler.InstallWebsiteApp(recInst, reqInst)
+		if recInst.Code != http.StatusNotFound {
+			t.Fatalf("Expected 404 Not Found for cross-tenant InstallWebsiteApp, got %d", recInst.Code)
+		}
+	})
+}
+
 
 

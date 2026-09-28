@@ -877,6 +877,17 @@ func (m *Manager) ListSchedules() ([]ScheduleConfig, error) {
 	return list, nil
 }
 
+func (m *Manager) GetSchedule(id string) (*ScheduleConfig, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	s, ok := m.schedules[id]
+	if !ok {
+		return nil, ErrScheduleNotFound
+	}
+	return &s, nil
+}
+
 func (m *Manager) SaveSchedule(sched ScheduleConfig) (*ScheduleConfig, error) {
 	if sched.Name == "" || sched.Scope == "" {
 		return nil, errors.New("schedule name and scope are required")

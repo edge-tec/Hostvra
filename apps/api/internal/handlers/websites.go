@@ -434,6 +434,8 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
 
 	if claims != nil && h.quotaSvc != nil {
+		unlock := h.quotaSvc.LockUser(claims.UserID)
+		defer unlock()
 		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "websites"); err != nil {
 			response.Error(w, http.StatusConflict, "QUOTA_EXCEEDED", err.Error(), nil, "")
 			return

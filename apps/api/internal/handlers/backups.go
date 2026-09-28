@@ -362,6 +362,18 @@ func (h *BackupHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "SCHEDULES_FAILED", err.Error(), nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+		var filtered []backup.ScheduleConfig
+		for _, s := range list {
+			if err := h.verifyTargetOwnership(r.Context(), claims, string(s.Scope), s.TargetName); err == nil {
+				filtered = append(filtered, s)
+			}
+		}
+		list = filtered
+	}
+
 	response.JSON(w, http.StatusOK, list, &response.Meta{Total: len(list)})
 }
 
@@ -369,6 +381,12 @@ func (h *BackupHandler) SaveSchedule(w http.ResponseWriter, r *http.Request) {
 	var sched backup.ScheduleConfig
 	if err := json.NewDecoder(r.Body).Decode(&sched); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid payload", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if err := h.verifyTargetOwnership(r.Context(), claims, string(sched.Scope), sched.TargetName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -391,6 +409,19 @@ func (h *BackupHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Schedule ID required", nil, "")
 		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+		existing, err := h.manager.GetSchedule(id)
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Schedule not found", nil, "")
+			return
+		}
+		if err := h.verifyTargetOwnership(r.Context(), claims, string(existing.Scope), existing.TargetName); err != nil {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+			return
+		}
 	}
 
 	if err := h.manager.DeleteSchedule(id); err != nil {

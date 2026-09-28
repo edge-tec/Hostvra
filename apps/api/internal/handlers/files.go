@@ -65,6 +65,9 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 	}
 
 	clean := filepath.Clean(candidate)
+	if strings.Contains(candidate, "\x00") || strings.Contains(clean, "\x00") {
+		return fmt.Errorf("invalid path: null byte detected")
+	}
 
 	// 2. Reject relative paths and explicit directory traversal sequences
 	if !filepath.IsAbs(clean) {
