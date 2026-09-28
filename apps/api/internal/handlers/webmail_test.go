@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -357,3 +358,183 @@ func TestEmailHandler_AdvancedEndpoints(t *testing.T) {
 		t.Fatalf("Unexpected SMTP/IMAP ports: %+v", smtpResp.Data)
 	}
 }
+
+func TestWebmailHandler_SentPersistenceAndLocalDelivery(t *testing.T) {
+	wmHandler, _, st, orgID, userID, serverID, senderMb := setupWebmailTestEnv(t)
+	claims := &auth.Claims{
+		UserID:         userID,
+		OrganizationID: orgID,
+		Role:           "owner",
+	}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
+
+	// Create recipient mailbox on the same server
+	recipientMb := &store.EmailMailbox{
+		ID:           uuid.New(),
+		DomainID:     senderMb.DomainID,
+		ServerID:     serverID,
+		LocalPart:    "finance",
+		Email:        "finance@enterprise.net",
+		PasswordHash: "somehash",
+		Name:         "Finance Dept",
+		QuotaBytes:   5368709120,
+		IsActive:     true,
+	}
+	_ = st.CreateEmailMailbox(ctx, recipientMb)
+
+	// Set temp STORAGE_LOCATION to test Maildir disk operations
+	tempMaildir, err := os.MkdirTemp("", "hostvra-maildir-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp maildir: %v", err)
+	}
+	defer os.RemoveAll(tempMaildir)
+	os.Setenv("STORAGE_LOCATION", tempMaildir)
+	defer os.Unsetenv("STORAGE_LOCATION")
+
+	// 1. Send Message to recipient on the same server
+	sendReq := SendWebmailMessageRequest{
+		AccountEmail: senderMb.Email,
+		To:           []string{recipientMb.Email},
+		Subject:      "Budget Approval Request",
+		BodyText:     "Please approve the attached quarterly budget.",
+	}
+	bodyBytes, _ := json.Marshal(sendReq)
+	req := httptest.NewRequest("POST", "/api/v1/webmail/messages/send", bytes.NewReader(bodyBytes)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	wmHandler.SendMessage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from SendMessage, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. Verify that message was stored in sender's "sent" folder
+	sentMsgs, totalSent, err := st.ListWebmailMessages(ctx, senderMb.ID, "sent", 10, 0, "")
+	if err != nil || totalSent != 1 || len(sentMsgs) != 1 {
+		t.Fatalf("Expected 1 message in sender's sent folder, got %d (err: %v)", totalSent, err)
+	}
+	if sentMsgs[0].Subject != "Budget Approval Request" {
+		t.Fatalf("Subject mismatch: got %s", sentMsgs[0].Subject)
+	}
+
+	// 3. Verify that message was delivered directly to recipient's "inbox" folder
+	inboxMsgs, totalInbox, err := st.ListWebmailMessages(ctx, recipientMb.ID, "inbox", 10, 0, "")
+	if err != nil || totalInbox != 1 || len(inboxMsgs) != 1 {
+		t.Fatalf("Expected 1 message in recipient's inbox folder, got %d (err: %v)", totalInbox, err)
+	}
+	if inboxMsgs[0].FromEmail != senderMb.Email || !inboxMsgs[0].IsUnread {
+		t.Fatalf("Unexpected inbox message state: from=%s unread=%v", inboxMsgs[0].FromEmail, inboxMsgs[0].IsUnread)
+	}
+
+	// 4. Test Folder Counts Endpoint
+	countReq := httptest.NewRequest("GET", "/api/v1/webmail/counts?mailbox_id="+senderMb.ID.String(), nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.GetFolderCounts(w, countReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetFolderCounts failed: %s", w.Body.String())
+	}
+	var senderCounts map[string]int
+	var countResp struct {
+		Data map[string]int `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &countResp)
+	senderCounts = countResp.Data
+	if senderCounts["sent"] != 1 {
+		t.Fatalf("Expected sender sent count = 1, got %d", senderCounts["sent"])
+	}
+
+	// Recipient counts
+	countReqRecip := httptest.NewRequest("GET", "/api/v1/webmail/counts?mailbox_id="+recipientMb.ID.String(), nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.GetFolderCounts(w, countReqRecip)
+	var recipCounts struct {
+		Data map[string]int `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &recipCounts)
+	if recipCounts.Data["inbox"] != 1 || recipCounts.Data["inboxUnread"] != 1 {
+		t.Fatalf("Expected recipient inbox count = 1 (unread=1), got inbox=%d unread=%d", recipCounts.Data["inbox"], recipCounts.Data["inboxUnread"])
+	}
+}
+
+func TestWebmailHandler_MaildirSync(t *testing.T) {
+	wmHandler, _, _, orgID, userID, _, mb := setupWebmailTestEnv(t)
+	claims := &auth.Claims{
+		UserID:         userID,
+		OrganizationID: orgID,
+		Role:           "owner",
+	}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
+
+	tempMaildir, err := os.MkdirTemp("", "hostvra-sync-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp maildir: %v", err)
+	}
+	defer os.RemoveAll(tempMaildir)
+	os.Setenv("STORAGE_LOCATION", tempMaildir)
+	defer os.Unsetenv("STORAGE_LOCATION")
+
+	// Create physical Maildir directory for this user: <temp>/enterprise.net/ceo/new
+	inboxNewDir := filepath.Join(tempMaildir, "enterprise.net", "ceo", "new")
+	if err := os.MkdirAll(inboxNewDir, 0700); err != nil {
+		t.Fatalf("Failed to create inbox new dir: %v", err)
+	}
+
+	// Write a mock incoming raw email from an external server (e.g. delivered by Postfix)
+	rawEmail := "From: external-partner@acme.org\r\n" +
+		"To: ceo@enterprise.net\r\n" +
+		"Subject: Partnership Opportunity\r\n" +
+		"Message-ID: <ext-987654@acme.org>\r\n" +
+		"Date: Mon, 28 Sep 2026 10:00:00 +0000\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/plain; charset=UTF-8\r\n" +
+		"\r\n" +
+		"Hello, we would like to collaborate on your cloud hosting platform.\r\n"
+	mailFile := filepath.Join(inboxNewDir, "1727532345.M12345P6789.hostvra")
+	if err := os.WriteFile(mailFile, []byte(rawEmail), 0600); err != nil {
+		t.Fatalf("Failed to write mail file: %v", err)
+	}
+
+	// Call ListMessages - This should trigger Maildir synchronization
+	listReq := httptest.NewRequest("GET", "/api/v1/webmail/messages?mailbox_id="+mb.ID.String()+"&folder=inbox", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	wmHandler.ListMessages(w, listReq)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListMessages failed: %s", w.Body.String())
+	}
+
+	var listResp struct {
+		Data struct {
+			Messages []store.WebmailMessage `json:"messages"`
+			Total    int                    `json:"total"`
+			Counts   map[string]int         `json:"counts"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &listResp)
+
+	if len(listResp.Data.Messages) != 1 {
+		t.Fatalf("Expected Maildir sync to import 1 message, got %d", len(listResp.Data.Messages))
+	}
+
+	imported := listResp.Data.Messages[0]
+	if imported.Subject != "Partnership Opportunity" {
+		t.Fatalf("Expected subject 'Partnership Opportunity', got '%s'", imported.Subject)
+	}
+	if imported.FromEmail != "external-partner@acme.org" {
+		t.Fatalf("Expected sender 'external-partner@acme.org', got '%s'", imported.FromEmail)
+	}
+	if !imported.IsUnread {
+		t.Fatalf("Expected newly delivered message to be unread")
+	}
+	if listResp.Data.Counts["inbox"] != 1 || listResp.Data.Counts["inboxUnread"] != 1 {
+		t.Fatalf("Expected counts inbox=1 unread=1, got %+v", listResp.Data.Counts)
+	}
+
+	// Also check signature endpoint
+	sigReq := httptest.NewRequest("GET", "/api/v1/webmail/signatures?mailbox_id="+mb.ID.String(), nil).WithContext(ctx)
+	w = httptest.NewRecorder()
+	wmHandler.GetSignature(w, sigReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetSignature failed: %s", w.Body.String())
+	}
+}
+

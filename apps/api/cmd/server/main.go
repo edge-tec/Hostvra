@@ -812,10 +812,18 @@ func main() {
 				r.Post("/send", webmailHandler.SendMessage)
 				r.Post("/messages/send", webmailHandler.SendMessage)
 				r.Patch("/messages/{id}", webmailHandler.UpdateMessageFlags)
+				r.Put("/messages/{id}", webmailHandler.UpdateMessageFlags)
+				r.Put("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
+				r.Patch("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
 				r.Post("/messages/{id}/move", webmailHandler.MoveMessage)
+				r.Put("/messages/{id}/folder", webmailHandler.MoveMessage)
+				r.Post("/messages/{id}/folder", webmailHandler.MoveMessage)
 				r.Post("/draft", webmailHandler.SaveDraft)
 				r.Post("/messages/draft", webmailHandler.SaveDraft)
 				r.Delete("/messages/{id}", webmailHandler.DeleteMessage)
+				r.Get("/counts", webmailHandler.GetFolderCounts)
+				r.Get("/signatures", webmailHandler.GetSignature)
+				r.Post("/signatures", webmailHandler.SetSignature)
 			})
 
 			// Enterprise Hosting Billing, Subscriptions, Invoices & Payment Gateways

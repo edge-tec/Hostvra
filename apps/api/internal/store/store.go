@@ -152,6 +152,8 @@ type Store interface {
 	// Webmail Messages & Attachments
 	ListWebmailMessages(ctx context.Context, mailboxID uuid.UUID, folder string, limit, offset int, search string) ([]*WebmailMessage, int, error)
 	GetWebmailMessageByID(ctx context.Context, id uuid.UUID) (*WebmailMessage, error)
+	GetWebmailMessageByMessageID(ctx context.Context, mailboxID uuid.UUID, messageID string) (*WebmailMessage, error)
+	GetWebmailFolderCounts(ctx context.Context, mailboxID uuid.UUID) (map[string]int, error)
 	CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error
 	UpdateWebmailMessageFlags(ctx context.Context, id uuid.UUID, isUnread, isStarred, isImportant *bool) error
 	MoveWebmailMessage(ctx context.Context, id uuid.UUID, targetFolder string) error

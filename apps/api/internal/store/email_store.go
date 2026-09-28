@@ -842,6 +842,59 @@ func (m *MemoryStore) GetWebmailMessageByID(ctx context.Context, id uuid.UUID) (
 	return &res, nil
 }
 
+func (m *MemoryStore) GetWebmailMessageByMessageID(ctx context.Context, mailboxID uuid.UUID, messageID string) (*WebmailMessage, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, msg := range m.webmailMessages {
+		if msg.MailboxID == mailboxID && msg.MessageID == messageID {
+			res := *msg
+			return &res, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *MemoryStore) GetWebmailFolderCounts(ctx context.Context, mailboxID uuid.UUID) (map[string]int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := map[string]int{
+		"inbox":       0,
+		"inboxUnread": 0,
+		"sent":        0,
+		"drafts":      0,
+		"starred":     0,
+		"spam":        0,
+		"trash":       0,
+		"archive":     0,
+	}
+	for _, msg := range m.webmailMessages {
+		if msg.MailboxID != mailboxID {
+			continue
+		}
+		if msg.IsStarred {
+			counts["starred"]++
+		}
+		switch msg.Folder {
+		case "inbox":
+			counts["inbox"]++
+			if msg.IsUnread {
+				counts["inboxUnread"]++
+			}
+		case "sent":
+			counts["sent"]++
+		case "drafts":
+			counts["drafts"]++
+		case "spam", "junk":
+			counts["spam"]++
+		case "trash":
+			counts["trash"]++
+		case "archive":
+			counts["archive"]++
+		}
+	}
+	return counts, nil
+}
+
 func (m *MemoryStore) CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -2154,6 +2207,85 @@ func (p *PostgresStore) GetWebmailMessageByID(ctx context.Context, id uuid.UUID)
 	}
 
 	return m, nil
+}
+
+func (p *PostgresStore) GetWebmailMessageByMessageID(ctx context.Context, mailboxID uuid.UUID, messageID string) (*WebmailMessage, error) {
+	query := `
+		SELECT id, mailbox_id, account_email, folder, message_id, from_name, from_email,
+		       to_name, to_email, cc, bcc, subject, snippet, body_text, body_html,
+		       is_unread, is_starred, is_important, has_attachment, priority, size_bytes,
+		       created_at, updated_at
+		FROM webmail_messages
+		WHERE mailbox_id = $1 AND message_id = $2
+		LIMIT 1
+	`
+	m := &WebmailMessage{}
+	err := p.db.QueryRowContext(ctx, query, mailboxID, messageID).Scan(
+		&m.ID, &m.MailboxID, &m.AccountEmail, &m.Folder, &m.MessageID, &m.FromName, &m.FromEmail,
+		&m.ToName, &m.ToEmail, &m.Cc, &m.Bcc, &m.Subject, &m.Snippet, &m.BodyText, &m.BodyHTML,
+		&m.IsUnread, &m.IsStarred, &m.IsImportant, &m.HasAttachment, &m.Priority, &m.SizeBytes,
+		&m.CreatedAt, &m.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (p *PostgresStore) GetWebmailFolderCounts(ctx context.Context, mailboxID uuid.UUID) (map[string]int, error) {
+	counts := map[string]int{
+		"inbox":       0,
+		"inboxUnread": 0,
+		"sent":        0,
+		"drafts":      0,
+		"starred":     0,
+		"spam":        0,
+		"trash":       0,
+		"archive":     0,
+	}
+
+	query := `
+		SELECT folder,
+		       COUNT(*) as total,
+		       COUNT(*) FILTER (WHERE is_unread = TRUE) as unread
+		FROM webmail_messages
+		WHERE mailbox_id = $1
+		GROUP BY folder
+	`
+	rows, err := p.db.QueryContext(ctx, query, mailboxID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var folder string
+			var total, unread int
+			if err := rows.Scan(&folder, &total, &unread); err == nil {
+				switch folder {
+				case "inbox":
+					counts["inbox"] = total
+					counts["inboxUnread"] = unread
+				case "sent":
+					counts["sent"] = total
+				case "drafts":
+					counts["drafts"] = total
+				case "spam", "junk":
+					counts["spam"] = total
+				case "trash":
+					counts["trash"] = total
+				case "archive":
+					counts["archive"] = total
+				}
+			}
+		}
+	}
+
+	var starredCount int
+	_ = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM webmail_messages WHERE mailbox_id = $1 AND is_starred = TRUE`, mailboxID).Scan(&starredCount)
+	counts["starred"] = starredCount
+
+	return counts, nil
 }
 
 func (p *PostgresStore) CreateWebmailMessage(ctx context.Context, msg *WebmailMessage) error {

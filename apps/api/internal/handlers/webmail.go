@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
-	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,6 +162,19 @@ func (h *WebmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		search = r.URL.Query().Get("q")
 	}
 
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
 	var mb *store.EmailMailbox
 	var err error
 
@@ -178,26 +191,24 @@ func (h *WebmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, total, err := h.store.ListWebmailMessages(r.Context(), mb.ID, folder, 50, 0, search)
+	// 1. Sync Maildir from disk into database store for real-time incoming messages
+	h.syncMaildirFolder(r.Context(), mb, folder)
+
+	messages, total, err := h.store.ListWebmailMessages(r.Context(), mb.ID, folder, limit, offset, search)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve messages", nil, "")
 		return
 	}
 
-	// Calculate unread count for mailbox
-	inboxMsgs, _, _ := h.store.ListWebmailMessages(r.Context(), mb.ID, "inbox", 500, 0, "")
-	unreadCount := 0
-	for _, m := range inboxMsgs {
-		if m.IsUnread {
-			unreadCount++
-		}
-	}
+	// 2. Compute accurate folder counts across all mailbox folders
+	folderCounts, _ := h.store.GetWebmailFolderCounts(r.Context(), mb.ID)
 
 	res := map[string]interface{}{
 		"messages":     messages,
-		"unread_count": unreadCount,
+		"unread_count": folderCounts["inboxUnread"],
 		"total":        total,
 		"folder":       folder,
+		"counts":       folderCounts,
 	}
 
 	response.JSON(w, http.StatusOK, res, &response.Meta{Total: total})
@@ -391,18 +402,7 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Attempt real local SMTP delivery via loopback-safe TLS client
-	deliveryErr := sendMailLocal(smtpServer, mb.Email, allSMTPRecipients, payloadToDeliver)
-	deliveryStatus := "delivered"
-	failureReason := ""
-	if deliveryErr != nil {
-		deliveryStatus = "failed"
-		failureReason = deliveryErr.Error()
-		response.Error(w, http.StatusInternalServerError, "SMTP_DELIVERY_FAILED", fmt.Sprintf("Postfix local delivery error: %v", deliveryErr), nil, "")
-		return
-	}
-
-	// 3. Persist copy to sender's "sent" folder in DB and Maildir
+	// 3. Persist copy to sender's "sent" folder in DB and Maildir (Always saved)
 	sentMsg := &store.WebmailMessage{
 		ID:            uuid.New(),
 		MailboxID:     mb.ID,
@@ -431,18 +431,50 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.store.CreateWebmailMessage(r.Context(), sentMsg)
+	writeEmailToMaildir(mb.Email, "sent", payloadToDeliver, true)
 
-	// Also write to .Sent Maildir on filesystem if directory exists
-	parts := strings.SplitN(mb.Email, "@", 2)
-	if len(parts) == 2 {
-		sentDir := filepath.Join("/var/mail/vhosts", parts[1], parts[0], ".Sent", "new")
-		if err := os.MkdirAll(sentDir, 0700); err == nil {
-			fName := fmt.Sprintf("%d.H%dP%d.hostvra,S=%d", time.Now().Unix(), os.Getpid(), time.Now().UnixNano()%10000, len(fullMsg))
-			_ = os.WriteFile(filepath.Join(sentDir, fName), []byte(fullMsg), 0600)
+	// 4. Local Delivery: For any recipient that belongs to a hosted mailbox, deliver directly to their Inbox
+	for _, recip := range allSMTPRecipients {
+		recipClean := strings.ToLower(strings.TrimSpace(recip))
+		if recipMb, err := h.store.GetEmailMailboxByEmail(r.Context(), recipClean); err == nil && recipMb != nil {
+			inboxMsg := &store.WebmailMessage{
+				ID:            uuid.New(),
+				MailboxID:     recipMb.ID,
+				AccountEmail:  recipMb.Email,
+				Folder:        "inbox",
+				MessageID:     msgID,
+				FromName:      mb.Name,
+				FromEmail:     mb.Email,
+				ToName:        recipClean,
+				ToEmail:       strings.Join(recipients, ", "),
+				Cc:            ccStr,
+				Bcc:           bccStr,
+				Subject:       req.Subject,
+				BodyText:      mailBody,
+				BodyHTML:      req.BodyHTML,
+				IsUnread:      true,
+				IsStarred:     false,
+				IsImportant:   false,
+				HasAttachment: len(req.Attachments) > 0,
+				Priority:      sentMsg.Priority,
+				SizeBytes:     int64(len(fullMsg)),
+				Attachments:   req.Attachments,
+			}
+			_ = h.store.CreateWebmailMessage(r.Context(), inboxMsg)
+			writeEmailToMaildir(recipMb.Email, "inbox", payloadToDeliver, false)
 		}
 	}
 
-	// 4. Record Audit and Delivery Log
+	// 5. Attempt Postfix SMTP delivery via loopback-safe TLS client
+	deliveryErr := sendMailLocal(smtpServer, mb.Email, allSMTPRecipients, payloadToDeliver)
+	deliveryStatus := "delivered"
+	failureReason := ""
+	if deliveryErr != nil {
+		deliveryStatus = "failed"
+		failureReason = deliveryErr.Error()
+	}
+
+	// 6. Record Audit and Delivery Log
 	_ = h.store.RecordEmailDeliveryLog(r.Context(), &store.EmailDeliveryLog{
 		ID:            uuid.New(),
 		ServerID:      mb.ServerID,
@@ -454,7 +486,7 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		FailureReason: failureReason,
 	})
 
-	h.audit.Log(r.Context(), r, "webmail.message.send", "webmail_message", sentMsg.ID.String(), "success", "", map[string]interface{}{
+	h.audit.Log(r.Context(), r, "webmail.message.send", "webmail_message", sentMsg.ID.String(), deliveryStatus, failureReason, map[string]interface{}{
 		"from":      mb.Email,
 		"to":        strings.Join(recipients, ", "),
 		"status":    deliveryStatus,
@@ -465,6 +497,9 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		"message":   sentMsg,
 		"status":    deliveryStatus,
 		"delivered": deliveryErr == nil,
+	}
+	if deliveryErr != nil {
+		res["warning"] = fmt.Sprintf("Email saved to Sent folder. Postfix MTA notice: %v", deliveryErr)
 	}
 
 	response.JSON(w, http.StatusOK, res, nil)
@@ -535,6 +570,8 @@ func (h *WebmailHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeEmailToMaildir(mb.Email, "drafts", []byte(draftMsg.BodyText), true)
+
 	response.JSON(w, http.StatusOK, draftMsg, nil)
 }
 
@@ -579,9 +616,22 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var srcFolder string
+	var msgAccount string
+	var msgIdentifier string
+	if existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID); err == nil && existing != nil {
+		srcFolder = existing.Folder
+		msgAccount = existing.AccountEmail
+		msgIdentifier = existing.MessageID
+	}
+
 	if err := h.store.MoveWebmailMessage(r.Context(), msgID, req.TargetFolder); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to move message", nil, "")
 		return
+	}
+
+	if msgAccount != "" && msgIdentifier != "" && srcFolder != "" {
+		moveMaildirFile(msgAccount, msgIdentifier, srcFolder, req.TargetFolder)
 	}
 
 	response.JSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Message moved to %s", req.TargetFolder)}, nil)
@@ -594,12 +644,111 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID); err == nil && existing != nil {
+		if existing.Folder == "trash" {
+			moveMaildirFile(existing.AccountEmail, existing.MessageID, "trash", "")
+		} else {
+			moveMaildirFile(existing.AccountEmail, existing.MessageID, existing.Folder, "trash")
+		}
+	}
+
 	if err := h.store.DeleteWebmailMessage(r.Context(), msgID); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete message", nil, "")
 		return
 	}
 
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Message deleted successfully"}, nil)
+}
+
+func (h *WebmailHandler) GetFolderCounts(w http.ResponseWriter, r *http.Request) {
+	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
+	if accountEmail == "" {
+		accountEmail = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account_email")))
+	}
+	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
+
+	var mb *store.EmailMailbox
+	var err error
+
+	if accountEmail != "" {
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
+	} else if mailboxIDStr != "" {
+		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
+			mb, err = h.store.GetEmailMailboxByID(r.Context(), mbID)
+		}
+	}
+
+	if err != nil || mb == nil {
+		response.Error(w, http.StatusBadRequest, "MISSING_ACCOUNT", "Valid account email or mailbox_id parameter required", nil, "")
+		return
+	}
+
+	// Sync Maildir from disk so all folder counts are fresh
+	h.syncMaildirFolder(r.Context(), mb, "all")
+
+	counts, err := h.store.GetWebmailFolderCounts(r.Context(), mb.ID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to get folder counts", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, counts, nil)
+}
+
+func (h *WebmailHandler) GetSignature(w http.ResponseWriter, r *http.Request) {
+	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
+	if mailboxIDStr == "" {
+		response.JSON(w, http.StatusOK, []interface{}{}, nil)
+		return
+	}
+	mbID, err := uuid.Parse(mailboxIDStr)
+	if err != nil {
+		response.JSON(w, http.StatusOK, []interface{}{}, nil)
+		return
+	}
+	sig, err := h.store.GetEmailSignature(r.Context(), mbID)
+	if err != nil || sig == nil {
+		response.JSON(w, http.StatusOK, []interface{}{}, nil)
+		return
+	}
+	response.JSON(w, http.StatusOK, []map[string]interface{}{
+		{
+			"id":         sig.ID,
+			"mailbox_id": sig.MailboxID,
+			"content":    sig.PlainText,
+			"html":       sig.HTMLText,
+		},
+	}, nil)
+}
+
+func (h *WebmailHandler) SetSignature(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MailboxID uuid.UUID `json:"mailbox_id"`
+		Content   string    `json:"content"`
+		HTML      string    `json:"html"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
+		return
+	}
+	if req.MailboxID == uuid.Nil {
+		response.Error(w, http.StatusBadRequest, "MISSING_MAILBOX", "Mailbox ID required", nil, "")
+		return
+	}
+
+	sig := &store.EmailSignature{
+		ID:        uuid.New(),
+		MailboxID: req.MailboxID,
+		PlainText: req.Content,
+		HTMLText:  req.HTML,
+		IsEnabled: true,
+	}
+	if err := h.store.SetEmailSignature(r.Context(), sig); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save signature", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, sig, nil)
 }
 
 // ----------------------------------------------------------------------------

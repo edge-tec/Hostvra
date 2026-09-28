@@ -173,7 +173,7 @@ export function WebmailClient({
       setLoading(true);
       const params = new URLSearchParams({
         mailbox_id: activeMailbox.id,
-        folder: folder === 'starred' ? '' : folder,
+        folder: folder,
       });
       if (query.trim()) {
         params.set('q', query.trim());
@@ -181,6 +181,10 @@ export function WebmailClient({
 
       const res = await apiFetch<any>(`/api/v1/webmail/messages?${params.toString()}`);
       if (res.success && res.data) {
+        if (res.data.counts) {
+          setFolderCounts(res.data.counts);
+        }
+
         let rawList: any[] = [];
         if (Array.isArray(res.data)) {
           rawList = res.data;
@@ -236,13 +240,25 @@ export function WebmailClient({
     }
   };
 
-  // Fetch folder statistics
+  // Fetch folder statistics across all folders
   const fetchCounts = async () => {
     if (!activeMailbox.id) return;
     try {
-      // Fetch inbox & all folders
-      const res = await apiFetch<any>(`/api/v1/webmail/messages?mailbox_id=${activeMailbox.id}`);
+      // 1. Try dedicated fast counts endpoint
+      const countRes = await apiFetch<any>(`/api/v1/webmail/counts?mailbox_id=${activeMailbox.id}`);
+      if (countRes.success && countRes.data && typeof countRes.data === 'object') {
+        setFolderCounts(countRes.data);
+        return;
+      }
+
+      // 2. Fallback: Query all messages across all folders
+      const res = await apiFetch<any>(`/api/v1/webmail/messages?mailbox_id=${activeMailbox.id}&folder=all&limit=500`);
       if (res.success && res.data) {
+        if (res.data.counts) {
+          setFolderCounts(res.data.counts);
+          return;
+        }
+
         let rawList: any[] = [];
         if (Array.isArray(res.data)) {
           rawList = res.data;
@@ -464,8 +480,12 @@ export function WebmailClient({
       });
 
       if (res.success && res.data) {
-        setToastMessage(`Email delivered via Postfix MTA to ${recipients.join(', ')}`);
-        setTimeout(() => setToastMessage(null), 4000);
+        if (res.data.warning) {
+          setToastMessage(res.data.warning);
+        } else {
+          setToastMessage(`Email sent to ${recipients.join(', ')}`);
+        }
+        setTimeout(() => setToastMessage(null), 5000);
         setShowComposeModal(false);
         setComposeTo('');
         setComposeCc('');
@@ -474,8 +494,8 @@ export function WebmailClient({
         setComposeBody('');
         setActiveDraftId(undefined);
         fetchCounts();
-        if (currentFolder === 'sent') {
-          fetchMessages('sent');
+        if (currentFolder === 'sent' || currentFolder === 'inbox') {
+          fetchMessages(currentFolder);
         }
       } else {
         alert(`Failed to send email: ${res.error?.message || 'SMTP delivery rejected by Postfix'}`);
