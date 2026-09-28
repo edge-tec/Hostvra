@@ -89,25 +89,28 @@ func (h *SSLHandler) ListCertificates(w http.ResponseWriter, r *http.Request) {
 		seenDomains[primaryDomain] = true
 	}
 
-	// Add any certificates found on disk that aren't yet in DB
-	for _, dc := range diskCerts {
-		if !seenDomains[dc.Domain] {
-			c := &store.SSLCertificate{
-				ID:            uuid.New(),
-				DomainList:    append([]string{dc.Domain}, dc.SANs...),
-				Issuer:        dc.Issuer,
-				CertPath:      dc.CertPath,
-				KeyPath:       dc.KeyPath,
-				IssuedAt:      dc.ValidFrom,
-				ExpiresAt:     dc.ValidTo,
-				AutoRenew:     dc.AutoRenew,
-				Status:        dc.Status,
-				IsWildcard:    dc.IsWildcard,
-				DaysRemaining: dc.DaysRemaining,
-				CreatedAt:     dc.ValidFrom,
-				UpdatedAt:     time.Now().UTC(),
+	// Add any certificates found on disk that aren't yet in DB (admins only)
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
+	if isAdmin {
+		for _, dc := range diskCerts {
+			if !seenDomains[dc.Domain] {
+				c := &store.SSLCertificate{
+					ID:            uuid.New(),
+					DomainList:    append([]string{dc.Domain}, dc.SANs...),
+					Issuer:        dc.Issuer,
+					CertPath:      dc.CertPath,
+					KeyPath:       dc.KeyPath,
+					IssuedAt:      dc.ValidFrom,
+					ExpiresAt:     dc.ValidTo,
+					AutoRenew:     dc.AutoRenew,
+					Status:        dc.Status,
+					IsWildcard:    dc.IsWildcard,
+					DaysRemaining: dc.DaysRemaining,
+					CreatedAt:     dc.ValidFrom,
+					UpdatedAt:     time.Now().UTC(),
+				}
+				enrichedList = append(enrichedList, c)
 			}
-			enrichedList = append(enrichedList, c)
 		}
 	}
 
@@ -359,6 +362,19 @@ func (h *SSLHandler) Renew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if cert.WebsiteID != uuid.Nil {
+		site, err := h.store.GetWebsiteByID(r.Context(), cert.WebsiteID)
+		if err != nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+			return
+		}
+	} else if !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+		return
+	}
+
 	primaryDomain := ""
 	if len(cert.DomainList) > 0 {
 		primaryDomain = cert.DomainList[0]
@@ -400,6 +416,13 @@ func (h *SSLHandler) Renew(w http.ResponseWriter, r *http.Request) {
 
 // AutoRenew scans certificates expiring within 30 days and triggers automated renewal
 func (h *SSLHandler) AutoRenew(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if !isAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to trigger server-wide SSL auto-renewal", nil, "")
+		return
+	}
+
 	results, err := h.manager.CheckAndRenewExpiring(r.Context(), 30)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "SCAN_FAILED", err.Error(), nil, "")
@@ -425,13 +448,29 @@ func (h *SSLHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cert, err := h.store.GetSSLByID(r.Context(), certID)
-	if err == nil {
-		if len(cert.DomainList) > 0 {
-			_ = h.manager.RevokeOrDeleteCertificate(r.Context(), cert.DomainList[0])
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+		return
+	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if cert.WebsiteID != uuid.Nil {
+		site, err := h.store.GetWebsiteByID(r.Context(), cert.WebsiteID)
+		if err != nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+			return
 		}
-		if cert.WebsiteID != uuid.Nil {
-			_ = h.store.UpdateWebsiteSSL(r.Context(), cert.WebsiteID, false)
-		}
+	} else if !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+		return
+	}
+
+	if len(cert.DomainList) > 0 {
+		_ = h.manager.RevokeOrDeleteCertificate(r.Context(), cert.DomainList[0])
+	}
+	if cert.WebsiteID != uuid.Nil {
+		_ = h.store.UpdateWebsiteSSL(r.Context(), cert.WebsiteID, false)
 	}
 
 	_ = h.store.DeleteSSL(r.Context(), certID)

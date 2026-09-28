@@ -297,6 +297,14 @@ func (h *BillingHandler) GetSubscription(w http.ResponseWriter, r *http.Request)
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
 		return
 	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if sub.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
 	response.JSON(w, http.StatusOK, sub, nil)
 }
 
@@ -409,6 +417,7 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 			ID:             uuid.New(),
 			InvoiceNumber:  fmt.Sprintf("INV-TRL-%d-%05d", now.Year(), rand.Intn(90000)+10000),
 			UserID:         claims.UserID,
+			OrganizationID: claims.OrganizationID,
 			SubscriptionID: &subID,
 			PlanID:         plan.ID,
 			Description:    fmt.Sprintf("%s (%d-Day Free Trial)", plan.Name, trialDays),
@@ -471,6 +480,7 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		ID:             uuid.New(),
 		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
 		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
 		SubscriptionID: &subID,
 		PlanID:         plan.ID,
 		Description:    fmt.Sprintf("%s (%s Cycle)", plan.Name, strings.Title(req.BillingCycle)),
@@ -511,6 +521,13 @@ func (h *BillingHandler) CancelSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if sub.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
 	sub.Status = store.SubStatusCancelled
 	sub.AutoRenew = false
 	if err := h.store.UpdateSubscription(r.Context(), sub); err != nil {
@@ -533,6 +550,13 @@ func (h *BillingHandler) RenewSubscription(w http.ResponseWriter, r *http.Reques
 
 	sub, err := h.store.GetSubscriptionByID(r.Context(), subID)
 	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
+		return
+	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if sub.OrganizationID != claims.OrganizationID && !isAdmin {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Subscription not found", nil, "")
 		return
 	}
@@ -582,6 +606,14 @@ func (h *BillingHandler) GetInvoice(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
 		return
 	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if inv.UserID != claims.UserID && (inv.OrganizationID == uuid.Nil || inv.OrganizationID != claims.OrganizationID) && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
 	response.JSON(w, http.StatusOK, inv, nil)
 }
 
@@ -604,6 +636,13 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if inv.UserID != claims.UserID && (inv.OrganizationID == uuid.Nil || inv.OrganizationID != claims.OrganizationID) && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
 	if inv.Status == store.InvoiceStatusPaid {
 		response.JSON(w, http.StatusOK, map[string]interface{}{
 			"message": "Invoice has already been paid",
@@ -611,9 +650,6 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		}, nil)
 		return
 	}
-
-	claims, hasClaims := auth.GetClaims(r.Context())
-	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin")
 
 	var req PayInvoiceRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1205,6 +1241,7 @@ func (h *BillingHandler) ConvertTrial(w http.ResponseWriter, r *http.Request) {
 		ID:             uuid.New(),
 		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
 		UserID:         sub.UserID,
+		OrganizationID: sub.OrganizationID,
 		SubscriptionID: &sub.ID,
 		PlanID:         plan.ID,
 		Description:    fmt.Sprintf("%s (%s Cycle Conversion from Trial)", plan.Name, strings.Title(sub.BillingCycle)),
@@ -1321,6 +1358,7 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 		ID:             uuid.New(),
 		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
 		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
 		SubscriptionID: &subID,
 		PlanID:         plan.ID,
 		Description:    fmt.Sprintf("%s (%s Subscription)", plan.Name, strings.Title(req.BillingCycle)),

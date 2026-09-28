@@ -885,6 +885,13 @@ func (h *WebsiteHandler) GetConf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
 	phpSocket := "unix:/run/php/php8.3-fpm.sock"
 	if site.PHPVersion != nil && *site.PHPVersion != "" {
 		phpSocket = "unix:/run/php/php" + *site.PHPVersion + "-fpm.sock"
@@ -945,6 +952,13 @@ func (h *WebsiteHandler) UpdateConf(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
 	var req struct {
 		Config string `json:"config"`
 	}
@@ -981,6 +995,13 @@ func (h *WebsiteHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
 	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -1039,6 +1060,13 @@ func (h *WebsiteHandler) Backup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
 	site.BackupCount++
 	site.BackupStatus = "1 Backup"
 	_ = h.store.UpdateWebsite(r.Context(), site)
@@ -1070,6 +1098,13 @@ func (h *WebsiteHandler) ToggleWAF(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
 	if site.WAFStatus == "Active" {
 		site.WAFStatus = "Inactive"
 	} else {
@@ -1091,6 +1126,13 @@ func (h *WebsiteHandler) ScanMalware(w http.ResponseWriter, r *http.Request) {
 	}
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
 	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -1160,6 +1202,9 @@ func (h *WebsiteHandler) Batch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+
 	count := 0
 	for _, rawID := range req.IDs {
 		siteID, err := uuid.Parse(rawID)
@@ -1168,6 +1213,9 @@ func (h *WebsiteHandler) Batch(w http.ResponseWriter, r *http.Request) {
 		}
 		site, err := h.store.GetWebsiteByID(r.Context(), siteID)
 		if err != nil {
+			continue
+		}
+		if site.OrganizationID != claims.OrganizationID && !isAdmin {
 			continue
 		}
 

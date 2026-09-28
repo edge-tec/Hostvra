@@ -479,6 +479,9 @@ func (m *MemoryStore) ListInvoices(ctx context.Context, orgID uuid.UUID) ([]*Inv
 
 	var invs []*Invoice
 	for _, inv := range m.invoices {
+		if orgID != uuid.Nil && inv.OrganizationID != uuid.Nil && inv.OrganizationID != orgID {
+			continue
+		}
 		invs = append(invs, inv)
 	}
 
@@ -920,7 +923,7 @@ func (p *PostgresStore) ListInvoices(ctx context.Context, orgID uuid.UUID) ([]*I
 		       description, subtotal, tax, discount, total, currency,
 		       status, payment_method, transaction_id, due_date, paid_at, created_at
 		FROM invoices
-		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR user_id = $1)
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1 OR user_id = $1)
 		ORDER BY created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, orgID)

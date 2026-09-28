@@ -78,7 +78,11 @@ func (h *SupportHandler) GetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isStaff := claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
+	isStaff := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
+	if !isStaff && ticket.OrganizationID != claims.OrganizationID && ticket.UserID != claims.UserID {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil, "")
+		return
+	}
 
 	replies, err := h.store.ListTicketReplies(r.Context(), id)
 	if err != nil {
@@ -184,8 +188,14 @@ func (h *SupportHandler) ReplyTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.store.GetTicket(r.Context(), ticketID)
+	ticket, err := h.store.GetTicket(r.Context(), ticketID)
 	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil, "")
+		return
+	}
+
+	isStaff := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
+	if !isStaff && ticket.OrganizationID != claims.OrganizationID && ticket.UserID != claims.UserID {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil, "")
 		return
 	}
@@ -201,7 +211,6 @@ func (h *SupportHandler) ReplyTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isStaff := claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
 	userName := claims.Email
 	if isStaff {
 		userName = "Hostvra Support Staff"
@@ -232,7 +241,7 @@ func (h *SupportHandler) ReplyTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *SupportHandler) CloseTicket(w http.ResponseWriter, r *http.Request) {
-	_, ok := auth.GetClaims(r.Context())
+	claims, ok := auth.GetClaims(r.Context())
 	if !ok {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
 		return
@@ -242,6 +251,18 @@ func (h *SupportHandler) CloseTicket(w http.ResponseWriter, r *http.Request) {
 	ticketID, err := uuid.Parse(idStr)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid ticket ID format", nil, "")
+		return
+	}
+
+	ticket, err := h.store.GetTicket(r.Context(), ticketID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil, "")
+		return
+	}
+
+	isStaff := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "superadmin" || claims.Role == "admin"
+	if !isStaff && ticket.OrganizationID != claims.OrganizationID && ticket.UserID != claims.UserID {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Ticket not found", nil, "")
 		return
 	}
 

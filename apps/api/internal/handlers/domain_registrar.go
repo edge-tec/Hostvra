@@ -184,8 +184,11 @@ func (h *DomainRegistrarHandler) authorizeDomain(r *http.Request, domainID uuid.
 		return nil, errors.New("not_found")
 	}
 
-	if claims.Role != "admin" && claims.Role != "owner" && d.UserID != claims.UserID {
-		return nil, errors.New("forbidden")
+	isAdmin := claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	if !isAdmin {
+		if d.UserID != claims.UserID && (d.OrganizationID == nil || *d.OrganizationID != claims.OrganizationID) {
+			return nil, errors.New("forbidden")
+		}
 	}
 
 	return d, nil
@@ -310,6 +313,17 @@ func (h *DomainRegistrarHandler) GetDomainOrder(w http.ResponseWriter, r *http.R
 
 	order, err := h.store.GetDomainOrderByID(r.Context(), orderID)
 	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+	isAdmin := claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	if !isAdmin && order.UserID != claims.UserID && (order.OrganizationID == nil || *order.OrganizationID != claims.OrganizationID) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Order not found", nil, "")
 		return
 	}

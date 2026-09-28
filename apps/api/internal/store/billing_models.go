@@ -102,6 +102,7 @@ type Invoice struct {
 	ID             uuid.UUID     `json:"id"`
 	InvoiceNumber  string        `json:"invoice_number"`
 	UserID         uuid.UUID     `json:"user_id"`
+	OrganizationID uuid.UUID     `json:"organization_id"`
 	SubscriptionID *uuid.UUID    `json:"subscription_id,omitempty"`
 	PlanID         uuid.UUID     `json:"plan_id"`
 	Description    string        `json:"description"`

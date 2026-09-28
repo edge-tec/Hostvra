@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -967,6 +968,342 @@ func TestSecurityAudit_EnterpriseCrossTenantCustomerIsolation(t *testing.T) {
 	siteHandler.Create(httpRecB2, httpReqB2)
 	if httpRecB2.Code != http.StatusConflict {
 		t.Fatalf("Vector 7 Failed: Tenant Beta exceeding website limit returned %d, expected 409 Conflict: %s", httpRecB2.Code, httpRecB2.Body.String())
+	}
+
+	// ==========================================
+	// VECTOR 8: DATABASE QUERY BY NAME ISOLATION
+	// ==========================================
+	// Tenant Beta attempts to inspect/access alpha_db by name -> denied
+	if _, err := dbHandler.verifyDatabaseAccessByName(ctxB, claimsB, "alpha_db"); err == nil {
+		t.Fatalf("Vector 8 Failed: Tenant Beta accessed Tenant Alpha database by name without authorization")
+	}
+
+	// ==========================================
+	// VECTOR 9 & 10: HARDENED WEBSITE SUB-ENDPOINTS
+	// ==========================================
+	// Tenant Beta tries GET /websites/{id}/conf -> 404
+	reqSiteConf := httptest.NewRequest("GET", "/api/v1/websites/"+siteA.ID.String()+"/conf", nil).WithContext(ctxB)
+	reqSiteConf = reqSiteConf.WithContext(context.WithValue(reqSiteConf.Context(), chi.RouteCtxKey, rctxSite))
+	recSiteConf := httptest.NewRecorder()
+	siteHandler.GetConf(recSiteConf, reqSiteConf)
+	if recSiteConf.Code != http.StatusNotFound {
+		t.Fatalf("Vector 9 Failed: Tenant Beta GetConf on Tenant Alpha website returned %d, expected 404", recSiteConf.Code)
+	}
+
+	// Tenant Beta tries POST /websites/{id}/conf -> 404
+	reqUpdateConf := httptest.NewRequest("POST", "/api/v1/websites/"+siteA.ID.String()+"/conf", bytes.NewReader([]byte(`{"config":"# evil"}`))).WithContext(ctxB)
+	reqUpdateConf = reqUpdateConf.WithContext(context.WithValue(reqUpdateConf.Context(), chi.RouteCtxKey, rctxSite))
+	recUpdateConf := httptest.NewRecorder()
+	siteHandler.UpdateConf(recUpdateConf, reqUpdateConf)
+	if recUpdateConf.Code != http.StatusNotFound {
+		t.Fatalf("Vector 9 Failed: Tenant Beta UpdateConf on Tenant Alpha website returned %d, expected 404", recUpdateConf.Code)
+	}
+
+	// Tenant Beta tries GET /websites/{id}/logs -> 404
+	reqSiteLogs := httptest.NewRequest("GET", "/api/v1/websites/"+siteA.ID.String()+"/logs", nil).WithContext(ctxB)
+	reqSiteLogs = reqSiteLogs.WithContext(context.WithValue(reqSiteLogs.Context(), chi.RouteCtxKey, rctxSite))
+	recSiteLogs := httptest.NewRecorder()
+	siteHandler.GetLogs(recSiteLogs, reqSiteLogs)
+	if recSiteLogs.Code != http.StatusNotFound {
+		t.Fatalf("Vector 9 Failed: Tenant Beta GetLogs on Tenant Alpha website returned %d, expected 404", recSiteLogs.Code)
+	}
+
+	// Tenant Beta tries POST /websites/{id}/waf -> 404
+	reqWaf := httptest.NewRequest("POST", "/api/v1/websites/"+siteA.ID.String()+"/waf", nil).WithContext(ctxB)
+	reqWaf = reqWaf.WithContext(context.WithValue(reqWaf.Context(), chi.RouteCtxKey, rctxSite))
+	recWaf := httptest.NewRecorder()
+	siteHandler.ToggleWAF(recWaf, reqWaf)
+	if recWaf.Code != http.StatusNotFound {
+		t.Fatalf("Vector 9 Failed: Tenant Beta ToggleWAF on Tenant Alpha website returned %d, expected 404", recWaf.Code)
+	}
+
+	// Tenant Beta tries POST /websites/{id}/scan-malware -> 404
+	reqScan := httptest.NewRequest("POST", "/api/v1/websites/"+siteA.ID.String()+"/scan-malware", nil).WithContext(ctxB)
+	reqScan = reqScan.WithContext(context.WithValue(reqScan.Context(), chi.RouteCtxKey, rctxSite))
+	recScan := httptest.NewRecorder()
+	siteHandler.ScanMalware(recScan, reqScan)
+	if recScan.Code != http.StatusNotFound {
+		t.Fatalf("Vector 9 Failed: Tenant Beta ScanMalware on Tenant Alpha website returned %d, expected 404", recScan.Code)
+	}
+
+	// Tenant Beta tries Batch action on Tenant Alpha website -> 0 affected
+	batchBody, _ := json.Marshal(map[string]interface{}{
+		"action": "delete",
+		"ids":    []string{siteA.ID.String()},
+	})
+	reqBatch := httptest.NewRequest("POST", "/api/v1/websites/batch", bytes.NewReader(batchBody)).WithContext(ctxB)
+	recBatch := httptest.NewRecorder()
+	siteHandler.Batch(recBatch, reqBatch)
+	var batchEnvelope struct {
+		Data struct {
+			Action       string `json:"action"`
+			AffectedRows int    `json:"affected_rows"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(recBatch.Body).Decode(&batchEnvelope)
+	if batchEnvelope.Data.AffectedRows != 0 {
+		t.Fatalf("Vector 9 Failed: Tenant Beta Batch action on Tenant Alpha website affected %d, expected 0", batchEnvelope.Data.AffectedRows)
+	}
+
+	// ==========================================
+	// VECTOR 11-19: ENHANCED CRON, FS, AND TRAVERSAL
+	// ==========================================
+	// Double URL encoding traversal check
+	doubleEncodedPath := "/var/www/tenant-alpha.com/%252e%252e/%252e%252e/etc/passwd"
+	reqDoubleEncoded := httptest.NewRequest("GET", "/files/content?path="+doubleEncodedPath, nil).WithContext(ctxB)
+	if err := fileHandler.checkPathAuthorization(reqDoubleEncoded, doubleEncodedPath); err == nil {
+		t.Fatalf("Vector 22 Failed: Double URL encoded traversal should be blocked")
+	}
+
+	// Symlink escape test: create symlink inside tenant B docroot pointing to /etc
+	symlinkTarget := filepath.Join(tempDir, "www", "symlink_evil")
+	_ = os.Symlink("/etc", symlinkTarget)
+	reqSymlink := httptest.NewRequest("GET", "/files/content?path="+symlinkTarget+"/passwd", nil).WithContext(ctxB)
+	if err := fileHandler.checkPathAuthorization(reqSymlink, symlinkTarget+"/passwd"); err == nil {
+		t.Fatalf("Vector 23 Failed: Symlink traversal escaping into /etc must be blocked")
+	}
+
+	// Cron execute ad-hoc as root by customer -> 403
+	cronTestReq, _ := json.Marshal(TestCronCommandRequest{Command: "whoami", SystemUser: "root"})
+	reqTestCron := httptest.NewRequest("POST", "/api/v1/cron/test", bytes.NewReader(cronTestReq)).WithContext(ctxB)
+	recTestCron := httptest.NewRecorder()
+	cronHandler.TestCommand(recTestCron, reqTestCron)
+	if recTestCron.Code != http.StatusForbidden {
+		t.Fatalf("Vector 19 Failed: Customer running ad-hoc cron test as root returned %d, expected 403", recTestCron.Code)
+	}
+
+	// ==========================================
+	// VECTOR 25: ADMIN ENDPOINT RESTRICTION
+	// ==========================================
+	sslHandler := NewSSLHandler(cfg, memStore, auditLogger)
+	reqAutoRenew := httptest.NewRequest("POST", "/api/v1/ssl/auto-renew", nil).WithContext(ctxB)
+	recAutoRenew := httptest.NewRecorder()
+	sslHandler.AutoRenew(recAutoRenew, reqAutoRenew)
+	if recAutoRenew.Code != http.StatusForbidden {
+		t.Fatalf("Vector 25 Failed: Customer calling SSL AutoRenew returned %d, expected 403", recAutoRenew.Code)
+	}
+
+	// ==========================================
+	// VECTOR 27: CONCURRENT QUOTA RACE TEST
+	// ==========================================
+	// Reset user beta quota baseline with a fresh user
+	userGamma := uuid.New()
+	orgGamma := uuid.New()
+	_ = memStore.CreateUser(context.Background(), &store.User{
+		ID:        userGamma,
+		Email:     "user@tenant-gamma.com",
+		Role:      "customer",
+		CreatedAt: time.Now(),
+	}, orgGamma, "customer")
+	claimsGamma := &auth.Claims{
+		UserID:         userGamma,
+		OrganizationID: orgGamma,
+		Role:           "customer",
+	}
+	ctxGamma := context.WithValue(context.Background(), auth.UserContextKey, claimsGamma)
+
+	// Send 5 concurrent website creation requests (Starter plan limit is 1)
+	concurrency := 5
+	var wg sync.WaitGroup
+	var successCount int64
+	var mu sync.Mutex
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			payload, _ := json.Marshal(CreateWebsiteRequest{
+				PrimaryDomain: fmt.Sprintf("tenant-gamma-%d.com", idx),
+			})
+			req := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(payload)).WithContext(ctxGamma)
+			rec := httptest.NewRecorder()
+			siteHandler.Create(rec, req)
+			if rec.Code == http.StatusCreated {
+				mu.Lock()
+				successCount++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if successCount != 1 {
+		t.Fatalf("Vector 27 Failed: Concurrent quota bypass detected! Expected exactly 1 success, got %d", successCount)
+	}
+
+	// ==========================================
+	// VECTOR 28 & 29: EMAIL DOMAIN & MAILBOX ISOLATION
+	// ==========================================
+	dnsSvc := dns.NewService()
+	emailHandler := NewEmailHandler(cfg, memStore, dnsSvc, auditLogger)
+	domAlpha := &store.EmailDomain{
+		ID:             uuid.New(),
+		OrganizationID: orgAlpha,
+		Domain:         "alpha-mail.com",
+		MailHostname:   "mail.alpha-mail.com",
+		Status:         "active",
+	}
+	_ = memStore.CreateEmailDomain(context.Background(), domAlpha)
+	mbAlpha := &store.EmailMailbox{
+		ID:           uuid.New(),
+		DomainID:     domAlpha.ID,
+		Email:        "admin@alpha-mail.com",
+		LocalPart:    "admin",
+		PasswordHash: "secret",
+		IsActive:     true,
+	}
+	_ = memStore.CreateEmailMailbox(context.Background(), mbAlpha)
+
+	// Tenant Beta tries GET mailbox signature for mbAlpha -> 403
+	reqMbSig := httptest.NewRequest("GET", "/api/v1/email/mailboxes/"+mbAlpha.ID.String()+"/signature", nil).WithContext(ctxB)
+	rctxMb := chi.NewRouteContext()
+	rctxMb.URLParams.Add("id", mbAlpha.ID.String())
+	reqMbSig = reqMbSig.WithContext(context.WithValue(reqMbSig.Context(), chi.RouteCtxKey, rctxMb))
+	recMbSig := httptest.NewRecorder()
+	emailHandler.GetSignature(recMbSig, reqMbSig)
+	if recMbSig.Code != http.StatusForbidden {
+		t.Fatalf("Vector 29 Failed: Tenant Beta accessing Tenant Alpha mailbox signature returned %d, expected 403", recMbSig.Code)
+	}
+
+	// ==========================================
+	// VECTOR 30: APPLICATION INSTALLER BINDING
+	// ==========================================
+	installerHandler := NewInstallerHandler(cfg, memStore, auditLogger)
+	// Tenant Beta attempts to install an app on siteA -> 404
+	instPayload, _ := json.Marshal(map[string]interface{}{
+		"app_id":  "wordpress",
+		"db_name": "wp_beta",
+	})
+	reqInst := httptest.NewRequest("POST", "/api/v1/installer/websites/"+siteA.ID.String()+"/install", bytes.NewReader(instPayload)).WithContext(ctxB)
+	reqInst = reqInst.WithContext(context.WithValue(reqInst.Context(), chi.RouteCtxKey, rctxSite))
+	recInst := httptest.NewRecorder()
+	installerHandler.InstallWebsiteApp(recInst, reqInst)
+	if recInst.Code != http.StatusNotFound {
+		t.Fatalf("Vector 30 Failed: Tenant Beta installing app on Tenant Alpha website returned %d, expected 404", recInst.Code)
+	}
+
+	// ==========================================
+	// BILLING & ACCOUNTS CROSS-TENANT ISOLATION
+	// ==========================================
+	billingHandler := NewBillingHandler(cfg, memStore, auditLogger)
+	subA := &store.Subscription{
+		ID:             uuid.New(),
+		UserID:         userAlpha,
+		OrganizationID: orgAlpha,
+		PlanID:         uuid.New(),
+		PlanName:       "Starter Cloud",
+		Status:         store.SubStatusActive,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	_ = memStore.CreateSubscription(context.Background(), subA)
+
+	invA := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-ALPHA-001",
+		UserID:         userAlpha,
+		OrganizationID: orgAlpha,
+		Status:         store.InvoiceStatusUnpaid,
+		Total:          25.00,
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateInvoice(context.Background(), invA)
+
+	// Tenant Beta tries GET Subscription A -> 404
+	reqGetSub := httptest.NewRequest("GET", "/api/v1/billing/subscriptions/"+subA.ID.String(), nil).WithContext(ctxB)
+	rctxSub := chi.NewRouteContext()
+	rctxSub.URLParams.Add("id", subA.ID.String())
+	reqGetSub = reqGetSub.WithContext(context.WithValue(reqGetSub.Context(), chi.RouteCtxKey, rctxSub))
+	recGetSub := httptest.NewRecorder()
+	billingHandler.GetSubscription(recGetSub, reqGetSub)
+	if recGetSub.Code != http.StatusNotFound {
+		t.Fatalf("Billing Isolation Failed: Tenant Beta GetSubscription returned %d, expected 404", recGetSub.Code)
+	}
+
+	// Tenant Beta tries Cancel Subscription A -> 404
+	reqCancelSub := httptest.NewRequest("POST", "/api/v1/billing/subscriptions/"+subA.ID.String()+"/cancel", nil).WithContext(ctxB)
+	reqCancelSub = reqCancelSub.WithContext(context.WithValue(reqCancelSub.Context(), chi.RouteCtxKey, rctxSub))
+	recCancelSub := httptest.NewRecorder()
+	billingHandler.CancelSubscription(recCancelSub, reqCancelSub)
+	if recCancelSub.Code != http.StatusNotFound {
+		t.Fatalf("Billing Isolation Failed: Tenant Beta CancelSubscription returned %d, expected 404", recCancelSub.Code)
+	}
+
+	// Tenant Beta tries GET Invoice A -> 404
+	reqGetInv := httptest.NewRequest("GET", "/api/v1/billing/invoices/"+invA.ID.String(), nil).WithContext(ctxB)
+	rctxInv := chi.NewRouteContext()
+	rctxInv.URLParams.Add("id", invA.ID.String())
+	reqGetInv = reqGetInv.WithContext(context.WithValue(reqGetInv.Context(), chi.RouteCtxKey, rctxInv))
+	recGetInv := httptest.NewRecorder()
+	billingHandler.GetInvoice(recGetInv, reqGetInv)
+	if recGetInv.Code != http.StatusNotFound {
+		t.Fatalf("Billing Isolation Failed: Tenant Beta GetInvoice returned %d, expected 404", recGetInv.Code)
+	}
+
+	// Accounts: Hosting Account cross-tenant test
+	accountHandler := NewAccountHandler(cfg, memStore, auditLogger)
+	accA := &store.HostingAccount{
+		ID:             uuid.New(),
+		OrganizationID: orgAlpha,
+		UserID:         userAlpha,
+		Username:       "c_alphauser",
+		Domain:         "alpha-corp.com",
+		Status:         store.AccountStatusActive,
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateHostingAccount(context.Background(), accA)
+
+	// Tenant Beta tries GET Account A -> 404
+	reqGetAcc := httptest.NewRequest("GET", "/api/v1/accounts/"+accA.ID.String(), nil).WithContext(ctxB)
+	rctxAcc := chi.NewRouteContext()
+	rctxAcc.URLParams.Add("id", accA.ID.String())
+	reqGetAcc = reqGetAcc.WithContext(context.WithValue(reqGetAcc.Context(), chi.RouteCtxKey, rctxAcc))
+	recGetAcc := httptest.NewRecorder()
+	accountHandler.GetAccount(recGetAcc, reqGetAcc)
+	if recGetAcc.Code != http.StatusNotFound {
+		t.Fatalf("Account Isolation Failed: Tenant Beta GetAccount returned %d, expected 404", recGetAcc.Code)
+	}
+
+	// Tenant Beta tries Delete Account A -> 404
+	reqDelAcc := httptest.NewRequest("DELETE", "/api/v1/accounts/"+accA.ID.String(), nil).WithContext(ctxB)
+	reqDelAcc = reqDelAcc.WithContext(context.WithValue(reqDelAcc.Context(), chi.RouteCtxKey, rctxAcc))
+	recDelAcc := httptest.NewRecorder()
+	accountHandler.DeleteAccount(recDelAcc, reqDelAcc)
+	if recDelAcc.Code != http.StatusNotFound {
+		t.Fatalf("Account Isolation Failed: Tenant Beta DeleteAccount returned %d, expected 404", recDelAcc.Code)
+	}
+
+	// Support Tickets: cross-tenant test
+	supportHandler := NewSupportHandler(cfg, memStore, auditLogger)
+	ticketA := &store.Ticket{
+		ID:             uuid.New(),
+		OrganizationID: orgAlpha,
+		UserID:         userAlpha,
+		UserEmail:      "user@tenant-alpha.com",
+		Subject:        "Alpha Secret Support Issue",
+		Status:         store.TicketStatusOpen,
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateTicket(context.Background(), ticketA, "Alpha initial message")
+
+	// Tenant Beta tries GET Ticket A -> 404
+	reqGetTicket := httptest.NewRequest("GET", "/api/v1/support/tickets/"+ticketA.ID.String(), nil).WithContext(ctxB)
+	rctxTicket := chi.NewRouteContext()
+	rctxTicket.URLParams.Add("id", ticketA.ID.String())
+	reqGetTicket = reqGetTicket.WithContext(context.WithValue(reqGetTicket.Context(), chi.RouteCtxKey, rctxTicket))
+	recGetTicket := httptest.NewRecorder()
+	supportHandler.GetTicket(recGetTicket, reqGetTicket)
+	if recGetTicket.Code != http.StatusNotFound {
+		t.Fatalf("Ticket Isolation Failed: Tenant Beta GetTicket returned %d, expected 404", recGetTicket.Code)
+	}
+
+	// Tenant Beta tries Close Ticket A -> 404
+	reqCloseTicket := httptest.NewRequest("POST", "/api/v1/support/tickets/"+ticketA.ID.String()+"/close", nil).WithContext(ctxB)
+	reqCloseTicket = reqCloseTicket.WithContext(context.WithValue(reqCloseTicket.Context(), chi.RouteCtxKey, rctxTicket))
+	recCloseTicket := httptest.NewRecorder()
+	supportHandler.CloseTicket(recCloseTicket, reqCloseTicket)
+	if recCloseTicket.Code != http.StatusNotFound {
+		t.Fatalf("Ticket Isolation Failed: Tenant Beta CloseTicket returned %d, expected 404", recCloseTicket.Code)
 	}
 }
 

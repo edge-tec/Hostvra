@@ -144,7 +144,7 @@ func (h *DatabaseHandler) verifyDatabaseAccessByName(ctx context.Context, claims
 		}
 		for _, d := range dbs {
 			if strings.EqualFold(d.Name, dbName) && d.DeletedAt == nil {
-				if d.OrganizationID == claims.OrganizationID || d.ServerID == sID {
+				if (d.OrganizationID != uuid.Nil && d.OrganizationID == claims.OrganizationID) || (sID != uuid.Nil && d.ServerID == sID) {
 					return d, nil
 				}
 			}

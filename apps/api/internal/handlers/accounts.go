@@ -73,6 +73,17 @@ func (h *AccountHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, filtered, &response.Meta{Total: len(filtered)})
 }
 
+func (h *AccountHandler) authorizeAccount(r *http.Request, acc *store.HostingAccount) bool {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	if !hasClaims || claims == nil {
+		return false
+	}
+	if claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin" {
+		return true
+	}
+	return acc.OrganizationID == claims.OrganizationID
+}
+
 func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	accID, err := uuid.Parse(idStr)
@@ -82,7 +93,7 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Hosting account not found", nil, "")
 		return
 	}
@@ -238,7 +249,7 @@ func (h *AccountHandler) SuspendAccount(w http.ResponseWriter, r *http.Request) 
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
 		return
 	}
@@ -273,7 +284,7 @@ func (h *AccountHandler) UnsuspendAccount(w http.ResponseWriter, r *http.Request
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
 		return
 	}
@@ -305,7 +316,7 @@ func (h *AccountHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
 		return
 	}
@@ -355,7 +366,7 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
 		return
 	}
@@ -380,7 +391,7 @@ func (h *AccountHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
-	if err != nil {
+	if err != nil || !h.authorizeAccount(r, acc) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
 		return
 	}
