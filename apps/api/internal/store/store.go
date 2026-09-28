@@ -77,6 +77,7 @@ type Store interface {
 	CreateDatabase(ctx context.Context, db *Database) error
 	GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error)
 	ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error)
+	ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Database, error)
 	UpdateDatabase(ctx context.Context, db *Database) error
 	DeleteDatabase(ctx context.Context, id uuid.UUID) error
 	RestoreDatabase(ctx context.Context, id uuid.UUID) error

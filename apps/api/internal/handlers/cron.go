@@ -71,13 +71,41 @@ func (h *CronHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, status, nil)
 }
 
-// ListJobs retrieves all configured cron jobs
+func (h *CronHandler) isJobOwnedByTenant(ctx context.Context, claims *auth.Claims, jobID string) bool {
+	if claims == nil || claims.Role == "owner" || claims.Role == "admin" || claims.IsSuperAdmin {
+		return true
+	}
+	jobs, err := h.cronMgr.ListJobs()
+	if err != nil {
+		return false
+	}
+	for _, j := range jobs {
+		if j.ID == jobID {
+			return h.validateTenantSystemUser(ctx, claims, j.SystemUser) == nil
+		}
+	}
+	return false
+}
+
+// ListJobs retrieves all configured cron jobs belonging to the authenticated tenant
 func (h *CronHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	jobs, err := h.cronMgr.ListJobs()
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "CRON_LIST_ERROR", err.Error(), nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
+		var tenantJobs []cron.CronJob
+		for _, j := range jobs {
+			if h.validateTenantSystemUser(r.Context(), claims, j.SystemUser) == nil {
+				tenantJobs = append(tenantJobs, j)
+			}
+		}
+		jobs = tenantJobs
+	}
+
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"jobs":  jobs,
 		"count": len(jobs),
@@ -166,8 +194,8 @@ func (h *CronHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
-		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can modify a root cron job", nil, "")
+	if !h.isJobOwnedByTenant(r.Context(), claims, jobID) {
+		response.Error(w, http.StatusForbidden, "CRON_JOB_FORBIDDEN", "Cron job does not belong to your organization", nil, "")
 		return
 	}
 
@@ -178,14 +206,12 @@ func (h *CronHandler) UpdateJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sysUser := strings.TrimSpace(req.SystemUser)
-	if sysUser == "" || sysUser == "root" {
-		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-			response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can update cron jobs as root", nil, "")
-			return
-		}
-		if sysUser == "" {
-			sysUser = "root"
-		}
+	if err := h.validateTenantSystemUser(r.Context(), claims, sysUser); err != nil {
+		response.Error(w, http.StatusForbidden, "CRON_USER_FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+	if sysUser == "" {
+		sysUser = "root"
 	}
 
 	job := cron.CronJob{
@@ -235,8 +261,8 @@ func (h *CronHandler) DeleteJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
-		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can delete a root cron job", nil, "")
+	if !h.isJobOwnedByTenant(r.Context(), claims, jobID) {
+		response.Error(w, http.StatusForbidden, "CRON_JOB_FORBIDDEN", "Cron job does not belong to your organization", nil, "")
 		return
 	}
 
@@ -267,8 +293,8 @@ func (h *CronHandler) ToggleJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
-		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can toggle a root cron job", nil, "")
+	if !h.isJobOwnedByTenant(r.Context(), claims, jobID) {
+		response.Error(w, http.StatusForbidden, "CRON_JOB_FORBIDDEN", "Cron job does not belong to your organization", nil, "")
 		return
 	}
 
@@ -298,8 +324,8 @@ func (h *CronHandler) RunJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	if h.isRootJob(jobID) && (claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin") {
-		response.Error(w, http.StatusForbidden, "ROOT_CRON_FORBIDDEN", "Only owner or admin can execute root cron jobs", nil, "")
+	if !h.isJobOwnedByTenant(r.Context(), claims, jobID) {
+		response.Error(w, http.StatusForbidden, "CRON_JOB_FORBIDDEN", "Cron job does not belong to your organization", nil, "")
 		return
 	}
 

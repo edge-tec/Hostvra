@@ -1,17 +1,21 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"hostvra/agent/pkg/backup"
 	"hostvra/api/internal/audit"
+	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
@@ -56,7 +60,59 @@ func NewBackupHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Backu
 	}
 }
 
-// List returns all backup snapshot records.
+func (h *BackupHandler) verifyTargetOwnership(ctx context.Context, claims *auth.Claims, targetType, targetName string) error {
+	if claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.IsSuperAdmin {
+		return nil
+	}
+
+	if targetType == "full_config" {
+		return errors.New("full system configuration backups require administrative privileges")
+	}
+
+	if targetType == "website" {
+		sites, err := h.store.ListWebsitesByOrg(ctx, claims.OrganizationID)
+		if err != nil {
+			return errors.New("failed to verify website ownership")
+		}
+		for _, s := range sites {
+			if s != nil && (strings.EqualFold(s.PrimaryDomain, targetName) || s.ID.String() == targetName) {
+				return nil
+			}
+		}
+		return errors.New("website does not belong to your organization")
+	}
+
+	if targetType == "database" {
+		dbs, err := h.store.ListDatabasesByOrg(ctx, claims.OrganizationID)
+		if err != nil {
+			return errors.New("failed to verify database ownership")
+		}
+		for _, db := range dbs {
+			if db != nil && (strings.EqualFold(db.Name, targetName) || db.ID.String() == targetName) {
+				return nil
+			}
+		}
+		return errors.New("database does not belong to your organization")
+	}
+
+	return errors.New("unrecognized backup target type")
+}
+
+func (h *BackupHandler) verifyBackupOwnership(ctx context.Context, claims *auth.Claims, backupID string) (*backup.BackupRecord, error) {
+	record, err := h.manager.GetBackup(backupID)
+	if err != nil {
+		return nil, err
+	}
+	if claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.IsSuperAdmin {
+		return record, nil
+	}
+	if err := h.verifyTargetOwnership(ctx, claims, record.Type, record.TargetName); err != nil {
+		return nil, errors.New("forbidden: backup does not belong to your organization")
+	}
+	return record, nil
+}
+
+// List returns backup snapshot records filtered by tenant ownership for non-admins.
 func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 	backups, err := h.manager.ListBackups()
 	if err != nil {
@@ -64,10 +120,21 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+		var tenantBackups []backup.BackupRecord
+		for _, b := range backups {
+			if err := h.verifyTargetOwnership(r.Context(), claims, b.Type, b.TargetName); err == nil {
+				tenantBackups = append(tenantBackups, b)
+			}
+		}
+		backups = tenantBackups
+	}
+
 	response.JSON(w, http.StatusOK, backups, &response.Meta{Total: len(backups)})
 }
 
-// Create triggers a real on-demand compressed backup snapshot.
+// Create triggers an on-demand compressed backup snapshot with tenant boundary validation.
 func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req backup.CreateBackupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -80,6 +147,12 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type != "full_config" && req.TargetName == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Target name required for website and database backups", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if err := h.verifyTargetOwnership(r.Context(), claims, req.Type, req.TargetName); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -104,7 +177,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, item, nil)
 }
 
-// Restore executes an atomic rollback-protected restore of a backup archive.
+// Restore executes an atomic rollback-protected restore of a backup archive with tenant verification.
 func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	var req backup.RestoreBackupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -114,6 +187,12 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 
 	if req.BackupID == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Backup ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyBackupOwnership(r.Context(), claims, req.BackupID); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -136,11 +215,17 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Delete permanently deletes a backup snapshot.
+// Delete permanently deletes a backup snapshot after confirming tenant ownership.
 func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Backup ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyBackupOwnership(r.Context(), claims, id); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
 		return
 	}
 
@@ -156,11 +241,17 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// Download streams the raw .tar.gz archive.
+// Download streams the raw .tar.gz archive after verifying tenant ownership.
 func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "Backup ID required", http.StatusBadRequest)
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyBackupOwnership(r.Context(), claims, id); err != nil {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 

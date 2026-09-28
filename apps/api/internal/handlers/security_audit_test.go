@@ -8,15 +8,19 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/backup"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/store"
 )
 
@@ -569,4 +573,398 @@ func TestSecurityAudit_DomainCaseInsensitiveUniqueness(t *testing.T) {
 		t.Fatalf("Expected 409 Conflict for duplicate domain with trailing dot by Org B, got %d: %s", httpRecB2.Code, httpRecB2.Body.String())
 	}
 }
+
+func TestSecurityAudit_EnterpriseCrossTenantCustomerIsolation(t *testing.T) {
+	// Configure temp dirs for store, backup, and cron to ensure pristine state
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_STORE_FILE", filepath.Join(tempDir, "store.json"))
+	t.Setenv("HOSTVRA_BACKUP_DIR", filepath.Join(tempDir, "backups"))
+	t.Setenv("HOSTVRA_CONFIG_DIR", filepath.Join(tempDir, "config"))
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+	_ = os.MkdirAll(filepath.Join(tempDir, "backups"), 0755)
+	_ = os.MkdirAll(filepath.Join(tempDir, "config"), 0755)
+	_ = os.MkdirAll(filepath.Join(tempDir, "www", "tenant-alpha.com"), 0755)
+	_ = os.WriteFile(filepath.Join(tempDir, "www", "tenant-alpha.com", "index.html"), []byte("<h1>Alpha</h1>"), 0644)
+
+	cfg := &config.Config{JWTSecret: "test-secret-at-least-32-bytes-long-12345"}
+	memStore := store.NewMemoryStore()
+	slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(memStore, slogger)
+	quotaSvc := quota.NewService(memStore)
+
+	siteHandler := NewWebsiteHandler(cfg, memStore, auditLogger)
+	siteHandler.SetQuotaService(quotaSvc)
+	dbHandler := NewDatabaseHandler(cfg, memStore, auditLogger)
+	dbHandler.SetQuotaService(quotaSvc)
+	fileHandler := NewFileHandler(cfg, memStore, auditLogger)
+	terminalHandler := NewTerminalHandler(cfg, memStore, auditLogger)
+	terminalHandler.SetQuotaService(quotaSvc)
+
+	backupHandler := NewBackupHandler(cfg, memStore, auditLogger)
+	cronHandler := NewCronHandler(cfg, memStore, auditLogger)
+	cronHandler.cronMgr.SetStoragePath(filepath.Join(tempDir, "crontab"))
+
+	// 1. Setup Tenant Alpha and Tenant Beta
+	orgAlpha := uuid.New()
+	userAlpha := uuid.New()
+	_ = memStore.CreateUser(context.Background(), &store.User{
+		ID:        userAlpha,
+		Email:     "user@tenant-alpha.com",
+		Role:      "customer",
+		CreatedAt: time.Now(),
+	}, orgAlpha, "customer")
+
+	orgBeta := uuid.New()
+	userBeta := uuid.New()
+	_ = memStore.CreateUser(context.Background(), &store.User{
+		ID:        userBeta,
+		Email:     "user@tenant-beta.com",
+		Role:      "customer",
+		CreatedAt: time.Now(),
+	}, orgBeta, "customer")
+
+	claimsA := &auth.Claims{
+		UserID:         userAlpha,
+		OrganizationID: orgAlpha,
+		Email:          "user@tenant-alpha.com",
+		Role:           "customer",
+	}
+	ctxA := context.WithValue(context.Background(), auth.UserContextKey, claimsA)
+
+	claimsB := &auth.Claims{
+		UserID:         userBeta,
+		OrganizationID: orgBeta,
+		Email:          "user@tenant-beta.com",
+		Role:           "customer",
+	}
+	ctxB := context.WithValue(context.Background(), auth.UserContextKey, claimsB)
+
+	// Servers for both tenants
+	serverA := &store.Server{
+		ID:             uuid.New(),
+		OrganizationID: orgAlpha,
+		Name:           "node-alpha",
+		Status:         "active",
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateServer(context.Background(), serverA)
+
+	serverB := &store.Server{
+		ID:             uuid.New(),
+		OrganizationID: orgBeta,
+		Name:           "node-beta",
+		Status:         "active",
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateServer(context.Background(), serverB)
+
+	// 2. Tenant Alpha provisions Website and Database
+	siteA := &store.Website{
+		ID:             uuid.New(),
+		ServerID:       serverA.ID,
+		OrganizationID: orgAlpha,
+		PrimaryDomain:  "tenant-alpha.com",
+		DocumentRoot:   filepath.Join(tempDir, "www", "tenant-alpha.com"),
+		SystemUser:     "useralpha",
+		Status:         "active",
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateWebsite(ctxA, siteA)
+
+	dbA := &store.Database{
+		ID:             uuid.New(),
+		ServerID:       serverA.ID,
+		OrganizationID: orgAlpha,
+		DBType:         "mysql",
+		Name:           "alpha_db",
+		Username:       "alpha_user",
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateDatabase(ctxA, dbA)
+
+	// ==========================================
+	// VECTOR 1: WEBSITE CROSS-TENANT ISOLATION
+	// ==========================================
+	// Tenant Beta tries GET website A -> 404 NOT_FOUND
+	reqGetSite := httptest.NewRequest("GET", "/api/v1/websites/"+siteA.ID.String(), nil).WithContext(ctxB)
+	rctxSite := chi.NewRouteContext()
+	rctxSite.URLParams.Add("id", siteA.ID.String())
+	reqGetSite = reqGetSite.WithContext(context.WithValue(reqGetSite.Context(), chi.RouteCtxKey, rctxSite))
+	recGetSite := httptest.NewRecorder()
+	siteHandler.Get(recGetSite, reqGetSite)
+	if recGetSite.Code != http.StatusNotFound {
+		t.Fatalf("Vector 1 Failed: Tenant Beta GET Tenant Alpha website returned %d, expected 404", recGetSite.Code)
+	}
+
+	// Tenant Beta tries UpdateStatus on website A -> 404 NOT_FOUND
+	statusPayload, _ := json.Marshal(map[string]string{"status": "suspended"})
+	reqStatusSite := httptest.NewRequest("POST", "/api/v1/websites/"+siteA.ID.String()+"/status", bytes.NewReader(statusPayload)).WithContext(ctxB)
+	reqStatusSite = reqStatusSite.WithContext(context.WithValue(reqStatusSite.Context(), chi.RouteCtxKey, rctxSite))
+	recStatusSite := httptest.NewRecorder()
+	siteHandler.UpdateStatus(recStatusSite, reqStatusSite)
+	if recStatusSite.Code != http.StatusNotFound {
+		t.Fatalf("Vector 1 Failed: Tenant Beta UpdateStatus Tenant Alpha website returned %d, expected 404", recStatusSite.Code)
+	}
+
+	// Tenant Beta tries DELETE website A -> 404 NOT_FOUND
+	reqDelSite := httptest.NewRequest("DELETE", "/api/v1/websites/"+siteA.ID.String(), nil).WithContext(ctxB)
+	reqDelSite = reqDelSite.WithContext(context.WithValue(reqDelSite.Context(), chi.RouteCtxKey, rctxSite))
+	recDelSite := httptest.NewRecorder()
+	siteHandler.Delete(recDelSite, reqDelSite)
+	if recDelSite.Code != http.StatusNotFound {
+		t.Fatalf("Vector 1 Failed: Tenant Beta DELETE Tenant Alpha website returned %d, expected 404", recDelSite.Code)
+	}
+
+	// Tenant Beta lists websites -> 0 websites returned
+	reqListSites := httptest.NewRequest("GET", "/api/v1/websites", nil).WithContext(ctxB)
+	recListSites := httptest.NewRecorder()
+	siteHandler.List(recListSites, reqListSites)
+	var listSitesResp struct {
+		Data []interface{} `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	_ = json.NewDecoder(recListSites.Body).Decode(&listSitesResp)
+	if listSitesResp.Meta.Total != 0 || len(listSitesResp.Data) != 0 {
+		t.Fatalf("Vector 1 Failed: Tenant Beta website list returned %d, expected 0", listSitesResp.Meta.Total)
+	}
+
+	// ==========================================
+	// VECTOR 2: DATABASE CROSS-TENANT ISOLATION
+	// ==========================================
+	// Tenant Beta tries PUT (update) database A -> 403 FORBIDDEN
+	dbUpdateBody, _ := json.Marshal(UpdateDatabaseRequest{Note: "hacked"})
+	reqUpdateDB := httptest.NewRequest("PUT", "/api/v1/databases/"+dbA.ID.String(), bytes.NewReader(dbUpdateBody)).WithContext(ctxB)
+	rctxDB := chi.NewRouteContext()
+	rctxDB.URLParams.Add("id", dbA.ID.String())
+	reqUpdateDB = reqUpdateDB.WithContext(context.WithValue(reqUpdateDB.Context(), chi.RouteCtxKey, rctxDB))
+	recUpdateDB := httptest.NewRecorder()
+	dbHandler.Update(recUpdateDB, reqUpdateDB)
+	if recUpdateDB.Code != http.StatusForbidden {
+		t.Fatalf("Vector 2 Failed: Tenant Beta PUT Tenant Alpha database returned %d, expected 403", recUpdateDB.Code)
+	}
+
+	// Tenant Beta tries DELETE database A -> 403 FORBIDDEN
+	reqDelDB := httptest.NewRequest("DELETE", "/api/v1/databases/"+dbA.ID.String(), nil).WithContext(ctxB)
+	reqDelDB = reqDelDB.WithContext(context.WithValue(reqDelDB.Context(), chi.RouteCtxKey, rctxDB))
+	recDelDB := httptest.NewRecorder()
+	dbHandler.Delete(recDelDB, reqDelDB)
+	if recDelDB.Code != http.StatusForbidden {
+		t.Fatalf("Vector 2 Failed: Tenant Beta DELETE Tenant Alpha database returned %d, expected 403", recDelDB.Code)
+	}
+
+	// Tenant Beta lists databases -> 0 databases returned
+	reqListDB := httptest.NewRequest("GET", "/api/v1/databases", nil).WithContext(ctxB)
+	recListDB := httptest.NewRecorder()
+	dbHandler.List(recListDB, reqListDB)
+	var listDBResp struct {
+		Data []interface{} `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	_ = json.NewDecoder(recListDB.Body).Decode(&listDBResp)
+	if listDBResp.Meta.Total != 0 || len(listDBResp.Data) != 0 {
+		t.Fatalf("Vector 2 Failed: Tenant Beta database list returned %d, expected 0", listDBResp.Meta.Total)
+	}
+
+	// ==========================================
+	// VECTOR 3: BACKUP CROSS-TENANT ISOLATION
+	// ==========================================
+	// Tenant Alpha creates backup for siteA -> 201 Created
+	bkReqAlpha, _ := json.Marshal(backup.CreateBackupRequest{
+		Type:       "website",
+		TargetName: "tenant-alpha.com",
+	})
+	reqCreateBkA := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader(bkReqAlpha)).WithContext(ctxA)
+	recCreateBkA := httptest.NewRecorder()
+	backupHandler.Create(recCreateBkA, reqCreateBkA)
+	if recCreateBkA.Code != http.StatusCreated {
+		t.Fatalf("Tenant Alpha backup create failed with %d: %s", recCreateBkA.Code, recCreateBkA.Body.String())
+	}
+	var createdBkEnvelope struct {
+		Data backup.BackupRecord `json:"data"`
+	}
+	_ = json.NewDecoder(recCreateBkA.Body).Decode(&createdBkEnvelope)
+	createdBk := createdBkEnvelope.Data
+
+	// Tenant Beta tries to create backup targeting Tenant Alpha's site -> 403 FORBIDDEN
+	reqCreateBkB := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader(bkReqAlpha)).WithContext(ctxB)
+	recCreateBkB := httptest.NewRecorder()
+	backupHandler.Create(recCreateBkB, reqCreateBkB)
+	if recCreateBkB.Code != http.StatusForbidden {
+		t.Fatalf("Vector 3 Failed: Tenant Beta creating backup of Tenant Alpha website returned %d, expected 403", recCreateBkB.Code)
+	}
+
+	// Tenant Beta tries full_config backup -> 403 FORBIDDEN
+	fullBkReq, _ := json.Marshal(backup.CreateBackupRequest{Type: "full_config"})
+	reqFullBk := httptest.NewRequest("POST", "/api/v1/backups", bytes.NewReader(fullBkReq)).WithContext(ctxB)
+	recFullBk := httptest.NewRecorder()
+	backupHandler.Create(recFullBk, reqFullBk)
+	if recFullBk.Code != http.StatusForbidden {
+		t.Fatalf("Vector 3 Failed: Tenant Beta full_config backup returned %d, expected 403", recFullBk.Code)
+	}
+
+	// Tenant Beta tries to restore Tenant Alpha's backup snapshot -> 403 FORBIDDEN
+	restoreReqBody, _ := json.Marshal(backup.RestoreBackupRequest{BackupID: createdBk.ID})
+	reqRestore := httptest.NewRequest("POST", "/api/v1/backups/restore", bytes.NewReader(restoreReqBody)).WithContext(ctxB)
+	recRestore := httptest.NewRecorder()
+	backupHandler.Restore(recRestore, reqRestore)
+	if recRestore.Code != http.StatusForbidden {
+		t.Fatalf("Vector 3 Failed: Tenant Beta restoring Tenant Alpha backup returned %d, expected 403", recRestore.Code)
+	}
+
+	// Tenant Beta tries to delete Tenant Alpha's backup snapshot -> 403 FORBIDDEN
+	reqDelBk := httptest.NewRequest("DELETE", "/api/v1/backups/"+createdBk.ID, nil).WithContext(ctxB)
+	rctxBk := chi.NewRouteContext()
+	rctxBk.URLParams.Add("id", createdBk.ID)
+	reqDelBk = reqDelBk.WithContext(context.WithValue(reqDelBk.Context(), chi.RouteCtxKey, rctxBk))
+	recDelBk := httptest.NewRecorder()
+	backupHandler.Delete(recDelBk, reqDelBk)
+	if recDelBk.Code != http.StatusForbidden {
+		t.Fatalf("Vector 3 Failed: Tenant Beta deleting Tenant Alpha backup returned %d, expected 403", recDelBk.Code)
+	}
+
+	// Tenant Beta tries to download Tenant Alpha's backup snapshot -> 403 FORBIDDEN
+	reqDlBk := httptest.NewRequest("GET", "/api/v1/backups/"+createdBk.ID+"/download", nil).WithContext(ctxB)
+	reqDlBk = reqDlBk.WithContext(context.WithValue(reqDlBk.Context(), chi.RouteCtxKey, rctxBk))
+	recDlBk := httptest.NewRecorder()
+	backupHandler.Download(recDlBk, reqDlBk)
+	if recDlBk.Code != http.StatusForbidden {
+		t.Fatalf("Vector 3 Failed: Tenant Beta downloading Tenant Alpha backup returned %d, expected 403", recDlBk.Code)
+	}
+
+	// Tenant Beta lists backups -> Tenant Alpha backup is filtered out (0 backups)
+	reqListBk := httptest.NewRequest("GET", "/api/v1/backups", nil).WithContext(ctxB)
+	recListBk := httptest.NewRecorder()
+	backupHandler.List(recListBk, reqListBk)
+	var listBkResp struct {
+		Data []interface{} `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	_ = json.NewDecoder(recListBk.Body).Decode(&listBkResp)
+	if listBkResp.Meta.Total != 0 || len(listBkResp.Data) != 0 {
+		t.Fatalf("Vector 3 Failed: Tenant Beta backup list returned %d, expected 0", listBkResp.Meta.Total)
+	}
+
+	// ==========================================
+	// VECTOR 4: CRON CROSS-TENANT ISOLATION
+	// ==========================================
+	// Tenant Alpha creates cron job under their system user "useralpha"
+	cronReqAlpha, _ := json.Marshal(CreateCronJobRequest{
+		Schedule:    "*/10 * * * *",
+		Command:     "echo 'cron alpha'",
+		SystemUser:  "useralpha",
+		Description: "Alpha maintenance",
+	})
+	reqCreateCronA := httptest.NewRequest("POST", "/api/v1/cron/jobs", bytes.NewReader(cronReqAlpha)).WithContext(ctxA)
+	recCreateCronA := httptest.NewRecorder()
+	cronHandler.CreateJob(recCreateCronA, reqCreateCronA)
+	if recCreateCronA.Code != http.StatusCreated {
+		t.Fatalf("Tenant Alpha create cron job failed with %d: %s", recCreateCronA.Code, recCreateCronA.Body.String())
+	}
+	var createdCronEnvelope struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(recCreateCronA.Body).Decode(&createdCronEnvelope)
+	cronID := createdCronEnvelope.Data.ID
+
+	// Tenant Beta lists cron jobs -> Tenant Alpha job is filtered out
+	reqListCron := httptest.NewRequest("GET", "/api/v1/cron/jobs", nil).WithContext(ctxB)
+	recListCron := httptest.NewRecorder()
+	cronHandler.ListJobs(recListCron, reqListCron)
+	var listCronEnvelope struct {
+		Data struct {
+			Jobs  []interface{} `json:"jobs"`
+			Count int           `json:"count"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(recListCron.Body).Decode(&listCronEnvelope)
+	if listCronEnvelope.Data.Count != 0 || len(listCronEnvelope.Data.Jobs) != 0 {
+		t.Fatalf("Vector 4 Failed: Tenant Beta cron list returned %d, expected 0", listCronEnvelope.Data.Count)
+	}
+
+	// Tenant Beta tries to update Tenant Alpha's cron job -> 403 FORBIDDEN
+	updateCronBody, _ := json.Marshal(CreateCronJobRequest{
+		Schedule:   "*/5 * * * *",
+		Command:    "echo 'hacked'",
+		SystemUser: "useralpha",
+	})
+	reqUpdateCron := httptest.NewRequest("PUT", "/api/v1/cron/jobs/"+cronID, bytes.NewReader(updateCronBody)).WithContext(ctxB)
+	rctxCron := chi.NewRouteContext()
+	rctxCron.URLParams.Add("id", cronID)
+	reqUpdateCron = reqUpdateCron.WithContext(context.WithValue(reqUpdateCron.Context(), chi.RouteCtxKey, rctxCron))
+	recUpdateCron := httptest.NewRecorder()
+	cronHandler.UpdateJob(recUpdateCron, reqUpdateCron)
+	if recUpdateCron.Code != http.StatusForbidden {
+		t.Fatalf("Vector 4 Failed: Tenant Beta updating Tenant Alpha cron job returned %d, expected 403", recUpdateCron.Code)
+	}
+
+	// Tenant Beta tries to delete Tenant Alpha's cron job -> 403 FORBIDDEN
+	reqDelCron := httptest.NewRequest("DELETE", "/api/v1/cron/jobs/"+cronID, nil).WithContext(ctxB)
+	reqDelCron = reqDelCron.WithContext(context.WithValue(reqDelCron.Context(), chi.RouteCtxKey, rctxCron))
+	recDelCron := httptest.NewRecorder()
+	cronHandler.DeleteJob(recDelCron, reqDelCron)
+	if recDelCron.Code != http.StatusForbidden {
+		t.Fatalf("Vector 4 Failed: Tenant Beta deleting Tenant Alpha cron job returned %d, expected 403", recDelCron.Code)
+	}
+
+	// ==========================================
+	// VECTOR 5: FILESYSTEM CROSS-TENANT ISOLATION
+	// ==========================================
+	// Tenant Beta attempts to access Tenant Alpha's public_html -> blocked
+	reqCrossFile := httptest.NewRequest("GET", "/files/content?path=/var/www/tenant-alpha.com/public_html/index.php", nil).WithContext(ctxB)
+	if err := fileHandler.checkPathAuthorization(reqCrossFile, "/var/www/tenant-alpha.com/public_html/index.php"); err == nil {
+		t.Fatalf("Vector 5 Failed: Tenant Beta checkPathAuthorization to Tenant Alpha document root should be blocked")
+	}
+
+	// Traversal attempt
+	reqTraversal := httptest.NewRequest("GET", "/files/content?path=/var/www/tenant-beta.com/public_html/../../tenant-alpha.com/public_html/index.php", nil).WithContext(ctxB)
+	if err := fileHandler.checkPathAuthorization(reqTraversal, "/var/www/tenant-beta.com/public_html/../../tenant-alpha.com/public_html/index.php"); err == nil {
+		t.Fatalf("Vector 5 Failed: Path traversal from Tenant Beta to Tenant Alpha should be blocked")
+	}
+
+	// ==========================================
+	// VECTOR 6: TERMINAL EXECUTION ISOLATION
+	// ==========================================
+	// Customer role attempts terminal execution -> 403 FORBIDDEN
+	termReqBody, _ := json.Marshal(ExecuteCommandRequest{Command: "id"})
+	reqTerm := httptest.NewRequest("POST", "/api/v1/terminal/execute", bytes.NewReader(termReqBody)).WithContext(ctxB)
+	recTerm := httptest.NewRecorder()
+	terminalHandler.Execute(recTerm, reqTerm)
+	if recTerm.Code != http.StatusForbidden {
+		t.Fatalf("Vector 6 Failed: Customer executing terminal command returned %d, expected 403", recTerm.Code)
+	}
+
+	// ==========================================
+	// VECTOR 7: PACKAGE LIMIT ENFORCEMENT
+	// ==========================================
+	// Tenant Beta creates 1st website -> 201 Created (starter cloud allows 1 website)
+	reqSiteB1, _ := json.Marshal(CreateWebsiteRequest{
+		PrimaryDomain: "tenant-beta-site1.com",
+	})
+	httpReqB1 := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(reqSiteB1)).WithContext(ctxB)
+	httpRecB1 := httptest.NewRecorder()
+	siteHandler.Create(httpRecB1, httpReqB1)
+	if httpRecB1.Code != http.StatusCreated {
+		t.Fatalf("Vector 7: Tenant Beta 1st website failed with %d: %s", httpRecB1.Code, httpRecB1.Body.String())
+	}
+
+	// Tenant Beta attempts to create 2nd website -> must receive 409 Conflict (QUOTA_EXCEEDED)
+	reqSiteB2, _ := json.Marshal(CreateWebsiteRequest{
+		PrimaryDomain: "tenant-beta-site2.com",
+	})
+	httpReqB2 := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(reqSiteB2)).WithContext(ctxB)
+	httpRecB2 := httptest.NewRecorder()
+	siteHandler.Create(httpRecB2, httpReqB2)
+	if httpRecB2.Code != http.StatusConflict {
+		t.Fatalf("Vector 7 Failed: Tenant Beta exceeding website limit returned %d, expected 409 Conflict: %s", httpRecB2.Code, httpRecB2.Body.String())
+	}
+}
+
 

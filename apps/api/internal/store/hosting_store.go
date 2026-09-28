@@ -156,6 +156,19 @@ func (m *MemoryStore) ListDatabasesByServer(ctx context.Context, serverID uuid.U
 	return dbs, nil
 }
 
+func (m *MemoryStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Database, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	dbs := make([]*Database, 0)
+	for _, d := range m.databases {
+		if (orgID == uuid.Nil || d.OrganizationID == orgID) && d.DeletedAt == nil && !d.InRecycleBin {
+			dbs = append(dbs, d)
+		}
+	}
+	return dbs, nil
+}
+
 func (m *MemoryStore) UpdateDatabase(ctx context.Context, db *Database) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -447,6 +460,31 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 		ORDER BY created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	dbs := make([]*Database, 0)
+	for rows.Next() {
+		d := &Database{}
+		err := rows.Scan(&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		dbs = append(dbs, d)
+	}
+	return dbs, nil
+}
+
+func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Database, error) {
+	query := `
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
+		FROM databases
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1) AND deleted_at IS NULL
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, orgID)
 	if err != nil {
 		return nil, err
 	}

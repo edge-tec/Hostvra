@@ -97,12 +97,13 @@ func (h *InstallerHandler) InstallWebsiteApp(w http.ResponseWriter, r *http.Requ
 	// 1. If database required, create database record in store
 	if req.DBName != "" {
 		_ = h.store.CreateDatabase(r.Context(), &store.Database{
-			ID:           uuid.New(),
-			ServerID:     site.ServerID,
-			DBType:       req.DBType,
-			Name:         req.DBName,
-			CharacterSet: "utf8mb4",
-			Collation:    "utf8mb4_unicode_ci",
+			ID:             uuid.New(),
+			OrganizationID: site.OrganizationID,
+			ServerID:       site.ServerID,
+			DBType:         req.DBType,
+			Name:           req.DBName,
+			CharacterSet:   "utf8mb4",
+			Collation:      "utf8mb4_unicode_ci",
 		})
 	}
 

@@ -398,14 +398,16 @@ func (h *DatabaseHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	dbID, err := uuid.Parse(idParam)
 	if err == nil {
 		db, err := h.store.GetDatabaseByID(r.Context(), dbID)
-		if err == nil && db != nil {
-			if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
-				response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
-				return
-			}
-			if !recycle {
-				_ = h.dbMgr.ExecuteDropDatabase(r.Context(), db.Name)
-			}
+		if err != nil || db == nil {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database not found", nil, "")
+			return
+		}
+		if err := h.verifyDatabaseAccess(r.Context(), claims, db); err != nil {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+			return
+		}
+		if !recycle {
+			_ = h.dbMgr.ExecuteDropDatabase(r.Context(), db.Name)
 		}
 
 		if err := h.store.DeleteDatabase(r.Context(), dbID); err != nil {
