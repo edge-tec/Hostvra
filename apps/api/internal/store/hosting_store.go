@@ -61,6 +61,19 @@ func (m *MemoryStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([
 	return sites, nil
 }
 
+func (m *MemoryStore) ListAllWebsites(ctx context.Context) ([]*Website, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sites := make([]*Website, 0)
+	for _, s := range m.websites {
+		if s.DeletedAt == nil {
+			sites = append(sites, s)
+		}
+	}
+	return sites, nil
+}
+
 func (m *MemoryStore) UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -365,6 +378,35 @@ func (p *PostgresStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) 
 		ORDER BY created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sites := make([]*Website, 0)
+	for rows.Next() {
+		s := &Website{}
+		err := rows.Scan(
+			&s.ID, &s.ServerID, &s.OrganizationID, &s.PrimaryDomain,
+			&s.DocumentRoot, &s.SystemUser, &s.PHPVersion, &s.AppType,
+			&s.ProxyPort, &s.Status, &s.SSLEnabled, &s.CreatedAt, &s.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		sites = append(sites, s)
+	}
+	return sites, nil
+}
+
+func (p *PostgresStore) ListAllWebsites(ctx context.Context) ([]*Website, error) {
+	query := `
+		SELECT id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
+		FROM websites
+		WHERE deleted_at IS NULL
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

@@ -68,6 +68,7 @@ type Store interface {
 	CreateWebsite(ctx context.Context, site *Website) error
 	GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Website, error)
 	ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Website, error)
+	ListAllWebsites(ctx context.Context) ([]*Website, error)
 	UpdateWebsite(ctx context.Context, site *Website) error
 	UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error
 	DeleteWebsite(ctx context.Context, id uuid.UUID) error

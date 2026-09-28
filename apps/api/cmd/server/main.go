@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -79,6 +81,10 @@ func main() {
 	// Seed administrator account if configured or in development
 	seedDefaultAdmin(context.Background(), dataStore, cfg, logger)
 	autoRecoverLocalAgentNode(context.Background(), dataStore, logger)
+
+	// Sync all customer website Nginx vhosts on startup
+	// This ensures domains keep working after updates/restarts
+	go syncAllNginxVhosts(context.Background(), dataStore, logger)
 
 	// Initialize Audit Logger
 	auditLogger := audit.NewLogger(dataStore, logger)
@@ -1187,6 +1193,141 @@ func autoRecoverLocalAgentNode(ctx context.Context, s store.Store, logger *slog.
 		logger.Warn("Failed to auto-recover server node from agent config", "error", err)
 	} else {
 		logger.Info("Successfully auto-recovered server node into fleet registry", "server_id", cfg.ServerID, "hostname", hostname)
+	}
+}
+
+// syncAllNginxVhosts re-deploys Nginx virtual host configs for ALL customer websites
+// on API startup. This prevents domains from showing the wrong site after updates.
+func syncAllNginxVhosts(ctx context.Context, s store.Store, logger *slog.Logger) {
+	sitesAvailable := "/etc/nginx/sites-available"
+	sitesEnabled := "/etc/nginx/sites-enabled"
+
+	// Check if Nginx is installed
+	if _, err := os.Stat(sitesAvailable); err != nil {
+		return // Nginx not installed or non-Linux dev environment
+	}
+
+	allWebsites, err := s.ListAllWebsites(ctx)
+	if err != nil {
+		logger.Warn("Startup vhost sync: failed to list websites", "error", err)
+		return
+	}
+
+	if len(allWebsites) == 0 {
+		return
+	}
+
+	logger.Info("Startup vhost sync: re-deploying Nginx configs for all customer websites", "count", len(allWebsites))
+
+	// Detect PHP-FPM socket
+	phpSocket := "unix:/run/php/php8.2-fpm.sock"
+	matches, _ := filepath.Glob("/run/php/php*-fpm.sock")
+	if len(matches) > 0 {
+		phpSocket = "unix:" + matches[len(matches)-1] // use highest PHP version
+	}
+
+	deployedCount := 0
+	for _, site := range allWebsites {
+		if site == nil || site.PrimaryDomain == "" || site.Status == "deleted" {
+			continue
+		}
+
+		domain := site.PrimaryDomain
+		docRoot := site.DocumentRoot
+		if docRoot == "" {
+			docRoot = "/var/www/" + domain + "/public_html"
+		}
+
+		// Determine PHP socket for the site
+		sitePhpSocket := phpSocket
+		if site.PHPVersion != nil && *site.PHPVersion != "" {
+			socketPath := fmt.Sprintf("/run/php/php%s-fpm.sock", *site.PHPVersion)
+			if _, err := os.Stat(socketPath); err == nil {
+				sitePhpSocket = "unix:" + socketPath
+			}
+		}
+
+		// Generate Nginx vhost config
+		var conf string
+		if site.AppType == "proxy" && site.ProxyPort != nil && *site.ProxyPort > 0 {
+			conf = fmt.Sprintf(`# Auto-synced by Hostvra on startup for %s
+server {
+    listen 80;
+    listen [::]:80;
+    server_name %s www.%s;
+
+    location / {
+        proxy_pass http://127.0.0.1:%d;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+`, domain, domain, domain, *site.ProxyPort)
+		} else {
+			conf = fmt.Sprintf(`# Auto-synced by Hostvra on startup for %s
+server {
+    listen 80;
+    listen [::]:80;
+    server_name %s www.%s;
+    root %s;
+    index index.php index.html index.htm;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    access_log /var/log/nginx/%s.access.log;
+    error_log /var/log/nginx/%s.error.log;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass %s;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\. {
+        deny all;
+    }
+}
+`, domain, domain, domain, docRoot, domain, domain, sitePhpSocket)
+		}
+
+		confPath := filepath.Join(sitesAvailable, domain)
+		if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
+			logger.Warn("Startup vhost sync: failed to write config", "domain", domain, "error", err)
+			continue
+		}
+
+		// Create symlink in sites-enabled
+		symlinkPath := filepath.Join(sitesEnabled, domain)
+		_ = os.Remove(symlinkPath)
+		_ = os.Symlink(confPath, symlinkPath)
+
+		// Ensure document root exists
+		_ = os.MkdirAll(docRoot, 0755)
+
+		deployedCount++
+	}
+
+	// Validate and reload Nginx once (not per domain)
+	if deployedCount > 0 {
+		if err := exec.Command("nginx", "-t").Run(); err == nil {
+			_ = exec.Command("systemctl", "reload", "nginx").Run()
+			logger.Info("Startup vhost sync: Nginx reloaded successfully", "deployed", deployedCount)
+		} else {
+			logger.Warn("Startup vhost sync: Nginx config test failed, skipping reload", "error", err)
+		}
 	}
 }
 
