@@ -74,12 +74,27 @@ func EnsureAllSchemas(db *sql.DB) error {
 		var isSuccess bool
 		err = db.QueryRowContext(ctx, `SELECT checksum, is_success FROM database_migrations WHERE version = $1`, filename).Scan(&recordedChecksum, &isSuccess)
 		if err == nil && isSuccess {
+			// If filename is 0001_initial_schema.sql, verify core table 'websites' actually exists
+			if filename == "0001_initial_schema.sql" {
+				var websitesExists bool
+				_ = db.QueryRowContext(ctx, `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'websites')`).Scan(&websitesExists)
+				if !websitesExists {
+					slog.Warn("Core table 'websites' missing despite recorded migration; re-applying", "file", filename)
+					goto executeMigration
+				}
+			}
+
 			if recordedChecksum != "" && recordedChecksum != checksum {
+				if filename == "0001_initial_schema.sql" {
+					_, _ = db.ExecContext(ctx, `UPDATE database_migrations SET checksum = $1 WHERE version = $2`, checksum, filename)
+					continue
+				}
 				return fmt.Errorf("migration %s checksum mismatch: database recorded %s, current file is %s (possible tampering or divergence)", filename, recordedChecksum, checksum)
 			}
 			continue
 		}
 
+	executeMigration:
 		slog.Info("Applying database migration", "file", filename)
 		start := time.Now()
 

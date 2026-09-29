@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS websites (
     organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     primary_domain VARCHAR(255) NOT NULL,
     document_root VARCHAR(512) NOT NULL,
-    system_user VARCHAR(100) NOT NULL,
+    "system_user" VARCHAR(100) NOT NULL,
     php_version VARCHAR(20), -- e.g. '8.3', '8.2' or NULL
     app_type VARCHAR(50) NOT NULL DEFAULT 'php', -- 'php', 'nodejs', 'python', 'static', 'proxy'
     proxy_port INT,
@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     schedule VARCHAR(100) NOT NULL, -- e.g. '0 3 * * *'
     command TEXT NOT NULL,
-    system_user VARCHAR(100) NOT NULL DEFAULT 'root',
+    "system_user" VARCHAR(100) NOT NULL DEFAULT 'root',
     description VARCHAR(255),
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     last_run_at TIMESTAMPTZ,
