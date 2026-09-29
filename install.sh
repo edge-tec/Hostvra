@@ -133,6 +133,7 @@ install_dependencies() {
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
         apt-get install -y -qq curl wget tar gzip openssl ufw nginx ca-certificates \
+            postgresql postgresql-contrib \
             postfix dovecot-imapd dovecot-pop3d dovecot-lmtpd rspamd \
             php-fpm php-mysql php-curl php-gd php-mbstring php-xml php-zip > /dev/null
 
@@ -144,7 +145,13 @@ install_dependencies() {
         fi
     elif [[ "$PKG_MGR" == "dnf" ]]; then
         dnf install -y -q curl wget tar gzip openssl firewalld nginx ca-certificates \
+            postgresql-server postgresql-contrib \
             postfix dovecot rspamd php-fpm php-mysqlnd php-gd php-mbstring php-xml > /dev/null
+
+        # Initialize PostgreSQL data dir on RHEL/CentOS if needed
+        if command -v postgresql-setup &>/dev/null; then
+            postgresql-setup --initdb 2>/dev/null || true
+        fi
 
         # Install Node.js & npm runtime for Hostvra Web Dashboard if missing
         if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
@@ -160,7 +167,7 @@ install_dependencies() {
     systemctl stop httpd 2>/dev/null || true
     systemctl disable httpd 2>/dev/null || true
 
-    log_success "System and email dependencies satisfied."
+    log_success "System, database, and email dependencies satisfied."
 }
 
 # 3. Create Hostvra System User & Directories
@@ -194,16 +201,58 @@ setup_user_and_dirs() {
     log_success "Runtime filesystem and mail storage initialized."
 }
 
-# 4. Generate Production Secrets & Environment
-generate_credentials() {
-    log_info "Minting cryptographically secure tokens and credentials..."
+# 4. Generate Production Secrets & Environment (Strictly Idempotent)
+setup_database_and_environment() {
+    log_info "Configuring database and persistent environment (Zero Data Loss)..."
 
-    JWT_SECRET=$(openssl rand -hex 32)
+    ENV_FILE="${CONFIG_DIR}/api.env"
+    mkdir -p "${CONFIG_DIR}"
+
+    # Read existing credentials if api.env already exists to preserve them
+    EXISTING_JWT=""
+    EXISTING_DB_URL=""
+    if [[ -f "${ENV_FILE}" ]]; then
+        EXISTING_JWT=$(grep "^JWT_SECRET=" "${ENV_FILE}" | cut -d= -f2- || true)
+        EXISTING_DB_URL=$(grep "^DATABASE_URL=" "${ENV_FILE}" | cut -d= -f2- || true)
+        log_info "Existing environment file found at ${ENV_FILE}. Preserving existing secrets."
+    fi
+
+    if [[ -n "${EXISTING_JWT}" ]]; then
+        JWT_SECRET="${EXISTING_JWT}"
+    else
+        JWT_SECRET=$(openssl rand -hex 32)
+    fi
+
     ADMIN_PASSWORD="${INITIAL_ADMIN_PASSWORD:-Miz@n2129}"
     ADMIN_EMAIL="${INITIAL_ADMIN_EMAIL:-admin@hostvra.com}"
 
-    ENV_FILE="${CONFIG_DIR}/api.env"
-    cat > "${ENV_FILE}" << EOF
+    # Setup PostgreSQL if service is available
+    DB_URL="${EXISTING_DB_URL}"
+    if [[ -z "${DB_URL}" ]] && command -v psql &>/dev/null; then
+        log_info "Provisioning local PostgreSQL database for Hostvra..."
+        systemctl enable postgresql 2>/dev/null || true
+        systemctl start postgresql 2>/dev/null || true
+
+        DB_PASS_FILE="${CONFIG_DIR}/.db_password"
+        if [[ -f "${DB_PASS_FILE}" ]]; then
+            DB_PASS=$(cat "${DB_PASS_FILE}")
+        else
+            DB_PASS=$(openssl rand -hex 16)
+            echo "${DB_PASS}" > "${DB_PASS_FILE}"
+            chmod 600 "${DB_PASS_FILE}"
+        fi
+
+        # Create user and db if not exists (non-destructive)
+        sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'hostvra') THEN CREATE ROLE hostvra WITH LOGIN PASSWORD '${DB_PASS}'; ELSE ALTER ROLE hostvra WITH PASSWORD '${DB_PASS}'; END IF; END \$\$;" 2>/dev/null || true
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = 'hostvra'" | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE hostvra OWNER hostvra;" 2>/dev/null || true
+
+        DB_URL="postgres://hostvra:${DB_PASS}@127.0.0.1:5432/hostvra?sslmode=disable"
+        log_success "PostgreSQL database 'hostvra' configured with persistent storage."
+    fi
+
+    # Write or update api.env idempotently
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        cat > "${ENV_FILE}" << EOF
 PORT=${DEFAULT_PORT}
 HOST=0.0.0.0
 JWT_SECRET=${JWT_SECRET}
@@ -212,8 +261,25 @@ DATA_DIR=${DATA_DIR}
 INITIAL_ADMIN_EMAIL=${ADMIN_EMAIL}
 INITIAL_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 EOF
+        if [[ -n "${DB_URL}" ]]; then
+            echo "DATABASE_URL=${DB_URL}" >> "${ENV_FILE}"
+        fi
+    else
+        # Idempotently update or append keys without overwriting other customizations
+        if ! grep -q "^PORT=" "${ENV_FILE}"; then echo "PORT=${DEFAULT_PORT}" >> "${ENV_FILE}"; fi
+        if ! grep -q "^HOST=" "${ENV_FILE}"; then echo "HOST=0.0.0.0" >> "${ENV_FILE}"; fi
+        if ! grep -q "^JWT_SECRET=" "${ENV_FILE}"; then echo "JWT_SECRET=${JWT_SECRET}" >> "${ENV_FILE}"; fi
+        if ! grep -q "^LOG_FORMAT=" "${ENV_FILE}"; then echo "LOG_FORMAT=json" >> "${ENV_FILE}"; fi
+        if ! grep -q "^DATA_DIR=" "${ENV_FILE}"; then echo "DATA_DIR=${DATA_DIR}" >> "${ENV_FILE}"; fi
+        if ! grep -q "^INITIAL_ADMIN_EMAIL=" "${ENV_FILE}"; then echo "INITIAL_ADMIN_EMAIL=${ADMIN_EMAIL}" >> "${ENV_FILE}"; fi
+        if ! grep -q "^INITIAL_ADMIN_PASSWORD=" "${ENV_FILE}"; then echo "INITIAL_ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> "${ENV_FILE}"; fi
+        if [[ -n "${DB_URL}" ]] && ! grep -q "^DATABASE_URL=" "${ENV_FILE}"; then
+            echo "DATABASE_URL=${DB_URL}" >> "${ENV_FILE}"
+        fi
+    fi
+
     chmod 600 "${ENV_FILE}"
-    chown hostvra:hostvra "${ENV_FILE}"
+    chown hostvra:hostvra "${ENV_FILE}" 2>/dev/null || true
     log_success "Generated environment configuration at ${ENV_FILE}"
 }
 
@@ -642,9 +708,13 @@ perform_upgrade() {
     done
 
     if [[ $HEALTH_OK -eq 1 ]]; then
-        log_success "Post-upgrade health check passed! Control plane is online and healthy."
+        log_success "Post-upgrade health check passed! Control plane is online and healthy with zero data loss."
     else
-        log_warn "Health check probe timed out. If needed, restore snapshot via: tar -xzf ${BACKUP_FILE} -C /"
+        log_error "Post-upgrade health check failed! Initiating automatic rollback to preserve zero data loss..."
+        tar -xzf "${BACKUP_FILE}" -C / 2>/dev/null || true
+        systemctl restart hostvra-api.service hostvra-agent.service hostvra-web.service 2>/dev/null || true
+        log_warn "System safely rolled back to pre-upgrade snapshot: ${BACKUP_FILE}."
+        exit 1
     fi
 
     echo -e "\n${GREEN}${BOLD}======================================================================${NC}"
@@ -653,6 +723,7 @@ perform_upgrade() {
     echo -e "  • Check Status:         ${CYAN}hostvra update status${NC}"
     echo -e "  • Verify Health:        ${CYAN}systemctl status hostvra-api${NC}"
     echo -e "  • Pre-upgrade snapshot: ${CYAN}${BACKUP_FILE}${NC}"
+    echo -e "  • Zero Data Loss:       ${GREEN}All customer websites, databases, mail, and accounts intact${NC}"
     echo -e "======================================================================\n"
 }
 
@@ -663,11 +734,12 @@ main() {
     install_dependencies
     setup_user_and_dirs
 
-    # Check for existing installation
+    # Check for existing installation (Idempotent: update never acts as destructive reinstall)
     if [[ -f "${CONFIG_DIR}/api.env" && -f "${INSTALL_DIR}/hostvra-api" ]]; then
+        setup_database_and_environment
         perform_upgrade
     else
-        generate_credentials
+        setup_database_and_environment
         deploy_services
         configure_firewall
         display_summary

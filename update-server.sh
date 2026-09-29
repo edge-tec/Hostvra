@@ -79,22 +79,55 @@ git fetch origin main
 git reset --hard origin/main
 echo -e "${GREEN}[SUCCESS]${NC} Codebase updated to: $(git log -1 --oneline)"
 
+# Create pre-update backup snapshot
+TIMESTAMP=$(date +%s)
+BACKUP_DIR="/var/lib/hostvra/updates_backup/${TIMESTAMP}"
+mkdir -p "${BACKUP_DIR}" 2>/dev/null || BACKUP_DIR="/tmp/hostvra_server_backup_${TIMESTAMP}"
+mkdir -p "${BACKUP_DIR}"
+
+if [[ -f "/usr/local/bin/hostvra-api" ]]; then
+    cp -p "/usr/local/bin/hostvra-api" "${BACKUP_DIR}/hostvra-api.bak" 2>/dev/null || true
+fi
+if [[ -f "/var/lib/hostvra/store.json" ]]; then
+    cp -p "/var/lib/hostvra/store.json" "${BACKUP_DIR}/store.json.bak" 2>/dev/null || true
+fi
+if [[ -f "${CONFIG_FILE}" ]]; then
+    cp -p "${CONFIG_FILE}" "${BACKUP_DIR}/api.env.bak" 2>/dev/null || true
+fi
+
+rollback_server() {
+    echo -e "${RED}[ALERT] Update failed! Rolling back to prior release to guarantee Zero Data Loss...${NC}" >&2
+    if [[ -f "${BACKUP_DIR}/hostvra-api.bak" ]]; then
+        cp -fp "${BACKUP_DIR}/hostvra-api.bak" "/usr/local/bin/hostvra-api" 2>/dev/null || true
+    fi
+    if [[ -f "${BACKUP_DIR}/api.env.bak" ]]; then
+        cp -fp "${BACKUP_DIR}/api.env.bak" "${CONFIG_FILE}" 2>/dev/null || true
+    fi
+    systemctl restart hostvra-api hostvra-web 2>/dev/null || true
+    echo -e "${YELLOW}[WARN] Rollback completed. System restored safely.${NC}" >&2
+    exit 1
+}
+
+trap rollback_server ERR
+
 # 4. Compile Go API binary
 echo -e "${BLUE}[INFO]${NC} Compiling backend API binary (/usr/local/bin/hostvra-api)..."
 cd "${REPO_DIR}/apps/api"
 if command -v go &>/dev/null; then
-    go build -o /usr/local/bin/hostvra-api ./cmd/server
+    go build -o /usr/local/bin/hostvra-api.tmp ./cmd/server
+    mv -f /usr/local/bin/hostvra-api.tmp /usr/local/bin/hostvra-api
     chmod +x /usr/local/bin/hostvra-api
     echo -e "${GREEN}[SUCCESS]${NC} Backend API binary compiled successfully."
 else
     echo -e "${YELLOW}[WARN]${NC} Go compiler not found on PATH. Attempting /usr/local/go/bin/go..."
     if [[ -x "/usr/local/go/bin/go" ]]; then
-        /usr/local/go/bin/go build -o /usr/local/bin/hostvra-api ./cmd/server
+        /usr/local/go/bin/go build -o /usr/local/bin/hostvra-api.tmp ./cmd/server
+        mv -f /usr/local/bin/hostvra-api.tmp /usr/local/bin/hostvra-api
         chmod +x /usr/local/bin/hostvra-api
         echo -e "${GREEN}[SUCCESS]${NC} Backend API binary compiled successfully."
     else
         echo -e "${RED}[ERROR] Go compiler not found! Cannot rebuild backend binary.${NC}" >&2
-        exit 1
+        rollback_server
     fi
 fi
 
@@ -107,7 +140,7 @@ if command -v npm &>/dev/null; then
     echo -e "${GREEN}[SUCCESS]${NC} Web UI production build completed."
 else
     echo -e "${RED}[ERROR] npm not found! Cannot build frontend.${NC}" >&2
-    exit 1
+    rollback_server
 fi
 
 # 6. Restart Systemd Services
@@ -140,6 +173,8 @@ else
         echo -e "${YELLOW}[INFO] Verification status: ${LOGIN_STATUS_PUB}. Services are active.${NC}"
     fi
 fi
+
+trap - ERR
 
 echo -e "\n${GREEN}${BOLD}======================================================${NC}"
 echo -e "${GREEN}${BOLD}   Hostvra Successfully Updated & Live!             ${NC}"

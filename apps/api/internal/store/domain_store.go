@@ -94,6 +94,18 @@ func (m *MemoryStore) seedDomainResellerData() {
 			m.domainPrices[strings.ToLower(p.TLD)] = p
 		}
 	}
+
+	// Seed Registrars if empty
+	if len(m.registrarConfigs) == 0 {
+		initialRegistrars := []*DomainRegistrarConfig{
+			{Registrar: "namecheap", DisplayName: "Namecheap", Enabled: true, TestMode: true, UpdatedAt: now},
+			{Registrar: "resellerclub", DisplayName: "ResellerClub", Enabled: true, TestMode: true, UpdatedAt: now},
+			{Registrar: "enom", DisplayName: "eNom", Enabled: true, TestMode: true, UpdatedAt: now},
+		}
+		for _, reg := range initialRegistrars {
+			m.registrarConfigs[reg.Registrar] = reg
+		}
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -209,6 +221,7 @@ func (m *MemoryStore) CreateDomain(ctx context.Context, domain *Domain) error {
 	domain.UpdatedAt = now
 	domain.DomainName = strings.ToLower(strings.TrimSpace(domain.DomainName))
 	m.domains[domain.ID] = domain
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -276,6 +289,7 @@ func (m *MemoryStore) UpdateDomain(ctx context.Context, domain *Domain) error {
 	domain.UpdatedAt = time.Now().UTC()
 	domain.DomainName = strings.ToLower(strings.TrimSpace(domain.DomainName))
 	m.domains[domain.ID] = domain
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -287,6 +301,7 @@ func (m *MemoryStore) DeleteDomain(ctx context.Context, id uuid.UUID) error {
 	delete(m.domainContacts, id)
 	delete(m.domainNameservers, id)
 	delete(m.domainDNSRecords, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -408,6 +423,7 @@ func (m *MemoryStore) SaveDomainContacts(ctx context.Context, contacts []*Domain
 	}
 	domainID := contacts[0].DomainID
 	m.domainContacts[domainID] = contacts
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -423,6 +439,7 @@ func (m *MemoryStore) SaveDomainNameservers(ctx context.Context, domainID uuid.U
 	defer m.mu.Unlock()
 
 	m.domainNameservers[domainID] = ns
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -448,6 +465,7 @@ func (m *MemoryStore) CreateDomainDNSRecord(ctx context.Context, rec *DomainDNSR
 	rec.CreatedAt = now
 	rec.UpdatedAt = now
 	m.domainDNSRecords[rec.DomainID] = append(m.domainDNSRecords[rec.DomainID], rec)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -481,6 +499,7 @@ func (m *MemoryStore) UpdateDomainDNSRecord(ctx context.Context, rec *DomainDNSR
 		if r.ID == rec.ID {
 			rec.UpdatedAt = time.Now().UTC()
 			records[i] = rec
+			m.saveToDiskLocked()
 			return nil
 		}
 	}
@@ -495,6 +514,7 @@ func (m *MemoryStore) DeleteDomainDNSRecord(ctx context.Context, id uuid.UUID) e
 		for i, r := range records {
 			if r.ID == id {
 				m.domainDNSRecords[dID] = append(records[:i], records[i+1:]...)
+				m.saveToDiskLocked()
 				return nil
 			}
 		}

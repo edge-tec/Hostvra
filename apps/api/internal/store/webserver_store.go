@@ -28,6 +28,7 @@ func (m *MemoryStore) UpsertWebServerInstance(ctx context.Context, instance *Web
 	}
 	instance.UpdatedAt = now
 	m.webServerInstances[key] = instance
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -65,6 +66,7 @@ func (m *MemoryStore) SetActiveDefaultWebServer(ctx context.Context, serverID uu
 			inst.IsActiveDefault = (inst.ServerType == serverType)
 		}
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -82,6 +84,7 @@ func (m *MemoryStore) UpsertWebServerVHost(ctx context.Context, vhost *WebServer
 	}
 	vhost.UpdatedAt = now
 	m.webServerVHosts[key] = vhost
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -116,6 +119,7 @@ func (m *MemoryStore) DeleteWebServerVHost(ctx context.Context, serverID uuid.UU
 
 	key := fmt.Sprintf("%s:%s:%s", serverID.String(), serverType, domain)
 	delete(m.webServerVHosts, key)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -130,6 +134,7 @@ func (m *MemoryStore) CreateWebServerConfigBackup(ctx context.Context, backup *W
 		backup.CreatedAt = time.Now().UTC()
 	}
 	m.webServerBackups = append(m.webServerBackups, backup)
+	m.saveToDiskLocked()
 	return nil
 }
 

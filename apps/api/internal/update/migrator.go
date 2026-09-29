@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"hostvra/api/internal/store"
 )
 
 var (
@@ -142,6 +144,11 @@ func (m *DatabaseMigrator) ApplyMigrations(ctx context.Context, candidates []Mig
 					ErrMigrationChecksumMismatch, cand.Version, cand.Name, prev.Checksum, cand.Checksum)
 			}
 			continue
+		}
+
+		// Validate safe migration
+		if err := store.ValidateSafeMigration(cand.UpSQL); err != nil {
+			return appliedCount, fmt.Errorf("migration %s (%s) rejected by Zero Data Loss policy: %w", cand.Version, cand.Name, err)
 		}
 
 		// Execute new migration

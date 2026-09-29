@@ -88,6 +88,7 @@ func (m *MemoryStore) CreateMailServer(ctx context.Context, s *MailServer) error
 	}
 
 	m.mailServers[s.ID] = s
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -156,6 +157,7 @@ func (m *MemoryStore) UpdateMailServer(ctx context.Context, s *MailServer) error
 
 	s.UpdatedAt = time.Now().UTC()
 	m.mailServers[s.ID] = s
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -170,6 +172,7 @@ func (m *MemoryStore) DeleteMailServer(ctx context.Context, id uuid.UUID) error 
 
 	now := time.Now().UTC()
 	existing.DeletedAt = &now
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -205,6 +208,7 @@ func (m *MemoryStore) CreateEmailDomain(ctx context.Context, domain *EmailDomain
 	}
 
 	m.emailDomains[domain.ID] = domain
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -292,6 +296,7 @@ func (m *MemoryStore) UpdateEmailDomain(ctx context.Context, domain *EmailDomain
 	}
 	domain.UpdatedAt = time.Now().UTC()
 	m.emailDomains[domain.ID] = domain
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -311,6 +316,7 @@ func (m *MemoryStore) UpdateEmailDomainDNSVerified(ctx context.Context, id uuid.
 		d.DNSVerifiedAt = nil
 	}
 	d.UpdatedAt = now
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -333,6 +339,7 @@ func (m *MemoryStore) DeleteEmailDomain(ctx context.Context, id uuid.UUID) error
 			mb.UpdatedAt = now
 		}
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -360,6 +367,7 @@ func (m *MemoryStore) CreateEmailMailbox(ctx context.Context, mb *EmailMailbox) 
 	}
 
 	m.emailMailboxes[mb.ID] = mb
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -426,6 +434,7 @@ func (m *MemoryStore) UpdateEmailMailbox(ctx context.Context, mb *EmailMailbox) 
 		mb.PasswordHash = existing.PasswordHash
 	}
 	m.emailMailboxes[mb.ID] = mb
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -439,6 +448,7 @@ func (m *MemoryStore) UpdateEmailMailboxPassword(ctx context.Context, id uuid.UU
 	}
 	mb.PasswordHash = passwordHash
 	mb.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -453,6 +463,7 @@ func (m *MemoryStore) DeleteEmailMailbox(ctx context.Context, id uuid.UUID) erro
 	now := time.Now().UTC()
 	mb.DeletedAt = &now
 	mb.UpdatedAt = now
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -477,6 +488,7 @@ func (m *MemoryStore) CreateEmailAlias(ctx context.Context, alias *EmailAlias) e
 	alias.IsActive = true
 
 	m.emailAliases[alias.ID] = alias
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -512,6 +524,7 @@ func (m *MemoryStore) DeleteEmailAlias(ctx context.Context, id uuid.UUID) error 
 		return ErrNotFound
 	}
 	delete(m.emailAliases, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -528,6 +541,7 @@ func (m *MemoryStore) CreateEmailForwarder(ctx context.Context, fwd *EmailForwar
 	fwd.IsActive = true
 
 	m.emailForwarders[fwd.ID] = fwd
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -563,6 +577,7 @@ func (m *MemoryStore) DeleteEmailForwarder(ctx context.Context, id uuid.UUID) er
 		return ErrNotFound
 	}
 	delete(m.emailForwarders, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -585,6 +600,7 @@ func (m *MemoryStore) SetEmailAutoresponder(ctx context.Context, ar *EmailAutore
 		ar.UpdatedAt = now
 	}
 	m.emailAutoresponders[ar.MailboxID] = ar
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -607,6 +623,7 @@ func (m *MemoryStore) DeleteEmailAutoresponder(ctx context.Context, mailboxID uu
 		return ErrNotFound
 	}
 	delete(m.emailAutoresponders, mailboxID)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -630,6 +647,7 @@ func (m *MemoryStore) SaveEmailDKIMKey(ctx context.Context, dkim *EmailDKIMKey) 
 	}
 
 	m.emailDKIMKeys[dkim.DomainID] = dkim
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -709,6 +727,7 @@ func (m *MemoryStore) SetEmailSignature(ctx context.Context, sig *EmailSignature
 	}
 	sig.UpdatedAt = now
 	m.emailSignatures[sig.MailboxID] = sig
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -732,6 +751,7 @@ func (m *MemoryStore) AddEmailSuppression(ctx context.Context, sup *EmailSuppres
 		sup.CreatedAt = time.Now().UTC()
 	}
 	m.emailSuppressions[sup.ID] = sup
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -752,6 +772,7 @@ func (m *MemoryStore) DeleteEmailSuppression(ctx context.Context, id uuid.UUID) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.emailSuppressions, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -922,6 +943,7 @@ func (m *MemoryStore) CreateWebmailMessage(ctx context.Context, msg *WebmailMess
 		att.CreatedAt = now
 		m.webmailAttachments[att.ID] = &att
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -942,6 +964,7 @@ func (m *MemoryStore) UpdateWebmailMessageFlags(ctx context.Context, id uuid.UUI
 		msg.IsImportant = *isImportant
 	}
 	msg.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -954,6 +977,7 @@ func (m *MemoryStore) MoveWebmailMessage(ctx context.Context, id uuid.UUID, targ
 	}
 	msg.Folder = targetFolder
 	msg.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -975,6 +999,7 @@ func (m *MemoryStore) DeleteWebmailMessage(ctx context.Context, id uuid.UUID) er
 		msg.Folder = "trash"
 		msg.UpdatedAt = time.Now().UTC()
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -988,6 +1013,7 @@ func (m *MemoryStore) CreateWebmailAttachment(ctx context.Context, att *WebmailA
 		att.CreatedAt = time.Now().UTC()
 	}
 	m.webmailAttachments[att.ID] = att
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1050,6 +1076,7 @@ func (m *MemoryStore) CreateMailFilter(ctx context.Context, filter *MailFilter) 
 	filter.CreatedAt = now
 	filter.UpdatedAt = now
 	m.mailFilters[filter.ID] = filter
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1058,6 +1085,7 @@ func (m *MemoryStore) UpdateMailFilter(ctx context.Context, filter *MailFilter) 
 	defer m.mu.Unlock()
 	filter.UpdatedAt = time.Now().UTC()
 	m.mailFilters[filter.ID] = filter
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1065,6 +1093,7 @@ func (m *MemoryStore) DeleteMailFilter(ctx context.Context, id uuid.UUID) error 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.mailFilters, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1111,6 +1140,7 @@ func (m *MemoryStore) CreateMailContact(ctx context.Context, contact *MailContac
 	contact.CreatedAt = now
 	contact.UpdatedAt = now
 	m.mailContacts[contact.ID] = contact
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1119,6 +1149,7 @@ func (m *MemoryStore) UpdateMailContact(ctx context.Context, contact *MailContac
 	defer m.mu.Unlock()
 	contact.UpdatedAt = time.Now().UTC()
 	m.mailContacts[contact.ID] = contact
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1126,6 +1157,7 @@ func (m *MemoryStore) DeleteMailContact(ctx context.Context, id uuid.UUID) error
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.mailContacts, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1155,6 +1187,7 @@ func (m *MemoryStore) SaveMailIdentity(ctx context.Context, identity *MailIdenti
 	}
 	identity.UpdatedAt = now
 	m.mailIdentities[identity.ID] = identity
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1162,6 +1195,7 @@ func (m *MemoryStore) DeleteMailIdentity(ctx context.Context, id uuid.UUID) erro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.mailIdentities, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1192,6 +1226,7 @@ func (m *MemoryStore) SaveWebmailPreferences(ctx context.Context, prefs *Webmail
 	}
 	prefs.UpdatedAt = now
 	m.webmailPreferences[prefs.MailboxID] = prefs
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1219,6 +1254,7 @@ func (m *MemoryStore) SaveMailForwardingRule(ctx context.Context, rule *MailForw
 	}
 	rule.UpdatedAt = now
 	m.mailForwardingRules[rule.MailboxID] = rule
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -1226,6 +1262,7 @@ func (m *MemoryStore) DeleteMailForwardingRule(ctx context.Context, mailboxID uu
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.mailForwardingRules, mailboxID)
+	m.saveToDiskLocked()
 	return nil
 }
 

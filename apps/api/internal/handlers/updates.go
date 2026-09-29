@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime"
 	"time"
 
@@ -18,6 +19,61 @@ import (
 	"hostvra/api/internal/store"
 	"hostvra/api/internal/update"
 )
+
+// StoreInventoryProvider queries store.Store to compute live resource inventories
+type StoreInventoryProvider struct {
+	store          store.Store
+	persistentDirs []string
+}
+
+func NewStoreInventoryProvider(s store.Store, dirs ...string) *StoreInventoryProvider {
+	if len(dirs) == 0 {
+		dirs = []string{"/var/lib/hostvra", "/etc/hostvra"}
+	}
+	return &StoreInventoryProvider{
+		store:          s,
+		persistentDirs: dirs,
+	}
+}
+
+func (p *StoreInventoryProvider) CaptureInventory(ctx context.Context) (*update.ResourceInventory, error) {
+	inv := &update.ResourceInventory{
+		DirectoryChecks: make(map[string]bool),
+		CapturedAt:      time.Now().UTC(),
+	}
+
+	for _, d := range p.persistentDirs {
+		if _, err := os.Stat(d); err == nil {
+			inv.DirectoryChecks[d] = true
+		} else {
+			// Directory might not exist in dev/test, mark appropriately
+			inv.DirectoryChecks[d] = false
+		}
+	}
+
+	if p.store != nil {
+		if users, err := p.store.ListUsers(ctx); err == nil {
+			inv.CustomerCount = len(users)
+		}
+		if domains, err := p.store.ListAllDomains(ctx); err == nil {
+			inv.DomainCount = len(domains)
+		}
+		if sites, err := p.store.ListAllWebsites(ctx); err == nil {
+			inv.WebsiteCount = len(sites)
+		}
+		if servers, err := p.store.ListAllMailServers(ctx); err == nil {
+			mailboxes := 0
+			for _, srv := range servers {
+				if mbs, err := p.store.ListEmailMailboxesByServer(ctx, srv.NodeServerID); err == nil {
+					mailboxes += len(mbs)
+				}
+			}
+			inv.MailboxCount = mailboxes
+		}
+	}
+
+	return inv, nil
+}
 
 // UpdateHandler exposes Live Update System operations via REST API
 type UpdateHandler struct {
@@ -39,7 +95,9 @@ func NewUpdateHandler(cfg *config.Config, s store.Store, a *audit.Logger, appVer
 	deployer := update.NewReleaseDeployer("/opt/hostvra")
 	prober := update.NewDefaultHealthProber("http://127.0.0.1:" + cfg.Port)
 
-	orchestrator := update.NewUpdateOrchestrator(engine, verifier, snapshot, deployer, nil, prober)
+	invProvider := NewStoreInventoryProvider(s, "/var/lib/hostvra", "/etc/hostvra")
+	orchestrator := update.NewUpdateOrchestrator(engine, verifier, snapshot, deployer, nil, prober).
+		WithInventoryProvider(invProvider)
 	relService := update.NewReleaseService(appVersion, appVersion, 5)
 
 	return &UpdateHandler{

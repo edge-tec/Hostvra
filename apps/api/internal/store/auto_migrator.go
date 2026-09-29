@@ -83,6 +83,12 @@ func EnsureAllSchemas(db *sql.DB) error {
 		slog.Info("Applying database migration", "file", filename)
 		start := time.Now()
 
+		// Validate that migration contains no destructive operations (Zero Data Loss Policy)
+		if err := ValidateSafeMigration(string(content)); err != nil {
+			slog.Error("Database migration rejected by Zero Data Loss policy", "file", filename, "error", err)
+			return fmt.Errorf("migration %s rejected: %w", filename, err)
+		}
+
 		// Execute migration SQL
 		if _, err := db.ExecContext(ctx, string(content)); err != nil {
 			slog.Error("Database migration failed", "file", filename, "error", err)

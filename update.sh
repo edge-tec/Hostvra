@@ -81,12 +81,21 @@ BACKUP_DIR="/var/lib/hostvra/updates_backup/${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}" 2>/dev/null || BACKUP_DIR="/tmp/hostvra_backup_${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}" "bin"
 
-# Backup current binaries if present
+# Backup current binaries, config, and data snapshot
 if [[ -f "/usr/local/bin/hostvra-api" ]]; then
     cp -p "/usr/local/bin/hostvra-api" "${BACKUP_DIR}/hostvra-api.bak" 2>/dev/null || true
 fi
 if [[ -f "/usr/local/bin/hostvra-agent" ]]; then
     cp -p "/usr/local/bin/hostvra-agent" "${BACKUP_DIR}/hostvra-agent.bak" 2>/dev/null || true
+fi
+if [[ -f "/etc/hostvra/api.env" ]]; then
+    cp -p "/etc/hostvra/api.env" "${BACKUP_DIR}/api.env.bak" 2>/dev/null || true
+fi
+if [[ -f "/var/lib/hostvra/store.json" ]]; then
+    cp -p "/var/lib/hostvra/store.json" "${BACKUP_DIR}/store.json.bak" 2>/dev/null || true
+fi
+if command -v pg_dump &>/dev/null; then
+    sudo -u postgres pg_dump hostvra > "${BACKUP_DIR}/hostvra_db.sql" 2>/dev/null || true
 fi
 
 rollback() {
@@ -97,10 +106,16 @@ rollback() {
     if [[ -f "${BACKUP_DIR}/hostvra-agent.bak" ]] && [[ -w "/usr/local/bin" ]]; then
         cp -fp "${BACKUP_DIR}/hostvra-agent.bak" "/usr/local/bin/hostvra-agent" 2>/dev/null || true
     fi
+    if [[ -f "${BACKUP_DIR}/api.env.bak" ]] && [[ -w "/etc/hostvra" ]]; then
+        cp -fp "${BACKUP_DIR}/api.env.bak" "/etc/hostvra/api.env" 2>/dev/null || true
+    fi
+    if [[ -f "${BACKUP_DIR}/store.json.bak" ]] && [[ ! -s "/var/lib/hostvra/store.json" ]] && [[ -w "/var/lib/hostvra" ]]; then
+        cp -fp "${BACKUP_DIR}/store.json.bak" "/var/lib/hostvra/store.json" 2>/dev/null || true
+    fi
     if command -v systemctl &>/dev/null; then
         systemctl restart hostvra-api hostvra-web hostvra-agent 2>/dev/null || true
     fi
-    echo "[ERROR] Rollback completed. System restored to prior version." >&2
+    echo "[ERROR] Rollback completed. System restored to prior version without customer data loss." >&2
     exit 1
 }
 

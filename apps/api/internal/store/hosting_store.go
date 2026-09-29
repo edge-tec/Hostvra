@@ -34,6 +34,7 @@ func (m *MemoryStore) CreateWebsite(ctx context.Context, site *Website) error {
 	site.Status = "active"
 
 	m.websites[site.ID] = site
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -84,6 +85,7 @@ func (m *MemoryStore) UpdateWebsiteStatus(ctx context.Context, id uuid.UUID, sta
 	}
 	site.Status = status
 	site.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -98,6 +100,7 @@ func (m *MemoryStore) UpdateWebsite(ctx context.Context, site *Website) error {
 	site.CreatedAt = existing.CreatedAt
 	site.UpdatedAt = time.Now().UTC()
 	m.websites[site.ID] = site
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -111,6 +114,7 @@ func (m *MemoryStore) DeleteWebsite(ctx context.Context, id uuid.UUID) error {
 	}
 	now := time.Now().UTC()
 	site.DeletedAt = &now
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -124,6 +128,7 @@ func (m *MemoryStore) UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslEna
 	}
 	site.SSLEnabled = sslEnabled
 	site.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -142,6 +147,7 @@ func (m *MemoryStore) CreateDatabase(ctx context.Context, db *Database) error {
 	}
 	db.CreatedAt = time.Now().UTC()
 	m.databases[db.ID] = db
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -192,6 +198,7 @@ func (m *MemoryStore) UpdateDatabase(ctx context.Context, db *Database) error {
 	}
 	db.CreatedAt = existing.CreatedAt
 	m.databases[db.ID] = db
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -206,6 +213,7 @@ func (m *MemoryStore) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
 	now := time.Now().UTC()
 	db.DeletedAt = &now
 	db.InRecycleBin = true
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -219,6 +227,7 @@ func (m *MemoryStore) RestoreDatabase(ctx context.Context, id uuid.UUID) error {
 	}
 	db.DeletedAt = nil
 	db.InRecycleBin = false
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -237,6 +246,7 @@ func (m *MemoryStore) CreateDatabaseUser(ctx context.Context, user *DatabaseUser
 	}
 	user.CreatedAt = time.Now().UTC()
 	m.databaseUsers[user.ID] = user
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -267,6 +277,7 @@ func (m *MemoryStore) CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificat
 	cert.UpdatedAt = now
 
 	m.sslCerts[cert.ID] = cert
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -321,6 +332,7 @@ func (m *MemoryStore) DeleteSSL(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	delete(m.sslCerts, id)
+	m.saveToDiskLocked()
 	return nil
 }
 

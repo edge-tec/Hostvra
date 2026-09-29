@@ -26,6 +26,7 @@ func (m *MemoryStore) UpsertPHPVersion(ctx context.Context, v *PHPInstalledVersi
 	}
 	v.UpdatedAt = now
 	m.phpVersions[key] = v
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -60,6 +61,7 @@ func (m *MemoryStore) DeletePHPVersion(ctx context.Context, serverID uuid.UUID, 
 
 	key := fmt.Sprintf("%s:%s", serverID.String(), version)
 	delete(m.phpVersions, key)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -72,6 +74,7 @@ func (m *MemoryStore) SetDefaultPHPCli(ctx context.Context, serverID uuid.UUID, 
 			v.IsDefaultCLI = (v.Version == version)
 		}
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -84,6 +87,7 @@ func (m *MemoryStore) SetDefaultPHPFpm(ctx context.Context, serverID uuid.UUID, 
 			v.IsDefaultFPM = (v.Version == version)
 		}
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -101,6 +105,7 @@ func (m *MemoryStore) UpsertPHPExtension(ctx context.Context, ext *PHPExtension)
 	}
 	ext.UpdatedAt = now
 	m.phpExtensions[key] = ext
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -135,6 +140,7 @@ func (m *MemoryStore) DeletePHPExtension(ctx context.Context, serverID uuid.UUID
 
 	key := fmt.Sprintf("%s:%s:%s", serverID.String(), version, name)
 	delete(m.phpExtensions, key)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -149,6 +155,7 @@ func (m *MemoryStore) CreatePHPFPMPool(ctx context.Context, pool *PHPFPMPool) er
 	pool.CreatedAt = now
 	pool.UpdatedAt = now
 	m.phpPools[pool.ID] = pool
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -211,6 +218,7 @@ func (m *MemoryStore) UpdatePHPFPMPool(ctx context.Context, pool *PHPFPMPool) er
 	pool.CreatedAt = existing.CreatedAt
 	pool.UpdatedAt = time.Now().UTC()
 	m.phpPools[pool.ID] = pool
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -219,6 +227,7 @@ func (m *MemoryStore) DeletePHPFPMPool(ctx context.Context, id uuid.UUID) error 
 	defer m.mu.Unlock()
 
 	delete(m.phpPools, id)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -240,6 +249,7 @@ func (m *MemoryStore) UpsertPHPIniOverride(ctx context.Context, override *PHPIni
 	}
 	override.UpdatedAt = now
 	m.phpIniOverrides[key] = override
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -275,6 +285,7 @@ func (m *MemoryStore) DeletePHPIniOverride(ctx context.Context, id uuid.UUID) er
 			break
 		}
 	}
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -289,6 +300,7 @@ func (m *MemoryStore) CreatePHPConfigBackup(ctx context.Context, backup *PHPConf
 		backup.CreatedAt = time.Now().UTC()
 	}
 	m.phpConfigBackups = append(m.phpConfigBackups, backup)
+	m.saveToDiskLocked()
 	return nil
 }
 

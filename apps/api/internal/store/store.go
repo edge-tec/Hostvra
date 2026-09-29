@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -449,39 +451,72 @@ type MemoryStore struct {
 }
 
 type memoryDumpData struct {
-	Orgs               map[uuid.UUID]*Organization            `json:"orgs"`
-	OrgsBySlug         map[string]uuid.UUID                   `json:"orgs_by_slug"`
-	Users              map[uuid.UUID]*User                    `json:"users"`
-	UsersByEmail       map[string]uuid.UUID                   `json:"users_by_email"`
-	Servers            map[uuid.UUID]*Server                  `json:"servers"`
-	Tokens             map[string]*ServerEnrollmentToken      `json:"tokens"`
-	Websites           map[uuid.UUID]*Website                 `json:"websites"`
-	Databases          map[uuid.UUID]*Database                `json:"databases"`
-	DatabaseUsers      map[uuid.UUID]*DatabaseUser            `json:"database_users"`
-	SSLCerts           map[uuid.UUID]*SSLCertificate          `json:"ssl_certs"`
-	EmailDomains       map[uuid.UUID]*EmailDomain             `json:"email_domains"`
-	EmailMailboxes     map[uuid.UUID]*EmailMailbox            `json:"email_mailboxes"`
-	EmailAliases       map[uuid.UUID]*EmailAlias              `json:"email_aliases"`
-	WebServerInstances map[string]*WebServerInstance          `json:"web_server_instances"`
-	WebServerVHosts    map[string]*WebServerVHost             `json:"web_server_vhosts"`
-	HostingPlans       map[uuid.UUID]*HostingPlan             `json:"hosting_plans,omitempty"`
-	Subscriptions      map[uuid.UUID]*Subscription            `json:"subscriptions,omitempty"`
-	Invoices           map[uuid.UUID]*Invoice                 `json:"invoices,omitempty"`
-	GatewayConfigs     map[string]*PaymentGatewayConfig       `json:"gateway_configs,omitempty"`
-	HostingAccounts    map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
-	TLDPricings        map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
-	RegistrarConfigs   map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
-	Tickets            []Ticket                               `json:"tickets,omitempty"`
-	TicketReplies      []TicketReply                          `json:"ticket_replies,omitempty"`
-	Articles           []KnowledgeArticle                     `json:"articles,omitempty"`
-	CannedResponses    []CannedResponse                       `json:"canned_responses,omitempty"`
-	SystemSettings     *SystemSettings                        `json:"system_settings,omitempty"`
-	UserPlanOverrides  map[uuid.UUID]*UserPlanOverride        `json:"user_plan_overrides,omitempty"`
+	Orgs                 map[uuid.UUID]*Organization            `json:"orgs"`
+	OrgsBySlug           map[string]uuid.UUID                   `json:"orgs_by_slug"`
+	Users                map[uuid.UUID]*User                    `json:"users"`
+	UsersByEmail         map[string]uuid.UUID                   `json:"users_by_email"`
+	Servers              map[uuid.UUID]*Server                  `json:"servers"`
+	Tokens               map[string]*ServerEnrollmentToken      `json:"tokens"`
+	Websites             map[uuid.UUID]*Website                 `json:"websites"`
+	Databases            map[uuid.UUID]*Database                `json:"databases"`
+	DatabaseUsers        map[uuid.UUID]*DatabaseUser            `json:"database_users"`
+	SSLCerts             map[uuid.UUID]*SSLCertificate          `json:"ssl_certs"`
+	MailServers          map[uuid.UUID]*MailServer              `json:"mail_servers,omitempty"`
+	EmailDomains         map[uuid.UUID]*EmailDomain             `json:"email_domains"`
+	EmailMailboxes       map[uuid.UUID]*EmailMailbox            `json:"email_mailboxes"`
+	EmailAliases         map[uuid.UUID]*EmailAlias              `json:"email_aliases"`
+	EmailForwarders      map[uuid.UUID]*EmailForwarder          `json:"email_forwarders,omitempty"`
+	EmailAutoresponders  map[uuid.UUID]*EmailAutoresponder      `json:"email_autoresponders,omitempty"`
+	EmailDKIMKeys        map[uuid.UUID]*EmailDKIMKey            `json:"email_dkim_keys,omitempty"`
+	EmailSignatures      map[uuid.UUID]*EmailSignature          `json:"email_signatures,omitempty"`
+	EmailSuppressions    map[uuid.UUID]*EmailSuppression        `json:"email_suppressions,omitempty"`
+	WebmailMessages      map[uuid.UUID]*WebmailMessage          `json:"webmail_messages,omitempty"`
+	WebmailAttachments   map[uuid.UUID]*WebmailAttachment       `json:"webmail_attachments,omitempty"`
+	MailFilters          map[uuid.UUID]*MailFilter              `json:"mail_filters,omitempty"`
+	MailContacts         map[uuid.UUID]*MailContact             `json:"mail_contacts,omitempty"`
+	MailIdentities       map[uuid.UUID]*MailIdentity            `json:"mail_identities,omitempty"`
+	WebmailPreferences   map[uuid.UUID]*WebmailPreferences      `json:"webmail_preferences,omitempty"`
+	MailForwardingRules  map[uuid.UUID]*MailForwardingRule      `json:"mail_forwarding_rules,omitempty"`
+	PHPInstalledVersions map[string]*PHPInstalledVersion        `json:"php_installed_versions,omitempty"`
+	PHPExtensions        map[string]*PHPExtension               `json:"php_extensions,omitempty"`
+	PHPFPMPools          map[uuid.UUID]*PHPFPMPool              `json:"php_fpm_pools,omitempty"`
+	PHPIniOverrides      map[string]*PHPIniOverride             `json:"php_ini_overrides,omitempty"`
+	PHPConfigBackups     []*PHPConfigBackup                     `json:"php_config_backups,omitempty"`
+	WebServerInstances   map[string]*WebServerInstance          `json:"web_server_instances"`
+	WebServerVHosts      map[string]*WebServerVHost             `json:"web_server_vhosts"`
+	WebServerBackups     []*WebServerConfigBackup               `json:"web_server_backups,omitempty"`
+	HostingPlans         map[uuid.UUID]*HostingPlan             `json:"hosting_plans,omitempty"`
+	Subscriptions        map[uuid.UUID]*Subscription            `json:"subscriptions,omitempty"`
+	Invoices             map[uuid.UUID]*Invoice                 `json:"invoices,omitempty"`
+	TrialSettings        *TrialSettings                         `json:"trial_settings,omitempty"`
+	GatewayConfigs       map[string]*PaymentGatewayConfig       `json:"gateway_configs,omitempty"`
+	HostingAccounts      map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
+	TLDPricings          map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
+	RegistrarConfigs     map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
+	DomainTLDs           map[string]*DomainTLD                  `json:"domain_tlds,omitempty"`
+	DomainPrices         map[string]*DomainPrice                `json:"domain_prices,omitempty"`
+	Domains              map[uuid.UUID]*Domain                  `json:"domains,omitempty"`
+	DomainOrders         map[uuid.UUID]*DomainOrder             `json:"domain_orders,omitempty"`
+	DomainContacts       map[uuid.UUID][]*DomainContact         `json:"domain_contacts,omitempty"`
+	DomainNameservers    map[uuid.UUID][]string                 `json:"domain_nameservers,omitempty"`
+	DomainDNSRecords     map[uuid.UUID][]*DomainDNSRecord       `json:"domain_dns_records,omitempty"`
+	DomainTransfers      map[uuid.UUID]*DomainTransfer          `json:"domain_transfers,omitempty"`
+	DomainRenewals       map[uuid.UUID][]*DomainRenewal         `json:"domain_renewals,omitempty"`
+	Tickets              []Ticket                               `json:"tickets,omitempty"`
+	TicketReplies        []TicketReply                          `json:"ticket_replies,omitempty"`
+	Articles             []KnowledgeArticle                     `json:"articles,omitempty"`
+	CannedResponses      []CannedResponse                       `json:"canned_responses,omitempty"`
+	SystemSettings       *SystemSettings                        `json:"system_settings,omitempty"`
+	UserPlanOverrides    map[uuid.UUID]*UserPlanOverride        `json:"user_plan_overrides,omitempty"`
 }
 
 func determineStoreFilePath() string {
 	if p := os.Getenv("HOSTVRA_STORE_FILE"); p != "" {
 		return p
+	}
+	// Under unit testing, do not read or write shared global files across test packages
+	if flag.Lookup("test.v") != nil || (len(os.Args) > 0 && strings.HasSuffix(os.Args[0], ".test")) {
+		return ""
 	}
 	if _, err := os.Stat("/var/lib/hostvra"); err == nil {
 		return "/var/lib/hostvra/store.json"
@@ -503,41 +538,77 @@ func (m *MemoryStore) saveToDiskLocked() {
 		return
 	}
 	data := memoryDumpData{
-		Orgs:               m.orgs,
-		OrgsBySlug:         m.orgsBySlug,
-		Users:              m.users,
-		UsersByEmail:       m.usersByEmail,
-		Servers:            m.servers,
-		Tokens:             m.tokens,
-		Websites:           m.websites,
-		Databases:          m.databases,
-		DatabaseUsers:      m.databaseUsers,
-		SSLCerts:           m.sslCerts,
-		EmailDomains:       m.emailDomains,
-		EmailMailboxes:     m.emailMailboxes,
-		EmailAliases:       m.emailAliases,
-		WebServerInstances: m.webServerInstances,
-		WebServerVHosts:    m.webServerVHosts,
-		HostingPlans:       m.hostingPlans,
-		Subscriptions:      m.subscriptions,
-		Invoices:           m.invoices,
-		GatewayConfigs:     m.gatewayConfigs,
-		HostingAccounts:    m.hostingAccounts,
-		TLDPricings:        m.tldPricings,
-		RegistrarConfigs:   m.registrarConfigs,
-		Tickets:            m.tickets,
-		TicketReplies:      m.ticketReplies,
-		Articles:           m.articles,
-		CannedResponses:    m.cannedResponses,
-		SystemSettings:     m.systemSettings,
-		UserPlanOverrides:  m.userPlanOverrides,
+		Orgs:                 m.orgs,
+		OrgsBySlug:           m.orgsBySlug,
+		Users:                m.users,
+		UsersByEmail:         m.usersByEmail,
+		Servers:              m.servers,
+		Tokens:               m.tokens,
+		Websites:             m.websites,
+		Databases:            m.databases,
+		DatabaseUsers:        m.databaseUsers,
+		SSLCerts:             m.sslCerts,
+		MailServers:          m.mailServers,
+		EmailDomains:         m.emailDomains,
+		EmailMailboxes:       m.emailMailboxes,
+		EmailAliases:         m.emailAliases,
+		EmailForwarders:      m.emailForwarders,
+		EmailAutoresponders:  m.emailAutoresponders,
+		EmailDKIMKeys:        m.emailDKIMKeys,
+		EmailSignatures:      m.emailSignatures,
+		EmailSuppressions:    m.emailSuppressions,
+		WebmailMessages:      m.webmailMessages,
+		WebmailAttachments:   m.webmailAttachments,
+		MailFilters:          m.mailFilters,
+		MailContacts:         m.mailContacts,
+		MailIdentities:       m.mailIdentities,
+		WebmailPreferences:   m.webmailPreferences,
+		MailForwardingRules:  m.mailForwardingRules,
+		PHPInstalledVersions: m.phpVersions,
+		PHPExtensions:        m.phpExtensions,
+		PHPFPMPools:          m.phpPools,
+		PHPIniOverrides:      m.phpIniOverrides,
+		PHPConfigBackups:     m.phpConfigBackups,
+		WebServerInstances:   m.webServerInstances,
+		WebServerVHosts:      m.webServerVHosts,
+		WebServerBackups:     m.webServerBackups,
+		HostingPlans:         m.hostingPlans,
+		Subscriptions:        m.subscriptions,
+		Invoices:             m.invoices,
+		TrialSettings:        m.trialSettings,
+		GatewayConfigs:       m.gatewayConfigs,
+		HostingAccounts:      m.hostingAccounts,
+		TLDPricings:          m.tldPricings,
+		RegistrarConfigs:     m.registrarConfigs,
+		DomainTLDs:           m.domainTLDs,
+		DomainPrices:         m.domainPrices,
+		Domains:              m.domains,
+		DomainOrders:         m.domainOrders,
+		DomainContacts:       m.domainContacts,
+		DomainNameservers:    m.domainNameservers,
+		DomainDNSRecords:     m.domainDNSRecords,
+		DomainTransfers:      m.domainTransfers,
+		DomainRenewals:       m.domainRenewals,
+		Tickets:              m.tickets,
+		TicketReplies:        m.ticketReplies,
+		Articles:             m.articles,
+		CannedResponses:      m.cannedResponses,
+		SystemSettings:       m.systemSettings,
+		UserPlanOverrides:    m.userPlanOverrides,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(m.filePath), 0755)
-	_ = os.WriteFile(m.filePath, bytes, 0644)
+	dir := filepath.Dir(m.filePath)
+	_ = os.MkdirAll(dir, 0755)
+
+	// Atomic write using unique temporary file and rename
+	tmpFile := fmt.Sprintf("%s.tmp.%d_%d", m.filePath, os.Getpid(), time.Now().UnixNano())
+	if err := os.WriteFile(tmpFile, bytes, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmpFile, m.filePath)
 }
 
 func (m *MemoryStore) loadFromDisk() {
@@ -582,6 +653,9 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.SSLCerts != nil {
 		m.sslCerts = data.SSLCerts
 	}
+	if data.MailServers != nil {
+		m.mailServers = data.MailServers
+	}
 	if data.EmailDomains != nil {
 		m.emailDomains = data.EmailDomains
 	}
@@ -591,11 +665,65 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.EmailAliases != nil {
 		m.emailAliases = data.EmailAliases
 	}
+	if data.EmailForwarders != nil {
+		m.emailForwarders = data.EmailForwarders
+	}
+	if data.EmailAutoresponders != nil {
+		m.emailAutoresponders = data.EmailAutoresponders
+	}
+	if data.EmailDKIMKeys != nil {
+		m.emailDKIMKeys = data.EmailDKIMKeys
+	}
+	if data.EmailSignatures != nil {
+		m.emailSignatures = data.EmailSignatures
+	}
+	if data.EmailSuppressions != nil {
+		m.emailSuppressions = data.EmailSuppressions
+	}
+	if data.WebmailMessages != nil {
+		m.webmailMessages = data.WebmailMessages
+	}
+	if data.WebmailAttachments != nil {
+		m.webmailAttachments = data.WebmailAttachments
+	}
+	if data.MailFilters != nil {
+		m.mailFilters = data.MailFilters
+	}
+	if data.MailContacts != nil {
+		m.mailContacts = data.MailContacts
+	}
+	if data.MailIdentities != nil {
+		m.mailIdentities = data.MailIdentities
+	}
+	if data.WebmailPreferences != nil {
+		m.webmailPreferences = data.WebmailPreferences
+	}
+	if data.MailForwardingRules != nil {
+		m.mailForwardingRules = data.MailForwardingRules
+	}
+	if data.PHPInstalledVersions != nil {
+		m.phpVersions = data.PHPInstalledVersions
+	}
+	if data.PHPExtensions != nil {
+		m.phpExtensions = data.PHPExtensions
+	}
+	if data.PHPFPMPools != nil {
+		m.phpPools = data.PHPFPMPools
+	}
+	if data.PHPIniOverrides != nil {
+		m.phpIniOverrides = data.PHPIniOverrides
+	}
+	if data.PHPConfigBackups != nil {
+		m.phpConfigBackups = data.PHPConfigBackups
+	}
 	if data.WebServerInstances != nil {
 		m.webServerInstances = data.WebServerInstances
 	}
 	if data.WebServerVHosts != nil {
 		m.webServerVHosts = data.WebServerVHosts
+	}
+	if data.WebServerBackups != nil {
+		m.webServerBackups = data.WebServerBackups
 	}
 	if data.HostingPlans != nil {
 		m.hostingPlans = data.HostingPlans
@@ -605,6 +733,9 @@ func (m *MemoryStore) loadFromDisk() {
 	}
 	if data.Invoices != nil {
 		m.invoices = data.Invoices
+	}
+	if data.TrialSettings != nil {
+		m.trialSettings = data.TrialSettings
 	}
 	if data.GatewayConfigs != nil {
 		m.gatewayConfigs = data.GatewayConfigs
@@ -617,6 +748,33 @@ func (m *MemoryStore) loadFromDisk() {
 	}
 	if data.RegistrarConfigs != nil {
 		m.registrarConfigs = data.RegistrarConfigs
+	}
+	if data.DomainTLDs != nil {
+		m.domainTLDs = data.DomainTLDs
+	}
+	if data.DomainPrices != nil {
+		m.domainPrices = data.DomainPrices
+	}
+	if data.Domains != nil {
+		m.domains = data.Domains
+	}
+	if data.DomainOrders != nil {
+		m.domainOrders = data.DomainOrders
+	}
+	if data.DomainContacts != nil {
+		m.domainContacts = data.DomainContacts
+	}
+	if data.DomainNameservers != nil {
+		m.domainNameservers = data.DomainNameservers
+	}
+	if data.DomainDNSRecords != nil {
+		m.domainDNSRecords = data.DomainDNSRecords
+	}
+	if data.DomainTransfers != nil {
+		m.domainTransfers = data.DomainTransfers
+	}
+	if data.DomainRenewals != nil {
+		m.domainRenewals = data.DomainRenewals
 	}
 	if len(data.Tickets) > 0 {
 		m.tickets = data.Tickets
@@ -639,7 +797,10 @@ func (m *MemoryStore) loadFromDisk() {
 }
 
 func NewMemoryStore() *MemoryStore {
-	storePath := determineStoreFilePath()
+	return NewMemoryStoreWithPath(determineStoreFilePath())
+}
+
+func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 	m := &MemoryStore{
 		filePath:            storePath,
 		orgs:                make(map[uuid.UUID]*Organization),
@@ -727,7 +888,17 @@ func NewMemoryStore() *MemoryStore {
 }
 
 func (m *MemoryStore) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveToDiskLocked()
 	return nil
+}
+
+// Persist flushes the in-memory state to the persistent disk storage file
+func (m *MemoryStore) Persist() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveToDiskLocked()
 }
 
 func (m *MemoryStore) CreateOrganization(ctx context.Context, org *Organization) error {

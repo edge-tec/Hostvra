@@ -84,14 +84,33 @@ func (p *DefaultHealthProber) ProbeHealth(ctx context.Context) (*SystemHealthRep
 	return report, nil
 }
 
+// ResourceInventory tracks counts of customer data and persistent hosting entities
+type ResourceInventory struct {
+	CustomerCount   int             `json:"customer_count"`
+	DomainCount     int             `json:"domain_count"`
+	WebsiteCount    int             `json:"website_count"`
+	DatabaseCount   int             `json:"database_count"`
+	MailboxCount    int             `json:"mailbox_count"`
+	DNSRecordCount  int             `json:"dns_record_count"`
+	SSLCount        int             `json:"ssl_count"`
+	DirectoryChecks map[string]bool `json:"directory_checks"`
+	CapturedAt      time.Time       `json:"captured_at"`
+}
+
+// InventoryProvider abstracts fetching current system resource counts for pre/post update comparison
+type InventoryProvider interface {
+	CaptureInventory(ctx context.Context) (*ResourceInventory, error)
+}
+
 // UpdateOrchestrator coordinates full end-to-end atomic update lifecycle with automatic rollback
 type UpdateOrchestrator struct {
-	engine   *JobEngine
-	verifier *PackageVerifier
-	snapshot *SnapshotManager
-	deployer *ReleaseDeployer
-	migrator *DatabaseMigrator
-	prober   SystemHealthProber
+	engine    *JobEngine
+	verifier  *PackageVerifier
+	snapshot  *SnapshotManager
+	deployer  *ReleaseDeployer
+	migrator  *DatabaseMigrator
+	prober    SystemHealthProber
+	inventory InventoryProvider
 }
 
 func NewUpdateOrchestrator(
@@ -112,6 +131,11 @@ func NewUpdateOrchestrator(
 	}
 }
 
+func (uo *UpdateOrchestrator) WithInventoryProvider(ip InventoryProvider) *UpdateOrchestrator {
+	uo.inventory = ip
+	return uo
+}
+
 // ExecuteLiveUpdate runs all phases from prechecking to health check, with automatic rollback on error
 func (uo *UpdateOrchestrator) ExecuteLiveUpdate(
 	ctx context.Context,
@@ -123,7 +147,7 @@ func (uo *UpdateOrchestrator) ExecuteLiveUpdate(
 	hostArch string,
 ) error {
 	// Step 1: PRECHECKING
-	if err := uo.engine.Transition(ctx, job, StatusPrechecking, "Validating package signatures and system compatibility"); err != nil {
+	if err := uo.engine.Transition(ctx, job, StatusPrechecking, "Validating package signatures, system compatibility and resource inventory"); err != nil {
 		return err
 	}
 	compatReport, err := uo.verifier.VerifyPackage(manifest, packageData, job.PreviousVersion, hostOS, hostArch)
@@ -135,6 +159,18 @@ func (uo *UpdateOrchestrator) ExecuteLiveUpdate(
 		err := fmt.Errorf("compatibility check failed: %v", compatReport.Blockers)
 		_ = uo.engine.Transition(ctx, job, StatusFailed, err.Error())
 		return err
+	}
+
+	// Capture pre-update resource inventory (Zero Data Loss preflight baseline)
+	var preInventory *ResourceInventory
+	if uo.inventory != nil {
+		inv, err := uo.inventory.CaptureInventory(ctx)
+		if err != nil {
+			err = fmt.Errorf("pre-update resource inventory capture failed: %w", err)
+			_ = uo.engine.Transition(ctx, job, StatusFailed, err.Error())
+			return err
+		}
+		preInventory = inv
 	}
 
 	// Step 2: BACKING_UP
@@ -173,8 +209,8 @@ func (uo *UpdateOrchestrator) ExecuteLiveUpdate(
 		return uo.handleRollback(ctx, job, recoveryPoint, fmt.Errorf("failed to activate release: %w", err))
 	}
 
-	// Step 6: HEALTH_CHECKING
-	if err := uo.engine.Transition(ctx, job, StatusHealthChecking, "Probing system health and smoke tests"); err != nil {
+	// Step 6: HEALTH_CHECKING & POST-UPDATE INTEGRITY VERIFICATION
+	if err := uo.engine.Transition(ctx, job, StatusHealthChecking, "Probing system health and verifying zero data loss integrity"); err != nil {
 		return err
 	}
 	health, err := uo.prober.ProbeHealth(ctx)
@@ -186,8 +222,35 @@ func (uo *UpdateOrchestrator) ExecuteLiveUpdate(
 		return uo.handleRollback(ctx, job, recoveryPoint, fmt.Errorf("post-activation smoke test failed: %s", failReason))
 	}
 
+	// Zero Data Loss Verification: Verify that no existing customers, domains, websites, databases or mailboxes disappeared
+	if preInventory != nil && uo.inventory != nil {
+		postInventory, err := uo.inventory.CaptureInventory(ctx)
+		if err != nil {
+			return uo.handleRollback(ctx, job, recoveryPoint, fmt.Errorf("post-update inventory capture failed: %w", err))
+		}
+		if postInventory.CustomerCount < preInventory.CustomerCount ||
+			postInventory.DomainCount < preInventory.DomainCount ||
+			postInventory.WebsiteCount < preInventory.WebsiteCount ||
+			postInventory.DatabaseCount < preInventory.DatabaseCount ||
+			postInventory.MailboxCount < preInventory.MailboxCount {
+			return uo.handleRollback(ctx, job, recoveryPoint, fmt.Errorf(
+				"post-update data loss detected! Customer count: %d -> %d, Domains: %d -> %d, Websites: %d -> %d, DBs: %d -> %d, Mailboxes: %d -> %d",
+				preInventory.CustomerCount, postInventory.CustomerCount,
+				preInventory.DomainCount, postInventory.DomainCount,
+				preInventory.WebsiteCount, postInventory.WebsiteCount,
+				preInventory.DatabaseCount, postInventory.DatabaseCount,
+				preInventory.MailboxCount, postInventory.MailboxCount,
+			))
+		}
+		for dir, ok := range postInventory.DirectoryChecks {
+			if !ok {
+				return uo.handleRollback(ctx, job, recoveryPoint, fmt.Errorf("critical persistent directory missing after update: %s", dir))
+			}
+		}
+	}
+
 	// Step 7: COMPLETED
-	return uo.engine.Transition(ctx, job, StatusCompleted, fmt.Sprintf("Hostvra successfully upgraded from %s to %s with zero downtime", job.PreviousVersion, manifest.Version))
+	return uo.engine.Transition(ctx, job, StatusCompleted, fmt.Sprintf("Hostvra successfully upgraded from %s to %s with zero data loss", job.PreviousVersion, manifest.Version))
 }
 
 func (uo *UpdateOrchestrator) handleRollback(ctx context.Context, job *UpdateJob, rp *RecoveryPoint, cause error) error {
