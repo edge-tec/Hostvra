@@ -95,14 +95,22 @@ interface WebmailContextType {
   isAddAccountOpen: boolean;
   openAddAccount: () => void;
   closeAddAccount: () => void;
+  // Layout & General Preferences
+  readingPaneLayout: 'split' | 'full';
+  setReadingPaneLayout: (l: 'split' | 'full') => void;
+  emailsPerPage: number;
+  setEmailsPerPage: (c: number) => void;
+  defaultFolder: string;
+  setDefaultFolder: (f: string) => void;
+  syncInterval: string;
+  setSyncInterval: (i: string) => void;
+  updatePreferences: (prefs: {
+    readingPaneLayout?: 'split' | 'full';
+    emailsPerPage?: number;
+    defaultFolder?: string;
+    syncInterval?: string;
+  }) => Promise<boolean>;
   // Audio & Desktop alerts
-  soundEnabled: boolean;
-  setSoundEnabled: (v: boolean) => void;
-  toggleSound: () => void;
-  desktopNotifications: boolean;
-  desktopNotificationsEnabled: boolean;
-  requestNotificationPermission: () => Promise<void>;
-  requestDesktopNotifications: () => Promise<void>;
   // Identities
   identities: MailIdentity[];
   fetchIdentities: () => Promise<void>;
@@ -186,6 +194,12 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
   // Sound and Desktop alerts
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
   const [desktopNotifications, setDesktopNotifications] = useState<boolean>(false);
+
+  // Layout & General Preferences
+  const [readingPaneLayout, setReadingPaneLayoutState] = useState<'split' | 'full'>('split');
+  const [emailsPerPage, setEmailsPerPageState] = useState<number>(50);
+  const [defaultFolder, setDefaultFolderState] = useState<string>('inbox');
+  const [syncInterval, setSyncIntervalState] = useState<string>('realtime');
 
   // Settings & entities state
   const [identities, setIdentities] = useState<MailIdentity[]>([]);
@@ -448,9 +462,65 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
     });
   }, [activeAccount]);
 
-  // Logout current account
+  // Layout & General Preference Setters
+  const setReadingPaneLayout = useCallback((l: 'split' | 'full') => {
+    setReadingPaneLayoutState(l);
+    localStorage.setItem('hostvra_webmail_reading_pane_layout', l);
+  }, []);
+
+  const setEmailsPerPage = useCallback((c: number) => {
+    setEmailsPerPageState(c);
+    localStorage.setItem('hostvra_webmail_page_size', String(c));
+  }, []);
+
+  const setDefaultFolder = useCallback((f: string) => {
+    setDefaultFolderState(f);
+    localStorage.setItem('hostvra_webmail_default_folder', f);
+  }, []);
+
+  const setSyncInterval = useCallback((i: string) => {
+    setSyncIntervalState(i);
+    localStorage.setItem('hostvra_webmail_sync_interval', i);
+  }, []);
+
+  const updatePreferences = useCallback(async (prefs: {
+    readingPaneLayout?: 'split' | 'full';
+    emailsPerPage?: number;
+    defaultFolder?: string;
+    syncInterval?: string;
+  }): Promise<boolean> => {
+    if (prefs.readingPaneLayout) setReadingPaneLayout(prefs.readingPaneLayout);
+    if (prefs.emailsPerPage) setEmailsPerPage(prefs.emailsPerPage);
+    if (prefs.defaultFolder) setDefaultFolder(prefs.defaultFolder);
+    if (prefs.syncInterval) setSyncInterval(prefs.syncInterval);
+
+    if (activeAccount) {
+      try {
+        await apiFetch('/api/v1/webmail/preferences', {
+          method: 'PUT',
+          body: JSON.stringify({
+            mailbox_id: activeAccount.id,
+            page_size: prefs.emailsPerPage || emailsPerPage,
+            auto_refresh_seconds: prefs.syncInterval === '60' ? 60 : prefs.syncInterval === '300' ? 300 : 30,
+          }),
+        });
+      } catch (e) {
+        console.debug('Failed to sync preferences to backend:', e);
+      }
+    }
+    return true;
+  }, [activeAccount, emailsPerPage, setReadingPaneLayout, setEmailsPerPage, setDefaultFolder, setSyncInterval]);
+
+  // Logout current account (works even if activeAccount is null)
   const logoutCurrentAccount = useCallback(() => {
-    if (!activeAccount) return;
+    if (!activeAccount) {
+      setAccounts([]);
+      setActiveAccount(null);
+      localStorage.removeItem(STORAGE_ACCOUNTS_KEY);
+      localStorage.removeItem(STORAGE_ACTIVE_KEY);
+      router.push('/webmail/login');
+      return;
+    }
     const emailToLogOut = activeAccount.email;
     setAccounts(prev => {
       const remaining = prev.filter(a => a.email.toLowerCase() !== emailToLogOut.toLowerCase());
@@ -730,6 +800,15 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
         isAddAccountOpen,
         openAddAccount,
         closeAddAccount,
+        readingPaneLayout,
+        setReadingPaneLayout,
+        emailsPerPage,
+        setEmailsPerPage,
+        defaultFolder,
+        setDefaultFolder,
+        syncInterval,
+        setSyncInterval,
+        updatePreferences,
         soundEnabled,
         setSoundEnabled,
         toggleSound,

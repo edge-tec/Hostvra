@@ -32,6 +32,10 @@ import {
   Sparkles,
   ExternalLink,
   ChevronDown,
+  Layout,
+  Columns2,
+  Maximize2,
+  Plus,
 } from 'lucide-react';
 import { useWebmail, WebmailAccount } from '@/context/WebmailContext';
 import { apiFetch } from '@/lib/api';
@@ -98,7 +102,6 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString([], { year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 
-// Generate distinct avatar gradient based on string hash
 function getAvatarColor(name: string): string {
   const colors = [
     'from-emerald-500 to-teal-600',
@@ -117,13 +120,24 @@ function getAvatarColor(name: string): string {
 
 export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
   const router = useRouter();
-  const { activeAccount, searchQuery, refreshFolderCounts, openCompose, isSyncing } = useWebmail();
+  const {
+    activeAccount,
+    accounts,
+    searchQuery,
+    refreshFolderCounts,
+    openCompose,
+    isSyncing,
+    readingPaneLayout,
+    setReadingPaneLayout,
+    emailsPerPage,
+    openAddAccount,
+  } = useWebmail();
 
   const [messages, setMessages] = useState<WebmailMessage[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [page, setPage] = useState<number>(1);
-  const pageSize = 50;
+  const pageSize = emailsPerPage || 50;
 
   // Selected message for reading pane
   const [selectedMessage, setSelectedMessage] = useState<WebmailMessage | null>(null);
@@ -135,16 +149,19 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
 
   // Fetch messages from backend
   const fetchMessages = useCallback(async () => {
-    if (!activeAccount) {
+    const currentAccount = activeAccount || (accounts.length > 0 ? accounts[0] : null);
+    if (!currentAccount) {
       setLoading(false);
+      setMessages([]);
+      setTotal(0);
       return;
     }
     setLoading(true);
     try {
       const offset = (page - 1) * pageSize;
       const params = new URLSearchParams({
-        mailbox_id: activeAccount.id,
-        account_email: activeAccount.email,
+        mailbox_id: currentAccount.id,
+        account_email: currentAccount.email,
         folder: folder,
         limit: String(pageSize),
         offset: String(offset),
@@ -162,7 +179,6 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
         const msgs = res.data.messages || [];
         setMessages(msgs);
         setTotal(res.data.total || msgs.length);
-        // Deselect any deleted
         setSelectedIds(new Set());
       }
     } catch (err) {
@@ -170,7 +186,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
     } finally {
       setLoading(false);
     }
-  }, [activeAccount, folder, page, searchQuery]);
+  }, [activeAccount, accounts, folder, page, pageSize, searchQuery]);
 
   useEffect(() => {
     fetchMessages();
@@ -182,14 +198,12 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
       const res = await apiFetch<WebmailMessage>(`/api/v1/webmail/messages/${msg.id}`);
       if (res.data) {
         setSelectedMessage(res.data);
-        // Mark as read locally
         setMessages((prev) =>
           prev.map((m) => (m.id === msg.id ? { ...m, is_unread: false } : m))
         );
         refreshFolderCounts();
       }
     } catch (e) {
-      // Fallback to list object
       setSelectedMessage(msg);
     }
   };
@@ -266,10 +280,9 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
           body: JSON.stringify({ target_folder: targetFolder }),
         });
       } else if (action === 'unread') {
-        const isRead = false;
         await apiFetch(`/api/v1/webmail/messages/${msgId}/flag`, {
           method: 'PUT',
-          body: JSON.stringify({ is_unread: !isRead }),
+          body: JSON.stringify({ is_unread: true }),
         });
       }
       setSelectedMessage(null);
@@ -314,13 +327,20 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
 
   // Quick reply submit
   const handleSendQuickReply = async () => {
-    if (!activeAccount || !selectedMessage || !quickReplyText.trim()) return;
+    const sender = activeAccount || (accounts.length > 0 ? accounts[0] : null);
+    if (!sender) {
+      alert('Please connect an email mailbox first before sending a reply.');
+      openAddAccount();
+      return;
+    }
+    if (!selectedMessage || !quickReplyText.trim()) return;
+
     setSendingQuickReply(true);
     try {
       const payload = {
-        mailbox_id: activeAccount.id,
-        account_email: activeAccount.email,
-        from_email: activeAccount.email,
+        mailbox_id: sender.id,
+        account_email: sender.email,
+        from_email: sender.email,
         to_email: selectedMessage.from_email,
         to: [selectedMessage.from_email],
         subject: selectedMessage.subject.startsWith('Re:') ? selectedMessage.subject : `Re: ${selectedMessage.subject}`,
@@ -355,73 +375,80 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
   }, [folder]);
 
   const totalPages = Math.ceil(total / pageSize) || 1;
+  const isFullLayout = readingPaneLayout === 'full';
+
+  // If no account is active or present
+  const hasAccounts = (accounts && accounts.length > 0) || activeAccount;
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-[#070D18]">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
       {/* Top Action Toolbar */}
-      <div className="h-12 px-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 bg-white dark:bg-[#0B1120] flex-shrink-0">
+      <div className="h-12 px-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-white flex-shrink-0 shadow-2xs">
         <div className="flex items-center gap-2">
-          {/* Back button on mobile when viewing email */}
+          {/* Back button when viewing email in Full layout or mobile */}
           {selectedMessage && (
             <button
               onClick={() => setSelectedMessage(null)}
-              className="lg:hidden p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 mr-1"
-              title="Back to list"
+              className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 flex items-center gap-1.5 text-xs font-semibold mr-1 transition-colors"
+              title="Back to email list"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-4 h-4 text-emerald-600" />
+              <span>Back to list</span>
             </button>
           )}
 
           {/* Select all checkbox */}
-          <button
-            onClick={handleSelectAll}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            title={selectedIds.size === messages.length && messages.length > 0 ? 'Deselect All' : 'Select All'}
-          >
-            {selectedIds.size > 0 && selectedIds.size === messages.length ? (
-              <CheckSquare className="w-4 h-4 text-emerald-600" />
-            ) : (
-              <Square className="w-4 h-4 text-slate-400" />
-            )}
-          </button>
+          {(!selectedMessage || !isFullLayout) && (
+            <button
+              onClick={handleSelectAll}
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+              title={selectedIds.size === messages.length && messages.length > 0 ? 'Deselect All' : 'Select All'}
+            >
+              {selectedIds.size > 0 && selectedIds.size === messages.length ? (
+                <CheckSquare className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <Square className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+          )}
 
           {/* Batch Actions Toolbar when selected */}
           {selectedIds.size > 0 ? (
             <div className="flex items-center gap-1 animate-in fade-in duration-100">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 mr-2">
+              <span className="text-xs font-bold text-slate-700 mr-2">
                 {selectedIds.size} selected
               </span>
               <button
                 onClick={() => handleBatchAction('read')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                 title="Mark as read"
               >
                 <MailOpen className="w-4 h-4" />
               </button>
               <button
                 onClick={() => handleBatchAction('unread')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                 title="Mark as unread"
               >
                 <Mail className="w-4 h-4" />
               </button>
               <button
                 onClick={() => handleBatchAction('move', 'archive')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                 title="Move to Archive"
               >
                 <Archive className="w-4 h-4" />
               </button>
               <button
                 onClick={() => handleBatchAction('move', 'spam')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-orange-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-orange-500 hover:bg-slate-100"
                 title="Report Spam"
               >
                 <AlertOctagon className="w-4 h-4" />
               </button>
               <button
                 onClick={() => handleBatchAction('delete')}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50"
                 title="Move to Trash"
               >
                 <Trash2 className="w-4 h-4" />
@@ -432,20 +459,48 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
               <button
                 onClick={fetchMessages}
                 disabled={isSyncing}
-                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100"
                 title="Refresh folder"
               >
                 <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-emerald-600' : ''}`} />
               </button>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              <span className="text-xs font-bold text-slate-800">
                 {folderTitle}
               </span>
             </div>
           )}
         </div>
 
-        {/* Right: Pagination */}
-        <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+        {/* Right: Layout Switcher & Pagination */}
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          {/* Quick Layout Mode Switcher */}
+          <div className="hidden sm:flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            <button
+              onClick={() => setReadingPaneLayout('split')}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                readingPaneLayout === 'split'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Split View: List on left, reading pane on right"
+            >
+              <Columns2 className="w-3.5 h-3.5" />
+              <span>Split</span>
+            </button>
+            <button
+              onClick={() => setReadingPaneLayout('full')}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                readingPaneLayout === 'full'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="Full View: Full width message reading"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Full</span>
+            </button>
+          </div>
+
           <span>
             {total > 0 ? (
               <>
@@ -455,11 +510,12 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
               '0 messages'
             )}
           </span>
+
           <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1}
-              className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+              className="p-1 rounded-md hover:bg-slate-100 disabled:opacity-30"
               title="Previous Page"
             >
               <ChevronLeft className="w-4 h-4" />
@@ -467,7 +523,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
-              className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"
+              className="p-1 rounded-md hover:bg-slate-100 disabled:opacity-30"
               title="Next Page"
             >
               <ChevronRight className="w-4 h-4" />
@@ -476,12 +532,18 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
         </div>
       </div>
 
-      {/* Main Mail View (Split 2-pane on desktop) */}
+      {/* Main Mail View (Split or Full layout) */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Message List */}
         <div
-          className={`flex-1 flex flex-col overflow-y-auto border-r border-slate-200 dark:border-slate-800 ${
-            selectedMessage ? 'hidden lg:flex lg:w-5/12 lg:max-w-md' : 'w-full'
+          className={`flex flex-col overflow-y-auto border-r border-slate-200 bg-white ${
+            isFullLayout
+              ? selectedMessage
+                ? 'hidden'
+                : 'w-full'
+              : selectedMessage
+              ? 'hidden lg:flex lg:w-5/12 lg:max-w-md'
+              : 'w-full'
           }`}
         >
           {loading ? (
@@ -489,20 +551,39 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
               <RefreshCw className="w-5 h-5 animate-spin text-emerald-500" />
               <span>Fetching {folderTitle.toLowerCase()}...</span>
             </div>
-          ) : messages.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
-              <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
-                <Inbox className="w-6 h-6 text-slate-300 dark:text-slate-600" />
+          ) : !hasAccounts ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center mb-3 text-emerald-600 shadow-xs">
+                <Mail className="w-7 h-7" />
               </div>
-              <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+              <h3 className="text-sm font-bold text-slate-800">
+                No Email Account Connected
+              </h3>
+              <p className="text-xs text-slate-500 mt-1.5 max-w-sm leading-relaxed">
+                Connect your business mailbox or log in to view emails, send new messages, and manage folders.
+              </p>
+              <button
+                onClick={openAddAccount}
+                className="mt-4 flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Connect Email Account</span>
+              </button>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-white">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+                <Inbox className="w-6 h-6 text-slate-400" />
+              </div>
+              <p className="text-sm font-bold text-slate-700">
                 No messages in {folderTitle}
               </p>
               <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                Your mailbox is up to date. Incoming emails will synchronize automatically in real-time.
+                Your mailbox is up to date. Incoming emails synchronize automatically in real-time.
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+            <div className="divide-y divide-slate-100">
               {messages.map((msg) => {
                 const isSelected = selectedMessage?.id === msg.id;
                 const isChecked = selectedIds.has(msg.id);
@@ -515,10 +596,10 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                     onClick={() => handleSelectMessage(msg)}
                     className={`flex items-center gap-3 px-4 py-3 cursor-pointer select-none transition-colors group relative ${
                       isSelected
-                        ? 'bg-emerald-50/80 dark:bg-emerald-950/30'
+                        ? 'bg-emerald-50/90 text-slate-900 font-medium'
                         : msg.is_unread
-                        ? 'bg-slate-50/60 dark:bg-slate-900/40 hover:bg-slate-100/80 dark:hover:bg-slate-800/80'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        ? 'bg-slate-50/90 hover:bg-slate-100/90'
+                        : 'bg-white hover:bg-slate-50'
                     }`}
                   >
                     {/* Left Accent Bar for Unread */}
@@ -529,7 +610,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                     {/* Checkbox */}
                     <button
                       onClick={(e) => handleToggleSelect(msg.id, e)}
-                      className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                      className="p-1 text-slate-400 hover:text-slate-700"
                     >
                       {isChecked ? (
                         <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
@@ -544,7 +625,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                       className={`p-1 transition-colors ${
                         msg.is_starred
                           ? 'text-amber-400 fill-amber-400'
-                          : 'text-slate-300 dark:text-slate-600 hover:text-amber-400'
+                          : 'text-slate-300 hover:text-amber-400'
                       }`}
                       title={msg.is_starred ? 'Unstar' : 'Star'}
                     >
@@ -564,8 +645,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                         <span
                           className={`text-xs truncate ${
                             msg.is_unread
-                              ? 'font-bold text-slate-900 dark:text-white'
-                              : 'font-medium text-slate-700 dark:text-slate-300'
+                              ? 'font-bold text-slate-900'
+                              : 'font-medium text-slate-700'
                           }`}
                         >
                           {folder === 'sent' ? `To: ${msg.to_name || msg.to_email}` : (msg.from_name || msg.from_email)}
@@ -579,8 +660,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                         <p
                           className={`text-xs truncate ${
                             msg.is_unread
-                              ? 'font-semibold text-slate-800 dark:text-slate-100'
-                              : 'text-slate-600 dark:text-slate-400'
+                              ? 'font-semibold text-slate-900'
+                              : 'text-slate-600'
                           }`}
                         >
                           {msg.subject || '(No subject)'}
@@ -605,27 +686,27 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
 
         {/* Right: Detailed Reading Pane */}
         {selectedMessage ? (
-          <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-[#070D18]">
+          <div className="flex-1 flex flex-col overflow-y-auto bg-white">
             {/* Message Action Header Bar */}
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap bg-slate-50/50 dark:bg-slate-900/50">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap bg-slate-50">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={handleReply}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-colors shadow-2xs"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
                 >
                   <Reply className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Reply</span>
                 </button>
                 <button
                   onClick={handleReplyAll}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-colors shadow-2xs"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
                 >
                   <ReplyAll className="w-3.5 h-3.5" />
                   <span>Reply All</span>
                 </button>
                 <button
                   onClick={handleForward}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-colors shadow-2xs"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
                 >
                   <Forward className="w-3.5 h-3.5" />
                   <span>Forward</span>
@@ -636,7 +717,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 {/* Print button */}
                 <button
                   onClick={() => window.print()}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   title="Print email"
                 >
                   <Printer className="w-4 h-4" />
@@ -646,7 +727,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 <a
                   href={`/api/v1/webmail/messages/${selectedMessage.id}/eml`}
                   download={`${selectedMessage.subject || 'message'}.eml`}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   title="Download .eml format"
                 >
                   <Download className="w-4 h-4" />
@@ -655,7 +736,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 {/* Mark as unread */}
                 <button
                   onClick={() => handleMessageAction(selectedMessage.id, 'unread')}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   title="Mark as unread"
                 >
                   <Mail className="w-4 h-4" />
@@ -664,7 +745,7 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 {/* Move to Archive */}
                 <button
                   onClick={() => handleMessageAction(selectedMessage.id, 'move', 'archive')}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                   title="Archive message"
                 >
                   <Archive className="w-4 h-4" />
@@ -673,8 +754,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 {/* Delete / Trash */}
                 <button
                   onClick={() => handleMessageAction(selectedMessage.id, 'delete')}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                  title="Delete message"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                  title="Move to Trash"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -682,8 +763,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
             </div>
 
             {/* Email Meta Details */}
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800">
-              <h1 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
+            <div className="p-6 border-b border-slate-100 bg-white">
+              <h1 className="text-lg font-bold text-slate-900 mb-4">
                 {selectedMessage.subject || '(No subject)'}
               </h1>
 
@@ -698,25 +779,25 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-xs text-slate-900 dark:text-white">
+                      <span className="font-bold text-xs text-slate-900">
                         {selectedMessage.from_name || selectedMessage.from_email}
                       </span>
                       <span className="text-[11px] text-slate-400 font-mono">
                         &lt;{selectedMessage.from_email}&gt;
                       </span>
-                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <ShieldCheck className="w-3 h-3" /> TLS / DKIM Verified
                       </span>
                     </div>
 
                     <div className="text-[11px] text-slate-400 mt-0.5">
                       <span>to: </span>
-                      <span className="text-slate-600 dark:text-slate-300 font-medium">
+                      <span className="text-slate-700 font-medium">
                         {selectedMessage.to_name || selectedMessage.to_email}
                       </span>
                       {selectedMessage.cc && (
                         <span className="ml-2">
-                          cc: <span className="text-slate-600 dark:text-slate-300">{selectedMessage.cc}</span>
+                          cc: <span className="text-slate-700">{selectedMessage.cc}</span>
                         </span>
                       )}
                     </div>
@@ -735,14 +816,14 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
             </div>
 
             {/* Email Body Content */}
-            <div className="p-6 flex-1 text-slate-800 dark:text-slate-200 text-xs leading-relaxed overflow-x-auto">
+            <div className="p-6 flex-1 text-slate-800 text-xs leading-relaxed overflow-x-auto bg-white">
               {selectedMessage.body_html ? (
                 <div
-                  className="prose dark:prose-invert max-w-none text-xs"
+                  className="prose max-w-none text-xs text-slate-800"
                   dangerouslySetInnerHTML={{ __html: selectedMessage.body_html }}
                 />
               ) : (
-                <pre className="font-sans whitespace-pre-wrap leading-relaxed text-xs">
+                <pre className="font-sans whitespace-pre-wrap leading-relaxed text-xs text-slate-800">
                   {selectedMessage.body_text || '(No body content)'}
                 </pre>
               )}
@@ -750,8 +831,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
 
             {/* Attachments Section if present */}
             {selectedMessage.attachments && selectedMessage.attachments.length > 0 && (
-              <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
-                <div className="flex items-center gap-2 mb-3 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <div className="p-6 border-t border-slate-100 bg-slate-50">
+                <div className="flex items-center gap-2 mb-3 text-xs font-bold text-slate-700">
                   <Paperclip className="w-4 h-4 text-emerald-500" />
                   <span>Attachments ({selectedMessage.attachments.length})</span>
                 </div>
@@ -761,10 +842,10 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                       key={att.id}
                       href={`/api/v1/webmail/attachments/${att.id}`}
                       download={att.filename}
-                      className="p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-emerald-500 transition-colors flex items-center justify-between group shadow-2xs"
+                      className="p-3 bg-white border border-slate-200 rounded-xl hover:border-emerald-500 transition-colors flex items-center justify-between group shadow-2xs"
                     >
                       <div className="min-w-0 pr-2">
-                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-600">
+                        <p className="text-xs font-semibold text-slate-800 truncate group-hover:text-emerald-600">
                           {att.filename}
                         </p>
                         <p className="text-[10px] text-slate-400 mt-0.5">
@@ -779,8 +860,8 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
             )}
 
             {/* Quick Inline Reply Box */}
-            <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60">
-              <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+            <div className="p-6 border-t border-slate-200 bg-slate-50">
+              <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-700">
                 <Reply className="w-3.5 h-3.5 text-emerald-500" />
                 <span>Quick Reply to {selectedMessage.from_name || selectedMessage.from_email}</span>
               </div>
@@ -789,12 +870,12 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
                 onChange={(e) => setQuickReplyText(e.target.value)}
                 placeholder="Type your response here..."
                 rows={3}
-                className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500 placeholder:text-slate-400 resize-y"
+                className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:border-emerald-500 placeholder:text-slate-400 resize-y"
               />
               <div className="flex items-center justify-between mt-2.5">
                 <button
                   onClick={handleReply}
-                  className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+                  className="text-xs font-semibold text-emerald-600 hover:underline flex items-center gap-1"
                 >
                   <ExternalLink className="w-3 h-3" /> Open Full Composer
                 </button>
@@ -809,19 +890,19 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="hidden lg:flex flex-1 flex-col items-center justify-center p-8 text-center text-slate-400 bg-slate-50/40 dark:bg-slate-900/20">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3 text-slate-300 dark:text-slate-600">
-              <Mail className="w-8 h-8" />
+        ) : !isFullLayout ? (
+          <div className="hidden lg:flex flex-1 flex-col items-center justify-center p-8 text-center text-slate-400 bg-slate-50/60">
+            <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center mb-3 text-slate-300 shadow-2xs">
+              <Mail className="w-8 h-8 text-slate-400" />
             </div>
-            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+            <h3 className="text-sm font-bold text-slate-700">
               Select an email to read
             </h3>
             <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              Click any conversation on the left to view contents, attachments, and reply directly.
+              Click any conversation on the left to view contents, download attachments, and reply.
             </p>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -50,7 +50,16 @@ function formatBytes(bytes: number): string {
 }
 
 export function WebmailComposeModal() {
-  const { isComposeOpen, closeCompose, composeInitial, activeAccount, refreshFolderCounts } = useWebmail();
+  const {
+    isComposeOpen,
+    closeCompose,
+    composeInitial,
+    activeAccount,
+    accounts,
+    switchAccount,
+    openAddAccount,
+    refreshFolderCounts,
+  } = useWebmail();
 
   const [minimized, setMinimized] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -259,7 +268,18 @@ export function WebmailComposeModal() {
 
   // Send message
   const handleSend = async () => {
-    if (!activeAccount) return;
+    let currentAcc = activeAccount;
+    if (!currentAcc && accounts.length > 0) {
+      currentAcc = accounts[0];
+      switchAccount(currentAcc.email);
+    }
+
+    if (!currentAcc) {
+      setErrorMessage('No email mailbox connected. Please connect your email address first.');
+      openAddAccount();
+      return;
+    }
+
     if (!to.trim()) {
       setErrorMessage('Please specify at least one recipient email address.');
       return;
@@ -268,9 +288,9 @@ export function WebmailComposeModal() {
     setErrorMessage(null);
 
     const payload = {
-      mailbox_id: activeAccount.id,
-      account_email: activeAccount.email,
-      from_email: activeAccount.email,
+      mailbox_id: currentAcc.id,
+      account_email: currentAcc.email,
+      from_email: currentAcc.email,
       to_email: to,
       to: to.split(',').map((e) => e.trim()).filter(Boolean),
       cc: cc,
@@ -294,9 +314,11 @@ export function WebmailComposeModal() {
         }
         await refreshFolderCounts();
         closeCompose();
+      } else {
+        setErrorMessage('Failed to send email. Please check server mail logs.');
       }
     } catch (err: unknown) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to send message via SMTP server');
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to send message via mail server');
     } finally {
       setIsSending(false);
     }
@@ -307,17 +329,17 @@ export function WebmailComposeModal() {
   // Minimized state (bottom-right tray)
   if (minimized) {
     return (
-      <div className="fixed bottom-0 right-8 z-50 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-2xl shadow-2xl flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+      <div className="fixed bottom-0 right-8 z-50 w-72 bg-white border border-slate-200 rounded-t-2xl shadow-2xl flex items-center justify-between p-3 cursor-pointer hover:bg-slate-50 transition-colors">
         <div className="flex items-center gap-2 truncate" onClick={() => setMinimized(false)}>
           <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-          <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+          <span className="text-xs font-bold text-slate-800 truncate">
             {subject || 'New Message'}
           </span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setMinimized(false)}
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            className="p-1 text-slate-400 hover:text-slate-600"
             title="Restore"
           >
             <Maximize2 className="w-3.5 h-3.5" />
@@ -336,16 +358,16 @@ export function WebmailComposeModal() {
 
   return (
     <div
-      className={`fixed z-50 flex flex-col bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden transition-all duration-200 ${
+      className={`fixed z-50 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-2xl overflow-hidden transition-all duration-200 ${
         fullscreen
           ? 'inset-4 sm:inset-10'
           : 'bottom-0 right-4 sm:right-8 w-full max-w-2xl h-[620px] rounded-b-none'
       }`}
     >
       {/* Header */}
-      <div className="h-11 px-4 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between select-none">
+      <div className="h-11 px-4 bg-slate-100 border-b border-slate-200 flex items-center justify-between select-none">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+          <span className="text-xs font-bold text-slate-900 truncate">
             {subject ? subject : 'New Message'}
           </span>
           {activeAccount && (
@@ -357,14 +379,14 @@ export function WebmailComposeModal() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => setMinimized(true)}
-            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md"
+            className="p-1 text-slate-400 hover:text-slate-700 rounded-md"
             title="Minimize"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setFullscreen(!fullscreen)}
-            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-md"
+            className="p-1 text-slate-400 hover:text-slate-700 rounded-md"
             title={fullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
           >
             {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
@@ -381,7 +403,7 @@ export function WebmailComposeModal() {
 
       {/* Error alert */}
       {errorMessage && (
-        <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-900 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
+        <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 flex items-center gap-2 text-xs text-rose-700">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           <span className="flex-1 truncate">{errorMessage}</span>
           <button onClick={() => setErrorMessage(null)} className="text-rose-400 hover:text-rose-600">
@@ -391,7 +413,7 @@ export function WebmailComposeModal() {
       )}
 
       {/* Recipient inputs */}
-      <div className="px-4 py-1.5 space-y-1 border-b border-slate-200 dark:border-slate-800 text-xs">
+      <div className="px-4 py-1.5 space-y-1 border-b border-slate-200 text-xs">
         {/* TO field */}
         <div className="relative flex items-center gap-2 py-1">
           <span className="text-slate-400 font-medium w-14">To:</span>
@@ -400,16 +422,16 @@ export function WebmailComposeModal() {
             value={to}
             onChange={(e) => setTo(e.target.value)}
             placeholder="Recipient email address (comma-separated)"
-            className="flex-1 bg-transparent border-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
+            className="flex-1 bg-transparent border-none text-slate-900 placeholder:text-slate-400 focus:outline-none"
           />
           <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
             {!showCc && (
-              <button onClick={() => setShowCc(true)} className="hover:text-slate-700 dark:hover:text-slate-200">
+              <button onClick={() => setShowCc(true)} className="hover:text-slate-700">
                 Cc
               </button>
             )}
             {!showBcc && (
-              <button onClick={() => setShowBcc(true)} className="hover:text-slate-700 dark:hover:text-slate-200">
+              <button onClick={() => setShowBcc(true)} className="hover:text-slate-700">
                 Bcc
               </button>
             )}
@@ -417,7 +439,7 @@ export function WebmailComposeModal() {
 
           {/* Autocomplete Dropdown */}
           {showSuggestions && contactSuggestions.length > 0 && (
-            <div className="absolute left-14 top-full mt-1 w-72 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
+            <div className="absolute left-14 top-full mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto">
               {contactSuggestions.map((c) => (
                 <button
                   key={c.id}
@@ -425,9 +447,9 @@ export function WebmailComposeModal() {
                     setTo(c.email);
                     setShowSuggestions(false);
                   }}
-                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 dark:hover:bg-slate-800 flex items-center justify-between text-xs"
+                  className="w-full text-left px-3 py-2 hover:bg-emerald-50 flex items-center justify-between text-xs"
                 >
-                  <span className="font-semibold text-slate-900 dark:text-white truncate">{c.name}</span>
+                  <span className="font-semibold text-slate-900 truncate">{c.name}</span>
                   <span className="text-[11px] text-slate-400 truncate">{c.email}</span>
                 </button>
               ))}
@@ -437,112 +459,112 @@ export function WebmailComposeModal() {
 
         {/* CC field */}
         {showCc && (
-          <div className="flex items-center gap-2 py-1 border-t border-slate-100 dark:border-slate-800/60">
+          <div className="flex items-center gap-2 py-1 border-t border-slate-100">
             <span className="text-slate-400 font-medium w-14">Cc:</span>
             <input
               type="text"
               value={cc}
               onChange={(e) => setCc(e.target.value)}
               placeholder="Cc recipients"
-              className="flex-1 bg-transparent border-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
+              className="flex-1 bg-transparent border-none text-slate-900 placeholder:text-slate-400 focus:outline-none"
             />
           </div>
         )}
 
         {/* BCC field */}
         {showBcc && (
-          <div className="flex items-center gap-2 py-1 border-t border-slate-100 dark:border-slate-800/60">
+          <div className="flex items-center gap-2 py-1 border-t border-slate-100">
             <span className="text-slate-400 font-medium w-14">Bcc:</span>
             <input
               type="text"
               value={bcc}
               onChange={(e) => setBcc(e.target.value)}
               placeholder="Bcc recipients"
-              className="flex-1 bg-transparent border-none text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
+              className="flex-1 bg-transparent border-none text-slate-900 placeholder:text-slate-400 focus:outline-none"
             />
           </div>
         )}
 
         {/* SUBJECT field */}
-        <div className="flex items-center gap-2 py-1 border-t border-slate-100 dark:border-slate-800/60">
+        <div className="flex items-center gap-2 py-1 border-t border-slate-100">
           <span className="text-slate-400 font-medium w-14">Subject:</span>
           <input
             type="text"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Subject line"
-            className="flex-1 bg-transparent border-none text-slate-900 dark:text-slate-100 font-semibold placeholder:text-slate-400 focus:outline-none"
+            className="flex-1 bg-transparent border-none text-slate-900 font-semibold placeholder:text-slate-400 focus:outline-none"
           />
         </div>
       </div>
 
       {/* WYSIWYG Editor Toolbar */}
-      <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-200 dark:border-slate-800 flex items-center gap-1 flex-wrap text-slate-600 dark:text-slate-300">
+      <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center gap-1 flex-wrap text-slate-600">
         <button
           onClick={() => formatDoc('bold')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Bold (Ctrl+B)"
         >
           <Bold className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => formatDoc('italic')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Italic (Ctrl+I)"
         >
           <Italic className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => formatDoc('underline')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Underline (Ctrl+U)"
         >
           <Underline className="w-3.5 h-3.5" />
         </button>
-        <div className="w-[1px] h-4 bg-slate-300 dark:bg-slate-700 mx-1" />
+        <div className="w-[1px] h-4 bg-slate-300 mx-1" />
         <button
           onClick={() => formatDoc('insertUnorderedList')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Bulleted List"
         >
           <List className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => formatDoc('insertOrderedList')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Numbered List"
         >
           <ListOrdered className="w-3.5 h-3.5" />
         </button>
-        <div className="w-[1px] h-4 bg-slate-300 dark:bg-slate-700 mx-1" />
+        <div className="w-[1px] h-4 bg-slate-300 mx-1" />
         <button
           onClick={() => formatDoc('justifyLeft')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Align Left"
         >
           <AlignLeft className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => formatDoc('justifyCenter')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Align Center"
         >
           <AlignCenter className="w-3.5 h-3.5" />
         </button>
         <button
           onClick={() => formatDoc('justifyRight')}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Align Right"
         >
           <AlignRight className="w-3.5 h-3.5" />
         </button>
-        <div className="w-[1px] h-4 bg-slate-300 dark:bg-slate-700 mx-1" />
+        <div className="w-[1px] h-4 bg-slate-300 mx-1" />
         <button
           onClick={() => {
             const url = prompt('Enter link URL:');
             if (url) formatDoc('createLink', url);
           }}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Insert Link"
         >
           <LinkIcon className="w-3.5 h-3.5" />
@@ -552,7 +574,7 @@ export function WebmailComposeModal() {
             const url = prompt('Enter image URL:');
             if (url) formatDoc('insertImage', url);
           }}
-          className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"
+          className="p-1 hover:bg-slate-200 rounded-md"
           title="Insert Image URL"
         >
           <ImageIcon className="w-3.5 h-3.5" />
@@ -564,17 +586,17 @@ export function WebmailComposeModal() {
         ref={editorRef}
         contentEditable
         onInput={(e) => setBodyHTML(e.currentTarget.innerHTML)}
-        className="flex-1 p-4 overflow-y-auto focus:outline-none text-xs text-slate-800 dark:text-slate-200 font-sans leading-relaxed selection:bg-emerald-200 dark:selection:bg-emerald-900"
+        className="flex-1 p-4 overflow-y-auto focus:outline-none text-xs text-slate-800 font-sans leading-relaxed selection:bg-emerald-200"
         style={{ minHeight: '180px' }}
       />
 
       {/* Uploaded Attachments List */}
       {attachments.length > 0 && (
-        <div className="px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-200 dark:border-slate-800 flex items-center gap-2 flex-wrap max-h-24 overflow-y-auto">
+        <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 flex items-center gap-2 flex-wrap max-h-24 overflow-y-auto">
           {attachments.map((att) => (
             <div
               key={att.id}
-              className="flex items-center gap-2 px-2.5 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] text-slate-700 dark:text-slate-300"
+              className="flex items-center gap-2 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[11px] text-slate-700"
             >
               <Paperclip className="w-3 h-3 text-emerald-500" />
               <span className="truncate max-w-[140px] font-medium">{att.filename}</span>
@@ -592,7 +614,7 @@ export function WebmailComposeModal() {
       )}
 
       {/* Bottom Action Footer */}
-      <div className="h-14 px-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div className="h-14 px-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {/* Send button */}
           <button
@@ -616,7 +638,7 @@ export function WebmailComposeModal() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isUploading}
-            className="p-2 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
+            className="p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-200 rounded-xl transition-colors"
             title="Attach files (Max 25MB)"
           >
             <Paperclip className={`w-4 h-4 ${isUploading ? 'animate-bounce text-emerald-500' : ''}`} />
@@ -648,7 +670,7 @@ export function WebmailComposeModal() {
               closeCompose();
             }
           }}
-          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors"
+          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
           title="Discard draft"
         >
           <Trash2 className="w-4 h-4" />
