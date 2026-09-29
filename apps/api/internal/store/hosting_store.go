@@ -350,7 +350,7 @@ func (p *PostgresStore) CreateWebsite(ctx context.Context, site *Website) error 
 	_, _ = p.db.ExecContext(ctx, `DELETE FROM websites WHERE LOWER(primary_domain) = LOWER($1) AND deleted_at IS NOT NULL`, site.PrimaryDomain)
 
 	query := `
-		INSERT INTO websites (id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled)
+		INSERT INTO websites (id, server_id, organization_id, primary_domain, document_root, "system_user", php_version, app_type, proxy_port, status, ssl_enabled)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING created_at, updated_at
 	`
@@ -373,7 +373,7 @@ func (p *PostgresStore) CreateWebsite(ctx context.Context, site *Website) error 
 
 func (p *PostgresStore) GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Website, error) {
 	query := `
-		SELECT id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
+		SELECT id, server_id, organization_id, primary_domain, document_root, "system_user", php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
 		FROM websites
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -391,7 +391,7 @@ func (p *PostgresStore) GetWebsiteByID(ctx context.Context, id uuid.UUID) (*Webs
 
 func (p *PostgresStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Website, error) {
 	query := `
-		SELECT id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
+		SELECT id, server_id, organization_id, primary_domain, document_root, "system_user", php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
 		FROM websites
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -420,7 +420,7 @@ func (p *PostgresStore) ListWebsitesByOrg(ctx context.Context, orgID uuid.UUID) 
 
 func (p *PostgresStore) ListAllWebsites(ctx context.Context) ([]*Website, error) {
 	query := `
-		SELECT id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
+		SELECT id, server_id, organization_id, primary_domain, document_root, "system_user", php_version, app_type, proxy_port, status, ssl_enabled, created_at, updated_at
 		FROM websites
 		WHERE deleted_at IS NULL
 		ORDER BY created_at DESC
