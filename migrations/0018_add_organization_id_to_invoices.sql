@@ -9,6 +9,6 @@ FROM subscriptions s
 WHERE i.subscription_id = s.id AND i.organization_id IS NULL;
 
 UPDATE invoices i
-SET organization_id = u.default_org_id
-FROM users u
-WHERE i.user_id = u.id AND i.organization_id IS NULL;
+SET organization_id = om.organization_id
+FROM organization_members om
+WHERE i.user_id = om.user_id AND i.organization_id IS NULL;
