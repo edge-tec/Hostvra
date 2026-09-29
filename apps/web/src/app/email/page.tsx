@@ -843,6 +843,23 @@ export default function EmailHostingPage() {
     }
   };
 
+  // Launch Webmail via Single-Use Cryptographically Secure SSO Token
+  const handleOpenWebmailSSO = async (mb: EmailMailbox) => {
+    try {
+      const res = await apiFetch<{ ticket: string; redirect_url: string }>('/api/v1/webmail/sso/generate', {
+        method: 'POST',
+        body: JSON.stringify({ mailbox_id: mb.id }),
+      });
+      if (res.data?.redirect_url) {
+        window.open(res.data.redirect_url, '_blank', 'noopener,noreferrer');
+      } else {
+        alert(res.error?.message || 'Failed to generate Webmail SSO security ticket');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Unable to generate Webmail SSO session');
+    }
+  };
+
   // Send Test Email
   const handleSendTestEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1737,6 +1754,14 @@ export default function EmailHostingPage() {
                             </td>
                             <td className="px-6 py-4 text-right space-x-2">
                               <button
+                                onClick={() => handleOpenWebmailSSO(mb)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-600/15 hover:bg-emerald-100 dark:hover:bg-emerald-600/30 text-emerald-700 dark:text-emerald-300 text-xs font-semibold border border-emerald-200 dark:border-emerald-500/30 transition shadow-xs"
+                                title={`Launch Webmail for ${mb.email} via Secure Single Sign-On (SSO)`}
+                              >
+                                <ExternalLink className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
+                                <span>Webmail (SSO)</span>
+                              </button>
+                              <button
                                 onClick={() => {
                                   setSelectedWebmailEmail(mb.email);
                                   setActiveTab('webmail');
@@ -1745,7 +1770,7 @@ export default function EmailHostingPage() {
                                 title={`Open Webmail Suite for ${mb.email}`}
                               >
                                 <Inbox className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
-                                <span>Webmail</span>
+                                <span>Client</span>
                               </button>
                               <button
                                 onClick={() => handleTestMailbox(mb)}

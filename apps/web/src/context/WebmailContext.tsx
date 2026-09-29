@@ -2,7 +2,13 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch, getStoredToken } from '@/lib/api';
+import {
+  apiFetch,
+  getStoredToken,
+  getStoredWebmailToken,
+  setStoredWebmailToken,
+  clearStoredWebmailAuth,
+} from '@/lib/api';
 
 export interface WebmailAccount {
   id: string;
@@ -72,6 +78,9 @@ export interface MailForwardingRule {
 }
 
 interface WebmailContextType {
+  isAuthenticated: boolean;
+  isAuthLoading: boolean;
+  verifySession: () => Promise<boolean>;
   accounts: WebmailAccount[];
   activeAccount: WebmailAccount | null;
   activeEmail: string;
@@ -217,7 +226,61 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
 
   const prevUnreadRef = useRef<number>(-1);
 
-  // Initialize accounts and check permission
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+
+  // Strict Webmail session verification from server
+  const verifySession = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await apiFetch<{
+        authenticated: boolean;
+        token: string;
+        mailbox: {
+          id: string;
+          email: string;
+          name: string;
+          quota_bytes: number;
+          used_bytes: number;
+        };
+      }>('/api/v1/webmail/session');
+
+      if (res.data && res.data.authenticated && res.data.mailbox) {
+        const mb = res.data.mailbox;
+        const token = res.data.token;
+        if (token) {
+          setStoredWebmailToken(token);
+        }
+        const acc: WebmailAccount = {
+          id: mb.id,
+          email: mb.email,
+          name: mb.name || mb.email.split('@')[0],
+          token: token,
+          quotaBytes: mb.quota_bytes,
+          usedBytes: mb.used_bytes,
+        };
+        setActiveAccount(acc);
+        setAccounts([acc]);
+        setIsAuthenticated(true);
+        return true;
+      } else {
+        clearStoredWebmailAuth();
+        setActiveAccount(null);
+        setAccounts([]);
+        setIsAuthenticated(false);
+        return false;
+      }
+    } catch {
+      clearStoredWebmailAuth();
+      setActiveAccount(null);
+      setAccounts([]);
+      setIsAuthenticated(false);
+      return false;
+    } finally {
+      setIsAuthLoading(false);
+    }
+  }, []);
+
+  // Initialize and attach bfcache back-button defense
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -230,75 +293,20 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
       setSoundEnabledState(soundPref === 'true');
     }
 
-    let storedList: WebmailAccount[] = [];
-    try {
-      const raw = localStorage.getItem(STORAGE_ACCOUNTS_KEY);
-      if (raw) {
-        storedList = JSON.parse(raw);
+    verifySession();
+
+    // Browser back button defense: revalidate session when page is shown from bfcache
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        verifySession();
       }
-    } catch (e) {
-      console.error('Failed reading webmail accounts from storage:', e);
-    }
+    };
 
-    async function discoverMailboxes() {
-      const mainToken = getStoredToken();
-      if (!mainToken) return;
-
-      try {
-        const res = await apiFetch<Array<{
-          id: string;
-          email: string;
-          name: string;
-          quota_bytes: number;
-          used_bytes: number;
-        }>>('/api/v1/email/mailboxes');
-
-        if (res.data && res.data.length > 0) {
-          const map = new Map<string, WebmailAccount>();
-          storedList.forEach(a => map.set(a.email.toLowerCase(), a));
-
-          res.data.forEach(mb => {
-            const clean = mb.email.toLowerCase();
-            const existing = map.get(clean);
-            map.set(clean, {
-              id: mb.id,
-              email: mb.email,
-              name: mb.name || mb.email.split('@')[0],
-              token: existing?.token,
-              quotaBytes: mb.quota_bytes,
-              usedBytes: mb.used_bytes,
-            });
-          });
-
-          const merged = Array.from(map.values());
-          storedList = merged;
-          localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
-          setAccounts(merged);
-
-          const savedActive = localStorage.getItem(STORAGE_ACTIVE_KEY);
-          const found = merged.find(a => a.email.toLowerCase() === savedActive?.toLowerCase()) || merged[0];
-          setActiveAccount(found);
-          if (found) {
-            localStorage.setItem(STORAGE_ACTIVE_KEY, found.email);
-          }
-        }
-      } catch (err) {
-        console.debug('No control panel mailbox discovery available:', err);
-      }
-    }
-
-    if (storedList.length > 0) {
-      setAccounts(storedList);
-      const savedActive = localStorage.getItem(STORAGE_ACTIVE_KEY);
-      const found = storedList.find(a => a.email.toLowerCase() === savedActive?.toLowerCase()) || storedList[0];
-      setActiveAccount(found);
-      if (found) {
-        localStorage.setItem(STORAGE_ACTIVE_KEY, found.email);
-      }
-    }
-
-    discoverMailboxes();
-  }, []);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [verifySession]);
 
   // Update document title with unread badge e.g. "(3) Hostvra Webmail"
   useEffect(() => {
@@ -431,18 +439,21 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
         };
       }>('/api/v1/webmail/auth', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
 
-      if (res.data && res.data.mailbox) {
-        addAccount({
+      if (res.data && res.data.mailbox && res.data.token) {
+        setStoredWebmailToken(res.data.token);
+        const newAcc: WebmailAccount = {
           id: res.data.mailbox.id,
           email: res.data.mailbox.email,
           name: res.data.mailbox.name || res.data.mailbox.email.split('@')[0],
           token: res.data.token,
           quotaBytes: res.data.mailbox.quota_bytes,
           usedBytes: res.data.mailbox.used_bytes,
-        });
+        };
+        addAccount(newAcc);
+        setIsAuthenticated(true);
         return true;
       }
       return false;
@@ -519,40 +530,32 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [activeAccount, emailsPerPage, setReadingPaneLayout, setEmailsPerPage, setDefaultFolder, setSyncInterval]);
 
-  // Logout current account (works even if activeAccount is null)
-  const logoutCurrentAccount = useCallback(() => {
-    if (!activeAccount) {
-      setAccounts([]);
-      setActiveAccount(null);
-      localStorage.removeItem(STORAGE_ACCOUNTS_KEY);
-      localStorage.removeItem(STORAGE_ACTIVE_KEY);
-      router.push('/webmail/login');
-      return;
-    }
-    const emailToLogOut = activeAccount.email;
-    setAccounts(prev => {
-      const remaining = prev.filter(a => a.email.toLowerCase() !== emailToLogOut.toLowerCase());
-      localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(remaining));
-      if (remaining.length > 0) {
-        setActiveAccount(remaining[0]);
-        localStorage.setItem(STORAGE_ACTIVE_KEY, remaining[0].email);
-      } else {
-        setActiveAccount(null);
-        localStorage.removeItem(STORAGE_ACTIVE_KEY);
-        router.push('/webmail/login');
-      }
-      return remaining;
-    });
-  }, [activeAccount, router]);
-
   // Logout all accounts
-  const logoutAllAccounts = useCallback(() => {
-    setAccounts([]);
+  const logoutAllAccounts = useCallback(async () => {
+    try {
+      await apiFetch('/api/v1/webmail/logout', { method: 'POST' });
+    } catch (e) {
+      console.debug('Webmail backend logout notification skipped:', e);
+    }
+    clearStoredWebmailAuth();
+    setIsAuthenticated(false);
     setActiveAccount(null);
-    localStorage.removeItem(STORAGE_ACCOUNTS_KEY);
-    localStorage.removeItem(STORAGE_ACTIVE_KEY);
+    setAccounts([]);
+    setFolderCounts({});
+    setContacts([]);
+    setFilters([]);
+    setIdentities([]);
+    setForwardingRule(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.clear();
+    }
     router.push('/webmail/login');
   }, [router]);
+
+  // Logout current account
+  const logoutCurrentAccount = useCallback(() => {
+    logoutAllAccounts();
+  }, [logoutAllAccounts]);
 
   // Compose actions
   const openCompose = useCallback((initial?: ComposeInitialData) => {
@@ -790,6 +793,9 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
   return (
     <WebmailContext.Provider
       value={{
+        isAuthenticated,
+        isAuthLoading,
+        verifySession,
         accounts,
         activeAccount,
         activeEmail: activeAccount?.email || '',

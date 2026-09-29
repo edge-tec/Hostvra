@@ -396,6 +396,27 @@ export function clearStoredAuth() {
   }
 }
 
+export function getStoredWebmailToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('hostvra_webmail_token');
+}
+
+export function setStoredWebmailToken(token: string) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('hostvra_webmail_token', token);
+    document.cookie = `hostvra_webmail_token=${encodeURIComponent(token)}; path=/; max-age=86400; SameSite=Lax`;
+  }
+}
+
+export function clearStoredWebmailAuth() {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('hostvra_webmail_token');
+    localStorage.removeItem('hostvra_webmail_accounts');
+    localStorage.removeItem('hostvra_webmail_active_account');
+    document.cookie = 'hostvra_webmail_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax';
+  }
+}
+
 async function executeFetch<T>(
   baseUrl: string,
   endpoint: string,
@@ -415,6 +436,7 @@ async function executeFetch<T>(
 
   try {
     const res = await fetch(`${baseUrl}${endpoint}`, {
+      credentials: 'include',
       ...options,
       headers,
       signal: options.signal || controller.signal,
@@ -423,12 +445,19 @@ async function executeFetch<T>(
     clearTimeout(timeoutId);
 
     // Auto-intercept 401 Unauthorized on authenticated routes to clear stale session and redirect
-    if (res.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/register')) {
-      clearStoredAuth();
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/register')) {
-        const currentPath = window.location.pathname + window.location.search;
-        const redirectParam = currentPath && currentPath !== '/' ? `?redirect=${encodeURIComponent(currentPath)}` : '';
-        window.location.href = `/login${redirectParam}`;
+    if (res.status === 401 && !endpoint.includes('/auth/login') && !endpoint.includes('/auth/register') && !endpoint.includes('/webmail/auth') && !endpoint.includes('/webmail/sso/validate') && !endpoint.includes('/webmail/session')) {
+      if (endpoint.includes('/webmail') || (typeof window !== 'undefined' && window.location.pathname.startsWith('/webmail'))) {
+        clearStoredWebmailAuth();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/webmail/login' && !window.location.pathname.startsWith('/webmail/sso')) {
+          window.location.href = '/webmail/login';
+        }
+      } else {
+        clearStoredAuth();
+        if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/register')) {
+          const currentPath = window.location.pathname + window.location.search;
+          const redirectParam = currentPath && currentPath !== '/' ? `?redirect=${encodeURIComponent(currentPath)}` : '';
+          window.location.href = `/login${redirectParam}`;
+        }
       }
     }
 
@@ -487,7 +516,11 @@ async function executeFetch<T>(
 }
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const token = getStoredToken();
+  const isWebmail = endpoint.includes('/webmail') || (typeof window !== 'undefined' && window.location.pathname.startsWith('/webmail'));
+  const webmailToken = getStoredWebmailToken();
+  const cpToken = getStoredToken();
+  const token = (isWebmail && webmailToken) ? webmailToken : (cpToken || webmailToken);
+
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> || {}),
   };
@@ -500,6 +533,9 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (webmailToken && !headers['X-Webmail-Token']) {
+    headers['X-Webmail-Token'] = webmailToken;
   }
 
   return executeFetch<T>(getApiBaseUrl(), endpoint, options, headers);

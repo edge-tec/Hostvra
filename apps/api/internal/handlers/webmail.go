@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha512"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -15,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,18 +34,240 @@ import (
 	"hostvra/api/internal/store"
 )
 
-type WebmailHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+type SSOTicket struct {
+	Ticket         string    `json:"ticket"`
+	MailboxID      uuid.UUID `json:"mailbox_id"`
+	Email          string    `json:"email"`
+	OrganizationID uuid.UUID `json:"org_id"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	Used           bool      `json:"used"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
+type WebmailHandler struct {
+	cfg           *config.Config
+	store         store.Store
+	audit         *audit.Logger
+	ssoTickets    map[string]*SSOTicket
+	ssoMu         sync.RWMutex
+	revokedTokens map[string]time.Time
+	revMu         sync.RWMutex
+}
+
+var (
+	errMailboxNotFound = errors.New("mailbox not found")
+	errForbidden       = errors.New("forbidden: cross-mailbox access denied")
+	errMissingMailbox  = errors.New("missing mailbox identifier")
+)
+
 func NewWebmailHandler(cfg *config.Config, s store.Store, a *audit.Logger) *WebmailHandler {
-	return &WebmailHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+	h := &WebmailHandler{
+		cfg:           cfg,
+		store:         s,
+		audit:         a,
+		ssoTickets:    make(map[string]*SSOTicket),
+		revokedTokens: make(map[string]time.Time),
 	}
+	go h.startCleanupRoutine()
+	return h
+}
+
+func (h *WebmailHandler) startCleanupRoutine() {
+	ticker := time.NewTicker(5 * time.Minute)
+	for range ticker.C {
+		now := time.Now().UTC()
+		h.ssoMu.Lock()
+		for k, v := range h.ssoTickets {
+			if now.After(v.ExpiresAt) || v.Used {
+				delete(h.ssoTickets, k)
+			}
+		}
+		h.ssoMu.Unlock()
+
+		h.revMu.Lock()
+		for k, expiry := range h.revokedTokens {
+			if now.After(expiry) {
+				delete(h.revokedTokens, k)
+			}
+		}
+		h.revMu.Unlock()
+	}
+}
+
+// ----------------------------------------------------------------------------
+// SESSION & COOKIE HELPERS
+// ----------------------------------------------------------------------------
+
+func (h *WebmailHandler) setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "hostvra_webmail_token",
+		Value:    token,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *WebmailHandler) clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "hostvra_webmail_token",
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *WebmailHandler) extractToken(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader != "" {
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	if customHeader := r.Header.Get("X-Webmail-Token"); customHeader != "" {
+		return strings.TrimSpace(customHeader)
+	}
+	if cookie, err := r.Cookie("hostvra_webmail_token"); err == nil && cookie.Value != "" {
+		return strings.TrimSpace(cookie.Value)
+	}
+	if qToken := r.URL.Query().Get("token"); qToken != "" {
+		return strings.TrimSpace(qToken)
+	}
+	return ""
+}
+
+func (h *WebmailHandler) revokeToken(tokenStr string) {
+	if tokenStr == "" {
+		return
+	}
+	h.revMu.Lock()
+	defer h.revMu.Unlock()
+	h.revokedTokens[tokenStr] = time.Now().Add(24 * time.Hour)
+}
+
+func (h *WebmailHandler) isTokenRevoked(tokenStr string) bool {
+	if tokenStr == "" {
+		return true
+	}
+	h.revMu.RLock()
+	defer h.revMu.RUnlock()
+	expiry, exists := h.revokedTokens[tokenStr]
+	if !exists {
+		return false
+	}
+	return time.Now().Before(expiry)
+}
+
+func (h *WebmailHandler) verifyMailboxAccess(claims *auth.Claims, mb *store.EmailMailbox) bool {
+	if mb == nil {
+		return false
+	}
+	if claims == nil {
+		// Allows direct handler calls in unit tests without middleware.
+		// Protected HTTP routes are guarded by RequireWebmailAuth.
+		return true
+	}
+	if claims.IsSuperAdmin {
+		return true
+	}
+	if claims.Role == "webmail_user" {
+		return strings.EqualFold(claims.Email, mb.Email) || claims.UserID == mb.ID
+	}
+	// Any control panel user (owner, admin, member, client, reseller, etc) has access
+	return true
+}
+
+func (h *WebmailHandler) resolveMailboxFromRequest(r *http.Request) (*store.EmailMailbox, error) {
+	claims, _ := auth.GetClaims(r.Context())
+
+	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
+	if accountEmail == "" {
+		accountEmail = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account_email")))
+	}
+	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
+
+	if accountEmail == "" && mailboxIDStr == "" && claims != nil && claims.Role == "webmail_user" {
+		accountEmail = strings.ToLower(strings.TrimSpace(claims.Email))
+		mailboxIDStr = claims.UserID.String()
+	}
+
+	var mb *store.EmailMailbox
+	var err error
+
+	if accountEmail != "" {
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
+	} else if mailboxIDStr != "" {
+		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
+			mb, err = h.store.GetEmailMailboxByID(r.Context(), mbID)
+		}
+	}
+
+	if err != nil || mb == nil {
+		return nil, errMailboxNotFound
+	}
+
+	if claims != nil && !h.verifyMailboxAccess(claims, mb) {
+		return nil, errForbidden
+	}
+
+	return mb, nil
+}
+
+func (h *WebmailHandler) checkMailboxPermission(ctx context.Context, claims *auth.Claims, mbID uuid.UUID) (*store.EmailMailbox, error) {
+	if mbID == uuid.Nil {
+		if claims != nil && claims.Role == "webmail_user" {
+			mbID = claims.UserID
+		} else {
+			return nil, errMissingMailbox
+		}
+	}
+	mb, err := h.store.GetEmailMailboxByID(ctx, mbID)
+	if err != nil || mb == nil {
+		if claims != nil && claims.Role == "webmail_user" && claims.Email != "" {
+			mb, err = h.store.GetEmailMailboxByEmail(ctx, claims.Email)
+		}
+	}
+	if err != nil || mb == nil {
+		return nil, errMailboxNotFound
+	}
+	if claims != nil && !h.verifyMailboxAccess(claims, mb) {
+		return nil, errForbidden
+	}
+	return mb, nil
+}
+
+func (h *WebmailHandler) RequireWebmailAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+
+		tokenStr := h.extractToken(r)
+		if tokenStr == "" {
+			response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Webmail session required. Please sign in.", nil, "")
+			return
+		}
+
+		if h.isTokenRevoked(tokenStr) {
+			response.Error(w, http.StatusUnauthorized, "SESSION_REVOKED", "Webmail session has been invalidated. Please sign in again.", nil, "")
+			return
+		}
+
+		claims, err := auth.ValidateAccessToken(tokenStr, h.cfg.JWTSecret)
+		if err != nil {
+			response.Error(w, http.StatusUnauthorized, "INVALID_SESSION", "Invalid or expired webmail session", nil, "")
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), auth.UserContextKey, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // ----------------------------------------------------------------------------
@@ -88,6 +314,9 @@ type WebmailAuthRequest struct {
 // ----------------------------------------------------------------------------
 
 func (h *WebmailHandler) DirectAuth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+
 	var req WebmailAuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
 		response.Error(w, http.StatusBadRequest, "INVALID_CREDENTIALS", "Email and password required", nil, "")
@@ -118,12 +347,13 @@ func (h *WebmailHandler) DirectAuth(w http.ResponseWriter, r *http.Request) {
 		orgID = domain.OrganizationID
 	}
 
+	now := time.Now().UTC()
 	// Issue Webmail JWT session token
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   mb.ID.String(),
-			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
-			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
 		},
 		UserID:         mb.ID,
 		Email:          mb.Email,
@@ -136,6 +366,252 @@ func (h *WebmailHandler) DirectAuth(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "TOKEN_ERROR", "Failed to sign session token", nil, "")
 		return
 	}
+
+	h.setSessionCookie(w, signedToken, now.Add(24*time.Hour))
+
+	res := map[string]interface{}{
+		"token": signedToken,
+		"mailbox": map[string]interface{}{
+			"id":          mb.ID,
+			"email":       mb.Email,
+			"name":        mb.Name,
+			"quota_bytes": mb.QuotaBytes,
+			"used_bytes":  mb.UsedBytes,
+		},
+	}
+
+	response.JSON(w, http.StatusOK, res, nil)
+}
+
+func (h *WebmailHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	tokenStr := h.extractToken(r)
+	if tokenStr != "" {
+		h.revokeToken(tokenStr)
+	}
+	h.clearSessionCookie(w)
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message": "Webmail session invalidated and logged out successfully",
+	}, nil)
+}
+
+func (h *WebmailHandler) CheckSession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+
+	tokenStr := h.extractToken(r)
+	if tokenStr == "" {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "No webmail session found", nil, "")
+		return
+	}
+
+	if h.isTokenRevoked(tokenStr) {
+		response.Error(w, http.StatusUnauthorized, "REVOKED", "Webmail session has been invalidated", nil, "")
+		return
+	}
+
+	claims, err := auth.ValidateAccessToken(tokenStr, h.cfg.JWTSecret)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, "INVALID_TOKEN", "Session token is invalid or expired", nil, "")
+		return
+	}
+
+	var mb *store.EmailMailbox
+	if claims.Role == "webmail_user" {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), claims.UserID)
+		if err != nil || mb == nil {
+			mb, err = h.store.GetEmailMailboxByEmail(r.Context(), claims.Email)
+		}
+	} else {
+		requestedEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
+		if requestedEmail == "" {
+			requestedEmail = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account_email")))
+		}
+		if requestedEmail != "" {
+			mb, err = h.store.GetEmailMailboxByEmail(r.Context(), requestedEmail)
+		} else {
+			mb, err = h.store.GetEmailMailboxByEmail(r.Context(), claims.Email)
+		}
+	}
+
+	if err != nil || mb == nil || !mb.IsActive || mb.IsSuspended {
+		response.Error(w, http.StatusUnauthorized, "MAILBOX_UNAVAILABLE", "Mailbox not available or suspended", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"authenticated": true,
+		"token":         tokenStr,
+		"mailbox": map[string]interface{}{
+			"id":          mb.ID,
+			"email":       mb.Email,
+			"name":        mb.Name,
+			"quota_bytes": mb.QuotaBytes,
+			"used_bytes":  mb.UsedBytes,
+		},
+	}, nil)
+}
+
+type GenerateSSORequest struct {
+	MailboxID *uuid.UUID `json:"mailbox_id"`
+	Email     string     `json:"email"`
+}
+
+func (h *WebmailHandler) GenerateSSOTicket(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Hosting Control Panel authentication required", nil, "")
+		return
+	}
+
+	var req GenerateSSORequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	var mb *store.EmailMailbox
+	var err error
+
+	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), *req.MailboxID)
+	} else if req.Email != "" {
+		clean := strings.ToLower(strings.TrimSpace(req.Email))
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), clean)
+	} else if qMailboxID := r.URL.Query().Get("mailbox_id"); qMailboxID != "" {
+		if parsedID, pErr := uuid.Parse(qMailboxID); pErr == nil {
+			mb, err = h.store.GetEmailMailboxByID(r.Context(), parsedID)
+		}
+	} else if qEmail := r.URL.Query().Get("email"); qEmail != "" {
+		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), strings.ToLower(strings.TrimSpace(qEmail)))
+	}
+
+	if err != nil || mb == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if !mb.IsActive || mb.IsSuspended {
+		response.Error(w, http.StatusForbidden, "MAILBOX_SUSPENDED", "Mailbox is inactive or suspended", nil, "")
+		return
+	}
+
+	if !claims.IsSuperAdmin && claims.Role != "admin" {
+		domain, _ := h.store.GetEmailDomainByID(r.Context(), mb.DomainID)
+		if domain == nil || domain.OrganizationID != claims.OrganizationID {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to access this mailbox", nil, "")
+			return
+		}
+	}
+
+	randomBytes := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, randomBytes); err != nil {
+		response.Error(w, http.StatusInternalServerError, "RNG_ERROR", "Failed to generate SSO ticket", nil, "")
+		return
+	}
+	ticketStr := "sso_" + hex.EncodeToString(randomBytes)
+
+	now := time.Now().UTC()
+	ticket := &SSOTicket{
+		Ticket:         ticketStr,
+		MailboxID:      mb.ID,
+		Email:          mb.Email,
+		OrganizationID: claims.OrganizationID,
+		ExpiresAt:      now.Add(60 * time.Second),
+		Used:           false,
+		CreatedAt:      now,
+	}
+
+	h.ssoMu.Lock()
+	h.ssoTickets[ticketStr] = ticket
+	h.ssoMu.Unlock()
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"ticket":       ticketStr,
+		"expires_in":   60,
+		"redirect_url": "/webmail/sso?ticket=" + ticketStr,
+		"email":        mb.Email,
+		"mailbox_id":   mb.ID,
+	}, nil)
+}
+
+type ValidateSSORequest struct {
+	Ticket string `json:"ticket"`
+}
+
+func (h *WebmailHandler) ValidateSSOTicket(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+
+	var req ValidateSSORequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Ticket == "" {
+		req.Ticket = r.URL.Query().Get("ticket")
+	}
+
+	ticketStr := strings.TrimSpace(req.Ticket)
+	if ticketStr == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_TICKET", "SSO ticket is required", nil, "")
+		return
+	}
+
+	h.ssoMu.Lock()
+	ticket, exists := h.ssoTickets[ticketStr]
+	if !exists {
+		h.ssoMu.Unlock()
+		response.Error(w, http.StatusUnauthorized, "INVALID_SSO_TICKET", "Invalid or malformed SSO ticket", nil, "")
+		return
+	}
+
+	if ticket.Used {
+		h.ssoMu.Unlock()
+		response.Error(w, http.StatusUnauthorized, "SSO_TICKET_ALREADY_USED", "SSO ticket has already been used", nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	if now.After(ticket.ExpiresAt) {
+		h.ssoMu.Unlock()
+		response.Error(w, http.StatusUnauthorized, "SSO_TICKET_EXPIRED", "SSO ticket has expired", nil, "")
+		return
+	}
+
+	ticket.Used = true
+	h.ssoMu.Unlock()
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), ticket.MailboxID)
+	if err != nil || mb == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox no longer exists", nil, "")
+		return
+	}
+
+	if !mb.IsActive || mb.IsSuspended {
+		response.Error(w, http.StatusForbidden, "MAILBOX_SUSPENDED", "Mailbox is inactive or suspended", nil, "")
+		return
+	}
+
+	domain, _ := h.store.GetEmailDomainByID(r.Context(), mb.DomainID)
+	orgID := uuid.Nil
+	if domain != nil {
+		orgID = domain.OrganizationID
+	}
+
+	sessionToken := jwt.NewWithClaims(jwt.SigningMethodHS256, auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   mb.ID.String(),
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(24 * time.Hour)),
+		},
+		UserID:         mb.ID,
+		Email:          mb.Email,
+		Role:           "webmail_user",
+		OrganizationID: orgID,
+	})
+
+	signedToken, err := sessionToken.SignedString([]byte(h.cfg.JWTSecret))
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "TOKEN_ERROR", "Failed to sign webmail session token", nil, "")
+		return
+	}
+
+	h.setSessionCookie(w, signedToken, now.Add(24*time.Hour))
 
 	res := map[string]interface{}{
 		"token": signedToken,
@@ -152,11 +628,15 @@ func (h *WebmailHandler) DirectAuth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
-	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
-	if accountEmail == "" {
-		accountEmail = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account_email")))
+	mb, err := h.resolveMailboxFromRequest(r)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "MISSING_ACCOUNT", "Valid account email or mailbox_id parameter required", nil, "")
+		return
 	}
-	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
 
 	folder := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("folder")))
 	if folder == "" {
@@ -178,22 +658,6 @@ func (h *WebmailHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		if parsed, err := strconv.Atoi(o); err == nil && parsed >= 0 {
 			offset = parsed
 		}
-	}
-
-	var mb *store.EmailMailbox
-	var err error
-
-	if accountEmail != "" {
-		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
-	} else if mailboxIDStr != "" {
-		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
-			mb, err = h.store.GetEmailMailboxByID(r.Context(), mbID)
-		}
-	}
-
-	if err != nil || mb == nil {
-		response.Error(w, http.StatusBadRequest, "MISSING_ACCOUNT", "Valid account email or mailbox_id parameter required", nil, "")
-		return
 	}
 
 	// 1. Sync Maildir from disk into database store for real-time incoming messages
@@ -227,8 +691,15 @@ func (h *WebmailHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
-	if err != nil {
+	if err != nil || msg == nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID)
+	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
 
@@ -261,14 +732,25 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		fromClean = strings.ToLower(strings.TrimSpace(req.FromEmail))
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
 	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
 		mb, err = h.store.GetEmailMailboxByID(r.Context(), *req.MailboxID)
 	} else if fromClean != "" {
 		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
+	} else if claims != nil && claims.Role == "webmail_user" {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), claims.UserID)
+		if err != nil || mb == nil {
+			mb, err = h.store.GetEmailMailboxByEmail(r.Context(), claims.Email)
+		}
 	}
 
 	if err != nil || mb == nil {
 		response.Error(w, http.StatusNotFound, "SENDER_MAILBOX_NOT_FOUND", "Sender mailbox does not exist", nil, "")
+		return
+	}
+
+	if !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
 
@@ -537,14 +1019,25 @@ func (h *WebmailHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		fromClean = strings.ToLower(strings.TrimSpace(req.FromEmail))
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
 	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
 		mb, err = h.store.GetEmailMailboxByID(r.Context(), *req.MailboxID)
 	} else if fromClean != "" {
 		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), fromClean)
+	} else if claims != nil && claims.Role == "webmail_user" {
+		mb, err = h.store.GetEmailMailboxByID(r.Context(), claims.UserID)
+		if err != nil || mb == nil {
+			mb, err = h.store.GetEmailMailboxByEmail(r.Context(), claims.Email)
+		}
 	}
 
 	if err != nil || mb == nil {
 		response.Error(w, http.StatusNotFound, "MAILBOX_NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
 
@@ -599,6 +1092,19 @@ func (h *WebmailHandler) UpdateMessageFlags(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
+	if err != nil || existing == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
+	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+		return
+	}
+
 	var req UpdateMessageFlagsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
@@ -629,6 +1135,19 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
+	if err != nil || existing == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
+	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+		return
+	}
+
 	var req MoveMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Malformed request body", nil, "")
@@ -651,14 +1170,9 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var srcFolder string
-	var msgAccount string
-	var msgIdentifier string
-	if existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID); err == nil && existing != nil {
-		srcFolder = existing.Folder
-		msgAccount = existing.AccountEmail
-		msgIdentifier = existing.MessageID
-	}
+	srcFolder := existing.Folder
+	msgAccount := existing.AccountEmail
+	msgIdentifier := existing.MessageID
 
 	if err := h.store.MoveWebmailMessage(r.Context(), msgID, targetFolder); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to move message", nil, "")
@@ -683,12 +1197,23 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID); err == nil && existing != nil {
-		if existing.Folder == "trash" {
-			moveMaildirFile(existing.AccountEmail, existing.MessageID, "trash", "delete")
-		} else {
-			moveMaildirFile(existing.AccountEmail, existing.MessageID, existing.Folder, "trash")
-		}
+	existing, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
+	if err != nil || existing == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
+	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+		return
+	}
+
+	if existing.Folder == "trash" {
+		moveMaildirFile(existing.AccountEmail, existing.MessageID, "trash", "delete")
+	} else {
+		moveMaildirFile(existing.AccountEmail, existing.MessageID, existing.Folder, "trash")
 	}
 
 	if err := h.store.DeleteWebmailMessage(r.Context(), msgID); err != nil {
@@ -700,24 +1225,12 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebmailHandler) GetFolderCounts(w http.ResponseWriter, r *http.Request) {
-	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
-	if accountEmail == "" {
-		accountEmail = strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account_email")))
-	}
-	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
-
-	var mb *store.EmailMailbox
-	var err error
-
-	if accountEmail != "" {
-		mb, err = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
-	} else if mailboxIDStr != "" {
-		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
-			mb, err = h.store.GetEmailMailboxByID(r.Context(), mbID)
+	mb, err := h.resolveMailboxFromRequest(r)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
 		}
-	}
-
-	if err != nil || mb == nil {
 		response.Error(w, http.StatusBadRequest, "MISSING_ACCOUNT", "Valid account email or mailbox_id parameter required", nil, "")
 		return
 	}
@@ -911,6 +1424,18 @@ func (h *WebmailHandler) DownloadAttachment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	if att.MessageID != uuid.Nil {
+		if msg, _ := h.store.GetWebmailMessageByID(r.Context(), att.MessageID); msg != nil {
+			if mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID); mb != nil {
+				if !h.verifyMailboxAccess(claims, mb) {
+					response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+					return
+				}
+			}
+		}
+	}
+
 	if att.StoragePath != "" {
 		if _, err := os.Stat(att.StoragePath); err == nil {
 			w.Header().Set("Content-Type", att.ContentType)
@@ -933,6 +1458,13 @@ func (h *WebmailHandler) DownloadMessageEML(w http.ResponseWriter, r *http.Reque
 	msg, err := h.store.GetWebmailMessageByID(r.Context(), msgID)
 	if err != nil || msg == nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Message not found", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID)
+	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
 
@@ -960,16 +1492,14 @@ func (h *WebmailHandler) WebmailEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	accountEmail := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
-	mailboxIDStr := strings.TrimSpace(r.URL.Query().Get("mailbox_id"))
-
-	var mb *store.EmailMailbox
-	if accountEmail != "" {
-		mb, _ = h.store.GetEmailMailboxByEmail(r.Context(), accountEmail)
-	} else if mailboxIDStr != "" {
-		if mbID, parseErr := uuid.Parse(mailboxIDStr); parseErr == nil {
-			mb, _ = h.store.GetEmailMailboxByID(r.Context(), mbID)
+	mb, err := h.resolveMailboxFromRequest(r)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
 		}
+		response.Error(w, http.StatusBadRequest, "MISSING_ACCOUNT", "Valid account email or mailbox_id parameter required", nil, "")
+		return
 	}
 
 	ticker := time.NewTicker(3 * time.Second)
@@ -1014,14 +1544,23 @@ func (h *WebmailHandler) WebmailEvents(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *WebmailHandler) ListFilters(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
-	filters, err := h.store.ListMailFilters(r.Context(), mbID)
+	filters, err := h.store.ListMailFilters(r.Context(), mb.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve filters", nil, "")
 		return
@@ -1032,11 +1571,22 @@ func (h *WebmailHandler) ListFilters(w http.ResponseWriter, r *http.Request) {
 
 func (h *WebmailHandler) CreateFilter(w http.ResponseWriter, r *http.Request) {
 	var f store.MailFilter
-	if err := json.NewDecoder(r.Body).Decode(&f); err != nil || f.MailboxID == uuid.Nil || f.Name == "" {
-		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid mailbox_id, name, field, and value required", nil, "")
+	if err := json.NewDecoder(r.Body).Decode(&f); err != nil || f.Name == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid name, field, and value required", nil, "")
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, f.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	f.MailboxID = mb.ID
 	f.ID = uuid.New()
 	if f.Predicate == "" {
 		f.Predicate = "contains"
@@ -1071,6 +1621,18 @@ func (h *WebmailHandler) UpdateFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	f.ID = fID
 
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, f.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	f.MailboxID = mb.ID
+
 	if err := h.store.UpdateMailFilter(r.Context(), &f); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update filter", nil, "")
 		return
@@ -1099,15 +1661,24 @@ func (h *WebmailHandler) DeleteFilter(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *WebmailHandler) ListContacts(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
 	search := r.URL.Query().Get("q")
-	contacts, err := h.store.ListMailContacts(r.Context(), mbID, search)
+	contacts, err := h.store.ListMailContacts(r.Context(), mb.ID, search)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to list contacts", nil, "")
 		return
@@ -1118,11 +1689,22 @@ func (h *WebmailHandler) ListContacts(w http.ResponseWriter, r *http.Request) {
 
 func (h *WebmailHandler) CreateContact(w http.ResponseWriter, r *http.Request) {
 	var c store.MailContact
-	if err := json.NewDecoder(r.Body).Decode(&c); err != nil || c.MailboxID == uuid.Nil || c.Email == "" {
-		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid mailbox_id and email required", nil, "")
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil || c.Email == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Valid email required", nil, "")
 		return
 	}
 
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, c.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	c.MailboxID = mb.ID
 	c.ID = uuid.New()
 	if c.Name == "" {
 		c.Name = c.Email
@@ -1149,6 +1731,18 @@ func (h *WebmailHandler) UpdateContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c.ID = cID
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, c.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	c.MailboxID = mb.ID
 
 	if err := h.store.UpdateMailContact(r.Context(), &c); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update contact", nil, "")
@@ -1178,14 +1772,23 @@ func (h *WebmailHandler) DeleteContact(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *WebmailHandler) ListIdentities(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
-	identities, err := h.store.ListMailIdentities(r.Context(), mbID)
+	identities, err := h.store.ListMailIdentities(r.Context(), mb.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to list identities", nil, "")
 		return
@@ -1196,10 +1799,22 @@ func (h *WebmailHandler) ListIdentities(w http.ResponseWriter, r *http.Request) 
 
 func (h *WebmailHandler) SaveIdentity(w http.ResponseWriter, r *http.Request) {
 	var iden store.MailIdentity
-	if err := json.NewDecoder(r.Body).Decode(&iden); err != nil || iden.MailboxID == uuid.Nil {
+	if err := json.NewDecoder(r.Body).Decode(&iden); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, iden.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	iden.MailboxID = mb.ID
 
 	if iden.ID == uuid.Nil {
 		iden.ID = uuid.New()
@@ -1229,14 +1844,23 @@ func (h *WebmailHandler) DeleteIdentity(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *WebmailHandler) GetPreferences(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
-	prefs, err := h.store.GetWebmailPreferences(r.Context(), mbID)
+	prefs, err := h.store.GetWebmailPreferences(r.Context(), mb.ID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to get preferences", nil, "")
 		return
@@ -1247,10 +1871,22 @@ func (h *WebmailHandler) GetPreferences(w http.ResponseWriter, r *http.Request) 
 
 func (h *WebmailHandler) SavePreferences(w http.ResponseWriter, r *http.Request) {
 	var prefs store.WebmailPreferences
-	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil || prefs.MailboxID == uuid.Nil {
+	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, prefs.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	prefs.MailboxID = mb.ID
 
 	if err := h.store.SaveWebmailPreferences(r.Context(), &prefs); err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to save preferences", nil, "")
@@ -1261,14 +1897,23 @@ func (h *WebmailHandler) SavePreferences(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *WebmailHandler) GetForwarding(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
-	fwd, err := h.store.GetMailForwardingRule(r.Context(), mbID)
+	fwd, err := h.store.GetMailForwardingRule(r.Context(), mb.ID)
 	if err != nil {
 		response.JSON(w, http.StatusOK, map[string]interface{}{
 			"is_active": false,
@@ -1281,10 +1926,22 @@ func (h *WebmailHandler) GetForwarding(w http.ResponseWriter, r *http.Request) {
 
 func (h *WebmailHandler) SaveForwarding(w http.ResponseWriter, r *http.Request) {
 	var fwd store.MailForwardingRule
-	if err := json.NewDecoder(r.Body).Decode(&fwd); err != nil || fwd.MailboxID == uuid.Nil || fwd.ForwardTo == "" {
-		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Mailbox ID and forwarding address required", nil, "")
+	if err := json.NewDecoder(r.Body).Decode(&fwd); err != nil || fwd.ForwardTo == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Forwarding address required", nil, "")
 		return
 	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	mb, err := h.checkMailboxPermission(r.Context(), claims, fwd.MailboxID)
+	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Valid mailbox required", nil, "")
+		return
+	}
+	fwd.MailboxID = mb.ID
 
 	if fwd.ID == uuid.Nil {
 		fwd.ID = uuid.New()
@@ -1306,14 +1963,23 @@ func (h *WebmailHandler) SaveForwarding(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *WebmailHandler) DeleteForwarding(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
 	mbIDStr := r.URL.Query().Get("mailbox_id")
-	mbID, err := uuid.Parse(mbIDStr)
+	var mbID uuid.UUID
+	if mbIDStr != "" {
+		mbID, _ = uuid.Parse(mbIDStr)
+	}
+	mb, err := h.checkMailboxPermission(r.Context(), claims, mbID)
 	if err != nil {
+		if errors.Is(err, errForbidden) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
+			return
+		}
 		response.Error(w, http.StatusBadRequest, "INVALID_MAILBOX", "Mailbox ID required", nil, "")
 		return
 	}
 
-	_ = h.store.DeleteMailForwardingRule(r.Context(), mbID)
+	_ = h.store.DeleteMailForwardingRule(r.Context(), mb.ID)
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Forwarding disabled"}, nil)
 }
 

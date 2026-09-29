@@ -278,6 +278,82 @@ func main() {
 		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
 		r.Post("/support/ai-assistant", supportHandler.AskAIAssistant)
 
+		// Standalone Webmail Operations (Strict Authentication Gate & Session Security)
+		r.Route("/webmail", func(r chi.Router) {
+			webmailLoginLimiter := auth.NewLoginRateLimiter(10, 60*time.Second)
+
+			// Standalone Auth (Public)
+			r.With(webmailLoginLimiter.RateLimitMiddleware).Post("/auth", webmailHandler.DirectAuth)
+
+			// Webmail SSO
+			// 1. Generate SSO Ticket: requires Control Panel JWT
+			r.With(auth.Middleware(cfg.JWTSecret)).Post("/sso/generate", webmailHandler.GenerateSSOTicket)
+			// 2. Validate SSO Ticket: public (ticket itself is authentication)
+			r.Post("/sso/validate", webmailHandler.ValidateSSOTicket)
+			r.Get("/sso/validate", webmailHandler.ValidateSSOTicket)
+
+			// Session & Logout
+			r.Get("/session", webmailHandler.CheckSession)
+			r.Post("/logout", webmailHandler.Logout)
+
+			// All protected Webmail routes strictly require Webmail session authentication
+			r.Group(func(pr chi.Router) {
+				pr.Use(webmailHandler.RequireWebmailAuth)
+
+				// Real-time events (SSE stream)
+				pr.Get("/events", webmailHandler.WebmailEvents)
+
+				// Messages & Mailbox Operations
+				pr.Get("/messages", webmailHandler.ListMessages)
+				pr.Get("/messages/{id}", webmailHandler.GetMessage)
+				pr.Get("/messages/{id}/eml", webmailHandler.DownloadMessageEML)
+				pr.Post("/send", webmailHandler.SendMessage)
+				pr.Post("/messages/send", webmailHandler.SendMessage)
+				pr.Patch("/messages/{id}", webmailHandler.UpdateMessageFlags)
+				pr.Put("/messages/{id}", webmailHandler.UpdateMessageFlags)
+				pr.Put("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
+				pr.Patch("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
+				pr.Post("/messages/{id}/move", webmailHandler.MoveMessage)
+				pr.Put("/messages/{id}/folder", webmailHandler.MoveMessage)
+				pr.Post("/messages/{id}/folder", webmailHandler.MoveMessage)
+				pr.Post("/draft", webmailHandler.SaveDraft)
+				pr.Post("/messages/draft", webmailHandler.SaveDraft)
+				pr.Delete("/messages/{id}", webmailHandler.DeleteMessage)
+				pr.Post("/messages/batch", webmailHandler.BatchUpdateMessages)
+				pr.Get("/counts", webmailHandler.GetFolderCounts)
+
+				// Attachments
+				pr.Post("/attachments/upload", webmailHandler.UploadAttachment)
+				pr.Get("/attachments/{id}", webmailHandler.DownloadAttachment)
+
+				// Signatures
+				pr.Get("/signatures", webmailHandler.GetSignature)
+				pr.Post("/signatures", webmailHandler.SetSignature)
+
+				// Filters
+				pr.Get("/filters", webmailHandler.ListFilters)
+				pr.Post("/filters", webmailHandler.CreateFilter)
+				pr.Put("/filters/{id}", webmailHandler.UpdateFilter)
+				pr.Delete("/filters/{id}", webmailHandler.DeleteFilter)
+
+				// Contacts
+				pr.Get("/contacts", webmailHandler.ListContacts)
+				pr.Post("/contacts", webmailHandler.CreateContact)
+				pr.Put("/contacts/{id}", webmailHandler.UpdateContact)
+				pr.Delete("/contacts/{id}", webmailHandler.DeleteContact)
+
+				// Identities & Preferences & Forwarding
+				pr.Get("/identities", webmailHandler.ListIdentities)
+				pr.Post("/identities", webmailHandler.SaveIdentity)
+				pr.Delete("/identities/{id}", webmailHandler.DeleteIdentity)
+				pr.Get("/preferences", webmailHandler.GetPreferences)
+				pr.Put("/preferences", webmailHandler.SavePreferences)
+				pr.Get("/forwarding", webmailHandler.GetForwarding)
+				pr.Post("/forwarding", webmailHandler.SaveForwarding)
+				pr.Delete("/forwarding", webmailHandler.DeleteForwarding)
+			})
+		})
+
 		// Real-Time Dashboard & Telemetry (Optional Auth - serves live server hardware metrics and user/default counts)
 		r.Group(func(r chi.Router) {
 			r.Use(auth.OptionalMiddleware(cfg.JWTSecret))
@@ -806,63 +882,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
 			})
 
-			// Webmail Operations
-			r.Route("/webmail", func(r chi.Router) {
-				// Standalone Auth
-				r.Post("/auth", webmailHandler.DirectAuth)
 
-				// Real-time events (SSE stream)
-				r.Get("/events", webmailHandler.WebmailEvents)
-
-				// Messages & Mailbox Operations
-				r.Get("/messages", webmailHandler.ListMessages)
-				r.Get("/messages/{id}", webmailHandler.GetMessage)
-				r.Get("/messages/{id}/eml", webmailHandler.DownloadMessageEML)
-				r.Post("/send", webmailHandler.SendMessage)
-				r.Post("/messages/send", webmailHandler.SendMessage)
-				r.Patch("/messages/{id}", webmailHandler.UpdateMessageFlags)
-				r.Put("/messages/{id}", webmailHandler.UpdateMessageFlags)
-				r.Put("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
-				r.Patch("/messages/{id}/flag", webmailHandler.UpdateMessageFlags)
-				r.Post("/messages/{id}/move", webmailHandler.MoveMessage)
-				r.Put("/messages/{id}/folder", webmailHandler.MoveMessage)
-				r.Post("/messages/{id}/folder", webmailHandler.MoveMessage)
-				r.Post("/draft", webmailHandler.SaveDraft)
-				r.Post("/messages/draft", webmailHandler.SaveDraft)
-				r.Delete("/messages/{id}", webmailHandler.DeleteMessage)
-				r.Post("/messages/batch", webmailHandler.BatchUpdateMessages)
-				r.Get("/counts", webmailHandler.GetFolderCounts)
-
-				// Attachments
-				r.Post("/attachments/upload", webmailHandler.UploadAttachment)
-				r.Get("/attachments/{id}", webmailHandler.DownloadAttachment)
-
-				// Signatures
-				r.Get("/signatures", webmailHandler.GetSignature)
-				r.Post("/signatures", webmailHandler.SetSignature)
-
-				// Filters
-				r.Get("/filters", webmailHandler.ListFilters)
-				r.Post("/filters", webmailHandler.CreateFilter)
-				r.Put("/filters/{id}", webmailHandler.UpdateFilter)
-				r.Delete("/filters/{id}", webmailHandler.DeleteFilter)
-
-				// Contacts
-				r.Get("/contacts", webmailHandler.ListContacts)
-				r.Post("/contacts", webmailHandler.CreateContact)
-				r.Put("/contacts/{id}", webmailHandler.UpdateContact)
-				r.Delete("/contacts/{id}", webmailHandler.DeleteContact)
-
-				// Identities & Preferences & Forwarding
-				r.Get("/identities", webmailHandler.ListIdentities)
-				r.Post("/identities", webmailHandler.SaveIdentity)
-				r.Delete("/identities/{id}", webmailHandler.DeleteIdentity)
-				r.Get("/preferences", webmailHandler.GetPreferences)
-				r.Put("/preferences", webmailHandler.SavePreferences)
-				r.Get("/forwarding", webmailHandler.GetForwarding)
-				r.Post("/forwarding", webmailHandler.SaveForwarding)
-				r.Delete("/forwarding", webmailHandler.DeleteForwarding)
-			})
 
 			// Enterprise Hosting Billing, Subscriptions, Invoices & Payment Gateways
 			r.Route("/billing", func(r chi.Router) {
