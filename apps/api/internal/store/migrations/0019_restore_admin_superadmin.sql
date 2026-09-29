@@ -18,6 +18,8 @@ WHERE id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1);
 -- 3. Link superadmin users to admin role in organization_members
 UPDATE organization_members om
 SET role_id = r.id, updated_at = NOW()
-FROM users u
-JOIN roles r ON r.organization_id = om.organization_id AND r.name = 'admin'
-WHERE om.user_id = u.id AND u.is_superadmin = TRUE;
+FROM users u, roles r
+WHERE om.user_id = u.id
+  AND u.is_superadmin = TRUE
+  AND r.organization_id = om.organization_id
+  AND r.name = 'admin';
