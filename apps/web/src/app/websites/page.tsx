@@ -170,6 +170,7 @@ export default function WebsitesPage() {
   const [newDomain, setNewDomain] = useState('');
   const [newRemarks, setNewRemarks] = useState('');
   const [newDocRoot, setNewDocRoot] = useState('/var/www/');
+  const [docRootCustomized, setDocRootCustomized] = useState(false);
   const [newPhpVer, setNewPhpVer] = useState('8.2');
   const [newWebServer, setNewWebServer] = useState('nginx');
   const [newCategory, setNewCategory] = useState('Default');
@@ -332,40 +333,92 @@ export default function WebsitesPage() {
     });
   };
 
-  // Create new Website
+  // Create new Website (enforcing distinct isolated directory per domain)
   const handleCreateWebsite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDomain.trim()) return;
+    const domainLines = newDomain
+      .split('\n')
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0);
+
+    if (domainLines.length === 0) return;
 
     setCreatingSite(true);
-    const domain = newDomain.trim().toLowerCase().split('\n')[0].trim();
-    const docRoot = newDocRoot.endsWith('/') ? `${newDocRoot}${domain}/public_html` : newDocRoot;
     const computedAppType = activeTab === 'nodejs' ? 'nodejs' : activeTab === 'python' ? 'python' : activeTab === 'go' ? 'go' : activeTab === 'proxy' ? 'proxy' : newPhpVer === 'Static' ? 'static' : 'php';
     const effectiveServerID = selectedServer || (servers.length > 0 ? servers[0].id : undefined);
 
-    try {
-      const res = await apiFetch<Website>('/api/v1/websites', {
-        method: 'POST',
-        body: JSON.stringify({
-          server_id: effectiveServerID,
-          primary_domain: domain,
-          document_root: docRoot,
-          php_version: newPhpVer === 'Static' ? undefined : newPhpVer,
-          app_type: computedAppType,
-          web_server_type: newWebServer,
-        }),
-      });
+    // Compute and validate distinct directory per domain
+    const assignedRoots = new Map<string, string>();
+    for (const d of domainLines) {
+      let root = '';
+      if (domainLines.length === 1 && docRootCustomized && newDocRoot.trim()) {
+        root = newDocRoot.trim();
+        if (root.endsWith('/')) {
+          root = `${root}${d}/public_html`;
+        }
+      } else {
+        root = `/var/www/${d}/public_html`;
+      }
 
-      if (res.success && res.data) {
-        setWebsites((prev) => [res.data!, ...prev.filter((s) => s.id !== res.data!.id)]);
-        showToast(`Website '${domain}' created successfully! Virtual host and root directory configured.`);
+      // Check collision among domains being added
+      for (const [otherDomain, otherRoot] of assignedRoots.entries()) {
+        if (otherRoot.toLowerCase() === root.toLowerCase()) {
+          showToast(`Error: '${d}' and '${otherDomain}' cannot share the same directory '${root}'. Different domains must use different directories.`, true);
+          setCreatingSite(false);
+          return;
+        }
+      }
+
+      // Check collision with existing websites
+      const existing = websites.find((w) => w.document_root.toLowerCase() === root.toLowerCase() && w.primary_domain.toLowerCase() !== d);
+      if (existing) {
+        showToast(`Directory '${root}' is already used by website '${existing.primary_domain}'. Different domains must use different directories.`, true);
+        setCreatingSite(false);
+        return;
+      }
+      assignedRoots.set(d, root);
+    }
+
+    try {
+      let lastCreated: Website | null = null;
+      let errorOccurred = false;
+
+      for (const domain of domainLines) {
+        const docRoot = assignedRoots.get(domain)!;
+        const res = await apiFetch<Website>('/api/v1/websites', {
+          method: 'POST',
+          body: JSON.stringify({
+            server_id: effectiveServerID,
+            primary_domain: domain,
+            document_root: docRoot,
+            php_version: newPhpVer === 'Static' ? undefined : newPhpVer,
+            app_type: computedAppType,
+            web_server_type: newWebServer,
+          }),
+        });
+
+        if (res.success && res.data) {
+          lastCreated = res.data;
+          setWebsites((prev) => [res.data!, ...prev.filter((s) => s.id !== res.data!.id)]);
+        } else {
+          errorOccurred = true;
+          showToast(res.error?.message || `Failed to create website '${domain}'`, true);
+          break;
+        }
+      }
+
+      if (!errorOccurred && lastCreated) {
+        showToast(
+          domainLines.length === 1
+            ? `Website '${domainLines[0]}' created successfully with distinct directory: ${assignedRoots.get(domainLines[0])}`
+            : `${domainLines.length} websites created successfully, each with its own separate directory!`
+        );
         setAddSiteOpen(false);
         setNewDomain('');
         setNewRemarks('');
         setNewDocRoot('/var/www/');
+        setDocRootCustomized(false);
         fetchData();
-      } else {
-        showToast(res.error?.message || 'Failed to create website', true);
       }
     } catch (err: any) {
       showToast(err.message || 'Error creating website', true);
@@ -1091,7 +1144,7 @@ export default function WebsitesPage() {
                               {/* 1. File Manager (Prominent One-Click Action) */}
                               <a
                                 href={`/files?domain=${encodeURIComponent(site.primary_domain)}&path=${encodeURIComponent(site.document_root)}`}
-                                title={`Open File Manager (/www/wwwroot/${site.primary_domain})`}
+                                title={`Open File Manager (${site.document_root || `/var/www/${site.primary_domain}/public_html`})`}
                                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold shadow-xs transition"
                               >
                                 <Folder className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -1394,21 +1447,26 @@ export default function WebsitesPage() {
                     onChange={(e) => {
                       const val = e.target.value;
                       setNewDomain(val);
-                      const firstDomain = val.trim().split('\n')[0].trim();
-                      if (firstDomain) {
+                      const lines = val.trim().split('\n').map((l) => l.trim()).filter(Boolean);
+                      if (lines.length > 0) {
+                        const firstDomain = lines[0];
                         const prevFirst = newDomain.trim().split('\n')[0].split('.')[0];
                         if (!newRemarks || newRemarks === prevFirst) {
                           setNewRemarks(firstDomain.split('.')[0]);
                         }
-                        if (!newDocRoot || newDocRoot === '/var/www/' || newDocRoot === '/www/wwwroot/' || newDocRoot.startsWith('/var/www/') || newDocRoot.startsWith('/www/wwwroot/')) {
+                        if (!docRootCustomized) {
                           setNewDocRoot(`/var/www/${firstDomain}/public_html`);
+                        }
+                      } else {
+                        if (!docRootCustomized) {
+                          setNewDocRoot('/var/www/');
                         }
                       }
                     }}
                     placeholder="example.com&#10;www.example.com"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 font-mono"
                   />
-                  <span className="text-[11px] text-slate-400">One domain per line. Port can be included like example.com:8080</span>
+                  <span className="text-[11px] text-slate-400">One domain per line. Each domain will be assigned its own isolated directory.</span>
                 </div>
 
                 {/* Remarks & Category */}
@@ -1440,13 +1498,25 @@ export default function WebsitesPage() {
 
                 {/* Root Directory */}
                 <div>
-                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Document Root</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-700 dark:text-slate-300">Document Root</label>
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      Separate directory per domain
+                    </span>
+                  </div>
                   <input
                     type="text"
                     value={newDocRoot}
-                    onChange={(e) => setNewDocRoot(e.target.value)}
+                    onChange={(e) => {
+                      setNewDocRoot(e.target.value);
+                      setDocRootCustomized(true);
+                    }}
+                    placeholder="/var/www/example.com/public_html"
                     className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono focus:outline-none"
                   />
+                  <span className="text-[11px] text-slate-400">
+                    Default: <code className="text-emerald-500 font-mono">/var/www/&#123;domain&#125;/public_html</code>. Different domains automatically get their own separate directories.
+                  </span>
                 </div>
 
                 {/* Web Server & PHP Version */}

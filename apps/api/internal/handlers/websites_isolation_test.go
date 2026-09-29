@@ -194,3 +194,71 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		t.Fatalf("expected 200 on delete website, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestWebsiteHandler_DistinctDocumentRootPerDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	h := NewWebsiteHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	_ = s.CreateOrganization(context.Background(), &store.Organization{
+		ID:   orgID,
+		Name: "Test Org",
+		Slug: "test-org",
+	})
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         uuid.New(),
+				OrganizationID: orgID,
+				Role:           "owner",
+			}
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Post("/api/v1/websites", h.Create)
+
+	// 1. Create first website
+	site1Payload := []byte(`{"primary_domain":"alpha.com","document_root":"/var/www/alpha.com/public_html"}`)
+	req := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(site1Payload))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on first site creation, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Attempt to create second website with identical document root -> Must fail
+	duplicatePayload := []byte(`{"primary_domain":"beta.com","document_root":"/var/www/alpha.com/public_html"}`)
+	req = httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(duplicatePayload))
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on duplicate document root, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 3. Create second website with bare /var/www -> should auto-expand to /var/www/beta.com/public_html and succeed
+	barePayload := []byte(`{"primary_domain":"beta.com","document_root":"/var/www"}`)
+	req = httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(barePayload))
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on auto-expanded document root, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var res struct {
+		Data store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&res)
+	expectedDocRoot := filepath.Clean("/var/www/beta.com/public_html")
+	if filepath.Clean(res.Data.DocumentRoot) != expectedDocRoot {
+		t.Fatalf("expected document root %s, got %s", expectedDocRoot, res.Data.DocumentRoot)
+	}
+}

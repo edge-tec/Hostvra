@@ -224,7 +224,7 @@ export function SiteModificationModal({
 
   useEffect(() => {
     if (website) {
-      setDocRoot(website.document_root || `/www/wwwroot/${website.primary_domain}`);
+      setDocRoot(website.document_root || `/var/www/${website.primary_domain}/public_html`);
     }
   }, [website]);
 

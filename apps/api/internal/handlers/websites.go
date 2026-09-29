@@ -527,6 +527,17 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.DocumentRoot = "/var/www/" + req.PrimaryDomain + "/public_html"
 	} else {
 		cleanDocRoot := filepath.Clean(req.DocumentRoot)
+		// Prevent bare root paths (e.g. /var/www, /www, /home) from being directly used as a site root
+		if cleanDocRoot == "/var/www" || cleanDocRoot == "/www/wwwroot" || cleanDocRoot == "/www" || cleanDocRoot == "/home" {
+			cleanDocRoot = filepath.Join(cleanDocRoot, req.PrimaryDomain, "public_html")
+		}
+		if envRoot := os.Getenv("HOSTVRA_WEB_ROOT"); envRoot != "" {
+			envClean := filepath.Clean(envRoot)
+			if cleanDocRoot == envClean {
+				cleanDocRoot = filepath.Join(cleanDocRoot, req.PrimaryDomain, "public_html")
+			}
+		}
+
 		allowed := strings.HasPrefix(cleanDocRoot, "/var/www/") || strings.HasPrefix(cleanDocRoot, "/home/") || strings.HasPrefix(cleanDocRoot, "/www/")
 		if envRoot := os.Getenv("HOSTVRA_WEB_ROOT"); envRoot != "" {
 			envClean := filepath.Clean(envRoot)
@@ -538,7 +549,20 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Document root must reside inside /var/www, /home, or /www", nil, "")
 			return
 		}
+
 		req.DocumentRoot = cleanDocRoot
+	}
+
+	// Enforce distinct document roots: different domains must not share the same directory
+	if existingSites, err := h.store.ListWebsitesByOrg(r.Context(), orgID); err == nil {
+		for _, es := range existingSites {
+			if es != nil && !strings.EqualFold(es.PrimaryDomain, req.PrimaryDomain) {
+				if strings.EqualFold(filepath.Clean(es.DocumentRoot), req.DocumentRoot) {
+					response.Error(w, http.StatusBadRequest, "DIRECTORY_IN_USE", fmt.Sprintf("Document root '%s' is already in use by website '%s'. Different domains must use distinct directories.", req.DocumentRoot, es.PrimaryDomain), nil, "")
+					return
+				}
+			}
+		}
 	}
 
 	defaultPHP := "8.3"
