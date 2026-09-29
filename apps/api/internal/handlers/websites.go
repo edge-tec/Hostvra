@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -150,6 +151,24 @@ type CreateWebsiteRequest struct {
 	ProxyPort     *int    `json:"proxy_port"`
 }
 
+func (h *WebsiteHandler) resolveOrgID(ctx context.Context, claimsOrgID uuid.UUID) uuid.UUID {
+	if claimsOrgID != uuid.Nil {
+		return claimsOrgID
+	}
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if org, err := h.store.GetOrganizationByID(ctx, defaultOrgID); err == nil && org != nil {
+		return org.ID
+	}
+	defaultOrg := &store.Organization{
+		ID:       defaultOrgID,
+		Name:     "Hostvra Default Org",
+		Slug:     "default-org",
+		PlanTier: "enterprise",
+	}
+	_ = h.store.CreateOrganization(ctx, defaultOrg)
+	return defaultOrgID
+}
+
 func (h *WebsiteHandler) resolveServerID(ctx context.Context, requestedID string, orgID uuid.UUID) uuid.UUID {
 	if requestedID != "" {
 		if parsed, err := uuid.Parse(requestedID); err == nil && parsed != uuid.Nil {
@@ -177,10 +196,12 @@ func (h *WebsiteHandler) resolveServerID(ctx context.Context, requestedID string
 		return s.ID
 	}
 
+	validOrgID := h.resolveOrgID(ctx, orgID)
+
 	// 4. Create local server record
 	newServer := &store.Server{
 		ID:             defaultServerID,
-		OrganizationID: orgID,
+		OrganizationID: validOrgID,
 		Name:           "Local Web Node",
 		Hostname:       "localhost",
 		IPAddress:      "127.0.0.1",
@@ -216,14 +237,11 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	targetOrgID := orgID
-	if targetOrgID == uuid.Nil {
-		if claims != nil && claims.OrganizationID != uuid.Nil {
-			targetOrgID = claims.OrganizationID
-		} else {
-			targetOrgID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-		}
+	var rawOrgID uuid.UUID
+	if claims != nil {
+		rawOrgID = claims.OrganizationID
 	}
+	targetOrgID := h.resolveOrgID(r.Context(), rawOrgID)
 
 	// 1. For administrators, auto-discover physical domains present in /var/www/
 	if isAdmin {
@@ -259,6 +277,16 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 					if cErr := h.store.CreateWebsite(r.Context(), newSite); cErr == nil {
 						sites = append(sites, newSite)
 						seen[dName] = true
+					} else {
+						if existing, gErr := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); gErr == nil {
+							for _, es := range existing {
+								if es != nil && strings.EqualFold(es.PrimaryDomain, dName) && !seen[dName] {
+									sites = append(sites, es)
+									seen[dName] = true
+									break
+								}
+							}
+						}
 					}
 				}
 			}
@@ -448,7 +476,25 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	serverID := h.resolveServerID(r.Context(), "", orgID)
+	// Also check /var/www for directories that don't have a website record yet
+	if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			d := strings.ToLower(strings.TrimSpace(entry.Name()))
+			if d == "html" || d == "default" || d == "hostvra-temp" || strings.HasPrefix(d, ".") {
+				continue
+			}
+			if strings.Contains(d, ".") && !siteMap[d] {
+				candidates = append(candidates, d)
+				siteMap[d] = true
+			}
+		}
+	}
+
+	validOrgID := h.resolveOrgID(r.Context(), orgID)
+	serverID := h.resolveServerID(r.Context(), "", validOrgID)
 	createdSites := make([]*store.Website, 0)
 	defaultPHP := "8.3"
 
@@ -463,7 +509,7 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 		site := &store.Website{
 			ID:             uuid.New(),
 			ServerID:       serverID,
-			OrganizationID: orgID,
+			OrganizationID: validOrgID,
 			PrimaryDomain:  domain,
 			DocumentRoot:   docRoot,
 			SystemUser:     systemUser,
@@ -477,6 +523,15 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 			_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, defaultPHP, site.AppType, nil)
 			createdSites = append(createdSites, site)
 			h.audit.Log(r.Context(), r, "website.sync", "website", site.ID.String(), "success", fmt.Sprintf("Auto-synced website for domain %s", domain), nil)
+		} else {
+			if all, lErr := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); lErr == nil {
+				for _, es := range all {
+					if es != nil && strings.EqualFold(es.PrimaryDomain, domain) {
+						createdSites = append(createdSites, es)
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -514,10 +569,11 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orgID := uuid.Nil
+	var rawOrgID uuid.UUID
 	if claims != nil {
-		orgID = claims.OrganizationID
+		rawOrgID = claims.OrganizationID
 	}
+	orgID := h.resolveOrgID(r.Context(), rawOrgID)
 	serverID := h.resolveServerID(r.Context(), req.ServerID, orgID)
 
 	if req.AppType == "" {
@@ -597,15 +653,19 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.CreateWebsite(r.Context(), site); err != nil {
-		if allSites, lErr := h.store.ListWebsitesByOrg(r.Context(), orgID); lErr == nil {
-			for _, s := range allSites {
-				if s != nil && strings.EqualFold(s.PrimaryDomain, req.PrimaryDomain) && s.OrganizationID == orgID {
-					response.JSON(w, http.StatusOK, s, nil)
-					return
+		if errors.Is(err, store.ErrAlreadyExists) || strings.Contains(err.Error(), "unique constraint") || strings.Contains(err.Error(), "23505") {
+			if allSites, lErr := h.store.ListWebsitesByOrg(r.Context(), orgID); lErr == nil {
+				for _, s := range allSites {
+					if s != nil && strings.EqualFold(s.PrimaryDomain, req.PrimaryDomain) && s.OrganizationID == orgID {
+						response.JSON(w, http.StatusOK, s, nil)
+						return
+					}
 				}
 			}
+			response.Error(w, http.StatusConflict, "WEBSITE_EXISTS", "A website with this domain already exists on the server", nil, "")
+			return
 		}
-		response.Error(w, http.StatusConflict, "WEBSITE_EXISTS", "A website with this domain already exists on the server", nil, "")
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", fmt.Sprintf("Failed to create website: %v", err), nil, "")
 		return
 	}
 

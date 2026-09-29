@@ -19,9 +19,13 @@ func (m *MemoryStore) CreateWebsite(ctx context.Context, site *Website) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for _, s := range m.websites {
-		if strings.EqualFold(s.PrimaryDomain, site.PrimaryDomain) && s.DeletedAt == nil {
-			return ErrAlreadyExists
+	for id, s := range m.websites {
+		if strings.EqualFold(s.PrimaryDomain, site.PrimaryDomain) {
+			if s.DeletedAt != nil {
+				delete(m.websites, id)
+			} else {
+				return ErrAlreadyExists
+			}
 		}
 	}
 
@@ -342,6 +346,9 @@ func (m *MemoryStore) DeleteSSL(ctx context.Context, id uuid.UUID) error {
 // ============================================================================
 
 func (p *PostgresStore) CreateWebsite(ctx context.Context, site *Website) error {
+	// Purge any previously soft-deleted website with the same domain so re-creation is unblocked
+	_, _ = p.db.ExecContext(ctx, `DELETE FROM websites WHERE LOWER(primary_domain) = LOWER($1) AND deleted_at IS NOT NULL`, site.PrimaryDomain)
+
 	query := `
 		INSERT INTO websites (id, server_id, organization_id, primary_domain, document_root, system_user, php_version, app_type, proxy_port, status, ssl_enabled)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
