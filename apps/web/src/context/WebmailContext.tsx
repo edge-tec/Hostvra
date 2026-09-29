@@ -111,6 +111,14 @@ interface WebmailContextType {
     syncInterval?: string;
   }) => Promise<boolean>;
   // Audio & Desktop alerts
+  soundEnabled: boolean;
+  setSoundEnabled: (enabled: boolean) => void;
+  toggleSound: () => void;
+  desktopNotifications: boolean;
+  setDesktopNotifications: (enabled: boolean) => void;
+  desktopNotificationsEnabled: boolean;
+  requestNotificationPermission: () => Promise<boolean>;
+  requestDesktopNotifications: () => Promise<boolean>;
   // Identities
   identities: MailIdentity[];
   fetchIdentities: () => Promise<void>;
@@ -585,8 +593,8 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Request desktop notification permission
-  const requestNotificationPermission = useCallback(async () => {
-    if (!('Notification' in window)) return;
+  const requestNotificationPermission = useCallback(async (): Promise<boolean> => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return false;
     try {
       const perm = await Notification.requestPermission();
       if (perm === 'granted') {
@@ -595,9 +603,12 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
           body: 'You will receive instant desktop alerts for incoming messages.',
           icon: '/favicon.ico',
         });
+        return true;
       }
+      return false;
     } catch (e) {
       console.error('Error requesting notification permission:', e);
+      return false;
     }
   }, []);
 
@@ -813,6 +824,7 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
         setSoundEnabled,
         toggleSound,
         desktopNotifications,
+        setDesktopNotifications,
         desktopNotificationsEnabled: desktopNotifications,
         requestNotificationPermission,
         requestDesktopNotifications: requestNotificationPermission,

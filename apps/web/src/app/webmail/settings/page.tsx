@@ -183,7 +183,7 @@ export default function WebmailSettingsPage() {
       name: newFilterName,
       criteria_field: filterCriteriaField,
       criteria_pattern: filterCriteriaVal,
-      action: filterAction,
+      action_type: filterAction,
       action_target: filterAction === 'move' ? filterActionTarget : '',
       is_active: true,
       priority: filters.length + 1,
@@ -678,7 +678,7 @@ export default function WebmailSettingsPage() {
                         <p className="text-[11px] text-slate-500 mt-0.5">
                           If {f.criteria_field} contains{' '}
                           <code className="bg-slate-100 px-1.5 py-0.5 rounded text-emerald-700 font-mono">{f.criteria_pattern}</code>{' '}
-                          &rarr; {f.action} {f.action_target ? `(${f.action_target})` : ''}
+                          &rarr; {f.action_type} {f.action_target ? `(${f.action_target})` : ''}
                         </p>
                       </div>
                       <button
