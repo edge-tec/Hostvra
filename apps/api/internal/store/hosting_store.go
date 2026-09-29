@@ -481,7 +481,7 @@ func (p *PostgresStore) UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslE
 
 func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error {
 	query := `
-		INSERT INTO databases (id, server_id, organization_id, db_type, name, character_set, collation)
+		INSERT INTO databases (id, server_id, organization_id, db_type, name, character_set, "collation")
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at
 	`
@@ -499,7 +499,7 @@ func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error 
 
 func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
 		FROM databases
 		WHERE id = $1 AND deleted_at IS NULL
 	`
@@ -515,7 +515,7 @@ func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Dat
 
 func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
 		FROM databases
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -540,7 +540,7 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 
 func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, collation, size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
 		FROM databases
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -566,7 +566,7 @@ func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID)
 func (p *PostgresStore) UpdateDatabase(ctx context.Context, db *Database) error {
 	query := `
 		UPDATE databases
-		SET name = $2, character_set = $3, collation = $4, size_bytes = $5
+		SET name = $2, character_set = $3, "collation" = $4, size_bytes = $5
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	_, err := p.db.ExecContext(ctx, query, db.ID, db.Name, db.CharacterSet, db.Collation, db.SizeBytes)

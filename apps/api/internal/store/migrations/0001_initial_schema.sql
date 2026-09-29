@@ -212,7 +212,7 @@ CREATE TABLE IF NOT EXISTS databases (
     db_type VARCHAR(50) NOT NULL DEFAULT 'mysql', -- 'mysql', 'mariadb', 'postgresql'
     name VARCHAR(100) NOT NULL,
     character_set VARCHAR(50) NOT NULL DEFAULT 'utf8mb4',
-    collation VARCHAR(50) NOT NULL DEFAULT 'utf8mb4_unicode_ci',
+    "collation" VARCHAR(50) NOT NULL DEFAULT 'utf8mb4_unicode_ci',
     size_bytes BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at TIMESTAMPTZ,
