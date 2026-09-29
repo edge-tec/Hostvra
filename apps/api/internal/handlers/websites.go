@@ -527,7 +527,7 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.DocumentRoot = "/var/www/" + req.PrimaryDomain + "/public_html"
 	} else {
 		cleanDocRoot := filepath.Clean(req.DocumentRoot)
-		allowed := strings.HasPrefix(cleanDocRoot, "/var/www/") || strings.HasPrefix(cleanDocRoot, "/home/")
+		allowed := strings.HasPrefix(cleanDocRoot, "/var/www/") || strings.HasPrefix(cleanDocRoot, "/home/") || strings.HasPrefix(cleanDocRoot, "/www/")
 		if envRoot := os.Getenv("HOSTVRA_WEB_ROOT"); envRoot != "" {
 			envClean := filepath.Clean(envRoot)
 			if strings.HasPrefix(cleanDocRoot, envClean+"/") || cleanDocRoot == envClean {
@@ -535,7 +535,7 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !allowed {
-			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Document root must reside inside /var/www or /home", nil, "")
+			response.Error(w, http.StatusBadRequest, "VALIDATION_ERROR", "Document root must reside inside /var/www, /home, or /www", nil, "")
 			return
 		}
 		req.DocumentRoot = cleanDocRoot

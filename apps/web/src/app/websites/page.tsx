@@ -169,7 +169,7 @@ export default function WebsitesPage() {
   // Add Site Form State
   const [newDomain, setNewDomain] = useState('');
   const [newRemarks, setNewRemarks] = useState('');
-  const [newDocRoot, setNewDocRoot] = useState('/www/wwwroot/');
+  const [newDocRoot, setNewDocRoot] = useState('/var/www/');
   const [newPhpVer, setNewPhpVer] = useState('8.2');
   const [newWebServer, setNewWebServer] = useState('nginx');
   const [newCategory, setNewCategory] = useState('Default');
@@ -339,8 +339,7 @@ export default function WebsitesPage() {
 
     setCreatingSite(true);
     const domain = newDomain.trim().toLowerCase().split('\n')[0].trim();
-    const remarks = newRemarks.trim() || domain.split('.')[0];
-    const docRoot = newDocRoot.endsWith('/') ? newDocRoot + domain : newDocRoot;
+    const docRoot = newDocRoot.endsWith('/') ? `${newDocRoot}${domain}/public_html` : newDocRoot;
     const computedAppType = activeTab === 'nodejs' ? 'nodejs' : activeTab === 'python' ? 'python' : activeTab === 'go' ? 'go' : activeTab === 'proxy' ? 'proxy' : newPhpVer === 'Static' ? 'static' : 'php';
     const effectiveServerID = selectedServer || (servers.length > 0 ? servers[0].id : undefined);
 
@@ -363,6 +362,7 @@ export default function WebsitesPage() {
         setAddSiteOpen(false);
         setNewDomain('');
         setNewRemarks('');
+        setNewDocRoot('/var/www/');
         fetchData();
       } else {
         showToast(res.error?.message || 'Failed to create website', true);
@@ -1392,10 +1392,17 @@ export default function WebsitesPage() {
                     rows={2}
                     value={newDomain}
                     onChange={(e) => {
-                      setNewDomain(e.target.value);
-                      if (!newRemarks) {
-                        const first = e.target.value.trim().split('\n')[0].split('.')[0];
-                        setNewRemarks(first);
+                      const val = e.target.value;
+                      setNewDomain(val);
+                      const firstDomain = val.trim().split('\n')[0].trim();
+                      if (firstDomain) {
+                        const prevFirst = newDomain.trim().split('\n')[0].split('.')[0];
+                        if (!newRemarks || newRemarks === prevFirst) {
+                          setNewRemarks(firstDomain.split('.')[0]);
+                        }
+                        if (!newDocRoot || newDocRoot === '/var/www/' || newDocRoot === '/www/wwwroot/' || newDocRoot.startsWith('/var/www/') || newDocRoot.startsWith('/www/wwwroot/')) {
+                          setNewDocRoot(`/var/www/${firstDomain}/public_html`);
+                        }
                       }
                     }}
                     placeholder="example.com&#10;www.example.com"
