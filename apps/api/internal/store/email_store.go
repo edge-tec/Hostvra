@@ -250,7 +250,7 @@ func (m *MemoryStore) ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UUID
 
 	list := make([]*EmailDomain, 0)
 	for _, d := range m.emailDomains {
-		if d.OrganizationID == orgID && d.DeletedAt == nil {
+		if (orgID == uuid.Nil || d.OrganizationID == orgID) && d.DeletedAt == nil {
 			res := *d
 			for _, mb := range m.emailMailboxes {
 				if mb.DomainID == d.ID && mb.DeletedAt == nil {
@@ -405,7 +405,7 @@ func (m *MemoryStore) ListEmailMailboxesByServer(ctx context.Context, serverID u
 
 	list := make([]*EmailMailbox, 0)
 	for _, mb := range m.emailMailboxes {
-		if mb.ServerID == serverID && mb.DeletedAt == nil {
+		if (serverID == uuid.Nil || mb.ServerID == serverID) && mb.DeletedAt == nil {
 			list = append(list, mb)
 		}
 	}
@@ -1630,7 +1630,7 @@ func (p *PostgresStore) ListEmailDomainsByOrg(ctx context.Context, orgID uuid.UU
 		       (SELECT COUNT(*) FROM email_mailboxes m WHERE m.domain_id = d.id AND m.deleted_at IS NULL) as mailbox_count,
 		       (SELECT COUNT(*) FROM email_aliases a WHERE a.domain_id = d.id) as alias_count
 		FROM email_domains d
-		WHERE d.organization_id = $1 AND d.deleted_at IS NULL
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR d.organization_id = $1) AND d.deleted_at IS NULL
 		ORDER BY d.created_at DESC
 	`
 	rows, err := p.db.QueryContext(ctx, query, orgID)
@@ -1844,7 +1844,7 @@ func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID
 		       quota_bytes, used_bytes, is_active, is_suspended,
 		       created_at, updated_at
 		FROM email_mailboxes
-		WHERE server_id = $1 AND deleted_at IS NULL
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
 		ORDER BY email ASC
 	`
 	rows, err := p.db.QueryContext(ctx, query, serverID)

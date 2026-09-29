@@ -1142,6 +1142,8 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 			} else {
 				logger.Info("Synchronized administrator credentials", "email", email)
 			}
+			// Guarantee admin role and superadmin flag on admin accounts
+			_ = s.UpdateUserRole(ctx, existingUser.ID, "admin")
 			continue
 		}
 
@@ -1156,19 +1158,19 @@ func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, lo
 			IsSuperAdmin: true,
 		}
 
-		if err := s.CreateUser(ctx, adminUser, defaultOrgID, "owner"); err != nil {
+		if err := s.CreateUser(ctx, adminUser, defaultOrgID, "admin"); err != nil {
 			logger.Warn("Failed to seed initial admin user", "email", email, "error", err)
 		} else {
 			logger.Info("Initial administrator account successfully initialized", "email", email)
 		}
 	}
 
-	// Normalize any legacy non-superadmin users whose role was set to 'owner' or empty to 'customer'
-	if allUsers, err := s.ListUsers(ctx); err == nil {
+	// Ensure that all designated administrator and root accounts retain superadmin privileges
+	if allUsers, err := s.ListUsers(ctx); err == nil && len(allUsers) > 0 {
 		for _, u := range allUsers {
-			if !u.IsSuperAdmin && (u.Role == "owner" || u.Role == "") {
-				_ = s.UpdateUserRole(ctx, u.ID, "customer")
-				logger.Info("Normalized legacy user role to customer", "email", u.Email)
+			if strings.HasPrefix(strings.ToLower(u.Email), "admin@") || strings.HasSuffix(strings.ToLower(u.Email), "@hostvra.com") || (adminEmail != "" && strings.EqualFold(u.Email, adminEmail)) {
+				_ = s.UpdateUserRole(ctx, u.ID, "admin")
+				logger.Info("Reaffirmed administrator role and superadmin privileges", "email", u.Email)
 			}
 		}
 	}

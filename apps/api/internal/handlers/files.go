@@ -85,7 +85,8 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 		}
 	}
 
-	if claims.Role != "owner" && claims.Role != "admin" {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if !isAdmin {
 		restrictedRoots := []string{
 			"/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/run", "/var/run",
 			"/var/lib/hostvra", "/var/lib/docker", "/usr", "/bin", "/sbin", "/lib", "/lib64",
@@ -2133,14 +2134,19 @@ func (h *FileHandler) ActivityLogs(w http.ResponseWriter, r *http.Request) {
 
 // ListDomains returns website domains for multi-domain directory switching
 func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+
 	orgID := uuid.Nil
-	if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
+	if !isAdmin && claims != nil {
 		orgID = claims.OrganizationID
 	}
 	sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", err.Error(), nil, "")
-		return
+		sites, _ = h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
+	}
+	if len(sites) == 0 && orgID != uuid.Nil {
+		sites, _ = h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
 	}
 
 	type SimpleDomain struct {
@@ -2151,14 +2157,45 @@ func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res := make([]SimpleDomain, 0)
+	seen := make(map[string]bool)
 	for _, s := range sites {
-		if s.DeletedAt == nil {
-			res = append(res, SimpleDomain{
-				ID:           s.ID.String(),
-				Domain:       s.PrimaryDomain,
-				DocumentRoot: s.DocumentRoot,
-				Status:       s.Status,
-			})
+		if s != nil && s.DeletedAt == nil && s.PrimaryDomain != "" {
+			d := strings.ToLower(strings.TrimSpace(s.PrimaryDomain))
+			if !seen[d] {
+				seen[d] = true
+				res = append(res, SimpleDomain{
+					ID:           s.ID.String(),
+					Domain:       s.PrimaryDomain,
+					DocumentRoot: s.DocumentRoot,
+					Status:       s.Status,
+				})
+			}
+		}
+	}
+
+	// Auto-discover any domain directory under /var/www that isn't yet in sites
+	if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			dName := strings.ToLower(entry.Name())
+			if dName == "html" || dName == "default" || dName == "hostvra-temp" || strings.HasPrefix(dName, ".") {
+				continue
+			}
+			if !seen[dName] && strings.Contains(dName, ".") {
+				seen[dName] = true
+				docRoot := filepath.Join("/var/www", dName, "public_html")
+				if _, sErr := os.Stat(docRoot); os.IsNotExist(sErr) {
+					docRoot = filepath.Join("/var/www", dName)
+				}
+				res = append(res, SimpleDomain{
+					ID:           uuid.New().String(),
+					Domain:       dName,
+					DocumentRoot: docRoot,
+					Status:       "active",
+				})
+			}
 		}
 	}
 

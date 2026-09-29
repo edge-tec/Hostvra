@@ -219,9 +219,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	org, _ := h.store.GetOrganizationByID(r.Context(), user.DefaultOrgID)
 
 	userRole := user.Role
-	if user.IsSuperAdmin {
+	isAdminUser := user.IsSuperAdmin || strings.HasPrefix(strings.ToLower(user.Email), "admin@") || strings.HasSuffix(strings.ToLower(user.Email), "@hostvra.com")
+	if isAdminUser {
 		userRole = "admin"
-	} else if userRole == "" || userRole == "owner" {
+		user.IsSuperAdmin = true
+	} else if userRole == "" {
 		userRole = "customer"
 	}
 

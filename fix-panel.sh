@@ -5,11 +5,17 @@ echo "=========================================================="
 echo "  Hostvra Control Panel & Webmail Auto-Fix & Restarter   "
 echo "=========================================================="
 
-echo "[1/5] Building Next.js Web App (apps/web)..."
+echo "[1/6] Compiling Hostvra Core API..."
+if command -v go &>/dev/null && [[ -f "/root/Hostvra/apps/api/cmd/server/main.go" ]]; then
+    (cd /root/Hostvra/apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/hostvra-api cmd/server/main.go)
+    echo "✓ Hostvra API compiled and updated."
+fi
+
+echo "[2/6] Building Next.js Web App (apps/web)..."
 cd /root/Hostvra/apps/web
 npm run build
 
-echo "[2/5] Cleaning conflicting Nginx default sites..."
+echo "[3/6] Cleaning conflicting Nginx default sites..."
 rm -f /etc/nginx/sites-enabled/default
 rm -f /etc/nginx/conf.d/default.conf
 
@@ -120,14 +126,14 @@ NGINX_CONF
 mkdir -p /etc/nginx/sites-enabled
 ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel
 
-echo "[3/5] Testing Nginx configuration..."
+echo "[4/6] Testing Nginx configuration..."
 nginx -t
 
-echo "[4/5] Reloading Nginx and restarting Hostvra services..."
+echo "[5/6] Reloading Nginx and restarting Hostvra services..."
 systemctl reload nginx
 systemctl restart hostvra-web hostvra-api
 
-echo "[5/5] Checking service status..."
+echo "[6/6] Checking service status..."
 systemctl is-active --quiet hostvra-web && echo "✓ hostvra-web is RUNNING" || echo "✗ hostvra-web failed to start"
 systemctl is-active --quiet hostvra-api && echo "✓ hostvra-api is RUNNING" || echo "✗ hostvra-api failed to start"
 systemctl is-active --quiet nginx && echo "✓ nginx is RUNNING" || echo "✗ nginx failed to start"
