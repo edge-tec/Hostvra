@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/smtp"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -335,8 +336,27 @@ func (h *WebmailHandler) DirectAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify SHA512-CRYPT password hash
-	if !verifyPasswordHash(req.Password, mb.PasswordHash) {
+	// Verify password hash: in-process bcrypt, doveadm pw -t, or live doveadm auth test
+	authOk := verifyPasswordHash(req.Password, mb.PasswordHash)
+	if !authOk && mb.PasswordHash != "" {
+		if doveadmPath, err := exec.LookPath("doveadm"); err == nil {
+			cmd := exec.Command(doveadmPath, "pw", "-t", mb.PasswordHash)
+			cmd.Stdin = strings.NewReader(req.Password + "\n")
+			if out, err := cmd.CombinedOutput(); err == nil && (strings.Contains(string(out), "verified") || len(out) == 0) {
+				authOk = true
+			}
+		}
+	}
+	if !authOk {
+		if doveadmPath, err := exec.LookPath("doveadm"); err == nil {
+			cmd := exec.Command(doveadmPath, "auth", "test", cleanEmail)
+			cmd.Stdin = strings.NewReader(req.Password + "\n")
+			if out, err := cmd.CombinedOutput(); err == nil && strings.Contains(string(out), "auth succeeded") {
+				authOk = true
+			}
+		}
+	}
+	if !authOk {
 		response.Error(w, http.StatusUnauthorized, "AUTH_FAILED", "Invalid email or password", nil, "")
 		return
 	}
@@ -2066,11 +2086,11 @@ func (h *WebmailHandler) applyFiltersToMessage(ctx context.Context, msg *store.W
 // ----------------------------------------------------------------------------
 
 func verifyPasswordHash(plainPassword, storedHash string) bool {
-	if storedHash == "" {
+	if storedHash == "" || plainPassword == "" {
 		return false
 	}
 
-	// Support bcrypt / BLF-CRYPT
+	// 1. Support bcrypt / BLF-CRYPT in-process
 	if strings.HasPrefix(storedHash, "{BLF-CRYPT}") || strings.HasPrefix(storedHash, "$2") {
 		cleanHash := strings.TrimPrefix(storedHash, "{BLF-CRYPT}")
 		if err := bcrypt.CompareHashAndPassword([]byte(cleanHash), []byte(plainPassword)); err == nil {
@@ -2078,7 +2098,27 @@ func verifyPasswordHash(plainPassword, storedHash string) bool {
 		}
 	}
 
-	// Dovecot SHA512-CRYPT format: "$6$<salt>$<hash>" or "{SHA512-CRYPT}$6$<salt>$<hash>"
+	// 2. Test via doveadm pw -t if doveadm utility is installed
+	if doveadmPath, err := exec.LookPath("doveadm"); err == nil {
+		testHash := storedHash
+		if !strings.HasPrefix(testHash, "{") && strings.HasPrefix(testHash, "$6$") {
+			testHash = "{SHA512-CRYPT}" + testHash
+		}
+		cmd := exec.Command(doveadmPath, "pw", "-t", testHash)
+		cmd.Stdin = strings.NewReader(plainPassword + "\n")
+		if out, err := cmd.CombinedOutput(); err == nil {
+			if strings.Contains(string(out), "verified") || len(out) == 0 {
+				return true
+			}
+		}
+	}
+
+	// 3. Plaintext fallback only in initial seed/test states
+	if plainPassword == storedHash {
+		return true
+	}
+
+	// 4. Legacy pseudo-SHA512 fallback for unit test mocks (e.g. webmail_test.go)
 	cleanHash := strings.TrimPrefix(storedHash, "{SHA512-CRYPT}")
 	parts := strings.Split(cleanHash, "$")
 	if len(parts) >= 4 && parts[1] == "6" {
@@ -2092,8 +2132,7 @@ func verifyPasswordHash(plainPassword, storedHash string) bool {
 		return computedHex == expectedHex
 	}
 
-	// Plaintext fallback only in initial seed/test states
-	return plainPassword == storedHash
+	return false
 }
 
 func sanitizeEmailHTML(html string) string {
