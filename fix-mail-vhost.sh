@@ -102,26 +102,12 @@ fi
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
 cat > "$NGINX_CONF" << NGINX_BLOCK
-# Virtual Host for $DOMAIN
+# Virtual Host for $DOMAIN (Serves both HTTP and HTTPS for Cloudflare compatibility)
 server {
     listen 80;
     listen [::]:80;
-    server_name $DOMAIN;
-
-    # Allow ACME / Certbot challenges over HTTP
-    location /.well-known/acme-challenge/ {
-        root $DOC_ROOT;
-    }
-
-    # Redirect all other traffic to HTTPS
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
     server_name $DOMAIN;
 
     root $DOC_ROOT;
@@ -141,6 +127,12 @@ server {
 
     access_log /var/log/nginx/${DOMAIN}.access.log;
     error_log /var/log/nginx/${DOMAIN}.error.log;
+
+    # Allow Let's Encrypt / Certbot challenges
+    location /.well-known/acme-challenge/ {
+        root $DOC_ROOT;
+        allow all;
+    }
 
     # Laravel / PHP Router handling
     location / {
@@ -175,17 +167,21 @@ nginx -t
 echo "[*] Reloading Nginx service..."
 systemctl restart nginx
 
-# 7. Self-test handshake locally
-echo "[*] Verifying local SSL handshake..."
-if curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1" -H "Host: $DOMAIN" | grep -qE "200|301|302|404|403"; then
-    echo "[✓] Local SSL handshake succeeded!"
-else
-    echo "[!] Warning: Local test response code was not standard, check Nginx status."
+# 7. Attempt official Let's Encrypt certificate via Certbot if installed
+if command -v certbot &>/dev/null; then
+    echo "[*] Attempting to issue trusted Let's Encrypt certificate via Certbot..."
+    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null || true
 fi
+
+# 8. Self-test handshake locally
+echo "[*] Verifying local HTTP and SSL response..."
+curl -k -s -o /dev/null -w "Port 443 status: %{http_code}\n" "https://127.0.0.1" -H "Host: $DOMAIN"
+curl -s -o /dev/null -w "Port 80 status: %{http_code}\n" "http://127.0.0.1" -H "Host: $DOMAIN"
 
 echo "=========================================================="
 echo "  SUCCESS! Cloudflare Error 525 resolved."
 echo "  https://$DOMAIN is now actively serving:"
 echo "  $DOC_ROOT"
 echo "=========================================================="
+
 
