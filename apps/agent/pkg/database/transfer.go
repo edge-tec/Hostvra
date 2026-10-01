@@ -220,12 +220,14 @@ type ImportResult struct {
 // It supports files up to 128 MB with automatic temporary file buffering,
 // fast-path native CLI execution (mysql/mariadb), and a streaming quote-aware
 // fallback parser with utf8mb4 encoding, foreign-key isolation, and comment preservation.
+// It enforces that all tables and data are imported into dbName, neutralizing any conflicting
+// CREATE DATABASE or USE statements that exist in third-party database dumps.
 func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*ImportResult, error) {
 	if strings.TrimSpace(dbName) == "" {
 		return nil, errors.New("target database name is required")
 	}
 
-	// 1. Buffer stream to secure temporary file (max 128 MB)
+	// 1. Buffer and sanitize stream to secure temporary file (max 128 MB)
 	tmpFile, err := os.CreateTemp("", fmt.Sprintf("hostvra_import_%s_*.sql", dbName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temporary file for import: %w", err)
@@ -237,9 +239,9 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*I
 	defer tmpFile.Close()
 
 	const maxImportBytes = 128 * 1024 * 1024 // 128 MB max upload size
-	written, err := io.Copy(tmpFile, io.LimitReader(r, maxImportBytes+1))
+	written, err := sanitizeAndBufferSQL(r, tmpFile, dbName, maxImportBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read import stream: %w", err)
+		return nil, fmt.Errorf("failed to process import stream: %w", err)
 	}
 	if written > maxImportBytes {
 		return nil, fmt.Errorf("import file exceeds maximum allowed size of 128 MB")
@@ -285,10 +287,10 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*I
 			_ = inFile.Close()
 
 			if cliErr == nil {
-				// CLI import succeeded! Count live tables to verify import.
+				// CLI import succeeded! Count live tables in target db to verify import.
 				tableCount := 0
 				if db, dbErr := m.pool.GetDB(ctx, dbName); dbErr == nil {
-					if rows, qErr := db.QueryContext(ctx, "SHOW TABLES"); qErr == nil {
+					if rows, qErr := db.QueryContext(ctx, fmt.Sprintf("SHOW TABLES FROM %s", SafeQuoteIdentifier(dbName))); qErr == nil {
 						for rows.Next() {
 							tableCount++
 						}
@@ -350,14 +352,15 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*I
 	_, _ = conn.ExecContext(ctx, "SET UNIQUE_CHECKS = 0")
 	_, _ = conn.ExecContext(ctx, "SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO'")
 	_, _ = conn.ExecContext(ctx, "SET AUTOCOMMIT = 1")
+	_, _ = conn.ExecContext(ctx, fmt.Sprintf("USE %s", SafeQuoteIdentifier(dbName)))
 
 	result := &ImportResult{}
-	if err := parseAndExecuteSQL(ctx, inFile, conn, result); err != nil && result.Successful == 0 {
+	if err := parseAndExecuteSQL(ctx, inFile, conn, dbName, result); err != nil && result.Successful == 0 {
 		return nil, err
 	}
 
 	// Count live tables after import
-	if rows, qErr := conn.QueryContext(ctx, "SHOW TABLES"); qErr == nil {
+	if rows, qErr := conn.QueryContext(ctx, fmt.Sprintf("SHOW TABLES FROM %s", SafeQuoteIdentifier(dbName))); qErr == nil {
 		for rows.Next() {
 			result.Tables++
 		}
@@ -366,6 +369,143 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*I
 	result.Total = result.Successful + result.Failed
 
 	return result, nil
+}
+
+// sanitizeAndBufferSQL streams from reader r into tmpFile, enforcing that all
+// statements target targetDB. It neutralizes conflicting CREATE DATABASE/SCHEMA
+// statements, rewrites USE statements to targetDB, and rewrites qualified
+// table references (e.g. `old_db`.`table` -> `targetDB`.`table`).
+func sanitizeAndBufferSQL(r io.Reader, tmpFile *os.File, targetDB string, maxBytes int64) (int64, error) {
+	bw := bufio.NewWriterSize(tmpFile, 128*1024)
+	defer bw.Flush()
+
+	// Initial header forcing utf8mb4 and setting target schema
+	header := fmt.Sprintf("/*!40101 SET NAMES utf8mb4 */;\n/*!40014 SET FOREIGN_KEY_CHECKS=0 */;\n/*!40101 SET UNIQUE_CHECKS=0 */;\nUSE %s;\n\n", SafeQuoteIdentifier(targetDB))
+	if _, err := bw.WriteString(header); err != nil {
+		return 0, err
+	}
+
+	br := bufio.NewReaderSize(io.LimitReader(r, maxBytes+1), 128*1024)
+	var totalWritten int64 = int64(len(header))
+	var detectedOldDB string
+
+	for {
+		line, isPrefix, err := br.ReadLine()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return totalWritten, err
+		}
+
+		trimmed := strings.TrimSpace(string(line))
+		upper := strings.ToUpper(trimmed)
+		cleanUpper := strings.TrimPrefix(upper, "/*!40000 ")
+		cleanUpper = strings.TrimPrefix(cleanUpper, "/*!40101 ")
+		cleanUpper = strings.TrimPrefix(cleanUpper, "/*!32312 ")
+		cleanUpper = strings.TrimPrefix(cleanUpper, "/*!")
+		cleanUpper = strings.TrimSpace(cleanUpper)
+
+		// 1. Detect and skip CREATE DATABASE / CREATE SCHEMA
+		if strings.HasPrefix(cleanUpper, "CREATE DATABASE") || strings.HasPrefix(cleanUpper, "CREATE SCHEMA") {
+			if old := extractDBName(trimmed); old != "" && !strings.EqualFold(old, targetDB) {
+				detectedOldDB = old
+			}
+			commented := fmt.Sprintf("-- [Hostvra] Preserved target schema: %s (skipped conflicting CREATE DATABASE)\n", SafeQuoteIdentifier(targetDB))
+			n, wErr := bw.WriteString(commented)
+			if wErr != nil {
+				return totalWritten, wErr
+			}
+			totalWritten += int64(n)
+
+			if isPrefix {
+				for isPrefix {
+					_, isPrefix, _ = br.ReadLine()
+				}
+			}
+			continue
+		}
+
+		// 2. Detect and rewrite USE statement
+		if strings.HasPrefix(cleanUpper, "USE ") {
+			if old := extractDBName(trimmed); old != "" && !strings.EqualFold(old, targetDB) {
+				detectedOldDB = old
+			}
+			rewritten := fmt.Sprintf("USE %s;\n", SafeQuoteIdentifier(targetDB))
+			n, wErr := bw.WriteString(rewritten)
+			if wErr != nil {
+				return totalWritten, wErr
+			}
+			totalWritten += int64(n)
+
+			if isPrefix {
+				for isPrefix {
+					_, isPrefix, _ = br.ReadLine()
+				}
+			}
+			continue
+		}
+
+		// 3. Rewrite qualified table references if an old database name was detected
+		if detectedOldDB != "" {
+			oldQuoted := fmt.Sprintf("`%s`.", detectedOldDB)
+			newQuoted := fmt.Sprintf("`%s`.", targetDB)
+			if bytes.Contains(line, []byte(oldQuoted)) {
+				line = bytes.ReplaceAll(line, []byte(oldQuoted), []byte(newQuoted))
+			}
+			oldUnquoted := fmt.Sprintf("%s.", detectedOldDB)
+			if bytes.Contains(line, []byte(oldUnquoted)) {
+				line = bytes.ReplaceAll(line, []byte(oldUnquoted), []byte(newQuoted))
+			}
+		}
+
+		n, wErr := bw.Write(line)
+		if wErr != nil {
+			return totalWritten, wErr
+		}
+		totalWritten += int64(n)
+
+		if !isPrefix {
+			if err := bw.WriteByte('\n'); err != nil {
+				return totalWritten, err
+			}
+			totalWritten++
+		}
+	}
+
+	footer := "\n/*!40014 SET FOREIGN_KEY_CHECKS=1 */;\n/*!40101 SET UNIQUE_CHECKS=1 */;\n"
+	if _, err := bw.WriteString(footer); err != nil {
+		return totalWritten, err
+	}
+	totalWritten += int64(len(footer))
+
+	return totalWritten, nil
+}
+
+// extractDBName parses the database identifier from a CREATE DATABASE or USE statement.
+func extractDBName(line string) string {
+	first := strings.IndexByte(line, '`')
+	if first != -1 {
+		second := strings.IndexByte(line[first+1:], '`')
+		if second != -1 {
+			return line[first+1 : first+1+second]
+		}
+	}
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		if strings.EqualFold(f, "USE") && i+1 < len(fields) {
+			return strings.Trim(fields[i+1], "`;(), \t\r\n")
+		}
+		if (strings.EqualFold(f, "DATABASE") || strings.EqualFold(f, "SCHEMA")) && i+1 < len(fields) {
+			for j := i + 1; j < len(fields); j++ {
+				cand := strings.Trim(fields[j], "`;(), \t\r\n")
+				if !strings.EqualFold(cand, "IF") && !strings.EqualFold(cand, "NOT") && !strings.EqualFold(cand, "EXISTS") && !strings.Contains(cand, "/*") {
+					return cand
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // countStatements scans a file to estimate statement count without loading into RAM.
@@ -444,8 +584,8 @@ func countStatements(filePath string) int {
 
 // parseAndExecuteSQL streams and parses SQL statements with quote-awareness,
 // comment-preservation (preserving executable /*!... */ conditional comments),
-// DELIMITER switching, and error recording.
-func parseAndExecuteSQL(ctx context.Context, r io.Reader, conn *sql.Conn, res *ImportResult) error {
+// DELIMITER switching, target-schema enforcement, and error recording.
+func parseAndExecuteSQL(ctx context.Context, r io.Reader, conn *sql.Conn, targetDB string, res *ImportResult) error {
 	reader := bufio.NewReaderSize(r, 64*1024)
 	var stmt strings.Builder
 	stmt.Grow(4096)
@@ -629,6 +769,19 @@ func parseAndExecuteSQL(ctx context.Context, r io.Reader, conn *sql.Conn, res *I
 				stmt.Reset()
 
 				if query != "" {
+					upperQ := strings.ToUpper(query)
+					cleanQ := strings.TrimPrefix(upperQ, "/*!40000 ")
+					cleanQ = strings.TrimPrefix(cleanQ, "/*!40101 ")
+					cleanQ = strings.TrimPrefix(cleanQ, "/*!32312 ")
+					cleanQ = strings.TrimPrefix(cleanQ, "/*!")
+					cleanQ = strings.TrimSpace(cleanQ)
+
+					if strings.HasPrefix(cleanQ, "USE ") {
+						query = fmt.Sprintf("USE %s", SafeQuoteIdentifier(targetDB))
+					} else if strings.HasPrefix(cleanQ, "CREATE DATABASE") || strings.HasPrefix(cleanQ, "CREATE SCHEMA") {
+						continue
+					}
+
 					if _, execErr := conn.ExecContext(ctx, query); execErr != nil {
 						res.Failed++
 						if len(res.Errors) < 20 {
@@ -651,6 +804,19 @@ func parseAndExecuteSQL(ctx context.Context, r io.Reader, conn *sql.Conn, res *I
 					stmt.Reset()
 
 					if query != "" {
+						upperQ := strings.ToUpper(query)
+						cleanQ := strings.TrimPrefix(upperQ, "/*!40000 ")
+						cleanQ = strings.TrimPrefix(cleanQ, "/*!40101 ")
+						cleanQ = strings.TrimPrefix(cleanQ, "/*!32312 ")
+						cleanQ = strings.TrimPrefix(cleanQ, "/*!")
+						cleanQ = strings.TrimSpace(cleanQ)
+
+						if strings.HasPrefix(cleanQ, "USE ") {
+							query = fmt.Sprintf("USE %s", SafeQuoteIdentifier(targetDB))
+						} else if strings.HasPrefix(cleanQ, "CREATE DATABASE") || strings.HasPrefix(cleanQ, "CREATE SCHEMA") {
+							continue
+						}
+
 						if _, execErr := conn.ExecContext(ctx, query); execErr != nil {
 							res.Failed++
 							if len(res.Errors) < 20 {
@@ -673,21 +839,33 @@ func parseAndExecuteSQL(ctx context.Context, r io.Reader, conn *sql.Conn, res *I
 	if stmt.Len() > 0 {
 		query := strings.TrimSpace(stmt.String())
 		if query != "" {
-			if _, execErr := conn.ExecContext(ctx, query); execErr != nil {
-				res.Failed++
-				if len(res.Errors) < 20 {
-					snippet := query
-					if len(snippet) > 100 {
-						snippet = snippet[:100] + "..."
+			upperQ := strings.ToUpper(query)
+			cleanQ := strings.TrimPrefix(upperQ, "/*!40000 ")
+			cleanQ = strings.TrimPrefix(cleanQ, "/*!40101 ")
+			cleanQ = strings.TrimPrefix(cleanQ, "/*!32312 ")
+			cleanQ = strings.TrimPrefix(cleanQ, "/*!")
+			cleanQ = strings.TrimSpace(cleanQ)
+
+			if strings.HasPrefix(cleanQ, "USE ") {
+				query = fmt.Sprintf("USE %s", SafeQuoteIdentifier(targetDB))
+			} else if !strings.HasPrefix(cleanQ, "CREATE DATABASE") && !strings.HasPrefix(cleanQ, "CREATE SCHEMA") {
+				if _, execErr := conn.ExecContext(ctx, query); execErr != nil {
+					res.Failed++
+					if len(res.Errors) < 20 {
+						snippet := query
+						if len(snippet) > 100 {
+							snippet = snippet[:100] + "..."
+						}
+						res.Errors = append(res.Errors, fmt.Sprintf("%v (query: %s)", execErr, snippet))
 					}
-					res.Errors = append(res.Errors, fmt.Sprintf("%v (query: %s)", execErr, snippet))
+				} else {
+					res.Successful++
 				}
-			} else {
-				res.Successful++
 			}
 		}
 	}
 
 	return nil
 }
+
 
