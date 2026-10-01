@@ -766,15 +766,15 @@ export default function AppStorePage() {
               </div>
 
               {/* Terminal Logs Window */}
-              <div className="flex-1 overflow-y-auto p-4 bg-[#0a0e14] font-mono text-xs text-slate-300 space-y-1 select-text min-h-[250px] max-h-[380px]">
+              <div className="flex-1 overflow-y-auto p-4 bg-white dark:bg-slate-900 font-mono text-xs text-slate-700 dark:text-slate-300 space-y-1 select-text min-h-[250px] max-h-[380px] border-t border-surface-100 dark:border-slate-800">
                 {activeJob.logs?.map((line, idx) => (
                   <div
                     key={idx}
                     className={`leading-relaxed ${
                       line.includes('ERROR') || line.includes('failed')
-                        ? 'text-rose-400 font-semibold'
+                        ? 'text-rose-600 dark:text-rose-400 font-semibold'
                         : line.includes('completed successfully')
-                        ? 'text-emerald-400 font-semibold'
+                        ? 'text-emerald-600 dark:text-emerald-400 font-semibold'
                         : ''
                     }`}
                   >

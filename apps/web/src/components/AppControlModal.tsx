@@ -451,68 +451,70 @@ export function AppControlModal({
 
                 {/* Daemons Table */}
                 <div className="border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden shadow-sm">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 dark:bg-surface-800/60 border-b border-slate-200 dark:border-surface-800 text-slate-500 dark:text-slate-400 font-semibold">
-                      <tr>
-                        <th className="py-3 px-3">Name</th>
-                        <th className="py-3 px-3">Command</th>
-                        <th className="py-3 px-3">Run User</th>
-                        <th className="py-3 px-2 text-center">Path</th>
-                        <th className="py-3 px-3 text-right">Operation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 dark:divide-surface-800 text-slate-700 dark:text-slate-300 font-mono text-[11px]">
-                      {daemons.map((d) => (
-                        <tr key={d.id} className="hover:bg-slate-50/80 dark:hover:bg-surface-800/40 transition">
-                          <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white truncate max-w-[140px]">
-                            {d.name}
-                          </td>
-                          <td className="py-3 px-3 text-slate-500 dark:text-slate-400 truncate max-w-[220px]">
-                            {d.command}
-                          </td>
-                          <td className="py-3 px-3 font-medium text-slate-600 dark:text-slate-400">
-                            {d.run_user}
-                          </td>
-                          <td className="py-3 px-2 text-center">
-                            <span title={d.process_dir} className="inline-block cursor-pointer">
-                              <Folder className="w-4 h-4 text-amber-500 fill-amber-500/20 inline" />
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-right whitespace-nowrap font-sans text-xs">
-                            <button
-                              onClick={() => setViewingDaemonLog(d)}
-                              className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mr-1.5"
-                            >
-                              Log
-                            </button>
-                            <span className="text-slate-300 dark:text-surface-700">|</span>
-                            <button
-                              onClick={() => handleToggleDaemonStatus(d.id)}
-                              className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mx-1.5"
-                            >
-                              {d.status === 'Running' ? 'Restart' : 'Start'}
-                            </button>
-                            <span className="text-slate-300 dark:text-surface-700">|</span>
-                            <button
-                              onClick={() => {
-                                setSelectedTab('master_profile');
-                              }}
-                              className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mx-1.5"
-                            >
-                              Config
-                            </button>
-                            <span className="text-slate-300 dark:text-surface-700">|</span>
-                            <button
-                              onClick={() => handleDeleteDaemon(d.id)}
-                              className="text-red-500 hover:text-red-600 font-medium ml-1.5"
-                            >
-                              Del
-                            </button>
-                          </td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs" style={{ minWidth: '680px' }}>
+                      <thead className="bg-slate-50 dark:bg-surface-800/60 border-b border-slate-200 dark:border-surface-800 text-slate-500 dark:text-slate-400 font-semibold">
+                        <tr>
+                          <th className="py-3 px-3 whitespace-nowrap">Name</th>
+                          <th className="py-3 px-3 whitespace-nowrap">Command</th>
+                          <th className="py-3 px-3 whitespace-nowrap">Run User</th>
+                          <th className="py-3 px-2 text-center whitespace-nowrap">Path</th>
+                          <th className="py-3 px-3 text-right whitespace-nowrap">Operation</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200 dark:divide-surface-800 text-slate-700 dark:text-slate-300 font-mono text-[11px]">
+                        {daemons.map((d) => (
+                          <tr key={d.id} className="hover:bg-slate-50/80 dark:hover:bg-surface-800/40 transition">
+                            <td className="py-3 px-3 font-semibold text-slate-900 dark:text-white truncate max-w-[140px]">
+                              {d.name}
+                            </td>
+                            <td className="py-3 px-3 text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
+                              {d.command}
+                            </td>
+                            <td className="py-3 px-3 font-medium text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                              {d.run_user}
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <span title={d.process_dir} className="inline-block cursor-pointer">
+                                <Folder className="w-4 h-4 text-amber-500 fill-amber-500/20 inline" />
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right whitespace-nowrap font-sans text-xs">
+                              <button
+                                onClick={() => setViewingDaemonLog(d)}
+                                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mr-1.5"
+                              >
+                                Log
+                              </button>
+                              <span className="text-slate-300 dark:text-surface-700">|</span>
+                              <button
+                                onClick={() => handleToggleDaemonStatus(d.id)}
+                                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mx-1.5"
+                              >
+                                {d.status === 'Running' ? 'Restart' : 'Start'}
+                              </button>
+                              <span className="text-slate-300 dark:text-surface-700">|</span>
+                              <button
+                                onClick={() => {
+                                  setSelectedTab('master_profile');
+                                }}
+                                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 font-medium mx-1.5"
+                              >
+                                Config
+                              </button>
+                              <span className="text-slate-300 dark:text-surface-700">|</span>
+                              <button
+                                onClick={() => handleDeleteDaemon(d.id)}
+                                className="text-red-500 hover:text-red-600 font-medium ml-1.5"
+                              >
+                                Del
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
