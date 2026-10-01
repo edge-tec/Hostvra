@@ -92,6 +92,10 @@ export default function DatabasesPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importSqlText, setImportSqlText] = useState('');
   const [importing, setImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importResult, setImportResult] = useState<{ successful: number; failed: number; total: number } | null>(null);
+  const [isDraggingImport, setIsDraggingImport] = useState(false);
 
   // Create DB Form Fields
   const [dbName, setDbName] = useState('');
@@ -352,20 +356,67 @@ export default function DatabasesPage() {
     showToast(`Access permission updated to '${newHost}'`);
   };
 
-  // Import SQL Dump
+  // Import SQL Dump (file upload or raw SQL text)
   const handleImportSql = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedDb) return;
+    if (!importFile && !importSqlText.trim()) {
+      showToast('Please select a .sql file or paste SQL statements.');
+      return;
+    }
 
     setImporting(true);
-    await apiFetch(`/api/v1/databases/${selectedDb.id}/import`, {
-      method: 'POST',
-      body: importSqlText,
-    });
-    setImporting(false);
-    setImportModalOpen(false);
-    setImportSqlText('');
-    showToast(`SQL import into '${selectedDb.name}' completed successfully!`);
+    setImportResult(null);
+    setImportProgress(10);
+
+    const progressTimer = setInterval(() => {
+      setImportProgress((prev) => {
+        if (prev < 30) return prev + 10;
+        if (prev < 80) return prev + 5;
+        if (prev < 95) return prev + 1;
+        return prev;
+      });
+    }, 400);
+
+    try {
+      let res;
+      if (importFile) {
+        // File upload — use multipart/form-data
+        const formData = new FormData();
+        formData.append('file', importFile);
+        res = await apiFetch<any>(`/api/v1/databases/${selectedDb.id}/import`, {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        // Raw SQL text — send as text/plain so backend reads from body
+        res = await apiFetch<any>(`/api/v1/databases/${selectedDb.id}/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: importSqlText,
+        });
+      }
+
+      clearInterval(progressTimer);
+      setImportProgress(100);
+
+      if (res && res.success) {
+        setImportResult(res.data);
+        showToast(`Import into '${selectedDb.name}' completed: ${res.data?.successful || 0} succeeded, ${res.data?.failed || 0} failed.`);
+        fetchDatabases();
+      } else {
+        showToast(res?.error?.message || 'Import failed.');
+      }
+    } catch (err: any) {
+      clearInterval(progressTimer);
+      setImportProgress(0);
+      showToast(err?.message || 'Import error');
+    } finally {
+      clearInterval(progressTimer);
+      setTimeout(() => {
+        setImporting(false);
+      }, 600);
+    }
   };
 
   // Sync All
@@ -1408,7 +1459,7 @@ export default function DatabasesPage() {
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
             <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative text-xs">
               <button
-                onClick={() => setImportModalOpen(false)}
+                onClick={() => { setImportModalOpen(false); setImportFile(null); setImportResult(null); setImportProgress(0); }}
                 className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
@@ -1420,12 +1471,49 @@ export default function DatabasesPage() {
               </div>
               <p className="text-slate-500 dark:text-slate-400 mb-4 font-mono">Target: {selectedDb.name}</p>
 
-              <form onSubmit={handleImportSql} className="space-y-3">
+              <form onSubmit={handleImportSql} className="space-y-4">
+                {/* Drag-and-drop file upload zone */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImport(true); }}
+                  onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImport(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImport(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault(); e.stopPropagation(); setIsDraggingImport(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      setImportFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-5 text-center transition cursor-pointer ${
+                    isDraggingImport
+                      ? 'border-emerald-500 bg-emerald-500/10 scale-[1.01]'
+                      : 'border-slate-300 dark:border-surface-700 bg-slate-50/50 dark:bg-surface-950 hover:border-emerald-500'
+                  }`}
+                >
+                  <Upload className={`w-6 h-6 mx-auto mb-1.5 transition ${isDraggingImport ? 'text-emerald-500 animate-bounce' : 'text-slate-400'}`} />
+                  <p className="font-bold text-slate-900 dark:text-white text-xs">
+                    {isDraggingImport ? 'Drop your .sql file here' : 'Upload .sql or .txt dump file'}
+                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Max 128 MB — Drag & drop or browse</p>
+                  <input
+                    type="file"
+                    accept=".sql,.txt"
+                    id="db-import-file"
+                    className="hidden"
+                    onChange={(e) => { if (e.target.files && e.target.files[0]) setImportFile(e.target.files[0]); }}
+                  />
+                  <label
+                    htmlFor="db-import-file"
+                    className="mt-2 inline-block px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200 text-[11px]"
+                  >
+                    {importFile ? `${importFile.name} (${(importFile.size / 1024).toFixed(1)} KB)` : 'Browse File'}
+                  </label>
+                </div>
+
+                {/* Or paste SQL text */}
                 <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Paste SQL Query or Dump Statements</label>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Or Paste SQL Statements</label>
                   <textarea
-                    rows={6}
-                    required
+                    rows={5}
                     placeholder="-- Paste your SQL dump statements here..."
                     value={importSqlText}
                     onChange={(e) => setImportSqlText(e.target.value)}
@@ -1433,21 +1521,45 @@ export default function DatabasesPage() {
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-2">
+                {/* Progress bar */}
+                {importing && (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <div className="flex items-center gap-1.5">
+                        <RefreshCw className="w-3.5 h-3.5 text-emerald-500 animate-spin" />
+                        <span className="text-slate-800 dark:text-slate-200">Importing SQL into {selectedDb.name}...</span>
+                      </div>
+                      <span className="text-emerald-600 dark:text-emerald-400 font-mono">{importProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-surface-800 h-2 rounded-full overflow-hidden">
+                      <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-full transition-all duration-300 rounded-full" style={{ width: `${importProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Result display */}
+                {importResult && (
+                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 space-y-0.5">
+                    <p className="font-bold">Import Completed</p>
+                    <p>Total: {importResult.total} — Succeeded: {importResult.successful} — Failed: {importResult.failed}</p>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1">
                   <button
                     type="button"
-                    onClick={() => setImportModalOpen(false)}
+                    onClick={() => { setImportModalOpen(false); setImportFile(null); setImportResult(null); setImportProgress(0); }}
                     className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300 font-semibold border border-slate-200 dark:border-surface-700"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={importing || !importSqlText.trim()}
+                    disabled={importing || (!importFile && !importSqlText.trim())}
                     className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
                   >
-                    {importing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
-                    <span>Execute Import</span>
+                    {importing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>{importing ? 'Importing...' : 'Start Import'}</span>
                   </button>
                 </div>
               </form>
