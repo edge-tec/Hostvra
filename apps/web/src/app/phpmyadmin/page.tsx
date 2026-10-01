@@ -274,6 +274,8 @@ function PhpMyAdminCore() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSqlText, setImportSqlText] = useState<string>('');
   const [isDraggingImport, setIsDraggingImport] = useState<boolean>(false);
+  const [importProgress, setImportProgress] = useState<number>(0);
+  const [importStatusText, setImportStatusText] = useState<string>('');
 
   // Operations State
   const [opCollation, setOpCollation] = useState<string>('utf8mb4_unicode_ci');
@@ -1026,14 +1028,31 @@ function PhpMyAdminCore() {
 
     setImporting(true);
     setImportResult(null);
+    setImportProgress(10);
+    setImportStatusText('Uploading SQL dump file...');
+
+    const progressTimer = setInterval(() => {
+      setImportProgress((prev) => {
+        if (prev < 30) return prev + 10;
+        if (prev < 80) return prev + 5;
+        if (prev < 95) return prev + 1;
+        return prev;
+      });
+    }, 300);
+
     try {
       if (importFile) {
+        setImportStatusText(`Restoring ${importFile.name}...`);
         const formData = new FormData();
         formData.append('file', importFile);
         const res = await apiFetch<any>(`/api/v1/databases/import?db=${encodeURIComponent(currentDb)}`, {
           method: 'POST',
           body: formData,
         });
+        clearInterval(progressTimer);
+        setImportProgress(100);
+        setImportStatusText('Import complete!');
+
         if (res && res.success) {
           setImportResult(res.data);
           showToast(`Import finished: ${res.data?.successful || 0} executed, ${res.data?.failed || 0} failed.`);
@@ -1043,6 +1062,7 @@ function PhpMyAdminCore() {
           showToast(res?.error?.message || 'Import failed.');
         }
       } else if (importSqlText.trim()) {
+        setImportStatusText('Executing raw SQL statements...');
         const res = await apiFetch<any>('/api/v1/databases/query', {
           method: 'POST',
           body: JSON.stringify({
@@ -1050,6 +1070,10 @@ function PhpMyAdminCore() {
             query: importSqlText,
           }),
         });
+        clearInterval(progressTimer);
+        setImportProgress(100);
+        setImportStatusText('Execution complete!');
+
         if (res && res.data && !res.data.error) {
           showToast('SQL script executed successfully.');
           fetchTree();
@@ -1059,9 +1083,14 @@ function PhpMyAdminCore() {
         }
       }
     } catch (e: any) {
+      clearInterval(progressTimer);
+      setImportProgress(0);
       showToast(e?.message || 'Import error');
     } finally {
-      setImporting(false);
+      clearInterval(progressTimer);
+      setTimeout(() => {
+        setImporting(false);
+      }, 600);
     }
   };
 
@@ -2540,6 +2569,25 @@ function PhpMyAdminCore() {
                     className="w-full p-3 font-mono text-xs bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 rounded-xl focus:outline-none focus:border-amber-500"
                   />
                 </div>
+
+                {importing && (
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+                        <span className="text-slate-800 dark:text-slate-200">{importStatusText || 'Importing SQL dump into database...'}</span>
+                      </div>
+                      <span className="text-amber-600 dark:text-amber-400 font-mono text-sm">{importProgress}%</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-surface-800 h-2.5 rounded-full overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 h-full transition-all duration-300 rounded-full"
+                        style={{ width: `${importProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">Executing tables &amp; rows restoration. Please keep this tab open.</p>
+                  </div>
+                )}
 
                 {importResult && (
                   <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 space-y-1">

@@ -210,6 +210,9 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (in
 	}
 
 	scanner := bufio.NewScanner(r)
+	const maxCapacity = 128 * 1024 * 1024 // 128 MB max line size for large bulk INSERT statements
+	buf := make([]byte, 1024*1024)
+	scanner.Buffer(buf, maxCapacity)
 	var currentStmt strings.Builder
 	var successful, failed int
 	var delimiter = ";"
