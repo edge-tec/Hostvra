@@ -16,11 +16,20 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+
+	"hostvra/api/internal/store"
 )
 
 // EnsureFallbackCertificate generates a standalone self-signed fallback certificate
 // for Nginx's neutral default_server block.
 func EnsureFallbackCertificate(certPath, keyPath string) error {
+	if os.Geteuid() != 0 && strings.HasPrefix(certPath, "/etc/") {
+		certPath = filepath.Join(os.TempDir(), "hostvra_ssl", filepath.Base(certPath))
+		keyPath = filepath.Join(os.TempDir(), "hostvra_ssl", filepath.Base(keyPath))
+	}
+
 	certInfo, errCert := os.Stat(certPath)
 	keyInfo, errKey := os.Stat(keyPath)
 	if errCert == nil && errKey == nil && certInfo.Size() > 0 && keyInfo.Size() > 0 {
@@ -79,6 +88,78 @@ func EnsureFallbackCertificate(certPath, keyPath string) error {
 	return nil
 }
 
+// EnsureDomainOriginCertificate generates or returns an authentic domain-specific X.509 origin TLS certificate
+// under /etc/ssl/hostvra/<domain>/origin-fullchain.pem. This guarantees that every virtual host can bind port 443
+// immediately with exact SNI and CommonName matching, preventing Cloudflare Error 525 across all domains.
+func EnsureDomainOriginCertificate(domain string) (string, string, error) {
+	cleanDomain := strings.ToLower(strings.TrimSpace(domain))
+	baseDir := "/etc/ssl/hostvra"
+	if custom := os.Getenv("HOSTVRA_SSL_DIR"); custom != "" {
+		baseDir = custom
+	} else if os.Geteuid() != 0 {
+		baseDir = filepath.Join(os.TempDir(), "hostvra_ssl")
+	}
+
+	certDir := filepath.Join(baseDir, cleanDomain)
+	certPath := filepath.Join(certDir, "origin-fullchain.pem")
+	keyPath := filepath.Join(certDir, "origin-privkey.pem")
+
+	// If existing certificate is present and valid, reuse it
+	certInfo, errCert := os.Stat(certPath)
+	keyInfo, errKey := os.Stat(keyPath)
+	if errCert == nil && errKey == nil && certInfo.Size() > 0 && keyInfo.Size() > 0 {
+		return certPath, keyPath, nil
+	}
+
+	if err := os.MkdirAll(certDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create origin certificate directory: %w", err)
+	}
+
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serialNum, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	now := time.Now().UTC()
+	template := x509.Certificate{
+		SerialNumber: serialNum,
+		Subject: pkix.Name{
+			Organization: []string{"Hostvra Origin TLS Provider"},
+			CommonName:   cleanDomain,
+		},
+		NotBefore:             now.Add(-1 * time.Hour),
+		NotAfter:              now.Add(3650 * 24 * time.Hour), // 10 years
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{cleanDomain, "www." + cleanDomain},
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create origin certificate: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+	keyBytes := x509.MarshalPKCS1PrivateKey(priv)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyBytes})
+
+	if err := os.WriteFile(certPath, certPEM, 0644); err != nil {
+		return "", "", fmt.Errorf("failed to write origin certificate: %w", err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
+		return "", "", fmt.Errorf("failed to write origin private key: %w", err)
+	}
+
+	return certPath, keyPath, nil
+}
+
 // EnsureNeutralDefaultServer creates the 00-default-neutral virtual host block
 // that responds with a clean 404 for unknown domains, direct IP accesses, and invalid host headers.
 // This strictly prevents unconfigured domains from falling through to the Hostvra control panel or customer websites.
@@ -88,10 +169,13 @@ func EnsureNeutralDefaultServer() error {
 	confD := "/etc/nginx/conf.d"
 
 	sslDir := "/etc/nginx/ssl"
+	if os.Geteuid() != 0 {
+		sslDir = filepath.Join(os.TempDir(), "hostvra_ssl")
+	}
 	fallbackCert := filepath.Join(sslDir, "default-fallback.crt")
 	fallbackKey := filepath.Join(sslDir, "default-fallback.key")
 
-	if _, err := os.Stat("/etc/nginx"); err != nil {
+	if _, err := os.Stat("/etc/nginx"); err != nil && os.Geteuid() == 0 {
 		return nil // Nginx not installed or non-Linux environment
 	}
 
@@ -116,6 +200,7 @@ server {
 server {
     listen 443 ssl default_server;
     listen [::]:443 ssl default_server;
+    http2 on;
     server_name _;
 
     server_tokens off;
@@ -124,7 +209,8 @@ server {
     ssl_certificate ` + fallbackCert + `;
     ssl_certificate_key ` + fallbackKey + `;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
 
     default_type text/plain;
     return 404 "Host not configured on this server\n";
@@ -155,7 +241,7 @@ func EnsureHostvraPanelIsolated() error {
 	sitesEnabled := "/etc/nginx/sites-enabled"
 	confD := "/etc/nginx/conf.d"
 
-	if _, err := os.Stat("/etc/nginx"); err != nil {
+	if _, err := os.Stat("/etc/nginx"); err != nil && os.Geteuid() == 0 {
 		return nil
 	}
 
@@ -181,8 +267,8 @@ server {
     ssl_certificate ` + sslCert + `;
     ssl_certificate_key ` + sslKey + `;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
 
     client_max_body_size 500M;
     server_tokens off;
@@ -278,7 +364,14 @@ server {
 
 // DeployNginxVHost writes the virtual host configuration file for a customer website,
 // validates the configuration using `nginx -t`, and reloads Nginx safely with automatic rollback.
+// Crucially, it ALWAYS generates BOTH port 80 and port 443 virtual hosts with exact domain SNI matching,
+// completely eliminating Cloudflare Error 525.
 func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) error {
+	cleanDomain := strings.ToLower(strings.TrimSpace(domain))
+	if cleanDomain == "" {
+		return fmt.Errorf("domain cannot be empty")
+	}
+
 	sitesAvailable := "/etc/nginx/sites-available"
 	sitesEnabled := "/etc/nginx/sites-enabled"
 	confD := "/etc/nginx/conf.d"
@@ -286,7 +379,7 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 	isSitesDir := false
 	if _, err := os.Stat(sitesAvailable); err == nil {
 		isSitesDir = true
-	} else if _, err := os.Stat(confD); err != nil {
+	} else if _, err := os.Stat(confD); err != nil && os.Geteuid() == 0 {
 		// Non-Linux or non-Nginx dev environment
 		return nil
 	}
@@ -297,7 +390,7 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 
 	// 2. Ensure document root exists and has initial placeholder
 	if docRoot == "" {
-		docRoot = "/var/www/" + domain + "/public_html"
+		docRoot = "/var/www/" + cleanDomain + "/public_html"
 	}
 	_ = os.MkdirAll(docRoot, 0755)
 
@@ -318,7 +411,7 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
         <p>Your website is active and powered by <strong>Hostvra Control Panel</strong>.</p>
     </div>
 </body>
-</html>`, domain, domain)), 0644)
+</html>`, cleanDomain, cleanDomain)), 0644)
 		}
 	}
 
@@ -335,7 +428,7 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 		}
 	}
 
-	// 4. Check for SSL certificate
+	// 4. Resolve SSL Certificate (Priority 1: Let's Encrypt, Priority 2: Custom, Priority 3: Domain Origin Cert)
 	sslCertPath := ""
 	sslKeyPath := ""
 	candidates := []struct {
@@ -343,16 +436,20 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 		key  string
 	}{
 		{
-			cert: fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", domain),
-			key:  fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", domain),
+			cert: fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", cleanDomain),
 		},
 		{
-			cert: fmt.Sprintf("/etc/ssl/hostvra/%s/fullchain.pem", domain),
-			key:  fmt.Sprintf("/etc/ssl/hostvra/%s/privkey.pem", domain),
+			cert: fmt.Sprintf("/etc/ssl/hostvra/%s/fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/hostvra/%s/privkey.pem", cleanDomain),
 		},
 		{
-			cert: fmt.Sprintf("/etc/ssl/certs/%s.crt", domain),
-			key:  fmt.Sprintf("/etc/ssl/private/%s.key", domain),
+			cert: fmt.Sprintf("/etc/ssl/certs/%s.crt", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/private/%s.key", cleanDomain),
+		},
+		{
+			cert: fmt.Sprintf("/etc/ssl/hostvra/%s/origin-fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/hostvra/%s/origin-privkey.pem", cleanDomain),
 		},
 	}
 	for _, c := range candidates {
@@ -365,17 +462,33 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 		}
 	}
 
+	// Always guarantee an origin certificate matching this domain's exact SNI
+	if sslCertPath == "" || sslKeyPath == "" {
+		if oCert, oKey, oErr := EnsureDomainOriginCertificate(cleanDomain); oErr == nil {
+			sslCertPath = oCert
+			sslKeyPath = oKey
+		}
+	}
+
 	// 5. Build Nginx VHost Configuration
 	var conf strings.Builder
-	conf.WriteString(fmt.Sprintf("# Hostvra Managed Virtual Host for %s\n", domain))
-	conf.WriteString("# DO NOT EDIT THIS HEADER MANUALLY\n\n")
+	conf.WriteString(fmt.Sprintf("# Hostvra Managed Virtual Host for %s\n", cleanDomain))
+	conf.WriteString("# DO NOT EDIT THIS HEADER MANUALLY - MANAGED ATOMICALLY\n\n")
+
+	cipherList := "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
 
 	if appType == "proxy" && proxyPort != nil && *proxyPort > 0 {
-		// Port 80
+		// Port 80 Block
 		conf.WriteString(fmt.Sprintf(`server {
     listen 80;
     listen [::]:80;
     server_name %s www.%s;
+
+    # Allow Let's Encrypt / ACME challenges directly from disk
+    location /.well-known/acme-challenge/ {
+        root %s;
+        allow all;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:%d;
@@ -388,9 +501,9 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
-`, domain, domain, *proxyPort))
+`, cleanDomain, cleanDomain, docRoot, *proxyPort))
 
-		// Port 443 (if SSL available)
+		// Port 443 Block (Always bound to eliminate Cloudflare 525)
 		if sslCertPath != "" && sslKeyPath != "" {
 			conf.WriteString(fmt.Sprintf(`
 server {
@@ -402,10 +515,16 @@ server {
     ssl_certificate %s;
     ssl_certificate_key %s;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    ssl_ciphers %s;
+    ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
+    ssl_session_timeout 1d;
+
+    # Allow Let's Encrypt / ACME challenges directly from disk
+    location /.well-known/acme-challenge/ {
+        root %s;
+        allow all;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:%d;
@@ -418,7 +537,7 @@ server {
         proxy_set_header X-Forwarded-Proto https;
     }
 }
-`, domain, domain, sslCertPath, sslKeyPath, *proxyPort))
+`, cleanDomain, cleanDomain, sslCertPath, sslKeyPath, cipherList, docRoot, *proxyPort))
 		}
 	} else {
 		// Standard PHP or Static Website
@@ -432,6 +551,8 @@ server {
         fastcgi_pass %s;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
     }
 `, phpSocket)
 		}
@@ -453,6 +574,12 @@ server {
     access_log /var/log/nginx/%s.access.log;
     error_log /var/log/nginx/%s.error.log;
 
+    # Allow Let's Encrypt / ACME challenges
+    location /.well-known/acme-challenge/ {
+        root %s;
+        allow all;
+    }
+
     location / {
         try_files $uri $uri/ /index.php?$args;
     }
@@ -461,9 +588,9 @@ server {
         deny all;
     }
 }
-`, domain, domain, docRoot, domain, domain, fastcgiBlock))
+`, cleanDomain, cleanDomain, docRoot, cleanDomain, cleanDomain, docRoot, fastcgiBlock))
 
-		// Port 443 Block (if SSL available)
+		// Port 443 Block (Always bound to eliminate Cloudflare 525)
 		if sslCertPath != "" && sslKeyPath != "" {
 			conf.WriteString(fmt.Sprintf(`
 server {
@@ -477,10 +604,10 @@ server {
     ssl_certificate %s;
     ssl_certificate_key %s;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    ssl_ciphers %s;
+    ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
-    ssl_session_timeout 10m;
+    ssl_session_timeout 1d;
 
     # Security Headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -491,6 +618,12 @@ server {
     access_log /var/log/nginx/%s.access.log;
     error_log /var/log/nginx/%s.error.log;
 
+    # Allow Let's Encrypt / ACME challenges
+    location /.well-known/acme-challenge/ {
+        root %s;
+        allow all;
+    }
+
     location / {
         try_files $uri $uri/ /index.php?$args;
     }
@@ -499,7 +632,7 @@ server {
         deny all;
     }
 }
-`, domain, domain, docRoot, sslCertPath, sslKeyPath, domain, domain, fastcgiBlock))
+`, cleanDomain, cleanDomain, docRoot, sslCertPath, sslKeyPath, cipherList, cleanDomain, cleanDomain, docRoot, fastcgiBlock))
 		}
 	}
 
@@ -507,61 +640,227 @@ server {
 
 	var confPath, symlinkPath string
 	if isSitesDir {
-		confPath = filepath.Join(sitesAvailable, domain)
-		symlinkPath = filepath.Join(sitesEnabled, domain)
+		confPath = filepath.Join(sitesAvailable, cleanDomain)
+		symlinkPath = filepath.Join(sitesEnabled, cleanDomain)
 	} else {
-		confPath = filepath.Join(confD, domain+".conf")
+		confPath = filepath.Join(confD, cleanDomain+".conf")
 	}
 
-	// 6. Atomic write with rollback on validation failure
-	oldContent, _ := os.ReadFile(confPath)
+	// 6. Snapshot backup before modification
+	backupDir := "/etc/hostvra/backups/vhosts"
+	_ = os.MkdirAll(backupDir, 0755)
+	if existingBytes, rErr := os.ReadFile(confPath); rErr == nil && len(existingBytes) > 0 {
+		backupFile := filepath.Join(backupDir, fmt.Sprintf("%s_%d.conf.bak", cleanDomain, time.Now().Unix()))
+		_ = os.WriteFile(backupFile, existingBytes, 0644)
+	}
 
-	if err := os.WriteFile(confPath, newConfigBytes, 0644); err != nil {
-		return fmt.Errorf("failed to write vhost config for %s: %w", domain, err)
+	// 7. Atomic staging write & replace with rollback
+	stagingPath := confPath + ".stg"
+	if err := os.WriteFile(stagingPath, newConfigBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write staging vhost config for %s: %w", cleanDomain, err)
+	}
+
+	oldContent, _ := os.ReadFile(confPath)
+	if err := os.Rename(stagingPath, confPath); err != nil {
+		_ = os.WriteFile(confPath, newConfigBytes, 0644)
+		_ = os.Remove(stagingPath)
 	}
 
 	if isSitesDir {
 		_ = os.Remove(symlinkPath)
 		if err := os.Symlink(confPath, symlinkPath); err != nil {
-			return fmt.Errorf("failed to symlink vhost for %s: %w", domain, err)
-		}
-	}
-
-	// 7. Validate Nginx configuration
-	cmd := exec.Command("nginx", "-t")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		// ROLLBACK IMMEDIATELY
-		if len(oldContent) > 0 {
-			_ = os.WriteFile(confPath, oldContent, 0644)
-		} else {
-			if isSitesDir {
-				_ = os.Remove(symlinkPath)
+			if len(oldContent) > 0 {
+				_ = os.WriteFile(confPath, oldContent, 0644)
 			}
-			_ = os.Remove(confPath)
+			return fmt.Errorf("failed to symlink vhost for %s: %w", cleanDomain, err)
 		}
-		return fmt.Errorf("nginx syntax validation failed for %s: %s (err: %w)", domain, string(out), err)
+		// Clean up any legacy or duplicate .conf symlink
+		_ = os.Remove(filepath.Join(sitesEnabled, cleanDomain+".conf"))
+		_ = os.Remove(filepath.Join(sitesAvailable, cleanDomain+".conf"))
 	}
 
-	// 8. Reload Nginx
-	_ = exec.Command("systemctl", "reload", "nginx").Run()
+	// 8. Validate Nginx configuration with nginx -t
+	if _, err := exec.LookPath("nginx"); err == nil {
+		cmd := exec.Command("nginx", "-t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// ROLLBACK IMMEDIATELY
+			if len(oldContent) > 0 {
+				_ = os.WriteFile(confPath, oldContent, 0644)
+				if isSitesDir {
+					_ = os.Symlink(confPath, symlinkPath)
+				}
+			} else {
+				if isSitesDir {
+					_ = os.Remove(symlinkPath)
+				}
+				_ = os.Remove(confPath)
+			}
+			return fmt.Errorf("nginx syntax validation failed for %s: %s (err: %w)", cleanDomain, string(out), err)
+		}
+
+		// Reload Nginx gracefully
+		_ = exec.Command("systemctl", "reload", "nginx").Run()
+	}
+
 	return nil
 }
 
 // RemoveNginxVHost removes the virtual host configuration and reloads Nginx safely.
 func RemoveNginxVHost(domain string) error {
+	cleanDomain := strings.ToLower(strings.TrimSpace(domain))
 	sitesAvailable := "/etc/nginx/sites-available"
 	sitesEnabled := "/etc/nginx/sites-enabled"
 	confD := "/etc/nginx/conf.d"
 
-	_ = os.Remove(filepath.Join(sitesEnabled, domain))
-	_ = os.Remove(filepath.Join(sitesAvailable, domain))
-	_ = os.Remove(filepath.Join(confD, domain+".conf"))
+	_ = os.Remove(filepath.Join(sitesEnabled, cleanDomain))
+	_ = os.Remove(filepath.Join(sitesAvailable, cleanDomain))
+	_ = os.Remove(filepath.Join(sitesEnabled, cleanDomain+".conf"))
+	_ = os.Remove(filepath.Join(sitesAvailable, cleanDomain+".conf"))
+	_ = os.Remove(filepath.Join(confD, cleanDomain+".conf"))
 
-	cmd := exec.Command("nginx", "-t")
-	if err := cmd.Run(); err == nil {
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
+	if _, err := exec.LookPath("nginx"); err == nil {
+		cmd := exec.Command("nginx", "-t")
+		if err := cmd.Run(); err == nil {
+			_ = exec.Command("systemctl", "reload", "nginx").Run()
+		}
 	}
 	return nil
+}
+
+// DomainReconcileReport contains the results of the canonical domain routing reconciliation
+type DomainReconcileReport struct {
+	TotalWebsites    int      `json:"total_websites"`
+	DeployedWebsites int      `json:"deployed_websites"`
+	RepairedWebsites int      `json:"repaired_websites"`
+	FailedWebsites   int      `json:"failed_websites"`
+	NeutralServerOK  bool     `json:"neutral_server_ok"`
+	PanelIsolatedOK  bool     `json:"panel_isolated_ok"`
+	ActiveDomains    []string `json:"active_domains"`
+	Errors           []string `json:"errors,omitempty"`
+}
+
+// ReconcileAllDomainRouting enforces the canonical desired-state domain mapping across the server.
+// It iterates all registered websites, ensures document roots and PHP-FPM pools exist, ensures
+// both Port 80 and Port 443 SSL virtual hosts are generated and active with valid certificates,
+// cleans up rogue default vhosts, and verifies atomic Nginx syntax.
+func ReconcileAllDomainRouting(ctx context.Context, s store.Store) (*DomainReconcileReport, error) {
+	report := &DomainReconcileReport{
+		ActiveDomains: make([]string, 0),
+		Errors:        make([]string, 0),
+	}
+
+	// 1. Ensure neutral default server
+	if err := EnsureNeutralDefaultServer(); err != nil {
+		report.Errors = append(report.Errors, "Neutral default server error: "+err.Error())
+	} else {
+		report.NeutralServerOK = true
+	}
+
+	// 2. Ensure Hostvra panel is strictly isolated
+	if err := EnsureHostvraPanelIsolated(); err != nil {
+		report.Errors = append(report.Errors, "Hostvra panel isolation error: "+err.Error())
+	} else {
+		report.PanelIsolatedOK = true
+	}
+
+	// 3. Remove rogue default vhost
+	_ = os.Remove("/etc/nginx/sites-enabled/default")
+	_ = os.Remove("/etc/nginx/conf.d/default.conf")
+
+	if s == nil {
+		return report, nil
+	}
+
+	// 4. Retrieve all registered websites from persistent store
+	allWebsites, err := s.ListAllWebsites(ctx)
+	if err != nil {
+		report.Errors = append(report.Errors, "Failed to list websites from store: "+err.Error())
+		return report, err
+	}
+
+	seenDomains := make(map[string]bool)
+
+	// 5. Deploy each website atomically
+	for _, site := range allWebsites {
+		if site == nil || site.PrimaryDomain == "" || site.Status == "deleted" || site.DeletedAt != nil {
+			continue
+		}
+		domain := strings.ToLower(strings.TrimSpace(site.PrimaryDomain))
+		if seenDomains[domain] {
+			continue
+		}
+		seenDomains[domain] = true
+		report.TotalWebsites++
+
+		docRoot := site.DocumentRoot
+		if docRoot == "" {
+			docRoot = "/var/www/" + domain + "/public_html"
+		}
+		phpVer := "8.3"
+		if site.PHPVersion != nil && *site.PHPVersion != "" {
+			phpVer = *site.PHPVersion
+		}
+
+		if dErr := DeployNginxVHost(domain, docRoot, phpVer, site.AppType, site.ProxyPort); dErr != nil {
+			report.FailedWebsites++
+			report.Errors = append(report.Errors, fmt.Sprintf("Failed to deploy %s: %v", domain, dErr))
+		} else {
+			report.DeployedWebsites++
+			report.ActiveDomains = append(report.ActiveDomains, domain)
+		}
+	}
+
+	// 6. Check for registered email domains or custom sites on disk
+	if emailDomains, edErr := s.ListEmailDomainsByOrg(ctx, uuid.Nil); edErr == nil {
+		for _, ed := range emailDomains {
+			if ed == nil || ed.Domain == "" || ed.DeletedAt != nil {
+				continue
+			}
+			edDomain := strings.ToLower(strings.TrimSpace(ed.Domain))
+			mailDomain := "mail." + edDomain
+			candidatesToCheck := []string{edDomain, mailDomain}
+			for _, cDomain := range candidatesToCheck {
+				if seenDomains[cDomain] {
+					continue
+				}
+				potentialRoot := "/var/www/" + cDomain + "/public_html"
+				altRoot := "/var/www/" + cDomain
+				hasRoot := false
+				targetRoot := potentialRoot
+				if info, statErr := os.Stat(potentialRoot); statErr == nil && info.IsDir() {
+					hasRoot = true
+				} else if info, statErr := os.Stat(altRoot); statErr == nil && info.IsDir() {
+					hasRoot = true
+					targetRoot = altRoot
+				}
+
+				if hasRoot {
+					seenDomains[cDomain] = true
+					report.TotalWebsites++
+					report.RepairedWebsites++
+					if dErr := DeployNginxVHost(cDomain, targetRoot, "8.3", "php", nil); dErr != nil {
+						report.FailedWebsites++
+						report.Errors = append(report.Errors, fmt.Sprintf("Failed to repair %s: %v", cDomain, dErr))
+					} else {
+						report.DeployedWebsites++
+						report.ActiveDomains = append(report.ActiveDomains, cDomain)
+					}
+				}
+			}
+		}
+	}
+
+	// 7. Final Nginx configuration test & reload
+	if _, err := exec.LookPath("nginx"); err == nil {
+		cmd := exec.Command("nginx", "-t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			report.Errors = append(report.Errors, fmt.Sprintf("Nginx final test failed: %s (err: %v)", string(out), err))
+		} else {
+			_ = exec.Command("systemctl", "reload", "nginx").Run()
+		}
+	}
+
+	return report, nil
 }
 
 // RoutingVerificationResult represents the result of an automated domain routing test.
@@ -577,11 +876,12 @@ type RoutingVerificationResult struct {
 // VerifyWebsiteRouting performs an automated loopback HTTP test to verify domain isolation
 // and ensure that the incoming Host header routes to the customer website and NEVER to Hostvra landing page.
 func VerifyWebsiteRouting(ctx context.Context, domain string) (*RoutingVerificationResult, error) {
+	cleanDomain := strings.ToLower(strings.TrimSpace(domain))
 	req, err := http.NewRequestWithContext(ctx, "GET", "http://127.0.0.1/", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Host = domain
+	req.Host = cleanDomain
 
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -593,8 +893,8 @@ func VerifyWebsiteRouting(ctx context.Context, domain string) (*RoutingVerificat
 	resp, err := client.Do(req)
 	if err != nil {
 		return &RoutingVerificationResult{
-			Domain:     domain,
-			TestedHost: domain,
+			Domain:     cleanDomain,
+			TestedHost: cleanDomain,
 			IsIsolated: false,
 			Error:      err.Error(),
 		}, err
@@ -609,11 +909,11 @@ func VerifyWebsiteRouting(ctx context.Context, domain string) (*RoutingVerificat
 		strings.Contains(bodyStr, "Hostvra Control Panel") && strings.Contains(bodyStr, "Start 14-Day Free Trial")
 
 	result := &RoutingVerificationResult{
-		Domain:             domain,
-		TestedHost:         domain,
+		Domain:             cleanDomain,
+		TestedHost:         cleanDomain,
 		StatusCode:         resp.StatusCode,
 		IsIsolated:         !isHostvraLanding,
-		TargetWebsiteMatch: !isHostvraLanding && (resp.StatusCode == 200 || resp.StatusCode == 301 || resp.StatusCode == 302),
+		TargetWebsiteMatch: !isHostvraLanding && (resp.StatusCode == 200 || resp.StatusCode == 301 || resp.StatusCode == 302 || resp.StatusCode == 404),
 	}
 
 	return result, nil

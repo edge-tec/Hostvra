@@ -457,6 +457,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/statistics", websiteHandler.Statistics)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/available-domains", websiteHandler.AvailableDomains)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesCreate)).Post("/sync-domains", websiteHandler.SyncDomains)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/repair", websiteHandler.RepairRouting)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/batch", websiteHandler.Batch)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/conf", websiteHandler.GetConf)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/conf", websiteHandler.UpdateConf)
@@ -1279,57 +1280,21 @@ func autoRecoverLocalAgentNode(ctx context.Context, s store.Store, logger *slog.
 	}
 }
 
-// syncAllNginxVhosts ensures the neutral default_server is present, isolates the
-// Hostvra control panel from catching customer traffic, and re-deploys Nginx virtual
-// host configs for ALL active customer websites (including SSL port 443 where certificates exist).
+// syncAllNginxVhosts runs the canonical domain routing reconciler on startup.
+// It ensures the neutral default_server is present, isolates the Hostvra control panel,
+// and enforces dual-port (80+443) virtual host configs with SSL for all active customer websites.
 func syncAllNginxVhosts(ctx context.Context, s store.Store, logger *slog.Logger) {
-	// 1. Ensure neutral default server is active on ports 80 & 443
-	if err := handlers.EnsureNeutralDefaultServer(); err != nil {
-		logger.Warn("Startup vhost sync: failed to configure neutral default server", "error", err)
-	}
-
-	// 2. Ensure Hostvra control panel is strictly bound to its own domain(s) and NOT default_server
-	if err := handlers.EnsureHostvraPanelIsolated(); err != nil {
-		logger.Warn("Startup vhost sync: failed to isolate Hostvra panel vhost", "error", err)
-	}
-
-	// 3. Re-deploy virtual hosts for all registered customer websites
-	allWebsites, err := s.ListAllWebsites(ctx)
+	report, err := handlers.ReconcileAllDomainRouting(ctx, s)
 	if err != nil {
-		logger.Warn("Startup vhost sync: failed to list websites", "error", err)
-		return
+		logger.Warn("Startup vhost reconciliation encountered errors", "error", err)
 	}
-
-	if len(allWebsites) == 0 {
-		return
+	if report != nil {
+		logger.Info("Startup vhost reconciliation completed",
+			"total_websites", report.TotalWebsites,
+			"deployed_websites", report.DeployedWebsites,
+			"repaired_websites", report.RepairedWebsites,
+			"failed_websites", report.FailedWebsites)
 	}
-
-	logger.Info("Startup vhost sync: re-deploying Nginx configs for all customer websites", "count", len(allWebsites))
-
-	deployedCount := 0
-	for _, site := range allWebsites {
-		if site == nil || site.PrimaryDomain == "" || site.Status == "deleted" {
-			continue
-		}
-
-		phpVer := "8.3"
-		if site.PHPVersion != nil && *site.PHPVersion != "" {
-			phpVer = *site.PHPVersion
-		}
-
-		docRoot := site.DocumentRoot
-		if docRoot == "" {
-			docRoot = "/var/www/" + site.PrimaryDomain + "/public_html"
-		}
-
-		if err := handlers.DeployNginxVHost(site.PrimaryDomain, docRoot, phpVer, site.AppType, site.ProxyPort); err != nil {
-			logger.Warn("Startup vhost sync: failed to deploy vhost for site", "domain", site.PrimaryDomain, "error", err)
-		} else {
-			deployedCount++
-		}
-	}
-
-	logger.Info("Startup vhost sync completed", "deployed_websites", deployedCount)
 }
 
 

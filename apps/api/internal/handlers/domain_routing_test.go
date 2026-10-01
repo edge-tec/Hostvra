@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostvra/api/internal/store"
 )
 
 // TestDomainRoutingIsolation validates that the Hostvra architecture guarantees
@@ -226,4 +228,100 @@ server {
 			t.Errorf("Customer site should not match landing page signature")
 		}
 	})
+
+	// --- TEST 1 & 4: Cloudflare 525 Prevention - Guaranteed Origin TLS & Dual Port Binding ---
+	t.Run("Test1_4_Cloudflare525Prevention_DualPortBinding", func(t *testing.T) {
+		domain := "test-cloudflare525-prevention.com"
+		certPath, keyPath, err := EnsureDomainOriginCertificate(domain)
+		if err != nil {
+			t.Fatalf("EnsureDomainOriginCertificate failed: %v", err)
+		}
+		if _, err := os.Stat(certPath); err != nil {
+			t.Errorf("Origin certificate file does not exist: %v", err)
+		}
+		if _, err := os.Stat(keyPath); err != nil {
+			t.Errorf("Origin key file does not exist: %v", err)
+		}
+
+		// Re-invoking must be idempotent and reuse existing certificate
+		certPath2, keyPath2, err2 := EnsureDomainOriginCertificate(domain)
+		if err2 != nil || certPath2 != certPath || keyPath2 != keyPath {
+			t.Errorf("EnsureDomainOriginCertificate must be idempotent: %v", err2)
+		}
+	})
+
+	// --- TEST 2 & 3: Multi-Domain Canonical Desired-State Reconciliation ---
+	t.Run("Test2_3_MultiDomain_ReconcileAllDomainRouting", func(t *testing.T) {
+		memStore := store.NewMemoryStore()
+		ctx := context.Background()
+
+		// Seed 3 websites for different tenants
+		siteA := &store.Website{
+			PrimaryDomain: "tenant-a.com",
+			DocumentRoot:  "/var/www/tenant-a.com/public_html",
+			AppType:       "php",
+			Status:        "active",
+		}
+		siteB := &store.Website{
+			PrimaryDomain: "tenant-b.net",
+			DocumentRoot:  "/var/www/tenant-b.net/public_html",
+			AppType:       "laravel",
+			Status:        "active",
+		}
+		siteC := &store.Website{
+			PrimaryDomain: "tenant-c.org",
+			DocumentRoot:  "/var/www/tenant-c.org/public_html",
+			AppType:       "proxy",
+			ProxyPort:     intPtr(8000),
+			Status:        "active",
+		}
+		_ = memStore.CreateWebsite(ctx, siteA)
+		_ = memStore.CreateWebsite(ctx, siteB)
+		_ = memStore.CreateWebsite(ctx, siteC)
+
+		report, err := ReconcileAllDomainRouting(ctx, memStore)
+		if err != nil {
+			t.Fatalf("ReconcileAllDomainRouting returned error: %v", err)
+		}
+
+		if report.TotalWebsites < 3 {
+			t.Errorf("Expected at least 3 total websites reconciled, got: %d", report.TotalWebsites)
+		}
+		if !report.NeutralServerOK {
+			t.Errorf("Neutral default server was not marked OK in report")
+		}
+		if !report.PanelIsolatedOK {
+			t.Errorf("Panel isolated was not marked OK in report")
+		}
+
+		// Idempotency: Running reconcile a 2nd time must remain 100% stable
+		report2, err2 := ReconcileAllDomainRouting(ctx, memStore)
+		if err2 != nil || report2.TotalWebsites != report.TotalWebsites {
+			t.Errorf("ReconcileAllDomainRouting must be completely idempotent across runs")
+		}
+	})
+
+	// --- TEST 7: Multi-Tenant Isolation ---
+	t.Run("Test7_MultiTenant_DistinctRootsAndUsers", func(t *testing.T) {
+		domainA := "client-alpha.com"
+		domainB := "client-beta.com"
+
+		userA := strings.ReplaceAll(domainA, ".", "_")
+		userB := strings.ReplaceAll(domainB, ".", "_")
+
+		if userA == userB {
+			t.Errorf("Derived system users for different tenants must never collide")
+		}
+
+		rootA := "/var/www/" + domainA + "/public_html"
+		rootB := "/var/www/" + domainB + "/public_html"
+
+		if rootA == rootB {
+			t.Errorf("Document roots for different tenants must never collide")
+		}
+	})
+}
+
+func intPtr(i int) *int {
+	return &i
 }

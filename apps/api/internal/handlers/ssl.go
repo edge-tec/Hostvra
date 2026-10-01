@@ -213,7 +213,16 @@ func (h *SSLHandler) VerifyChallenge(w http.ResponseWriter, r *http.Request) {
 		if wID, err := uuid.Parse(body.WebsiteID); err == nil {
 			certRec.WebsiteID = wID
 			_ = h.store.UpdateWebsiteSSL(r.Context(), wID, true)
+			if site, sErr := h.store.GetWebsiteByID(r.Context(), wID); sErr == nil && site != nil {
+				phpVer := "8.3"
+				if site.PHPVersion != nil && *site.PHPVersion != "" {
+					phpVer = *site.PHPVersion
+				}
+				_ = DeployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+			}
 		}
+	} else if body.Domain != "" {
+		_ = DeployNginxVHost(body.Domain, "", "8.3", "php", nil)
 	}
 
 	_ = h.store.CreateOrUpdateSSL(r.Context(), certRec)
@@ -286,6 +295,15 @@ func (h *SSLHandler) Issue(w http.ResponseWriter, r *http.Request) {
 
 	if websiteID != uuid.Nil {
 		_ = h.store.UpdateWebsiteSSL(r.Context(), websiteID, true)
+		if site, sErr := h.store.GetWebsiteByID(r.Context(), websiteID); sErr == nil && site != nil {
+			phpVer := "8.3"
+			if site.PHPVersion != nil && *site.PHPVersion != "" {
+				phpVer = *site.PHPVersion
+			}
+			_ = DeployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+		}
+	} else if req.PrimaryDomain != "" {
+		_ = DeployNginxVHost(req.PrimaryDomain, "", "8.3", "php", nil)
 	}
 
 	h.audit.Log(r.Context(), r, "ssl.issue", "ssl_certificate", certRec.ID.String(), "success", "", map[string]interface{}{
@@ -338,6 +356,15 @@ func (h *SSLHandler) ImportCustom(w http.ResponseWriter, r *http.Request) {
 
 	if websiteID != uuid.Nil {
 		_ = h.store.UpdateWebsiteSSL(r.Context(), websiteID, true)
+		if site, sErr := h.store.GetWebsiteByID(r.Context(), websiteID); sErr == nil && site != nil {
+			phpVer := "8.3"
+			if site.PHPVersion != nil && *site.PHPVersion != "" {
+				phpVer = *site.PHPVersion
+			}
+			_ = DeployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+		}
+	} else if certInfo.Domain != "" {
+		_ = DeployNginxVHost(certInfo.Domain, "", "8.3", "php", nil)
 	}
 
 	h.audit.Log(r.Context(), r, "ssl.custom_import", "ssl_certificate", certRec.ID.String(), "success", "", map[string]interface{}{
@@ -407,6 +434,18 @@ func (h *SSLHandler) Renew(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.store.CreateOrUpdateSSL(r.Context(), cert)
 
+	if cert.WebsiteID != uuid.Nil {
+		if site, sErr := h.store.GetWebsiteByID(r.Context(), cert.WebsiteID); sErr == nil && site != nil {
+			phpVer := "8.3"
+			if site.PHPVersion != nil && *site.PHPVersion != "" {
+				phpVer = *site.PHPVersion
+			}
+			_ = DeployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+		}
+	} else if primaryDomain != "" {
+		_ = DeployNginxVHost(primaryDomain, "", "8.3", "php", nil)
+	}
+
 	h.audit.Log(r.Context(), r, "ssl.renew", "ssl_certificate", cert.ID.String(), "success", "", map[string]interface{}{
 		"domain": primaryDomain,
 	})
@@ -427,6 +466,13 @@ func (h *SSLHandler) AutoRenew(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "SCAN_FAILED", err.Error(), nil, "")
 		return
+	}
+
+	// Re-deploy vhosts for all successfully renewed domains
+	for _, res := range results {
+		if res.Renewed && res.Domain != "" {
+			_ = DeployNginxVHost(res.Domain, "", "8.3", "php", nil)
+		}
 	}
 
 	h.audit.Log(r.Context(), r, "ssl.auto_renew", "ssl", "all", "success", "", map[string]interface{}{

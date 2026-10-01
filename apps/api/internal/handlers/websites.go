@@ -1619,3 +1619,29 @@ func (h *WebsiteHandler) VerifyRouting(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, res, nil)
 }
+
+// RepairRouting reconciles all domain virtual hosts, re-establishes dual-port (80+443) bindings,
+// ensures atomic Nginx syntax, and isolates the Hostvra control panel from catching customer traffic.
+func (h *WebsiteHandler) RepairRouting(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if !isAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to trigger domain routing repair", nil, "")
+		return
+	}
+
+	report, err := ReconcileAllDomainRouting(r.Context(), h.store)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "REPAIR_FAILED", err.Error(), report, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "website.repair_routing", "system", "all", "success", "Reconciled all domain virtual hosts and SSL bindings", map[string]interface{}{
+		"total":    report.TotalWebsites,
+		"deployed": report.DeployedWebsites,
+		"repaired": report.RepairedWebsites,
+		"failed":   report.FailedWebsites,
+	})
+
+	response.JSON(w, http.StatusOK, report, nil)
+}
