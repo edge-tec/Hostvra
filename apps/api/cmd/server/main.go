@@ -193,11 +193,22 @@ func main() {
 		})
 	})
 
-	// Request Body Limit Middleware (10MB) to mitigate memory exhaustion DoS
+	// Request Body Limit Middleware: 10MB for standard API calls, 500MB for file uploads, backups & database imports
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB
+				path := r.URL.Path
+				if strings.Contains(path, "/import") ||
+					strings.Contains(path, "/databases") ||
+					strings.Contains(path, "/files") ||
+					strings.Contains(path, "/backups") ||
+					strings.Contains(path, "/backup") ||
+					strings.Contains(path, "/migration") ||
+					strings.Contains(path, "/upload") {
+					r.Body = http.MaxBytesReader(w, r.Body, 500<<20) // 500MB for large uploads/imports
+				} else {
+					r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB for standard JSON API requests
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

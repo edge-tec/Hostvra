@@ -671,9 +671,9 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 	var reader io.Reader
 	// Check for multipart form file first
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
-		// Cap multipart body stream to 128 MB
-		r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
-		err := r.ParseMultipartForm(32 << 20) // 32 MB in RAM, rest on disk
+		// Cap multipart body stream to 256 MB
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
+		err := r.ParseMultipartForm(64 << 20) // 64 MB in RAM, rest on disk
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, "FORM_ERROR", "Failed to parse form: "+err.Error(), nil, "")
 			return
@@ -696,8 +696,8 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 		reader = file
 	} else {
-		// Raw SQL string from body (capped to 128 MB)
-		r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
+		// Raw SQL string from body (capped to 256 MB)
+		r.Body = http.MaxBytesReader(w, r.Body, 256<<20)
 		reader = r.Body
 	}
 

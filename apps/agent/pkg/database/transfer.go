@@ -238,13 +238,13 @@ func (m *Manager) ImportSQL(ctx context.Context, dbName string, r io.Reader) (*I
 	}()
 	defer tmpFile.Close()
 
-	const maxImportBytes = 128 * 1024 * 1024 // 128 MB max upload size
+	const maxImportBytes = 256 * 1024 * 1024 // 256 MB max upload size
 	written, err := sanitizeAndBufferSQL(r, tmpFile, dbName, maxImportBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process import stream: %w", err)
 	}
 	if written > maxImportBytes {
-		return nil, fmt.Errorf("import file exceeds maximum allowed size of 128 MB")
+		return nil, fmt.Errorf("import file exceeds maximum allowed size of 256 MB")
 	}
 	if written == 0 {
 		return nil, errors.New("import file is empty (0 bytes received)")
