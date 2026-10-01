@@ -163,7 +163,6 @@ ssl = required
 ssl_server_cert_file = %s
 ssl_server_key_file = %s
 ssl_min_protocol = TLSv1.2
-ssl_server_prefer_ciphers = server
 `, cert, key)
 	}
 
