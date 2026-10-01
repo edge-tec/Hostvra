@@ -81,7 +81,16 @@ EOF
     fi
 fi
 
-# 5. Verify Dovecot configuration syntax
+# 5. Fix Dovecot 2.4+ dovecot_config_version requirement if needed
+DOVECOT_MAIN_CONF="/etc/dovecot/dovecot.conf"
+if [[ -f "$DOVECOT_MAIN_CONF" ]]; then
+    if ! grep -q "dovecot_config_version" "$DOVECOT_MAIN_CONF"; then
+        echo "[*] Adding dovecot_config_version to $DOVECOT_MAIN_CONF for Dovecot 2.4+..."
+        sed -i '1s/^/dovecot_config_version = 2.4.0\ndovecot_storage_version = 2.4.0\n\n/' "$DOVECOT_MAIN_CONF"
+    fi
+fi
+
+# 6. Verify Dovecot configuration syntax
 echo "[*] Verifying Dovecot configuration syntax..."
 dovecot -n > /dev/null
 echo "[✓] Dovecot syntax is valid."
