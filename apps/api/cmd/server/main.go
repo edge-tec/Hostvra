@@ -168,7 +168,7 @@ func main() {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(300 * time.Second))
+	r.Use(middleware.Timeout(900 * time.Second))
 
 	// CORS Setup - Secure Origin validation allowing credentials
 	r.Use(cors.Handler(cors.Options{
@@ -1024,11 +1024,12 @@ func main() {
 
 	serverAddr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
 	srv := &http.Server{
-		Addr:         serverAddr,
-		Handler:      r,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              serverAddr,
+		Handler:           r,
+		ReadHeaderTimeout: 30 * time.Second,
+		ReadTimeout:       15 * time.Minute,
+		WriteTimeout:      15 * time.Minute,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// Server execution in background goroutine

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -670,33 +671,58 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 	var reader io.Reader
 	// Check for multipart form file first
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
-		err := r.ParseMultipartForm(128 << 20) // 128 MB max memory
+		// Cap multipart body stream to 128 MB
+		r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
+		err := r.ParseMultipartForm(32 << 20) // 32 MB in RAM, rest on disk
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, "FORM_ERROR", "Failed to parse form: "+err.Error(), nil, "")
 			return
 		}
-		file, _, err := r.FormFile("file")
+		file, fileHeader, err := r.FormFile("file")
 		if err != nil {
 			response.Error(w, http.StatusBadRequest, "FILE_ERROR", "File upload missing 'file' key", nil, "")
 			return
 		}
 		defer file.Close()
+
+		// Validate file extension
+		if fileHeader != nil && fileHeader.Filename != "" {
+			ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+			if ext != "" && ext != ".sql" && ext != ".txt" && ext != ".dump" {
+				response.Error(w, http.StatusBadRequest, "INVALID_FILE_TYPE", "Only .sql, .dump, and .txt files are allowed", nil, "")
+				return
+			}
+		}
+
 		reader = file
 	} else {
+		// Raw SQL string from body (capped to 128 MB)
+		r.Body = http.MaxBytesReader(w, r.Body, 128<<20)
 		reader = r.Body
 	}
 
-	successCount, failCount, err := h.dbMgr.ImportSQL(r.Context(), dbName, reader)
+	res, err := h.dbMgr.ImportSQL(r.Context(), dbName, reader)
 	if err != nil {
+		if h.audit != nil {
+			h.audit.Log(r.Context(), r, "database.import", "database", dbName, "failure", err.Error(), map[string]interface{}{
+				"database": dbName,
+			})
+		}
 		response.Error(w, http.StatusInternalServerError, "IMPORT_ERROR", err.Error(), nil, "")
 		return
 	}
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"successful": successCount,
-		"failed":     failCount,
-		"total":      successCount + failCount,
-	}, nil)
+	if h.audit != nil {
+		h.audit.Log(r.Context(), r, "database.import", "database", dbName, "success", "", map[string]interface{}{
+			"database":   dbName,
+			"successful": res.Successful,
+			"failed":     res.Failed,
+			"total":      res.Total,
+			"tables":     res.Tables,
+		})
+	}
+
+	response.JSON(w, http.StatusOK, res, nil)
 }
 
 // RootPassword gets or sets root database password

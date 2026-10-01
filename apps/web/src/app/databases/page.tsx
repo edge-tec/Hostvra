@@ -94,7 +94,13 @@ export default function DatabasesPage() {
   const [importing, setImporting] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importProgress, setImportProgress] = useState(0);
-  const [importResult, setImportResult] = useState<{ successful: number; failed: number; total: number } | null>(null);
+  const [importResult, setImportResult] = useState<{
+    successful: number;
+    failed: number;
+    total: number;
+    tables?: number;
+    errors?: string[];
+  } | null>(null);
   const [isDraggingImport, setIsDraggingImport] = useState(false);
 
   // Create DB Form Fields
@@ -1539,9 +1545,40 @@ export default function DatabasesPage() {
 
                 {/* Result display */}
                 {importResult && (
-                  <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 space-y-0.5">
+                  <div className={`p-3.5 rounded-xl border space-y-2 ${
+                    importResult.failed > 0
+                      ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+                      : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  }`}>
                     <p className="font-bold">Import Completed</p>
-                    <p>Total: {importResult.total} — Succeeded: {importResult.successful} — Failed: {importResult.failed}</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                        <span className="text-slate-500 block">Total Statements</span>
+                        <span className="font-mono font-bold text-sm">{importResult.total}</span>
+                      </div>
+                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                        <span className="text-slate-500 block">Successful</span>
+                        <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">{importResult.successful}</span>
+                      </div>
+                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                        <span className="text-slate-500 block">Failed</span>
+                        <span className="font-mono font-bold text-sm text-rose-600 dark:text-rose-400">{importResult.failed}</span>
+                      </div>
+                      {importResult.tables !== undefined && (
+                        <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                          <span className="text-slate-500 block">Live Tables</span>
+                          <span className="font-mono font-bold text-sm text-cyan-600 dark:text-cyan-400">{importResult.tables}</span>
+                        </div>
+                      )}
+                    </div>
+                    {importResult.errors && importResult.errors.length > 0 && (
+                      <div className="mt-2 text-xs bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-lg border border-rose-200 dark:border-rose-900 max-h-36 overflow-y-auto font-mono text-rose-700 dark:text-rose-300 space-y-1">
+                        <p className="font-bold text-rose-800 dark:text-rose-200">Execution Errors ({importResult.errors.length}):</p>
+                        {importResult.errors.map((err, i) => (
+                          <p key={i} className="break-all">• {err}</p>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 

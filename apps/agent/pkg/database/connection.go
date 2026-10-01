@@ -62,7 +62,7 @@ func (p *PoolManager) buildDSN(dbName string) []string {
 		authPart = fmt.Sprintf("root:%s", p.rootPassword)
 	}
 
-	params := "parseTime=true&loc=Local&timeout=3s&readTimeout=30s&writeTimeout=30s&multiStatements=true&interpolateParams=true"
+	params := "parseTime=true&loc=Local&timeout=5s&readTimeout=900s&writeTimeout=900s&multiStatements=true&interpolateParams=false&charset=utf8mb4&collation=utf8mb4_unicode_ci"
 
 	// 1. Unix socket if file exists
 	if _, err := os.Stat(p.socketPath); err == nil {

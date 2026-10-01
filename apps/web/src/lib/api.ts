@@ -428,7 +428,10 @@ async function executeFetch<T>(
     endpoint.includes('backup') ||
     endpoint.includes('update') ||
     endpoint.includes('docker') ||
-    endpoint.includes('websites');
+    endpoint.includes('websites') ||
+    endpoint.includes('import') ||
+    endpoint.includes('export') ||
+    endpoint.includes('databases');
   const timeoutMs = isLongRunning ? 900000 : 60000;
 
   const controller = new AbortController();
