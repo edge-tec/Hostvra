@@ -98,16 +98,31 @@ else
     echo "[✓] Using Origin SSL certificate: $SSL_CERT"
 fi
 
-# 4. Generate Nginx configuration
+# 4. Whitelist Cloudflare IP ranges in UFW (prevents 525 from firewall drops)
+if command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+    echo "[*] Ensuring Cloudflare IP ranges are whitelisted in UFW..."
+    for ip in \
+        173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+        141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+        197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+        104.24.0.0/14 172.64.0.0/13 131.0.72.0/22; do
+        ufw allow from "$ip" to any port 80,443 proto tcp comment 'Cloudflare' 2>/dev/null || true
+    done
+    ufw allow 80/tcp 2>/dev/null || true
+    ufw allow 443/tcp 2>/dev/null || true
+fi
+
+# 5. Generate Cloudflare-proof Nginx configuration
 NGINX_CONF="/etc/nginx/sites-available/$DOMAIN"
 
 cat > "$NGINX_CONF" << NGINX_BLOCK
-# Virtual Host for $DOMAIN (Serves both HTTP and HTTPS for Cloudflare compatibility)
+# Virtual Host for $DOMAIN - Universal Cloudflare Compatible (Flexible, Full & Full-Strict)
 server {
     listen 80;
     listen [::]:80;
     listen 443 ssl;
     listen [::]:443 ssl;
+    http2 on;
     server_name $DOMAIN;
 
     root $DOC_ROOT;
@@ -119,11 +134,10 @@ server {
     ssl_certificate $SSL_CERT;
     ssl_certificate_key $SSL_KEY;
     ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
-    ssl_session_tickets off;
 
     access_log /var/log/nginx/${DOMAIN}.access.log;
     error_log /var/log/nginx/${DOMAIN}.error.log;
@@ -156,22 +170,16 @@ server {
 }
 NGINX_BLOCK
 
-# 5. Enable site in Nginx
+# 6. Enable site in Nginx
 mkdir -p /etc/nginx/sites-enabled
 ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/$DOMAIN"
 
-# 6. Test and reload Nginx
+# 7. Test and restart Nginx
 echo "[*] Testing Nginx configuration..."
 nginx -t
 
-echo "[*] Reloading Nginx service..."
+echo "[*] Restarting Nginx service..."
 systemctl restart nginx
-
-# 7. Attempt official Let's Encrypt certificate via Certbot if installed
-if command -v certbot &>/dev/null; then
-    echo "[*] Attempting to issue trusted Let's Encrypt certificate via Certbot..."
-    certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null || true
-fi
 
 # 8. Self-test handshake locally
 echo "[*] Verifying local HTTP and SSL response..."
@@ -179,9 +187,10 @@ curl -k -s -o /dev/null -w "Port 443 status: %{http_code}\n" "https://127.0.0.1"
 curl -s -o /dev/null -w "Port 80 status: %{http_code}\n" "http://127.0.0.1" -H "Host: $DOMAIN"
 
 echo "=========================================================="
-echo "  SUCCESS! Cloudflare Error 525 resolved."
+echo "  SUCCESS! Cloudflare-proof vhost configured."
 echo "  https://$DOMAIN is now actively serving:"
 echo "  $DOC_ROOT"
 echo "=========================================================="
+
 
 
