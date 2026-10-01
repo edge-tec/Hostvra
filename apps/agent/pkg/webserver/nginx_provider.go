@@ -125,10 +125,72 @@ func (p *NginxProvider) Install(ctx context.Context) error {
 	return nil
 }
 
-// EnsureDefaultHostvraVHost configures the default server block to reverse-proxy
-// directly to Hostvra Web UI and Core API, and seeds fallback HTML in /var/www/html
-// to permanently resolve 403 Forbidden errors on fresh Nginx installs.
+// EnsureNeutralDefaultServer configures the 00-default-neutral server block to catch
+// all unmapped domains, direct IP requests, and invalid Host headers, returning a neutral
+// 404 response on both HTTP (80) and HTTPS (443). This strictly prevents unmatched requests
+// from ever falling through to the Hostvra control panel or another customer's website.
+func (p *NginxProvider) EnsureNeutralDefaultServer(ctx context.Context) error {
+	sslDir := filepath.Join(p.configDir, "ssl")
+	fallbackCert := filepath.Join(sslDir, "default-fallback.crt")
+	fallbackKey := filepath.Join(sslDir, "default-fallback.key")
+	_ = EnsureFallbackCertificate(fallbackCert, fallbackKey)
+
+	neutralContent := `# Hostvra Isolated Neutral Default Server
+# Unmatched domains, direct IP accesses, and invalid host headers MUST NEVER
+# fallback to Hostvra landing page or any customer website.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    server_tokens off;
+    access_log off;
+
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+
+    server_tokens off;
+    access_log off;
+
+    ssl_certificate ` + fallbackCert + `;
+    ssl_certificate_key ` + fallbackKey + `;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+`
+
+	if _, err := os.Stat(p.vhostDir); err == nil {
+		neutralPath := filepath.Join(p.vhostDir, "00-default-neutral")
+		_ = os.WriteFile(neutralPath, []byte(neutralContent), 0644)
+		_ = os.Remove(filepath.Join(p.enabledDir, "00-default-neutral"))
+		_ = os.Symlink(neutralPath, filepath.Join(p.enabledDir, "00-default-neutral"))
+		_ = os.Remove(filepath.Join(p.enabledDir, "default"))
+	} else {
+		confD := filepath.Join(p.configDir, "conf.d")
+		if _, err := os.Stat(confD); err == nil {
+			_ = os.Remove(filepath.Join(confD, "default.conf"))
+			_ = os.WriteFile(filepath.Join(confD, "00-default-neutral.conf"), []byte(neutralContent), 0644)
+		}
+	}
+	return nil
+}
+
+// EnsureDefaultHostvraVHost configures the Hostvra control panel reverse-proxy
+// bound strictly to hostvra.com, www.hostvra.com, panel.hostvra.com, and localhost.
+// It is explicitly isolated and will NEVER act as default_server for customer domains.
 func (p *NginxProvider) EnsureDefaultHostvraVHost(ctx context.Context) error {
+	_ = p.EnsureNeutralDefaultServer(ctx)
+
 	_ = os.MkdirAll("/var/www/html", 0755)
 	indexFile := "/var/www/html/index.html"
 	if _, err := os.Stat(indexFile); err != nil {
@@ -136,11 +198,66 @@ func (p *NginxProvider) EnsureDefaultHostvraVHost(ctx context.Context) error {
 		_ = os.WriteFile(indexFile, []byte(content), 0644)
 	}
 
-	confContent := `# Hostvra Control Panel - Default Reverse Proxy
+	sslCert := "/etc/letsencrypt/live/hostvra.com/fullchain.pem"
+	sslKey := "/etc/letsencrypt/live/hostvra.com/privkey.pem"
+	sslBlock := ""
+	if _, cErr := os.Stat(sslCert); cErr == nil {
+		if _, kErr := os.Stat(sslKey); kErr == nil {
+			sslBlock = `
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name hostvra.com www.hostvra.com panel.hostvra.com;
+
+    ssl_certificate ` + sslCert + `;
+    ssl_certificate_key ` + sslKey + `;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    client_max_body_size 500M;
+    server_tokens off;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 900s;
+        proxy_buffering off;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 900s;
+    }
+
+    error_page 502 503 504 /50x.html;
+    location = /50x.html {
+        root /var/www/html;
+    }
+}
+`
+		}
+	}
+
+	confContent := `# Hostvra Control Panel - Explicit Domain Reverse Proxy (NOT default_server)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name hostvra.com www.hostvra.com panel.hostvra.com localhost 127.0.0.1;
 
     client_max_body_size 500M;
     server_tokens off;
@@ -175,7 +292,8 @@ server {
         root /var/www/html;
     }
 }
-`
+` + sslBlock
+
 	if _, err := os.Stat(p.vhostDir); err == nil {
 		panelPath := filepath.Join(p.vhostDir, "hostvra-panel")
 		_ = os.WriteFile(panelPath, []byte(confContent), 0644)

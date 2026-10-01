@@ -1732,13 +1732,15 @@ func (p *PostgresStore) UpdateEmailDomain(ctx context.Context, domain *EmailDoma
 	query := `
 		UPDATE email_domains
 		SET status = $2, storage_limit_bytes = $3, spam_threshold = $4,
-		    is_catchall_enabled = $5, catchall_mailbox_id = $6, updated_at = NOW()
+		    is_catchall_enabled = $5, catchall_mailbox_id = $6,
+		    mail_hostname = CASE WHEN $7 <> '' THEN $7 ELSE mail_hostname END,
+		    updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING updated_at
 	`
 	return p.db.QueryRowContext(ctx, query,
 		domain.ID, domain.Status, domain.StorageLimitBytes, domain.SpamThreshold,
-		domain.IsCatchallEnabled, domain.CatchallMailboxID,
+		domain.IsCatchallEnabled, domain.CatchallMailboxID, domain.MailHostname,
 	).Scan(&domain.UpdatedAt)
 }
 

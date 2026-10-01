@@ -378,6 +378,7 @@ export default function EmailHostingPage() {
   // Form states
   const [newDomainName, setNewDomainName] = useState('');
   const [newDomainMailHost, setNewDomainMailHost] = useState('');
+  const [isMailHostCustomized, setIsMailHostCustomized] = useState(false);
   const [newDomainDKIMSelector, setNewDomainDKIMSelector] = useState('default');
   const [newDomainStorageGB, setNewDomainStorageGB] = useState(50);
   const [addingDomain, setAddingDomain] = useState(false);
@@ -948,7 +949,9 @@ export default function EmailHostingPage() {
     if (!newDomainName.trim()) return;
 
     const domainClean = newDomainName.toLowerCase().trim();
-    const mailHost = newDomainMailHost.trim() ? newDomainMailHost.toLowerCase().trim() : `mail.${domainClean}`;
+    const mailHost = (isMailHostCustomized && newDomainMailHost.trim())
+      ? newDomainMailHost.toLowerCase().trim()
+      : `mail.${domainClean}`;
     const dkimSel = newDomainDKIMSelector.trim() || 'default';
     const storageBytes = (newDomainStorageGB || 50) * 1024 * 1024 * 1024;
 
@@ -976,6 +979,7 @@ export default function EmailHostingPage() {
         setShowAddDomainModal(false);
         setNewDomainName('');
         setNewDomainMailHost('');
+        setIsMailHostCustomized(false);
         await openDNSModal(addedDomain);
       } else {
         alert(res.error?.message || 'Failed to add email domain. Please verify server status.');
@@ -2886,9 +2890,10 @@ export default function EmailHostingPage() {
                     placeholder="example.com"
                     value={newDomainName}
                     onChange={(e) => {
-                      setNewDomainName(e.target.value);
-                      if (!newDomainMailHost && e.target.value) {
-                        setNewDomainMailHost(`mail.${e.target.value.toLowerCase().trim()}`);
+                      const val = e.target.value;
+                      setNewDomainName(val);
+                      if (!isMailHostCustomized) {
+                        setNewDomainMailHost(val.trim() ? `mail.${val.toLowerCase().trim()}` : '');
                       }
                     }}
                     className="w-full px-3.5 py-2.5 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono"
@@ -2905,7 +2910,10 @@ export default function EmailHostingPage() {
                       type="text"
                       placeholder={newDomainName ? `mail.${newDomainName}` : 'mail.example.com'}
                       value={newDomainMailHost}
-                      onChange={(e) => setNewDomainMailHost(e.target.value)}
+                      onChange={(e) => {
+                        setIsMailHostCustomized(true);
+                        setNewDomainMailHost(e.target.value);
+                      }}
                       className="w-full px-3 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500 font-mono"
                     />
                   </div>
@@ -2935,7 +2943,10 @@ export default function EmailHostingPage() {
                 <div className="pt-3 flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => setShowAddDomainModal(false)}
+                    onClick={() => {
+                      setShowAddDomainModal(false);
+                      setIsMailHostCustomized(false);
+                    }}
                     className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100"
                   >
                     Cancel

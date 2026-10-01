@@ -923,6 +923,12 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.store.UpdateWebsiteSSL(r.Context(), siteID, true)
 
+	phpVer := "8.3"
+	if site.PHPVersion != nil && *site.PHPVersion != "" {
+		phpVer = *site.PHPVersion
+	}
+	_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+
 	h.audit.Log(r.Context(), r, "ssl.issue", "ssl_certificate", cert.ID.String(), "success", "", map[string]interface{}{
 		"domain":     site.PrimaryDomain,
 		"website_id": siteID.String(),
@@ -1107,12 +1113,26 @@ func (h *WebsiteHandler) UpdateConf(w http.ResponseWriter, r *http.Request) {
 	if req.Config != "" {
 		confPath := "/etc/nginx/sites-available/" + site.PrimaryDomain
 		enabledPath := "/etc/nginx/sites-enabled/" + site.PrimaryDomain
+		oldContent, _ := os.ReadFile(confPath)
+
 		_ = os.WriteFile(confPath, []byte(req.Config), 0644)
 		_ = os.Remove(enabledPath)
 		_ = os.Symlink(confPath, enabledPath)
-		if err := exec.Command("nginx", "-t").Run(); err == nil {
-			_ = exec.Command("systemctl", "reload", "nginx").Run()
+
+		cmd := exec.Command("nginx", "-t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			// Rollback to last known good configuration
+			if len(oldContent) > 0 {
+				_ = os.WriteFile(confPath, oldContent, 0644)
+			} else {
+				_ = os.Remove(enabledPath)
+				_ = os.Remove(confPath)
+			}
+			response.Error(w, http.StatusBadRequest, "CONFIG_SYNTAX_ERROR", fmt.Sprintf("Nginx syntax validation failed: %s", strings.TrimSpace(string(out))), nil, "")
+			return
 		}
+
+		_ = exec.Command("systemctl", "reload", "nginx").Run()
 	}
 
 	h.audit.Log(r.Context(), r, "website.conf.update", "website", siteID.String(), "success", "", map[string]interface{}{
@@ -1557,109 +1577,45 @@ func (h *WebsiteHandler) Statistics(w http.ResponseWriter, r *http.Request) {
 
 // deployNginxVHost writes the virtual host configuration file and reloads Nginx
 func deployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) error {
-	sitesAvailable := "/etc/nginx/sites-available"
-	sitesEnabled := "/etc/nginx/sites-enabled"
-	if _, err := os.Stat(sitesAvailable); err != nil {
-		// Nginx not installed or non-Linux dev environment
-		return nil
-	}
-	_ = os.MkdirAll(sitesAvailable, 0755)
-	_ = os.MkdirAll(sitesEnabled, 0755)
-	_ = os.MkdirAll(docRoot, 0755)
-
-	indexFile := filepath.Join(docRoot, "index.html")
-	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
-		phpFile := filepath.Join(docRoot, "index.php")
-		if _, pErr := os.Stat(phpFile); os.IsNotExist(pErr) {
-			_ = os.WriteFile(indexFile, []byte(fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <title>Welcome to %s</title>
-    <style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1120;color:#f8fafc;text-align:center}.card{padding:40px;background:#1e293b;border-radius:12px;border:1px solid #334155;box-shadow:0 10px 25px rgba(0,0,0,0.5)}h1{color:#10b981;margin-bottom:8px}p{color:#94a3b8}</style>
-</head>
-<body>
-    <div class="card">
-        <h1>Welcome to %s</h1>
-        <p>Your website is active and powered by <strong>Hostvra Control Panel</strong>.</p>
-    </div>
-</body>
-</html>`, domain, domain)), 0644)
-		}
-	}
-
-	phpSocket := fmt.Sprintf("unix:/run/php/php%s-fpm.sock", phpVer)
-	if _, err := os.Stat(fmt.Sprintf("/run/php/php%s-fpm.sock", phpVer)); err != nil {
-		matches, _ := filepath.Glob("/run/php/php*-fpm.sock")
-		if len(matches) > 0 {
-			phpSocket = "unix:" + matches[0]
-		}
-	}
-
-	confPath := filepath.Join(sitesAvailable, domain)
-	var conf string
-	if appType == "proxy" && proxyPort != nil && *proxyPort > 0 {
-		conf = fmt.Sprintf(`server {
-    listen 80;
-    listen [::]:80;
-    server_name %s www.%s;
-
-    location / {
-        proxy_pass http://127.0.0.1:%d;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-`, domain, domain, *proxyPort)
-	} else {
-		conf = fmt.Sprintf(`server {
-    listen 80;
-    listen [::]:80;
-    server_name %s www.%s;
-    root %s;
-    index index.php index.html index.htm;
-
-    location / {
-        try_files $uri $uri/ /index.php?$args;
-    }
-
-    location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass %s;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
-    }
-
-    location ~ /\. {
-        deny all;
-    }
-}
-`, domain, domain, docRoot, phpSocket)
-	}
-
-	if err := os.WriteFile(confPath, []byte(conf), 0644); err != nil {
-		return err
-	}
-
-	symlinkPath := filepath.Join(sitesEnabled, domain)
-	_ = os.Remove(symlinkPath)
-	_ = os.Symlink(confPath, symlinkPath)
-
-	if err := exec.Command("nginx", "-t").Run(); err == nil {
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
-	}
-	return nil
+	return DeployNginxVHost(domain, docRoot, phpVer, appType, proxyPort)
 }
 
 // removeNginxVHost deletes the virtual host configuration and reloads Nginx
 func removeNginxVHost(domain string) {
-	_ = os.Remove(filepath.Join("/etc/nginx/sites-enabled", domain))
-	_ = os.Remove(filepath.Join("/etc/nginx/sites-available", domain))
-	if err := exec.Command("nginx", "-t").Run(); err == nil {
-		_ = exec.Command("systemctl", "reload", "nginx").Run()
-	}
+	_ = RemoveNginxVHost(domain)
 }
 
+// VerifyRouting performs automated domain routing test
+func (h *WebsiteHandler) VerifyRouting(w http.ResponseWriter, r *http.Request) {
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
 
+	claims, hasClaims := auth.GetClaims(r.Context())
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	res, err := VerifyWebsiteRouting(r.Context(), site.PrimaryDomain)
+	if err != nil {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"domain":       site.PrimaryDomain,
+			"verified":     false,
+			"is_isolated":  false,
+			"status_code":  0,
+			"error":        err.Error(),
+		}, nil)
+		return
+	}
+
+	response.JSON(w, http.StatusOK, res, nil)
+}

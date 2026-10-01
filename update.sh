@@ -192,32 +192,75 @@ if command -v systemctl &>/dev/null; then
 
     # Ensure Nginx reverse proxy configuration is active and eliminates 403 Forbidden
     if command -v nginx &>/dev/null; then
-        echo "Ensuring Nginx reverse proxy is active for Hostvra Control Panel..."
-        mkdir -p /var/www/html
+        echo "Ensuring isolated Nginx domain routing and neutral default server..."
+        mkdir -p /var/www/html /etc/nginx/ssl
         chmod 0755 /var/www /var/www/html 2>/dev/null || true
         if [[ ! -f /var/www/html/index.html ]]; then
             echo "<!DOCTYPE html><html><head><title>Hostvra Server</title></head><body style=\"font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;\"><h1>Hostvra Server Online</h1></body></html>" > /var/www/html/index.html
             chmod 0644 /var/www/html/index.html 2>/dev/null || true
         fi
+
+        # 1. Fallback SSL certificate for neutral default_server (cleanly terminates unknown SNI)
+        if [[ ! -f "/etc/nginx/ssl/default-fallback.crt" || ! -f "/etc/nginx/ssl/default-fallback.key" ]]; then
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+                -keyout /etc/nginx/ssl/default-fallback.key \
+                -out /etc/nginx/ssl/default-fallback.crt \
+                -subj "/CN=default-server.neutral" 2>/dev/null || true
+        fi
+
+        SERVER_IP=$(curl -s -4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}' 2>/dev/null || echo "127.0.0.1")
+
         if [[ -d "/etc/nginx/sites-available" ]]; then
+            mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
             rm -f /etc/nginx/sites-enabled/default
-            cat > /etc/nginx/sites-available/hostvra-panel << 'NGINX_EOF'
+
+            # Deploy neutral default_server block
+            cat > /etc/nginx/sites-available/00-default-neutral << 'NEUTRAL_EOF'
+# Hostvra Isolated Neutral Default Server
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
+    server_tokens off;
+    access_log off;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    access_log off;
+    ssl_certificate /etc/nginx/ssl/default-fallback.crt;
+    ssl_certificate_key /etc/nginx/ssl/default-fallback.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+NEUTRAL_EOF
+            ln -sf /etc/nginx/sites-available/00-default-neutral /etc/nginx/sites-enabled/00-default-neutral
+
+            # Deploy explicit hostvra-panel block (NOT default_server)
+            cat > /etc/nginx/sites-available/hostvra-panel << NGINX_EOF
+# Hostvra Control Panel & Webmail Reverse Proxy (NOT default_server)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name hostvra.com www.hostvra.com panel.hostvra.com ${SERVER_IP} localhost 127.0.0.1;
     client_max_body_size 500M;
     server_tokens off;
 
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 900s;
         proxy_connect_timeout 60s;
         proxy_send_timeout 900s;
@@ -227,12 +270,12 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 900s;
         proxy_connect_timeout 60s;
         proxy_send_timeout 900s;
@@ -247,23 +290,41 @@ NGINX_EOF
             ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel
         elif [[ -d "/etc/nginx/conf.d" ]]; then
             rm -f /etc/nginx/conf.d/default.conf
-            cat > /etc/nginx/conf.d/hostvra-panel.conf << 'NGINX_EOF'
+            cat > /etc/nginx/conf.d/00-default-neutral.conf << 'NEUTRAL_EOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_certificate /etc/nginx/ssl/default-fallback.crt;
+    ssl_certificate_key /etc/nginx/ssl/default-fallback.key;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+NEUTRAL_EOF
+            cat > /etc/nginx/conf.d/hostvra-panel.conf << NGINX_EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name hostvra.com www.hostvra.com panel.hostvra.com ${SERVER_IP} localhost 127.0.0.1;
     client_max_body_size 500M;
     server_tokens off;
 
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 900s;
         proxy_buffering off;
     }
@@ -271,12 +332,12 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
         proxy_read_timeout 900s;
     }
 }

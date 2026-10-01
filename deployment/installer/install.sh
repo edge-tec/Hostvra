@@ -321,14 +321,49 @@ EOF
 EOF
     chmod 0644 /var/www/html/index.html /var/www/html/50x.html 2>/dev/null || true
 
-    cat > /tmp/hostvra-panel.nginx.conf << 'EOF'
-# Hostvra Control Panel - Production Reverse Proxy
-# Handles direct server IP access and unassigned domains, routing to Web UI and Core API.
+    # Fallback SSL certificate for neutral default_server (terminates unknown SNI cleanly)
+    mkdir -p /etc/nginx/ssl
+    if [[ ! -f "/etc/nginx/ssl/default-fallback.crt" || ! -f "/etc/nginx/ssl/default-fallback.key" ]]; then
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+            -keyout /etc/nginx/ssl/default-fallback.key \
+            -out /etc/nginx/ssl/default-fallback.crt \
+            -subj "/CN=default-server.neutral" 2>/dev/null || true
+    fi
 
+    # 1. Neutral default_server block (returns 404 for unmapped domains, NEVER Hostvra)
+    cat > /tmp/00-default-neutral.nginx.conf << 'EOF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
+    server_tokens off;
+    access_log off;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    server_tokens off;
+    access_log off;
+    ssl_certificate /etc/nginx/ssl/default-fallback.crt;
+    ssl_certificate_key /etc/nginx/ssl/default-fallback.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    default_type text/plain;
+    return 404 "Host not configured on this server\n";
+}
+EOF
+
+    SERVER_IP=$(curl -s -4 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}' 2>/dev/null || echo "127.0.0.1")
+
+    cat > /tmp/hostvra-panel.nginx.conf << EOF
+# Hostvra Control Panel - Production Reverse Proxy (NOT default_server)
+server {
+    listen 80;
+    listen [::]:80;
+    server_name hostvra.com www.hostvra.com panel.hostvra.com ${SERVER_IP} localhost 127.0.0.1;
 
     client_max_body_size 500M;
     server_tokens off;
@@ -375,9 +410,11 @@ EOF
     if [[ -d "/etc/nginx/sites-available" ]]; then
         # Debian / Ubuntu layout
         mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+        cp /tmp/00-default-neutral.nginx.conf /etc/nginx/sites-available/00-default-neutral
         cp /tmp/hostvra-panel.nginx.conf /etc/nginx/sites-available/hostvra-panel
         # Remove Ubuntu default site that produces 403 Forbidden
         rm -f /etc/nginx/sites-enabled/default
+        ln -sf /etc/nginx/sites-available/00-default-neutral /etc/nginx/sites-enabled/00-default-neutral
         ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel
     fi
 
@@ -385,17 +422,18 @@ EOF
         # RHEL / CentOS / Rocky / AlmaLinux layout (or supplemental for Debian)
         rm -f /etc/nginx/conf.d/default.conf
         if [[ ! -d "/etc/nginx/sites-available" ]]; then
+            cp /tmp/00-default-neutral.nginx.conf /etc/nginx/conf.d/00-default-neutral.conf
             cp /tmp/hostvra-panel.nginx.conf /etc/nginx/conf.d/hostvra-panel.conf
         fi
     fi
-    rm -f /tmp/hostvra-panel.nginx.conf
+    rm -f /tmp/00-default-neutral.nginx.conf /tmp/hostvra-panel.nginx.conf
 
     # Validate and reload Nginx
     if command -v nginx &>/dev/null; then
         if nginx -t >/dev/null 2>&1; then
             systemctl enable nginx 2>/dev/null || true
             systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
-            log_success "Nginx reverse proxy configured and active (403 Forbidden resolved)."
+            log_success "Nginx isolated domain routing and neutral default server configured and active."
         else
             log_warn "Nginx syntax check failed. Please check /etc/nginx/sites-available/hostvra-panel."
         fi

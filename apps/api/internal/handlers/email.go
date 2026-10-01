@@ -910,7 +910,7 @@ func (h *EmailHandler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mailHostname := strings.ToLower(strings.TrimSpace(req.MailHostname))
-	if mailHostname == "" {
+	if mailHostname == "" || !strings.Contains(mailHostname, ".") || (!strings.HasSuffix(mailHostname, domainName) && strings.Count(mailHostname, ".") < 2) {
 		mailHostname = "mail." + domainName
 	}
 
@@ -1244,6 +1244,15 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	effectiveMailHostname := domain.MailHostname
+	if effectiveMailHostname == "" || !strings.Contains(effectiveMailHostname, ".") || (!strings.HasSuffix(effectiveMailHostname, domain.Domain) && strings.Count(effectiveMailHostname, ".") < 2) {
+		effectiveMailHostname = "mail." + domain.Domain
+		if domain.MailHostname != effectiveMailHostname {
+			domain.MailHostname = effectiveMailHostname
+			_ = h.store.UpdateEmailDomain(r.Context(), domain)
+		}
+	}
+
 	selector := domain.DKIMSelector
 	if selector == "" {
 		selector = "default"
@@ -1300,7 +1309,7 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		{
 			RecordType: "MX",
 			Host:       "@",
-			Expected:   fmt.Sprintf("10 %s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("10 %s.", effectiveMailHostname),
 			Current:    auditReport.MX.Current,
 			Status:     mapStatus(mxValid, auditReport.MX.Status),
 			Message:    "Primary MX routing record for Postfix MTA",
@@ -1340,16 +1349,16 @@ func (h *EmailHandler) GetDomainDNS(w http.ResponseWriter, r *http.Request) {
 		{
 			RecordType: "CNAME",
 			Host:       "autoconfig",
-			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
 			Status:     "verified",
 			Message:    "Mozilla Thunderbird / Webmail client auto-configuration",
 		},
 		{
 			RecordType: "CNAME",
 			Host:       "autodiscover",
-			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
 			Status:     "verified",
 			Message:    "Microsoft Outlook and mobile mail auto-discovery",
 		},
@@ -1386,6 +1395,15 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil && body.ForceVerify {
 			forceVerify = true
+		}
+	}
+
+	effectiveMailHostname := domain.MailHostname
+	if effectiveMailHostname == "" || !strings.Contains(effectiveMailHostname, ".") || (!strings.HasSuffix(effectiveMailHostname, domain.Domain) && strings.Count(effectiveMailHostname, ".") < 2) {
+		effectiveMailHostname = "mail." + domain.Domain
+		if domain.MailHostname != effectiveMailHostname {
+			domain.MailHostname = effectiveMailHostname
+			_ = h.store.UpdateEmailDomain(r.Context(), domain)
 		}
 	}
 
@@ -1437,7 +1455,7 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		{
 			RecordType: "MX",
 			Host:       "@",
-			Expected:   fmt.Sprintf("10 %s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("10 %s.", effectiveMailHostname),
 			Current:    auditReport.MX.Current,
 			Status:     mapStatus(mxValid, auditReport.MX.Status),
 			Message:    "Primary MX routing record for Postfix MTA",
@@ -1477,16 +1495,16 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 		{
 			RecordType: "CNAME",
 			Host:       "autoconfig",
-			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
 			Status:     "verified",
 			Message:    "Mozilla Thunderbird / Webmail client auto-configuration",
 		},
 		{
 			RecordType: "CNAME",
 			Host:       "autodiscover",
-			Expected:   fmt.Sprintf("%s.", domain.MailHostname),
-			Current:    fmt.Sprintf("%s.", domain.MailHostname),
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
 			Status:     "verified",
 			Message:    "Microsoft Outlook and mobile mail auto-discovery",
 		},
@@ -1494,7 +1512,7 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 
 	var issues []string
 	if !mxValid {
-		issues = append(issues, "MX record is not resolving to "+domain.MailHostname)
+		issues = append(issues, "MX record is not resolving to "+effectiveMailHostname)
 	}
 	if !aValid {
 		issues = append(issues, "Mail server A record does not point to "+serverIP)

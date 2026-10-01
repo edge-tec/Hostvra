@@ -86,9 +86,11 @@ systemctl restart hostvra-web 2>/dev/null || true
 echo "[INFO] Waiting for API startup and Nginx vhost auto-sync..."
 sleep 5
 
-# ─── Step 8: Verify Nginx is serving correct configs ─────────────────────────
 if command -v nginx &>/dev/null; then
-    # Ensure hostvra-panel default server is present
+    # Ensure 00-default-neutral and hostvra-panel are enabled
+    if [[ -f "/etc/nginx/sites-available/00-default-neutral" ]]; then
+        ln -sf /etc/nginx/sites-available/00-default-neutral /etc/nginx/sites-enabled/00-default-neutral 2>/dev/null || true
+    fi
     if [[ -f "/etc/nginx/sites-available/hostvra-panel" ]]; then
         ln -sf /etc/nginx/sites-available/hostvra-panel /etc/nginx/sites-enabled/hostvra-panel 2>/dev/null || true
     fi
