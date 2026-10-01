@@ -274,6 +274,7 @@ function PhpMyAdminCore() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSqlText, setImportSqlText] = useState<string>('');
   const [isDraggingImport, setIsDraggingImport] = useState<boolean>(false);
+  const [isDraggingOverPage, setIsDraggingOverPage] = useState<boolean>(false);
   const [importProgress, setImportProgress] = useState<number>(0);
   const [importStatusText, setImportStatusText] = useState<string>('');
 
@@ -531,6 +532,56 @@ function PhpMyAdminCore() {
       }
     }
   }, [currentDb, selectedTable, activeTab, fetchTableStructure, fetchBrowseRows, browsePage, browseLimit, browseSortCol, browseSortOrder, browseSearch]);
+
+  // Global drag-and-drop prevention + full-page drop overlay
+  useEffect(() => {
+    let dragCounter = 0;
+    const handleDragOver = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const handleDragEnter = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      if (e.dataTransfer?.types?.includes('Files')) {
+        setIsDraggingOverPage(true);
+      }
+    };
+    const handleDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        setIsDraggingOverPage(false);
+      }
+    };
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0;
+      setIsDraggingOverPage(false);
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        const name = file.name.toLowerCase();
+        if (name.endsWith('.sql') || name.endsWith('.txt') || name.endsWith('.csv')) {
+          setImportFile(file);
+          setActiveTab('import');
+        }
+      }
+    };
+    document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('dragenter', handleDragEnter);
+    document.addEventListener('dragleave', handleDragLeave);
+    document.addEventListener('drop', handleDrop);
+    return () => {
+      document.removeEventListener('dragover', handleDragOver);
+      document.removeEventListener('dragenter', handleDragEnter);
+      document.removeEventListener('dragleave', handleDragLeave);
+      document.removeEventListener('drop', handleDrop);
+    };
+  }, []);
 
   // Switch Active Database
   const handleSwitchDb = (db: string) => {
@@ -1028,21 +1079,22 @@ function PhpMyAdminCore() {
 
     setImporting(true);
     setImportResult(null);
-    setImportProgress(10);
-    setImportStatusText('Uploading SQL dump file...');
+    setImportProgress(5);
+    setImportStatusText('Preparing import...');
 
     const progressTimer = setInterval(() => {
       setImportProgress((prev) => {
-        if (prev < 30) return prev + 10;
-        if (prev < 80) return prev + 5;
-        if (prev < 95) return prev + 1;
+        if (prev < 20) return prev + 5;
+        if (prev < 50) return prev + 3;
+        if (prev < 80) return prev + 2;
+        if (prev < 95) return prev + 0.5;
         return prev;
       });
-    }, 300);
+    }, 500);
 
     try {
       if (importFile) {
-        setImportStatusText(`Restoring ${importFile.name}...`);
+        setImportStatusText(`Uploading & restoring ${importFile.name} (${(importFile.size / (1024 * 1024)).toFixed(1)} MB)...`);
         const formData = new FormData();
         formData.append('file', importFile);
         const res = await apiFetch<any>(`/api/v1/databases/import?db=${encodeURIComponent(currentDb)}`, {
@@ -1051,40 +1103,43 @@ function PhpMyAdminCore() {
         });
         clearInterval(progressTimer);
         setImportProgress(100);
-        setImportStatusText('Import complete!');
 
         if (res && res.success) {
+          setImportStatusText(`Import complete! ${res.data?.successful || 0} statements executed.`);
           setImportResult(res.data);
           showToast(`Import finished: ${res.data?.successful || 0} executed, ${res.data?.failed || 0} failed.`);
           fetchTree();
           fetchTableDetails(currentDb);
         } else {
+          setImportStatusText('Import failed.');
           showToast(res?.error?.message || 'Import failed.');
         }
       } else if (importSqlText.trim()) {
         setImportStatusText('Executing raw SQL statements...');
-        const res = await apiFetch<any>('/api/v1/databases/query', {
+        // For raw SQL, use the import endpoint with text/plain Content-Type
+        const res = await apiFetch<any>(`/api/v1/databases/import?db=${encodeURIComponent(currentDb)}`, {
           method: 'POST',
-          body: JSON.stringify({
-            database: currentDb,
-            query: importSqlText,
-          }),
+          headers: { 'Content-Type': 'text/plain' },
+          body: importSqlText,
         });
         clearInterval(progressTimer);
         setImportProgress(100);
-        setImportStatusText('Execution complete!');
 
-        if (res && res.data && !res.data.error) {
-          showToast('SQL script executed successfully.');
+        if (res && res.success) {
+          setImportStatusText(`Execution complete! ${res.data?.successful || 0} statements executed.`);
+          setImportResult(res.data);
+          showToast(`SQL executed: ${res.data?.successful || 0} succeeded, ${res.data?.failed || 0} failed.`);
           fetchTree();
           fetchTableDetails(currentDb);
         } else {
-          showToast(res?.data?.error || 'SQL execution failed.');
+          setImportStatusText('SQL execution failed.');
+          showToast(res?.error?.message || res?.data?.error || 'SQL execution failed.');
         }
       }
     } catch (e: any) {
       clearInterval(progressTimer);
       setImportProgress(0);
+      setImportStatusText('Import error.');
       showToast(e?.message || 'Import error');
     } finally {
       clearInterval(progressTimer);
@@ -1333,6 +1388,17 @@ function PhpMyAdminCore() {
 
   return (
     <DashboardShell>
+      {/* Full-page drag overlay */}
+      {isDraggingOverPage && (
+        <div className="fixed inset-0 z-[100] bg-amber-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white dark:bg-surface-900 rounded-3xl p-10 shadow-2xl border-4 border-dashed border-amber-500 text-center animate-pulse">
+            <Upload className="w-16 h-16 mx-auto mb-4 text-amber-500" />
+            <p className="text-xl font-bold text-slate-900 dark:text-white">Drop your SQL file here</p>
+            <p className="text-sm text-slate-500 mt-2">Release to import into <code className="font-mono text-amber-600">{currentDb || 'database'}</code></p>
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl border border-slate-700 flex items-center gap-3 animate-fadeIn text-xs">
@@ -2501,7 +2567,7 @@ function PhpMyAdminCore() {
                 </p>
               </div>
 
-              <div className="space-y-4 text-xs">
+               <div className="space-y-4 text-xs">
                 {/* File Upload Area */}
                 <div
                   onDragOver={(e) => {
@@ -2528,17 +2594,39 @@ function PhpMyAdminCore() {
                       setImportFile(file);
                     }
                   }}
-                  className={`border-2 border-dashed rounded-2xl p-6 text-center transition cursor-pointer ${
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition cursor-pointer ${
                     isDraggingImport
                       ? 'border-amber-500 bg-amber-500/10 scale-[1.01]'
-                      : 'border-slate-300 dark:border-surface-700 bg-slate-50/50 dark:bg-surface-950 hover:border-amber-500'
+                      : importFile
+                        ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
+                        : 'border-slate-300 dark:border-surface-700 bg-slate-50/50 dark:bg-surface-950 hover:border-amber-500'
                   }`}
                 >
-                  <Upload className={`w-8 h-8 mx-auto mb-2 transition ${isDraggingImport ? 'text-amber-500 animate-bounce' : 'text-slate-400'}`} />
-                  <p className="font-bold text-slate-900 dark:text-white">
-                    {isDraggingImport ? 'Drop your .sql file here' : 'Select `.sql` or `.txt` dump file'}
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB (Drag & drop or browse)</p>
+                  <Upload className={`w-10 h-10 mx-auto mb-3 transition ${isDraggingImport ? 'text-amber-500 animate-bounce' : importFile ? 'text-emerald-500' : 'text-slate-400'}`} />
+                  {importFile ? (
+                    <>
+                      <p className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                        {importFile.name}
+                      </p>
+                      <p className="text-slate-500 mt-1">
+                        Size: {(importFile.size / (1024 * 1024)).toFixed(2)} MB
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setImportFile(null); }}
+                        className="mt-2 inline-block px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-bold hover:bg-red-100 cursor-pointer text-[11px]"
+                      >
+                        Remove File
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-bold text-slate-900 dark:text-white text-sm">
+                        {isDraggingImport ? 'Drop your .sql file here' : 'Drag & drop .sql file here'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB</p>
+                    </>
+                  )}
                   <input
                     type="file"
                     accept=".sql,.txt"
@@ -2550,12 +2638,14 @@ function PhpMyAdminCore() {
                       }
                     }}
                   />
-                  <label
-                    htmlFor="sql-file-input"
-                    className="mt-3 inline-block px-4 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200"
-                  >
-                    {importFile ? `Selected: ${importFile.name} (${(importFile.size / 1024).toFixed(1)} KB)` : 'Browse File'}
-                  </label>
+                  {!importFile && (
+                    <label
+                      htmlFor="sql-file-input"
+                      className="mt-3 inline-block px-5 py-2.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200 shadow-xs"
+                    >
+                      Browse File
+                    </label>
+                  )}
                 </div>
 
                 {/* Or paste SQL */}
@@ -2598,15 +2688,24 @@ function PhpMyAdminCore() {
                   </div>
                 )}
 
-                <div className="pt-2">
+                <div className="pt-2 flex items-center gap-3">
                   <button
                     onClick={handleStartImport}
-                    disabled={importing}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs disabled:opacity-50"
+                    disabled={importing || (!importFile && !importSqlText.trim())}
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs disabled:opacity-50 transition"
                   >
                     <Upload className="w-4 h-4" />
                     <span>{importing ? 'Importing Statements...' : 'Go / Start Import'}</span>
                   </button>
+                  {(importFile || importSqlText.trim()) && !importing && (
+                    <button
+                      onClick={() => { setImportFile(null); setImportSqlText(''); setImportResult(null); setImportProgress(0); setImportStatusText(''); }}
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200 dark:border-surface-700 cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Clear</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
