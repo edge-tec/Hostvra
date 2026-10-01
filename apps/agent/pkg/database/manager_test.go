@@ -80,3 +80,26 @@ func TestDatabaseManager_VerifyUserConnection_Failure(t *testing.T) {
 		t.Fatal("expected verification failure for non-existent service")
 	}
 }
+
+func TestDatabaseManager_PrivilegeScoping(t *testing.T) {
+	mgr := NewManager()
+	ctx := context.Background()
+
+	// 1. Attempting to grant global (*.*) or empty database must be blocked
+	err := mgr.ExecuteUpdatePermission(ctx, "tenant_user", "localhost", "localhost", "")
+	if err == nil || !strings.Contains(err.Error(), "granting global (*.*) privileges is forbidden") {
+		t.Fatalf("expected error blocking global privileges, got: %v", err)
+	}
+
+	err = mgr.ExecuteUpdatePermission(ctx, "tenant_user", "localhost", "localhost", "*")
+	if err == nil || !strings.Contains(err.Error(), "granting global (*.*) privileges is forbidden") {
+		t.Fatalf("expected error blocking wildcard privileges, got: %v", err)
+	}
+
+	// 2. Scoped database grant should succeed building SQL script
+	err = mgr.ExecuteGrantDatabasePrivileges(ctx, "tenant_user", "localhost", "tenant_a_db")
+	if err != nil && !strings.Contains(err.Error(), "mysql execution error") {
+		t.Fatalf("unexpected error for valid scoped grant: %v", err)
+	}
+}
+

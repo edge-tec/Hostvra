@@ -437,6 +437,8 @@ func safeSQLString(val string) string {
 
 // executeSQLScript executes SQL statements using the connection pool first, falling back to mysql CLI.
 func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error {
+	var poolErr error
+
 	// 1. Connection pool first
 	if m.pool != nil {
 		db, err := m.pool.GetDB(ctx, "information_schema")
@@ -449,6 +451,7 @@ func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error 
 					continue
 				}
 				if _, execErr := db.ExecContext(ctx, stmt); execErr != nil {
+					poolErr = execErr
 					allOk = false
 					break
 				}
@@ -456,17 +459,20 @@ func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error 
 			if allOk {
 				return nil
 			}
+		} else {
+			poolErr = err
 		}
 	}
 
-	// 2. CLI fallback
+	// 2. CLI fallback with secure stdin (prevents password/query exposure in ps aux / /proc)
 	if path, err := exec.LookPath("mysql"); err == nil {
-		args := []string{"-u", "root"}
+		cmd := exec.CommandContext(ctx, path, "-u", "root")
 		if m.rootPassword != "" {
-			args = append(args, fmt.Sprintf("-p%s", m.rootPassword))
+			cmd.Env = append(os.Environ(), "MYSQL_PWD="+m.rootPassword)
+		} else {
+			cmd.Env = os.Environ()
 		}
-		args = append(args, "-e", sqlScript)
-		cmd := exec.CommandContext(ctx, path, args...)
+		cmd.Stdin = strings.NewReader(sqlScript)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
@@ -475,7 +481,10 @@ func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error 
 		return nil
 	}
 
-	return nil
+	if poolErr != nil {
+		return fmt.Errorf("mysql execution failed: %w", poolErr)
+	}
+	return errors.New("no mysql connection or binary available to execute database operations")
 }
 
 // ExecuteRealDatabaseCreation creates the real database and user, granting all privileges.
@@ -651,35 +660,38 @@ func (m *Manager) VerifyUserConnection(ctx context.Context, dbName, user, passwo
 	return fmt.Errorf("credential authentication verification failed for database user '%s'", user)
 }
 
-// ExecuteUpdatePermission changes a user's allowed host.
+// ExecuteUpdatePermission changes a user's allowed host or grants scoped privileges.
 func (m *Manager) ExecuteUpdatePermission(ctx context.Context, user, oldHost, newHost, dbName string) error {
-	if path, err := exec.LookPath("mysql"); err == nil {
-		if oldHost == "" {
-			oldHost = "localhost"
-		}
-		if newHost == "" {
-			newHost = "localhost"
-		}
-		escUser := safeSQLString(user)
-		escHost := safeSQLString(newHost)
-
-		targetDB := "*"
-		if dbName != "" && dbName != "*" {
-			targetDB = SafeQuoteIdentifier(dbName)
-		}
-
-		sqlScript := fmt.Sprintf(
-			"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s'; FLUSH PRIVILEGES;",
-			targetDB, escUser, escHost,
-		)
-		args := []string{"-e", sqlScript}
-		if m.rootPassword != "" {
-			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
-		}
-		cmd := exec.CommandContext(ctx, path, args...)
-		_ = cmd.Run()
+	if user == "" {
+		return errors.New("database user is required")
 	}
-	return nil
+	if dbName == "" || dbName == "*" {
+		return errors.New("target database name must be explicitly specified: granting global (*.*) privileges is forbidden")
+	}
+	if newHost == "" {
+		newHost = "localhost"
+	}
+	escUser := safeSQLString(user)
+	escHost := safeSQLString(newHost)
+	targetDB := SafeQuoteIdentifier(dbName)
+
+	hosts := []string{escHost}
+	if newHost == "localhost" {
+		hosts = append(hosts, "127.0.0.1")
+	}
+
+	var sb strings.Builder
+	for _, h := range hosts {
+		sb.WriteString(fmt.Sprintf("GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n", targetDB, escUser, h))
+	}
+	sb.WriteString("FLUSH PRIVILEGES;\n")
+
+	return m.executeSQLScript(ctx, sb.String())
+}
+
+// ExecuteGrantDatabasePrivileges grants all privileges on a specific database to a user.
+func (m *Manager) ExecuteGrantDatabasePrivileges(ctx context.Context, user, hostAllow, dbName string) error {
+	return m.ExecuteUpdatePermission(ctx, user, "", hostAllow, dbName)
 }
 
 // RunDatabaseTools executes optimization, repair, or integrity check on database tables.
@@ -776,6 +788,9 @@ func (m *Manager) GetRootPassword() string {
 }
 
 func (m *Manager) SetRootPassword(newPassword string) error {
+	if newPassword == "" {
+		return errors.New("root password cannot be empty")
+	}
 	m.mu.Lock()
 	m.rootPassword = newPassword
 	if m.pool != nil {
@@ -783,13 +798,14 @@ func (m *Manager) SetRootPassword(newPassword string) error {
 	}
 	m.mu.Unlock()
 
-	// Attempt live host change if mysql is installed
-	if path, err := exec.LookPath("mysql"); err == nil {
-		sqlScript := fmt.Sprintf("ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;", newPassword)
-		cmd := exec.Command(path, "-e", sqlScript)
-		_ = cmd.Run()
-	}
-	return nil
+	escPass := safeSQLString(newPassword)
+	sqlScript := fmt.Sprintf(
+		"ALTER USER 'root'@'localhost' IDENTIFIED BY '%s';\n"+
+			"ALTER USER IF EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '%s';\n"+
+			"FLUSH PRIVILEGES;\n",
+		escPass, escPass,
+	)
+	return m.executeSQLScript(context.Background(), sqlScript)
 }
 
 // AutoBackup getters and setters

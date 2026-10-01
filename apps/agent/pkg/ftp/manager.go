@@ -228,7 +228,7 @@ func (fm *FTPManager) CreateUser(username, password, homeDir string, quotaMB, up
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		args := []string{"useradd", username, "-u", "www-data", "-d", homeDir}
+		args := []string{"useradd", username, "-u", "www-data", "-D", homeDir}
 		if quotaMB > 0 {
 			args = append(args, "-N", strconv.Itoa(quotaMB))
 		}
@@ -354,7 +354,7 @@ func (fm *FTPManager) UpdateUser(username, homeDir string, quotaMB, uploadBandwi
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		args := []string{"usermod", username, "-d", homeDir}
+		args := []string{"usermod", username, "-D", homeDir}
 		if quotaMB > 0 {
 			args = append(args, "-N", strconv.Itoa(quotaMB))
 		}
@@ -373,6 +373,7 @@ func (fm *FTPManager) UpdateUser(username, homeDir string, quotaMB, uploadBandwi
 		if mkdbOut, err := exec.CommandContext(ctx, "pure-pw", "mkdb").CombinedOutput(); err != nil {
 			return fmt.Errorf("pure-pw mkdb failed: %s (%w)", string(mkdbOut), err)
 		}
+		return nil
 	}
 
 	return fm.saveUsersUnlocked(existing, "", "")
@@ -413,6 +414,7 @@ func (fm *FTPManager) DeleteUser(username string) error {
 		if mkdbOut, err := exec.CommandContext(ctx, "pure-pw", "mkdb").CombinedOutput(); err != nil {
 			return fmt.Errorf("pure-pw mkdb failed: %s (%w)", string(mkdbOut), err)
 		}
+		return nil
 	}
 
 	return fm.saveUsersUnlocked(newUsers, "", "")
@@ -557,5 +559,12 @@ func (fm *FTPManager) saveUsersUnlocked(users []FTPUser, targetUser, targetPassw
 		return err
 	}
 
-	return os.Rename(tmpFile, fm.passwdFile)
+	if err := os.Rename(tmpFile, fm.passwdFile); err != nil {
+		return err
+	}
+
+	if fm.isPureFtpd {
+		_ = exec.Command("pure-pw", "mkdb").Run()
+	}
+	return nil
 }

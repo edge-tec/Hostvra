@@ -330,7 +330,10 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger real-time host provision
 	if err := h.dbMgr.ExecuteRealDatabaseCreation(r.Context(), req.Name, req.CharacterSet, req.Collation, req.Username, req.Password, req.HostAllow); err != nil {
-		h.audit.Log(r.Context(), r, "database.create.warning", "database", db.ID.String(), "warning", "live database provisioning warning: "+err.Error(), nil)
+		_ = h.store.DeleteDatabase(r.Context(), db.ID)
+		h.audit.Log(r.Context(), r, "database.create.failure", "database", db.ID.String(), "failure", "live database provisioning failed: "+err.Error(), nil)
+		response.Error(w, http.StatusBadGateway, "PROVISIONING_FAILED", "Failed to provision database on MySQL engine: "+err.Error(), nil, "")
+		return
 	}
 
 	h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
@@ -339,6 +342,7 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		"server_id": serverID.String(),
 	})
 
+	db.Password = "" // Mask password from response body
 	response.JSON(w, http.StatusCreated, db, nil)
 }
 
@@ -375,11 +379,18 @@ func (h *DatabaseHandler) Update(w http.ResponseWriter, r *http.Request) {
 		db.Quota = req.Quota
 	}
 	if req.Password != "" {
+		if err := h.dbMgr.ExecuteUpdatePassword(r.Context(), db.Username, db.HostAllow, req.Password); err != nil {
+			h.audit.Log(r.Context(), r, "database.password_update.failure", "database", dbID.String(), "failure", "failed to update live password: "+err.Error(), nil)
+			response.Error(w, http.StatusBadGateway, "PASSWORD_UPDATE_FAILED", "Failed to update database user password on MySQL engine: "+err.Error(), nil, "")
+			return
+		}
 		db.Password = req.Password
-		_ = h.dbMgr.ExecuteUpdatePassword(r.Context(), db.Username, db.HostAllow, req.Password)
 	}
 	if req.HostAllow != "" {
-		_ = h.dbMgr.ExecuteUpdatePermission(r.Context(), db.Username, db.HostAllow, req.HostAllow, db.Name)
+		if err := h.dbMgr.ExecuteUpdatePermission(r.Context(), db.Username, db.HostAllow, req.HostAllow, db.Name); err != nil {
+			response.Error(w, http.StatusBadGateway, "PERMISSION_UPDATE_FAILED", "Failed to update user host permissions on MySQL engine: "+err.Error(), nil, "")
+			return
+		}
 		db.HostAllow = req.HostAllow
 	}
 
@@ -389,6 +400,7 @@ func (h *DatabaseHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "database.update", "database", dbID.String(), "success", "", nil)
+	db.Password = "" // Mask password from response body
 	response.JSON(w, http.StatusOK, db, nil)
 }
 
@@ -977,7 +989,10 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger real-time host provision
 	if err := h.dbMgr.ExecuteCreateUser(r.Context(), req.Username, req.Password, req.HostAllow); err != nil {
-		h.audit.Log(r.Context(), r, "database_user.create.warning", "database_user", user.ID.String(), "warning", "live database user provisioning warning: "+err.Error(), nil)
+		_ = h.store.DeleteDatabaseUser(r.Context(), user.ID)
+		h.audit.Log(r.Context(), r, "database_user.create.failure", "database_user", user.ID.String(), "failure", "live database user provisioning failed: "+err.Error(), nil)
+		response.Error(w, http.StatusBadGateway, "PROVISIONING_FAILED", "Failed to provision database user on MySQL engine: "+err.Error(), nil, "")
+		return
 	}
 
 	h.audit.Log(r.Context(), r, "database_user.create", "database_user", user.ID.String(), "success", "", map[string]interface{}{
@@ -985,6 +1000,105 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 
 	response.JSON(w, http.StatusCreated, user, nil)
+}
+
+// ListUsers returns database users for the specified server or tenant
+func (h *DatabaseHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+
+	var serverID uuid.UUID
+	serverIDStr := r.URL.Query().Get("server_id")
+	if serverIDStr != "" {
+		if id, err := uuid.Parse(serverIDStr); err == nil {
+			serverID = id
+		}
+	}
+
+	if !isAdmin && claims != nil {
+		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
+		if err != nil || len(servers) == 0 {
+			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+			return
+		}
+		if serverID == uuid.Nil {
+			serverID = servers[0].ID
+		} else {
+			allowed := false
+			for _, s := range servers {
+				if s.ID == serverID {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access to this server is not permitted", nil, "")
+				return
+			}
+		}
+	}
+
+	users, err := h.store.ListDatabaseUsersByServer(r.Context(), serverID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve database users", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, users, &response.Meta{
+		Total: len(users),
+	})
+}
+
+// DeleteUser removes a database user from MySQL and database metadata
+func (h *DatabaseHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid database user UUID", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+
+	user, err := h.store.GetDatabaseUserByID(r.Context(), userID)
+	if err != nil || user == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Database user not found", nil, "")
+		return
+	}
+
+	if !isAdmin && claims != nil {
+		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
+		if err != nil {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+			return
+		}
+		allowed := false
+		for _, s := range servers {
+			if s.ID == user.ServerID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to delete this database user", nil, "")
+			return
+		}
+	}
+
+	// 1. Drop user from MySQL across all provisioned host variants (localhost + 127.0.0.1)
+	_ = h.dbMgr.ExecuteDropUser(r.Context(), user.Username, user.HostAllow)
+
+	// 2. Remove record from PostgreSQL
+	if err := h.store.DeleteDatabaseUser(r.Context(), userID); err != nil {
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to delete database user record", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "database_user.delete", "database_user", userID.String(), "success", "", map[string]interface{}{
+		"username": user.Username,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{"deleted": true, "username": user.Username}, nil)
 }
 
 // GetTables returns the live tables for a given database name

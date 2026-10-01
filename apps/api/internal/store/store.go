@@ -85,7 +85,9 @@ type Store interface {
 	DeleteDatabase(ctx context.Context, id uuid.UUID) error
 	RestoreDatabase(ctx context.Context, id uuid.UUID) error
 	CreateDatabaseUser(ctx context.Context, user *DatabaseUser) error
+	GetDatabaseUserByID(ctx context.Context, id uuid.UUID) (*DatabaseUser, error)
 	ListDatabaseUsersByServer(ctx context.Context, serverID uuid.UUID) ([]*DatabaseUser, error)
+	DeleteDatabaseUser(ctx context.Context, id uuid.UUID) error
 
 	// SSL
 	CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error

@@ -1,9 +1,6 @@
 package dovecot
 
 import (
-	"crypto/rand"
-	"crypto/sha512"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +16,7 @@ type ConfigOptions struct {
 	VmailGID    int    // default 5000
 	SSLCertPath string // e.g. "/etc/letsencrypt/live/mail.example.com/fullchain.pem"
 	SSLKeyPath  string // e.g. "/etc/letsencrypt/live/mail.example.com/privkey.pem"
+	ConfigDir   string // e.g. "/etc/dovecot"
 }
 
 type UserAccount struct {
@@ -225,7 +223,8 @@ service auth-worker {
 `
 }
 
-// GenerateUsersFile builds the Dovecot virtual passwd-file content
+// GenerateUsersFile builds the Dovecot virtual passwd-file content.
+// It merges new accounts while protecting existing accounts against blank/corrupted password hashes.
 func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 	if opts.MailDirBase == "" {
 		opts.MailDirBase = "/var/mail/vhosts"
@@ -237,12 +236,46 @@ func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 		opts.VmailGID = 5000
 	}
 
+	configDir := opts.ConfigDir
+	if configDir == "" {
+		configDir = "/etc/dovecot"
+	}
+
+	// 1. Read existing valid hashes from disk to protect against blank hash overwrite
+	existingHashes := make(map[string]string)
+	usersFile := filepath.Join(configDir, "users")
+	if data, err := os.ReadFile(usersFile); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				email := strings.ToLower(strings.TrimSpace(parts[0]))
+				hash := strings.TrimSpace(parts[1])
+				if hash != "" && hash != "{CRYPT}:" && hash != "{CRYPT}" {
+					existingHashes[email] = hash
+				}
+			}
+		}
+	}
+
 	var sb strings.Builder
 	for _, acc := range accounts {
+		emailKey := strings.ToLower(strings.TrimSpace(acc.Email))
 		hash := strings.TrimSpace(acc.PasswordHash)
+
+		// Empty hash protection: retain existing valid hash if available, otherwise safely reject/skip
 		if hash == "" {
-			continue
+			if existing, ok := existingHashes[emailKey]; ok && existing != "" {
+				hash = existing
+			} else {
+				// Safely skip: never write empty or {CRYPT}: password entry
+				continue
+			}
 		}
+
 		if !strings.HasPrefix(hash, "{") {
 			if strings.HasPrefix(hash, "$2a$") || strings.HasPrefix(hash, "$2b$") || strings.HasPrefix(hash, "$2y$") {
 				hash = "{BLF-CRYPT}" + hash
@@ -265,11 +298,16 @@ func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 	return sb.String()
 }
 
-// HashPassword generates a secure, Dovecot-compatible password hash
+// HashPassword generates a secure, Dovecot-compatible password hash without exposing plain password in process arguments
 func HashPassword(plainPassword string) string {
-	// If doveadm is available on the system (standard production Dovecot), use native SHA512-CRYPT
+	if plainPassword == "" {
+		return ""
+	}
+
+	// 1. If doveadm is available on the system, use native SHA512-CRYPT via stdin (avoiding -p argument in ps/proc)
 	if doveadmPath, err := exec.LookPath("doveadm"); err == nil {
-		cmd := exec.Command(doveadmPath, "pw", "-s", "SHA512-CRYPT", "-p", plainPassword)
+		cmd := exec.Command(doveadmPath, "pw", "-s", "SHA512-CRYPT")
+		cmd.Stdin = strings.NewReader(plainPassword + "\n" + plainPassword + "\n")
 		if out, err := cmd.Output(); err == nil {
 			trimmed := strings.TrimSpace(string(out))
 			if trimmed != "" {
@@ -278,22 +316,13 @@ func HashPassword(plainPassword string) string {
 		}
 	}
 
-	// Standard cryptographically secure fallback: BLF-CRYPT (bcrypt) which Dovecot natively supports
+	// 2. Standard cryptographically secure fallback: BLF-CRYPT (bcrypt) which Dovecot natively supports in-process
 	hash, err := bcrypt.GenerateFromPassword([]byte(plainPassword), 10)
 	if err == nil {
 		return "{BLF-CRYPT}" + string(hash)
 	}
 
-	// Fallback to SHA512
-	saltBytes := make([]byte, 12)
-	_, _ = rand.Read(saltBytes)
-	salt := base64.RawStdEncoding.EncodeToString(saltBytes)[:16]
-
-	h := sha512.New()
-	h.Write([]byte(plainPassword + salt))
-	hashHex := fmt.Sprintf("%x", h.Sum(nil))
-
-	return fmt.Sprintf("{SHA512-CRYPT}$6$%s$%s", salt, hashHex)
+	return ""
 }
 
 // ApplyDovecotConfig writes config files and users map, then reloads Dovecot safely
@@ -301,6 +330,7 @@ func ApplyDovecotConfig(configDir string, opts ConfigOptions, accounts []UserAcc
 	if configDir == "" {
 		configDir = "/etc/dovecot"
 	}
+	opts.ConfigDir = configDir
 	confD := filepath.Join(configDir, "conf.d")
 	if err := os.MkdirAll(confD, 0755); err != nil {
 		return fmt.Errorf("failed to create dovecot conf.d: %w", err)

@@ -108,3 +108,55 @@ func TestApplyDovecotConfig(t *testing.T) {
 		t.Errorf("10-master.conf not written correctly: %v", string(master))
 	}
 }
+
+func TestEmptyPasswordHashProtection(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "hostvra-empty-hash-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	opts := ConfigOptions{
+		MailDirBase: "/var/mail/vhosts",
+		VmailUID:    5000,
+		VmailGID:    5000,
+		ConfigDir:   tmpDir,
+	}
+
+	// 1. Simulate existing users file on disk with a valid credential
+	initialContent := "valid@example.com:{BLF-CRYPT}$2a$10$validblfhashsaltsalt:5000:5000::/var/mail/vhosts/example.com/valid::userdb_quota_rule=*:storage=5120M\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "users"), []byte(initialContent), 0644); err != nil {
+		t.Fatalf("failed to write initial users file: %v", err)
+	}
+
+	// 2. Simulate bad sync input where valid@example.com has empty password hash, plus a new account with empty hash
+	accounts := []UserAccount{
+		{
+			Email:        "valid@example.com",
+			PasswordHash: "", // Bad / empty synchronization input
+			Domain:       "example.com",
+			LocalPart:    "valid",
+			QuotaBytes:   5 * 1024 * 1024 * 1024,
+		},
+		{
+			Email:        "new_empty@example.com",
+			PasswordHash: "", // Brand new account with empty hash
+			Domain:       "example.com",
+			LocalPart:    "new_empty",
+			QuotaBytes:   5 * 1024 * 1024 * 1024,
+		},
+	}
+
+	content := GenerateUsersFile(accounts, opts)
+
+	// Invariant: existing valid mailbox + bad/empty sync input = existing password remains intact
+	if !strings.Contains(content, "valid@example.com:{BLF-CRYPT}$2a$10$validblfhashsaltsalt") {
+		t.Errorf("expected existing valid password hash to be preserved, got:\n%s", content)
+	}
+
+	// Invariant: never write empty, corrupted, or {CRYPT}: entry
+	if strings.Contains(content, "{CRYPT}:") || strings.Contains(content, "new_empty@example.com") {
+		t.Errorf("expected new_empty account with blank hash to be safely skipped without {CRYPT}: entry, got:\n%s", content)
+	}
+}
+

@@ -254,6 +254,17 @@ func (m *MemoryStore) CreateDatabaseUser(ctx context.Context, user *DatabaseUser
 	return nil
 }
 
+func (m *MemoryStore) GetDatabaseUserByID(ctx context.Context, id uuid.UUID) (*DatabaseUser, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	user, ok := m.databaseUsers[id]
+	if !ok || user.DeletedAt != nil {
+		return nil, ErrNotFound
+	}
+	return user, nil
+}
+
 func (m *MemoryStore) ListDatabaseUsersByServer(ctx context.Context, serverID uuid.UUID) ([]*DatabaseUser, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -265,6 +276,20 @@ func (m *MemoryStore) ListDatabaseUsersByServer(ctx context.Context, serverID uu
 		}
 	}
 	return users, nil
+}
+
+func (m *MemoryStore) DeleteDatabaseUser(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, ok := m.databaseUsers[id]
+	if !ok || user.DeletedAt != nil {
+		return ErrNotFound
+	}
+	now := time.Now().UTC()
+	user.DeletedAt = &now
+	m.saveToDiskLocked()
+	return nil
 }
 
 func (m *MemoryStore) CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error {
@@ -599,6 +624,22 @@ func (p *PostgresStore) CreateDatabaseUser(ctx context.Context, user *DatabaseUs
 	).Scan(&user.CreatedAt)
 }
 
+func (p *PostgresStore) GetDatabaseUserByID(ctx context.Context, id uuid.UUID) (*DatabaseUser, error) {
+	query := `
+		SELECT id, server_id, db_type, username, host_allow, created_at
+		FROM database_users
+		WHERE id = $1 AND deleted_at IS NULL
+	`
+	u := &DatabaseUser{}
+	err := p.db.QueryRowContext(ctx, query, id).Scan(
+		&u.ID, &u.ServerID, &u.DBType, &u.Username, &u.HostAllow, &u.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
 func (p *PostgresStore) ListDatabaseUsersByServer(ctx context.Context, serverID uuid.UUID) ([]*DatabaseUser, error) {
 	query := `
 		SELECT id, server_id, db_type, username, host_allow, created_at
@@ -622,6 +663,12 @@ func (p *PostgresStore) ListDatabaseUsersByServer(ctx context.Context, serverID 
 		users = append(users, u)
 	}
 	return users, nil
+}
+
+func (p *PostgresStore) DeleteDatabaseUser(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE database_users SET deleted_at = NOW() WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, id)
+	return err
 }
 
 func (p *PostgresStore) CreateOrUpdateSSL(ctx context.Context, cert *SSLCertificate) error {

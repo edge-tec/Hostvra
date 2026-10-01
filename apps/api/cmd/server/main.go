@@ -494,7 +494,9 @@ func main() {
 			r.Route("/databases", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/", databaseHandler.List)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/", databaseHandler.Create)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/users", databaseHandler.ListUsers)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/users", databaseHandler.CreateUser)
+				r.With(rbac.RequirePermission(rbac.PermDatabasesDelete)).Delete("/users/{id}", databaseHandler.DeleteUser)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Put("/{id}", databaseHandler.Update)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesDelete)).Delete("/{id}", databaseHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/status", databaseHandler.GetStatus)
