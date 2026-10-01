@@ -125,7 +125,8 @@ if [[ -f "$SSL_CONF" ]]; then
     if [[ "$DOV_VER" =~ ^2\.4 ]]; then
         sed -i 's/^[[:space:]]*ssl_cert[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_cert_file = \1/' "$SSL_CONF"
         sed -i 's/^[[:space:]]*ssl_key[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_key_file = \1/' "$SSL_CONF"
-        sed -i 's/^[[:space:]]*ssl_prefer_server_ciphers/ssl_server_prefer_ciphers/' "$SSL_CONF"
+        sed -i -E 's/^[[:space:]]*#?[[:space:]]*ssl(_server)?_prefer_ciphers[[:space:]]*=[[:space:]]*yes.*/ssl_server_prefer_ciphers = server/' "$SSL_CONF"
+        sed -i -E 's/^[[:space:]]*#?[[:space:]]*ssl(_server)?_prefer_ciphers[[:space:]]*=[[:space:]]*no.*/ssl_server_prefer_ciphers = client/' "$SSL_CONF"
     fi
 fi
 
@@ -136,7 +137,8 @@ if [[ "$DOV_VER" =~ ^2\.4 ]] && [[ -d "$CONF_DIR" ]]; then
     find "$CONF_DIR" -type f -name "*.conf" -not -name "10-auth.conf" -exec sed -i 's/^[[:space:]]*disable_plaintext_auth[[:space:]]*=/#disable_plaintext_auth =/' {} +
     find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_cert[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_cert_file = \1/' {} +
     find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_key[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_key_file = \1/' {} +
-    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_prefer_server_ciphers/ssl_server_prefer_ciphers/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -exec sed -i -E 's/^[[:space:]]*#?[[:space:]]*ssl(_server)?_prefer_ciphers[[:space:]]*=[[:space:]]*yes.*/ssl_server_prefer_ciphers = server/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -exec sed -i -E 's/^[[:space:]]*#?[[:space:]]*ssl(_server)?_prefer_ciphers[[:space:]]*=[[:space:]]*no.*/ssl_server_prefer_ciphers = client/' {} +
 fi
 
 # 9. Ensure Postfix SASL and LMTP sockets in 10-master.conf
