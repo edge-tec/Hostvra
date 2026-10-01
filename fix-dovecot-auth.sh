@@ -15,41 +15,92 @@ fi
 chmod 644 "$USERS_FILE"
 echo "[✓] Dovecot users file permissions set to 644"
 
-# 2. Configure 10-auth.conf to disable PAM system auth and enable virtual passwd-file
+# 2. Detect Dovecot Version
+DOV_VER=$(dovecot --version 2>/dev/null | awk '{print $1}')
+echo "[*] Detected Dovecot version: $DOV_VER"
+
+# 3. Fix dovecot.conf for Dovecot 2.4+
+DOVECOT_MAIN_CONF="/etc/dovecot/dovecot.conf"
+if [[ -f "$DOVECOT_MAIN_CONF" ]] && [[ "$DOV_VER" =~ ^2\.4 ]]; then
+    if ! grep -q "dovecot_config_version" "$DOVECOT_MAIN_CONF"; then
+        echo "[*] Adding dovecot_config_version to $DOVECOT_MAIN_CONF for Dovecot 2.4+..."
+        sed -i '1s/^/dovecot_config_version = 2.4.0\ndovecot_storage_version = 2.4.0\n\n/' "$DOVECOT_MAIN_CONF"
+    fi
+fi
+
+# 4. Configure 10-mail.conf (Resolve 'mail_location: Unknown setting' in Dovecot 2.4)
+MAIL_CONF="$CONF_DIR/10-mail.conf"
+if [[ -f "$MAIL_CONF" ]]; then
+    echo "[*] Configuring $MAIL_CONF..."
+    if [[ "$DOV_VER" =~ ^2\.4 ]]; then
+        # Comment out deprecated mail_location
+        sed -i 's/^[[:space:]]*mail_location/#mail_location/' "$MAIL_CONF"
+        
+        # Ensure mail_driver and mail_path exist
+        if ! grep -q "mail_driver" "$MAIL_CONF"; then
+            cat >> "$MAIL_CONF" << 'EOF'
+
+# Dovecot 2.4+ Virtual Mailbox Location
+mail_driver = maildir
+mail_path = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_uid = 5000
+mail_gid = 5000
+mail_privileged_group = mail
+EOF
+        fi
+    else
+        if ! grep -q "mail_location" "$MAIL_CONF"; then
+            cat >> "$MAIL_CONF" << 'EOF'
+
+# Dovecot 2.3 Virtual Mailbox Location
+mail_location = maildir:/var/mail/vhosts/%d/%n
+mail_uid = 5000
+mail_gid = 5000
+mail_privileged_group = mail
+EOF
+        fi
+    fi
+fi
+
+# 5. Configure 10-auth.conf to disable PAM system auth and enable virtual passwd-file
 AUTH_CONF="$CONF_DIR/10-auth.conf"
 if [[ -f "$AUTH_CONF" ]]; then
     echo "[*] Configuring $AUTH_CONF..."
     # Disable PAM system authentication
-    sed -i 's/^!include auth-system.conf.ext/#!include auth-system.conf.ext/' "$AUTH_CONF"
+    sed -i 's/^[[:space:]]*!include auth-system.conf.ext/#!include auth-system.conf.ext/' "$AUTH_CONF"
     # Enable passwd-file virtual authentication
-    sed -i 's/^#!include auth-passwdfile.conf.ext/!include auth-passwdfile.conf.ext/' "$AUTH_CONF"
+    sed -i 's/^[[:space:]]*#!include auth-passwdfile.conf.ext/!include auth-passwdfile.conf.ext/' "$AUTH_CONF"
     
     # Ensure auth-passwdfile is included if not present
     if ! grep -q "auth-passwdfile.conf.ext" "$AUTH_CONF"; then
         echo "!include auth-passwdfile.conf.ext" >> "$AUTH_CONF"
     fi
 
-    # Remove or comment disable_plaintext_auth for Dovecot 2.4 compatibility
-    sed -i 's/^disable_plaintext_auth/#disable_plaintext_auth/' "$AUTH_CONF"
+    # Handle cleartext auth setting for Dovecot 2.4 vs 2.3
+    if [[ "$DOV_VER" =~ ^2\.4 ]]; then
+        sed -i 's/^[[:space:]]*disable_plaintext_auth/#disable_plaintext_auth/' "$AUTH_CONF"
+        if ! grep -q "auth_allow_cleartext" "$AUTH_CONF"; then
+            echo "auth_allow_cleartext = no" >> "$AUTH_CONF"
+        fi
+    else
+        sed -i 's/^[[:space:]]*#*disable_plaintext_auth.*/disable_plaintext_auth = yes/' "$AUTH_CONF"
+    fi
 fi
 
-# 3. Configure auth-passwdfile.conf.ext
+# 6. Configure auth-passwdfile.conf.ext
 PASSWD_CONF="$CONF_DIR/auth-passwdfile.conf.ext"
 echo "[*] Writing $PASSWD_CONF..."
-DOV_VER=$(dovecot --version 2>/dev/null | awk '{print $1}')
 if [[ "$DOV_VER" =~ ^2\.4 ]]; then
     cat > "$PASSWD_CONF" << 'EOF'
 # Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
   driver = passwd-file
   passwd_file_path = /etc/dovecot/users
-  auth_username_format = %u
 }
 
 userdb passwd-file {
   driver = passwd-file
   passwd_file_path = /etc/dovecot/users
-  auth_username_format = %u
 }
 EOF
 else
@@ -67,7 +118,28 @@ userdb passwd-file {
 EOF
 fi
 
-# 4. Ensure Postfix SASL and LMTP sockets in 10-master.conf
+# 7. Configure 10-ssl.conf
+SSL_CONF="$CONF_DIR/10-ssl.conf"
+if [[ -f "$SSL_CONF" ]]; then
+    echo "[*] Configuring $SSL_CONF..."
+    if [[ "$DOV_VER" =~ ^2\.4 ]]; then
+        sed -i 's/^[[:space:]]*ssl_cert[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_cert_file = \1/' "$SSL_CONF"
+        sed -i 's/^[[:space:]]*ssl_key[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_key_file = \1/' "$SSL_CONF"
+        sed -i 's/^[[:space:]]*ssl_prefer_server_ciphers/ssl_server_prefer_ciphers/' "$SSL_CONF"
+    fi
+fi
+
+# 8. Sanitize all other conf files in /etc/dovecot/conf.d/ for Dovecot 2.4+
+if [[ "$DOV_VER" =~ ^2\.4 ]] && [[ -d "$CONF_DIR" ]]; then
+    echo "[*] Sanitizing any deprecated 2.3 directives across $CONF_DIR..."
+    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-mail.conf" -exec sed -i 's/^[[:space:]]*mail_location[[:space:]]*=/#mail_location =/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-auth.conf" -exec sed -i 's/^[[:space:]]*disable_plaintext_auth[[:space:]]*=/#disable_plaintext_auth =/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_cert[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_cert_file = \1/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_key[[:space:]]*=[[:space:]]*<\(.*\)/ssl_server_key_file = \1/' {} +
+    find "$CONF_DIR" -type f -name "*.conf" -not -name "10-ssl.conf" -exec sed -i 's/^[[:space:]]*ssl_prefer_server_ciphers/ssl_server_prefer_ciphers/' {} +
+fi
+
+# 9. Ensure Postfix SASL and LMTP sockets in 10-master.conf
 MASTER_CONF="$CONF_DIR/10-master.conf"
 if [[ -f "$MASTER_CONF" ]]; then
     echo "[*] Ensuring Postfix SASL & LMTP sockets in $MASTER_CONF..."
@@ -95,25 +167,31 @@ EOF
     fi
 fi
 
-# 5. Fix Dovecot 2.4+ dovecot_config_version requirement if needed
-DOVECOT_MAIN_CONF="/etc/dovecot/dovecot.conf"
-if [[ -f "$DOVECOT_MAIN_CONF" ]]; then
-    if ! grep -q "dovecot_config_version" "$DOVECOT_MAIN_CONF"; then
-        echo "[*] Adding dovecot_config_version to $DOVECOT_MAIN_CONF for Dovecot 2.4+..."
-        sed -i '1s/^/dovecot_config_version = 2.4.0\ndovecot_storage_version = 2.4.0\n\n/' "$DOVECOT_MAIN_CONF"
-    fi
+# 10. Ensure /var/mail/vhosts storage directory exists
+mkdir -p /var/mail/vhosts
+chown -R 5000:5000 /var/mail/vhosts 2>/dev/null || true
+chmod 770 /var/mail/vhosts
+echo "[✓] Mail storage /var/mail/vhosts prepared"
+
+# 11. Configure Postfix SASL and LMTP integration
+if command -v postconf >/dev/null 2>&1; then
+    echo "[*] Configuring Postfix SASL & LMTP..."
+    postconf -e "smtpd_sasl_type = dovecot"
+    postconf -e "smtpd_sasl_path = private/auth"
+    postconf -e "smtpd_sasl_auth_enable = yes"
+    postconf -e "virtual_transport = lmtp:unix:private/dovecot-lmtp"
+    echo "[✓] Postfix SASL & LMTP configured"
 fi
 
-# 6. Verify Dovecot configuration syntax
+# 12. Verify Dovecot configuration syntax
 echo "[*] Verifying Dovecot configuration syntax..."
-dovecot -n > /dev/null
+doveconf -n > /dev/null
 echo "[✓] Dovecot syntax is valid."
 
-# 6. Restart Dovecot & Postfix
+# 13. Restart Dovecot & Postfix
 echo "[*] Restarting Dovecot & Postfix services..."
 systemctl restart dovecot postfix
 
 echo "=========================================================="
-echo "  SUCCESS! Dovecot is now authenticating via virtual DB.  "
-echo "  PAM system lookup is DISABLED.                          "
+echo "  SUCCESS! Dovecot & Postfix are now working properly.    "
 echo "=========================================================="

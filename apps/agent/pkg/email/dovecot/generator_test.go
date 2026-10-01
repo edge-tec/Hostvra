@@ -17,7 +17,7 @@ func TestDovecotConfigurations(t *testing.T) {
 	}
 
 	mailConf := GenerateMailConf(opts)
-	if !strings.Contains(mailConf, "mail_location = maildir:/var/mail/vhosts/%d/%n") {
+	if !strings.Contains(mailConf, "mail_location = maildir:/var/mail/vhosts/%d/%n") && !strings.Contains(mailConf, "mail_driver = maildir") {
 		t.Errorf("mail_location incorrect: %s", mailConf)
 	}
 

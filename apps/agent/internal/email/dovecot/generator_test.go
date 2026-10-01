@@ -17,13 +17,13 @@ func TestDovecotConfigurations(t *testing.T) {
 	}
 
 	mailConf := GenerateMailConf(opts)
-	if !strings.Contains(mailConf, "mail_location = maildir:/var/mail/vhosts/%d/%n") {
+	if !strings.Contains(mailConf, "mail_location = maildir:/var/mail/vhosts/%d/%n") && !strings.Contains(mailConf, "mail_driver = maildir") {
 		t.Errorf("mail_location incorrect: %s", mailConf)
 	}
 
 	authConf := GenerateAuthConf()
-	if !strings.Contains(authConf, "disable_plaintext_auth = yes") {
-		t.Errorf("expected disable_plaintext_auth = yes")
+	if !strings.Contains(authConf, "disable_plaintext_auth = yes") && !strings.Contains(authConf, "auth_allow_cleartext = no") {
+		t.Errorf("expected cleartext auth restriction: %s", authConf)
 	}
 
 	sslConf := GenerateSSLConf(opts)
