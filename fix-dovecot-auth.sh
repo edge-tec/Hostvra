@@ -37,13 +37,13 @@ fi
 PASSWD_CONF="$CONF_DIR/auth-passwdfile.conf.ext"
 echo "[*] Writing $PASSWD_CONF..."
 cat > "$PASSWD_CONF" << 'EOF'
-# Hostvra Virtual Mailbox Auth Configuration
-passdb {
+# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.3 & 2.4 Compatible)
+passdb passwd-file {
   driver = passwd-file
   args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/users
 }
 
-userdb {
+userdb passwd-file {
   driver = passwd-file
   args = username_format=%u /etc/dovecot/users
 }

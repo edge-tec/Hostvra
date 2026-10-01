@@ -111,12 +111,12 @@ func GenerateAuthPasswdFileConf(passwdPath string) string {
 		passwdPath = "/etc/dovecot/users"
 	}
 	return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext
-passdb {
+passdb passwd-file {
   driver = passwd-file
   args = scheme=SHA512-CRYPT username_format=%%u %s
 }
 
-userdb {
+userdb passwd-file {
   driver = passwd-file
   args = username_format=%%u %s
 }
