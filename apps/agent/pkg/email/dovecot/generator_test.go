@@ -22,8 +22,8 @@ func TestDovecotConfigurations(t *testing.T) {
 	}
 
 	authConf := GenerateAuthConf()
-	if !strings.Contains(authConf, "disable_plaintext_auth = yes") {
-		t.Errorf("expected disable_plaintext_auth = yes")
+	if !strings.Contains(authConf, "disable_plaintext_auth = yes") && !strings.Contains(authConf, "auth_allow_cleartext = no") {
+		t.Errorf("expected cleartext auth restriction: %s", authConf)
 	}
 
 	sslConf := GenerateSSLConf(opts)

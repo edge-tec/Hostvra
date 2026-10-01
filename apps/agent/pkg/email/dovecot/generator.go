@@ -92,11 +92,17 @@ namespace inbox {
 
 // GenerateAuthConf creates 10-auth.conf
 func GenerateAuthConf() string {
-	return `# Hostvra Dovecot 10-auth.conf
-disable_plaintext_auth = yes
+	cleartextDirective := "disable_plaintext_auth = yes"
+	if out, err := exec.Command("dovecot", "--version").Output(); err == nil {
+		if strings.HasPrefix(strings.TrimSpace(string(out)), "2.4") {
+			cleartextDirective = "auth_allow_cleartext = no"
+		}
+	}
+	return fmt.Sprintf(`# Hostvra Dovecot 10-auth.conf
+%s
 auth_mechanisms = plain login
 !include auth-passwdfile.conf.ext
-`
+`, cleartextDirective)
 }
 
 // GenerateAuthPasswdFileConf creates auth-passwdfile.conf.ext
@@ -276,12 +282,18 @@ func ApplyDovecotConfig(configDir string, opts ConfigOptions, accounts []UserAcc
 	}
 
 	for path, content := range files {
-		if err := os.WriteFile(path, []byte(content), 0640); err != nil {
+		perm := os.FileMode(0644)
+		if strings.HasSuffix(path, ".key") {
+			perm = 0600
+		}
+		if err := os.WriteFile(path, []byte(content), perm); err != nil {
 			return fmt.Errorf("failed to write %s: %w", path, err)
 		}
 	}
 
-	// Reload Dovecot if running
+	// Reload Dovecot & Postfix
+	_ = exec.Command("systemctl", "reload", "dovecot").Run()
+	_ = exec.Command("systemctl", "reload", "postfix").Run()
 	if _, err := exec.LookPath("doveadm"); err == nil {
 		_ = exec.Command("doveadm", "reload").Run()
 	}
