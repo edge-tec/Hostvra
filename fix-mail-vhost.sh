@@ -18,16 +18,32 @@ fi
 chown -R www-data:www-data /var/www/mail.mailszo.com 2>/dev/null || true
 chmod -R 755 /var/www/mail.mailszo.com 2>/dev/null || true
 
-# 2. Detect active PHP-FPM socket
+# 2. Detect, Install and Start PHP-FPM
+echo "[*] Checking PHP-FPM service..."
+
+# Install PHP-FPM if not installed
+if ! command -v php &>/dev/null || ! ls /run/php/php*-fpm.sock &>/dev/null; then
+    echo "[*] Ensuring PHP-FPM and required extensions are installed..."
+    apt-get update -y || true
+    apt-get install -y php-fpm php-mysql php-mbstring php-xml php-curl php-zip php-gd php-bcmath php-intl php-sqlite3 || true
+fi
+
+# Find or start all PHP-FPM services
+for svc in $(systemctl list-unit-files 'php*-fpm.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+    echo "[*] Starting PHP service: $svc"
+    systemctl enable "$svc" 2>/dev/null || true
+    systemctl restart "$svc" 2>/dev/null || true
+done
+
+# Detect active PHP-FPM socket
 PHP_SOCKET=""
 for sock in \
     /run/php/php8.3-fpm.sock \
     /run/php/php8.2-fpm.sock \
     /run/php/php8.1-fpm.sock \
     /run/php/php8.0-fpm.sock \
-    /run/php/php-fpm.sock \
-    /var/run/php/php8.3-fpm.sock \
-    /var/run/php/php8.2-fpm.sock; do
+    /run/php/php7.4-fpm.sock \
+    /run/php/php-fpm.sock; do
     if [[ -S "$sock" ]]; then
         PHP_SOCKET="$sock"
         echo "[✓] Found active PHP-FPM socket: $PHP_SOCKET"
@@ -36,10 +52,26 @@ for sock in \
 done
 
 if [[ -z "$PHP_SOCKET" ]]; then
-    # Fallback default
-    PHP_SOCKET="/run/php/php8.2-fpm.sock"
-    echo "[!] No active PHP socket found directly, defaulting to $PHP_SOCKET"
+    # Look for any .sock in /run/php
+    ANY_SOCK=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1 || true)
+    if [[ -n "$ANY_SOCK" && -S "$ANY_SOCK" ]]; then
+        PHP_SOCKET="$ANY_SOCK"
+        echo "[✓] Detected PHP-FPM socket: $PHP_SOCKET"
+    else
+        # Try to start default php-fpm
+        systemctl restart php8.3-fpm 2>/dev/null || systemctl restart php8.2-fpm 2>/dev/null || systemctl restart php-fpm 2>/dev/null || true
+        PHP_SOCKET=$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n 1 || true)
+    fi
 fi
+
+if [[ -z "$PHP_SOCKET" ]]; then
+    echo "[!] CRITICAL: No PHP-FPM socket found! Installing php8.3-fpm..."
+    apt-get install -y php8.3-fpm php8.3-mysql php8.3-mbstring php8.3-curl php8.3-xml || true
+    systemctl enable --now php8.3-fpm || true
+    PHP_SOCKET="/run/php/php8.3-fpm.sock"
+fi
+
+echo "[✓] Final PHP-FPM socket to be used: $PHP_SOCKET"
 
 # 3. Ensure SSL Certificate exists for Cloudflare handshake
 mkdir -p /etc/ssl/certs /etc/ssl/private
