@@ -59,6 +59,11 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
+log_fatal() {
+    echo -e "${RED}[FATAL]${NC} $1" >&2
+    exit 1
+}
+
 # 1. Pre-flight Checks
 preflight_checks() {
     log_info "Executing pre-flight environment checks..."
@@ -475,15 +480,29 @@ deploy_services() {
         fi
     elif [[ -f "${INSTALL_DIR}/hostvra-api" ]] && [[ -s "${INSTALL_DIR}/hostvra-api" ]]; then
         log_info "Existing non-empty binary found in ${INSTALL_DIR}"
-    elif command -v go &>/dev/null && [[ -f "${REPO_ROOT}/apps/api/cmd/server/main.go" ]]; then
-        log_info "Compiling Hostvra binaries from source using native Go compiler..."
-        (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-api" cmd/server/main.go)
-        (cd "${REPO_ROOT}/apps/agent" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-agent" cmd/agent/main.go)
-        (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra" cmd/hostvra/main.go 2>/dev/null || true)
-        log_success "Hostvra binaries compiled and placed successfully!"
     else
-        log_error "No precompiled binaries found in ${REPO_ROOT}/bin and Go compiler is not installed."
-        log_fatal "Failed to deploy Hostvra binaries: Go toolchain or precompiled binaries are required."
+        # If Go compiler is missing and source code exists, install Go toolchain automatically
+        if ! command -v go &>/dev/null && [[ -f "${REPO_ROOT}/apps/api/cmd/server/main.go" ]]; then
+            log_info "Go compiler not found. Automatically installing Go toolchain..."
+            GO_VERSION="1.22.6"
+            curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${BIN_ARCH}.tar.gz" -o /tmp/go.tar.gz 2>/dev/null || true
+            if [[ -f /tmp/go.tar.gz ]]; then
+                rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz
+                rm -f /tmp/go.tar.gz
+                export PATH="/usr/local/go/bin:$PATH"
+            fi
+        fi
+
+        if command -v go &>/dev/null && [[ -f "${REPO_ROOT}/apps/api/cmd/server/main.go" ]]; then
+            log_info "Compiling Hostvra binaries from source using native Go compiler..."
+            (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-api" cmd/server/main.go)
+            (cd "${REPO_ROOT}/apps/agent" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra-agent" cmd/agent/main.go)
+            (cd "${REPO_ROOT}/apps/api" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "${INSTALL_DIR}/hostvra" cmd/hostvra/main.go 2>/dev/null || true)
+            log_success "Hostvra binaries compiled and placed successfully!"
+        else
+            log_error "No precompiled binaries found in ${REPO_ROOT}/bin and Go compiler is not installed."
+            log_fatal "Failed to deploy Hostvra binaries: Go toolchain or precompiled binaries are required."
+        fi
     fi
 
     # Compile / build Next.js UI dashboard if npm available
