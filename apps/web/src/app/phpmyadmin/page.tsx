@@ -273,6 +273,7 @@ function PhpMyAdminCore() {
   } | null>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importSqlText, setImportSqlText] = useState<string>('');
+  const [isDraggingImport, setIsDraggingImport] = useState<boolean>(false);
 
   // Operations State
   const [opCollation, setOpCollation] = useState<string>('utf8mb4_unicode_ci');
@@ -2473,10 +2474,42 @@ function PhpMyAdminCore() {
 
               <div className="space-y-4 text-xs">
                 {/* File Upload Area */}
-                <div className="border-2 border-dashed border-slate-300 dark:border-surface-700 rounded-2xl p-6 text-center hover:border-amber-500 transition bg-slate-50/50 dark:bg-surface-950">
-                  <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                  <p className="font-bold text-slate-900 dark:text-white">Select `.sql` or `.txt` dump file</p>
-                  <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB</p>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingImport(true);
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingImport(true);
+                  }}
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingImport(false);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsDraggingImport(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      const file = e.dataTransfer.files[0];
+                      setImportFile(file);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-2xl p-6 text-center transition cursor-pointer ${
+                    isDraggingImport
+                      ? 'border-amber-500 bg-amber-500/10 scale-[1.01]'
+                      : 'border-slate-300 dark:border-surface-700 bg-slate-50/50 dark:bg-surface-950 hover:border-amber-500'
+                  }`}
+                >
+                  <Upload className={`w-8 h-8 mx-auto mb-2 transition ${isDraggingImport ? 'text-amber-500 animate-bounce' : 'text-slate-400'}`} />
+                  <p className="font-bold text-slate-900 dark:text-white">
+                    {isDraggingImport ? 'Drop your .sql file here' : 'Select `.sql` or `.txt` dump file'}
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB (Drag & drop or browse)</p>
                   <input
                     type="file"
                     accept=".sql,.txt"
