@@ -29,12 +29,8 @@ if [[ -f "$AUTH_CONF" ]]; then
         echo "!include auth-passwdfile.conf.ext" >> "$AUTH_CONF"
     fi
 
-    # Ensure plain and login auth mechanisms are supported
-    if grep -q "^auth_mechanisms" "$AUTH_CONF"; then
-        sed -i 's/^auth_mechanisms =.*/auth_mechanisms = plain login/' "$AUTH_CONF"
-    else
-        echo "auth_mechanisms = plain login" >> "$AUTH_CONF"
-    fi
+    # Remove or comment disable_plaintext_auth for Dovecot 2.4 compatibility
+    sed -i 's/^disable_plaintext_auth/#disable_plaintext_auth/' "$AUTH_CONF"
 fi
 
 # 3. Configure auth-passwdfile.conf.ext
