@@ -435,103 +435,220 @@ func safeSQLString(val string) string {
 	return val
 }
 
-// ExecuteRealDatabaseCreation attempts to create real database and grant user privileges.
-func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset, collation, user, password, hostAllow string) error {
-	if path, err := exec.LookPath("mysql"); err == nil {
-		if charset == "" {
-			charset = "utf8mb4"
-		}
-		if collation == "" {
-			collation = "utf8mb4_unicode_ci"
-		}
-		if hostAllow == "" {
-			hostAllow = "localhost"
-		}
-
-		quotedDB := SafeQuoteIdentifier(name)
-		cleanCharset := strings.ReplaceAll(charset, ";", "")
-		cleanCollation := strings.ReplaceAll(collation, ";", "")
-
-		sqlScript := fmt.Sprintf(
-			"CREATE DATABASE IF NOT EXISTS %s CHARACTER SET %s COLLATE %s;\n",
-			quotedDB, cleanCharset, cleanCollation,
-		)
-		if user != "" && password != "" {
-			escUser := safeSQLString(user)
-			escHost := safeSQLString(hostAllow)
-			escPass := safeSQLString(password)
-
-			sqlScript += fmt.Sprintf(
-				"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
-					"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n"+
-					"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n"+
-					"FLUSH PRIVILEGES;\n",
-				escUser, escHost, escPass,
-				escUser, escHost, escPass,
-				quotedDB, escUser, escHost,
-			)
-		}
-
-		args := []string{"-e", sqlScript}
-		if m.rootPassword != "" {
-			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
-		}
-		cmd := exec.CommandContext(ctx, path, args...)
-		_ = cmd.Run() // Best effort on local or unprivileged daemon
-	}
-	return nil
-}
-
-// ExecuteDropDatabase drops the database from the live server.
-func (m *Manager) ExecuteDropDatabase(ctx context.Context, name string) error {
-	quotedDB := SafeQuoteIdentifier(name)
-	// 1. Direct connection via pool
+// executeSQLScript executes SQL statements using the connection pool first, falling back to mysql CLI.
+func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error {
+	// 1. Connection pool first
 	if m.pool != nil {
 		db, err := m.pool.GetDB(ctx, "information_schema")
 		if err == nil {
-			if _, execErr := db.ExecContext(ctx, fmt.Sprintf("DROP DATABASE IF EXISTS %s;", quotedDB)); execErr == nil {
+			stmts := strings.Split(sqlScript, ";")
+			allOk := true
+			for _, stmt := range stmts {
+				stmt = strings.TrimSpace(stmt)
+				if stmt == "" {
+					continue
+				}
+				if _, execErr := db.ExecContext(ctx, stmt); execErr != nil {
+					allOk = false
+					break
+				}
+			}
+			if allOk {
 				return nil
 			}
 		}
 	}
 
-	// 2. Fallback to mysql CLI
+	// 2. CLI fallback
 	if path, err := exec.LookPath("mysql"); err == nil {
-		sqlScript := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", quotedDB)
-		var args []string
+		args := []string{"-u", "root"}
 		if m.rootPassword != "" {
-			args = []string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword), "-e", sqlScript}
-		} else {
-			args = []string{"-e", sqlScript}
+			args = append(args, fmt.Sprintf("-p%s", m.rootPassword))
 		}
+		args = append(args, "-e", sqlScript)
 		cmd := exec.CommandContext(ctx, path, args...)
-		_ = cmd.Run()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("mysql execution error: %s (%w)", strings.TrimSpace(stderr.String()), err)
+		}
+		return nil
 	}
+
 	return nil
 }
 
-// ExecuteUpdatePassword updates a database user's password.
-func (m *Manager) ExecuteUpdatePassword(ctx context.Context, user, hostAllow, newPassword string) error {
-	if path, err := exec.LookPath("mysql"); err == nil {
-		if hostAllow == "" {
-			hostAllow = "localhost"
-		}
-		escUser := safeSQLString(user)
-		escHost := safeSQLString(hostAllow)
-		escPass := safeSQLString(newPassword)
-
-		sqlScript := fmt.Sprintf(
-			"ALTER USER '%s'@'%s' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
-			escUser, escHost, escPass,
-		)
-		args := []string{"-e", sqlScript}
-		if m.rootPassword != "" {
-			args = append([]string{"-u", "root", fmt.Sprintf("-p%s", m.rootPassword)}, args...)
-		}
-		cmd := exec.CommandContext(ctx, path, args...)
-		_ = cmd.Run()
+// ExecuteRealDatabaseCreation creates the real database and user, granting all privileges.
+func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset, collation, user, password, hostAllow string) error {
+	if charset == "" {
+		charset = "utf8mb4"
 	}
-	return nil
+	if collation == "" {
+		collation = "utf8mb4_unicode_ci"
+	}
+	if hostAllow == "" {
+		hostAllow = "localhost"
+	}
+
+	quotedDB := SafeQuoteIdentifier(name)
+	cleanCharset := strings.ReplaceAll(charset, ";", "")
+	cleanCollation := strings.ReplaceAll(collation, ";", "")
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s CHARACTER SET %s COLLATE %s;\n",
+		quotedDB, cleanCharset, cleanCollation))
+
+	if user != "" && password != "" {
+		escUser := safeSQLString(user)
+		escPass := safeSQLString(password)
+
+		hosts := []string{hostAllow}
+		if hostAllow == "localhost" {
+			hosts = append(hosts, "127.0.0.1")
+		}
+
+		for _, h := range hosts {
+			escHost := safeSQLString(h)
+			sb.WriteString(fmt.Sprintf(
+				"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
+					"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n"+
+					"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n",
+				escUser, escHost, escPass,
+				escUser, escHost, escPass,
+				quotedDB, escUser, escHost,
+			))
+		}
+		sb.WriteString("FLUSH PRIVILEGES;\n")
+	}
+
+	return m.executeSQLScript(ctx, sb.String())
+}
+
+// ExecuteCreateUser creates a database user with password across relevant hosts.
+func (m *Manager) ExecuteCreateUser(ctx context.Context, user, password, hostAllow string) error {
+	if user == "" || password == "" {
+		return errors.New("username and password are required")
+	}
+	if hostAllow == "" {
+		hostAllow = "localhost"
+	}
+
+	escUser := safeSQLString(user)
+	escPass := safeSQLString(password)
+
+	hosts := []string{hostAllow}
+	if hostAllow == "localhost" {
+		hosts = append(hosts, "127.0.0.1")
+	}
+
+	var sb strings.Builder
+	for _, h := range hosts {
+		escHost := safeSQLString(h)
+		sb.WriteString(fmt.Sprintf(
+			"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
+				"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n",
+			escUser, escHost, escPass,
+			escUser, escHost, escPass,
+		))
+	}
+	sb.WriteString("FLUSH PRIVILEGES;\n")
+
+	return m.executeSQLScript(ctx, sb.String())
+}
+
+// ExecuteDropDatabase drops the database from the live server.
+func (m *Manager) ExecuteDropDatabase(ctx context.Context, name string) error {
+	quotedDB := SafeQuoteIdentifier(name)
+	sqlScript := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", quotedDB)
+	return m.executeSQLScript(ctx, sqlScript)
+}
+
+// ExecuteUpdatePassword updates a database user's password across all host variants.
+func (m *Manager) ExecuteUpdatePassword(ctx context.Context, user, hostAllow, newPassword string) error {
+	if user == "" || newPassword == "" {
+		return errors.New("username and password are required")
+	}
+	if hostAllow == "" {
+		hostAllow = "localhost"
+	}
+
+	escUser := safeSQLString(user)
+	escPass := safeSQLString(newPassword)
+
+	hosts := []string{hostAllow}
+	if hostAllow == "localhost" {
+		hosts = append(hosts, "127.0.0.1")
+	}
+
+	var sb strings.Builder
+	for _, h := range hosts {
+		escHost := safeSQLString(h)
+		sb.WriteString(fmt.Sprintf("ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n", escUser, escHost, escPass))
+	}
+	sb.WriteString("FLUSH PRIVILEGES;\n")
+
+	return m.executeSQLScript(ctx, sb.String())
+}
+
+// ExecuteDropUser drops a database user from MySQL across all host variants.
+func (m *Manager) ExecuteDropUser(ctx context.Context, user, hostAllow string) error {
+	if user == "" {
+		return nil
+	}
+	if hostAllow == "" {
+		hostAllow = "localhost"
+	}
+
+	escUser := safeSQLString(user)
+	hosts := []string{hostAllow}
+	if hostAllow == "localhost" {
+		hosts = append(hosts, "127.0.0.1")
+	}
+
+	var sb strings.Builder
+	for _, h := range hosts {
+		escHost := safeSQLString(h)
+		sb.WriteString(fmt.Sprintf("DROP USER IF EXISTS '%s'@'%s';\n", escUser, escHost))
+	}
+	sb.WriteString("FLUSH PRIVILEGES;\n")
+
+	return m.executeSQLScript(ctx, sb.String())
+}
+
+// VerifyUserConnection verifies that the user credentials can actually authenticate against MySQL/MariaDB.
+func (m *Manager) VerifyUserConnection(ctx context.Context, dbName, user, password, host string) error {
+	if host == "" || host == "localhost" {
+		host = "127.0.0.1"
+	}
+
+	// 1. Try TCP verification
+	testDSN := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?timeout=3s", user, password, host, dbName)
+	if conn, err := sql.Open("mysql", testDSN); err == nil {
+		defer conn.Close()
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if err := conn.PingContext(pingCtx); err == nil {
+			return nil
+		}
+	}
+
+	// 2. Try Unix socket verification if available
+	socketPaths := []string{"/var/run/mysqld/mysqld.sock", "/run/mysqld/mysqld.sock", "/tmp/mysql.sock"}
+	for _, sock := range socketPaths {
+		if _, err := os.Stat(sock); err == nil {
+			sockDSN := fmt.Sprintf("%s:%s@unix(%s)/%s?timeout=3s", user, password, sock, dbName)
+			if sockConn, err := sql.Open("mysql", sockDSN); err == nil {
+				defer sockConn.Close()
+				pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				defer cancel()
+				if err := sockConn.PingContext(pingCtx); err == nil {
+					return nil
+				}
+			}
+		}
+	}
+
+	return fmt.Errorf("credential authentication verification failed for database user '%s'", user)
 }
 
 // ExecuteUpdatePermission changes a user's allowed host.

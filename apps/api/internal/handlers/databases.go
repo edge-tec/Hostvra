@@ -329,7 +329,9 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger real-time host provision
-	_ = h.dbMgr.ExecuteRealDatabaseCreation(r.Context(), req.Name, req.CharacterSet, req.Collation, req.Username, req.Password, req.HostAllow)
+	if err := h.dbMgr.ExecuteRealDatabaseCreation(r.Context(), req.Name, req.CharacterSet, req.Collation, req.Username, req.Password, req.HostAllow); err != nil {
+		h.audit.Log(r.Context(), r, "database.create.warning", "database", db.ID.String(), "warning", "live database provisioning warning: "+err.Error(), nil)
+	}
 
 	h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
 		"name":      db.Name,
@@ -971,6 +973,11 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.CreateDatabaseUser(r.Context(), user); err != nil {
 		response.Error(w, http.StatusConflict, "USER_EXISTS", "Database user already exists", nil, "")
 		return
+	}
+
+	// Trigger real-time host provision
+	if err := h.dbMgr.ExecuteCreateUser(r.Context(), req.Username, req.Password, req.HostAllow); err != nil {
+		h.audit.Log(r.Context(), r, "database_user.create.warning", "database_user", user.ID.String(), "warning", "live database user provisioning warning: "+err.Error(), nil)
 	}
 
 	h.audit.Log(r.Context(), r, "database_user.create", "database_user", user.ID.String(), "success", "", map[string]interface{}{

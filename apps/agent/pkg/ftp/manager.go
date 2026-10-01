@@ -211,6 +211,18 @@ func (fm *FTPManager) CreateUser(username, password, homeDir string, quotaMB, up
 		}
 	}
 
+	newUser := FTPUser{
+		Username:          username,
+		HomeDir:           homeDir,
+		UID:               33, // standard www-data UID
+		GID:               33,
+		QuotaMB:           quotaMB,
+		UploadBandwidth:   uploadBandwidth,
+		DownloadBandwidth: downloadBandwidth,
+		IsEnabled:         true,
+		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
+	}
+
 	// In real Linux with pure-pw installed
 	if fm.isPureFtpd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -236,18 +248,7 @@ func (fm *FTPManager) CreateUser(username, password, homeDir string, quotaMB, up
 		if mkdbOut, err := exec.CommandContext(ctx, "pure-pw", "mkdb").CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("pure-pw mkdb failed: %s (%w)", string(mkdbOut), err)
 		}
-	}
-
-	newUser := FTPUser{
-		Username:          username,
-		HomeDir:           homeDir,
-		UID:               33, // standard www-data UID
-		GID:               33,
-		QuotaMB:           quotaMB,
-		UploadBandwidth:   uploadBandwidth,
-		DownloadBandwidth: downloadBandwidth,
-		IsEnabled:         true,
-		CreatedAt:         time.Now().UTC().Format(time.RFC3339),
+		return &newUser, nil
 	}
 
 	existing = append(existing, newUser)
@@ -308,7 +309,10 @@ func (fm *FTPManager) ChangePassword(username, newPassword string) error {
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("pure-pw passwd failed: %s (%w)", string(out), err)
 		}
-		_ = exec.Command("pure-pw", "mkdb").Run()
+		if mkdbOut, err := exec.CommandContext(ctx, "pure-pw", "mkdb").CombinedOutput(); err != nil {
+			return fmt.Errorf("pure-pw mkdb failed: %s (%w)", string(mkdbOut), err)
+		}
+		return nil
 	}
 
 	return fm.saveUsersUnlocked(existing, username, newPassword)

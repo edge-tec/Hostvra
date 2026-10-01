@@ -1848,7 +1848,7 @@ func (p *PostgresStore) GetEmailMailboxByEmail(ctx context.Context, email string
 
 func (p *PostgresStore) ListEmailMailboxesByDomain(ctx context.Context, domainID uuid.UUID) ([]*EmailMailbox, error) {
 	query := `
-		SELECT id, domain_id, server_id, local_part, email, name,
+		SELECT id, domain_id, server_id, local_part, email, password_hash, name,
 		       quota_bytes, used_bytes, is_active, is_suspended,
 		       created_at, updated_at
 		FROM email_mailboxes
@@ -1865,7 +1865,7 @@ func (p *PostgresStore) ListEmailMailboxesByDomain(ctx context.Context, domainID
 	for rows.Next() {
 		mb := &EmailMailbox{}
 		err := rows.Scan(
-			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.Name,
+			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash, &mb.Name,
 			&mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
 			&mb.CreatedAt, &mb.UpdatedAt,
 		)
@@ -1879,7 +1879,7 @@ func (p *PostgresStore) ListEmailMailboxesByDomain(ctx context.Context, domainID
 
 func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID uuid.UUID) ([]*EmailMailbox, error) {
 	query := `
-		SELECT id, domain_id, server_id, local_part, email, name,
+		SELECT id, domain_id, server_id, local_part, email, password_hash, name,
 		       quota_bytes, used_bytes, is_active, is_suspended,
 		       created_at, updated_at
 		FROM email_mailboxes
@@ -1896,7 +1896,7 @@ func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID
 	for rows.Next() {
 		mb := &EmailMailbox{}
 		err := rows.Scan(
-			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.Name,
+			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash, &mb.Name,
 			&mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
 			&mb.CreatedAt, &mb.UpdatedAt,
 		)

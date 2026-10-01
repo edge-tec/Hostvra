@@ -239,7 +239,10 @@ func GenerateUsersFile(accounts []UserAccount, opts ConfigOptions) string {
 
 	var sb strings.Builder
 	for _, acc := range accounts {
-		hash := acc.PasswordHash
+		hash := strings.TrimSpace(acc.PasswordHash)
+		if hash == "" {
+			continue
+		}
 		if !strings.HasPrefix(hash, "{") {
 			if strings.HasPrefix(hash, "$2a$") || strings.HasPrefix(hash, "$2b$") || strings.HasPrefix(hash, "$2y$") {
 				hash = "{BLF-CRYPT}" + hash
