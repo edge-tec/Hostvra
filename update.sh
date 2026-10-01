@@ -396,6 +396,11 @@ NGINX_EOF
     fi
 fi
 
+# Reconcile all domain virtual hosts & SSL bindings via internal API
+echo "Reconciling all domain virtual hosts and SSL certificates..."
+sleep 2
+curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null || true
+
 if command -v pm2 &>/dev/null; then
     echo "Restarting any PM2 managed processes..."
     pm2 restart all 2>/dev/null || true

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -246,6 +247,30 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		// Health & Status
 		r.Get("/health", healthHandler.Health)
+
+		// Internal loopback maintenance endpoint for host administrators (strictly restricted to localhost/loopback)
+		r.Post("/internal/repair-routing", func(w http.ResponseWriter, r *http.Request) {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "" {
+				host = r.RemoteAddr
+			}
+			isLoopback := host == "127.0.0.1" || host == "::1" || host == "localhost" ||
+				strings.HasPrefix(r.RemoteAddr, "127.0.0.1") || strings.HasPrefix(r.RemoteAddr, "[::1]")
+			if !isLoopback {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Loopback access only"})
+				return
+			}
+			report, err := handlers.ReconcileAllDomainRouting(r.Context(), dataStore)
+			w.Header().Set("Content-Type", "application/json")
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error(), "report": report})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "report": report})
+		})
 
 		// Public Auth Endpoints
 		r.Route("/auth", func(r chi.Router) {

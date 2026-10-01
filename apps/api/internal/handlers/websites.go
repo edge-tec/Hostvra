@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1623,9 +1624,16 @@ func (h *WebsiteHandler) VerifyRouting(w http.ResponseWriter, r *http.Request) {
 // RepairRouting reconciles all domain virtual hosts, re-establishes dual-port (80+443) bindings,
 // ensures atomic Nginx syntax, and isolates the Hostvra control panel from catching customer traffic.
 func (h *WebsiteHandler) RepairRouting(w http.ResponseWriter, r *http.Request) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if host == "" {
+		host = r.RemoteAddr
+	}
+	isLoopback := host == "127.0.0.1" || host == "::1" || host == "localhost" ||
+		strings.HasPrefix(r.RemoteAddr, "127.0.0.1") || strings.HasPrefix(r.RemoteAddr, "[::1]")
+
 	claims, hasClaims := auth.GetClaims(r.Context())
 	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
-	if !isAdmin {
+	if !isAdmin && !isLoopback {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to trigger domain routing repair", nil, "")
 		return
 	}
