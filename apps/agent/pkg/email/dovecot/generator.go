@@ -110,15 +110,38 @@ func GenerateAuthPasswdFileConf(passwdPath string) string {
 	if passwdPath == "" {
 		passwdPath = "/etc/dovecot/users"
 	}
-	return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext
+	isDovecot24 := false
+	if out, err := exec.Command("dovecot", "--version").Output(); err == nil {
+		if strings.HasPrefix(strings.TrimSpace(string(out)), "2.4") {
+			isDovecot24 = true
+		}
+	}
+
+	if isDovecot24 {
+		return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext (Dovecot 2.4+)
 passdb passwd-file {
   driver = passwd-file
-  args = scheme=SHA512-CRYPT username_format=%%u %s
+  passwd_file_path = %s
+  auth_username_format = %%%%u
 }
 
 userdb passwd-file {
   driver = passwd-file
-  args = username_format=%%u %s
+  passwd_file_path = %s
+  auth_username_format = %%%%u
+}
+`, passwdPath, passwdPath)
+	}
+
+	return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext (Dovecot 2.3)
+passdb passwd-file {
+  driver = passwd-file
+  args = scheme=SHA512-CRYPT username_format=%%%%u %s
+}
+
+userdb passwd-file {
+  driver = passwd-file
+  args = username_format=%%%%u %s
 }
 `, passwdPath, passwdPath)
 }

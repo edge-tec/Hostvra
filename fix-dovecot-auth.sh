@@ -36,8 +36,25 @@ fi
 # 3. Configure auth-passwdfile.conf.ext
 PASSWD_CONF="$CONF_DIR/auth-passwdfile.conf.ext"
 echo "[*] Writing $PASSWD_CONF..."
-cat > "$PASSWD_CONF" << 'EOF'
-# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.3 & 2.4 Compatible)
+DOV_VER=$(dovecot --version 2>/dev/null | awk '{print $1}')
+if [[ "$DOV_VER" =~ ^2\.4 ]]; then
+    cat > "$PASSWD_CONF" << 'EOF'
+# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
+passdb passwd-file {
+  driver = passwd-file
+  passwd_file_path = /etc/dovecot/users
+  auth_username_format = %u
+}
+
+userdb passwd-file {
+  driver = passwd-file
+  passwd_file_path = /etc/dovecot/users
+  auth_username_format = %u
+}
+EOF
+else
+    cat > "$PASSWD_CONF" << 'EOF'
+# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.3)
 passdb passwd-file {
   driver = passwd-file
   args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/users
@@ -48,6 +65,7 @@ userdb passwd-file {
   args = username_format=%u /etc/dovecot/users
 }
 EOF
+fi
 
 # 4. Ensure Postfix SASL and LMTP sockets in 10-master.conf
 MASTER_CONF="$CONF_DIR/10-master.conf"
