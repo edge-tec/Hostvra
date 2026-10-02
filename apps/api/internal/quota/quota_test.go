@@ -3,6 +3,8 @@ package quota_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -141,3 +143,133 @@ func TestQuotaAndOverrides(t *testing.T) {
 		t.Fatalf("expected quota check to fail after override removed (1/1)")
 	}
 }
+
+func TestStorageQuotaAndTenantIsolation(t *testing.T) {
+	memStore := store.NewMemoryStore()
+	ctx := context.Background()
+	quotaService := quota.NewService(memStore)
+
+	// Create User A (Starter plan: 10 GB)
+	userA := &store.User{
+		ID:           uuid.New(),
+		Email:        "usera@example.com",
+		FullName:     "User Alpha",
+		IsActive:     true,
+		IsSuperAdmin: false,
+	}
+	orgA := &store.Organization{
+		ID:          uuid.New(),
+		Name:        "Alpha Org",
+		Slug:        "alpha-org",
+		PlanTier:    "starter",
+		MaxWebsites: 5,
+	}
+	_ = memStore.CreateOrganization(ctx, orgA)
+	_ = memStore.CreateUser(ctx, userA, orgA.ID, "customer")
+
+	// Create User B (Starter plan: 10 GB)
+	userB := &store.User{
+		ID:           uuid.New(),
+		Email:        "userb@example.com",
+		FullName:     "User Beta",
+		IsActive:     true,
+		IsSuperAdmin: false,
+	}
+	orgB := &store.Organization{
+		ID:          uuid.New(),
+		Name:        "Beta Org",
+		Slug:        "beta-org",
+		PlanTier:    "starter",
+		MaxWebsites: 5,
+	}
+	_ = memStore.CreateOrganization(ctx, orgB)
+	_ = memStore.CreateUser(ctx, userB, orgB.ID, "customer")
+
+	// 1. Initial State: Neither user should have 64 GB hardcoded or 100% full!
+	planA, err := quotaService.ResolveEffectivePlan(ctx, userA.ID)
+	if err != nil {
+		t.Fatalf("failed to resolve plan A: %v", err)
+	}
+	expectedQuotaBytes := int64(10240) * 1024 * 1024 // 10 GB
+	if planA.Storage.QuotaBytes != expectedQuotaBytes {
+		t.Errorf("expected 10 GB quota (%d), got %d", expectedQuotaBytes, planA.Storage.QuotaBytes)
+	}
+	if planA.Storage.UsedBytes != 0 {
+		t.Errorf("expected 0 used bytes for fresh user, got %d", planA.Storage.UsedBytes)
+	}
+	if planA.Storage.FreeBytes != expectedQuotaBytes {
+		t.Errorf("expected %d free bytes, got %d", expectedQuotaBytes, planA.Storage.FreeBytes)
+	}
+	if planA.Storage.UsagePercent != 0.0 {
+		t.Errorf("expected 0%% used, got %.1f%%", planA.Storage.UsagePercent)
+	}
+
+	// 2. Add real files to User A's website
+	tempDir := t.TempDir()
+	siteADocRoot := filepath.Join(tempDir, "var_www_alpha")
+	if err := os.MkdirAll(siteADocRoot, 0755); err != nil {
+		t.Fatalf("failed to create site A dir: %v", err)
+	}
+	// Write a 2 MB file for User A
+	dummyData := make([]byte, 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(siteADocRoot, "app.bin"), dummyData, 0644); err != nil {
+		t.Fatalf("failed to write dummy file: %v", err)
+	}
+
+	siteA := &store.Website{
+		ID:             uuid.New(),
+		OrganizationID: orgA.ID,
+		PrimaryDomain:  "alpha.com",
+		DocumentRoot:   siteADocRoot,
+		Status:         "active",
+		CreatedAt:      time.Now(),
+	}
+	_ = memStore.CreateWebsite(ctx, siteA)
+
+	// Force refresh cache for User A
+	quotaService.InvalidateUserStorageCache(userA.ID)
+	planAAfter, err := quotaService.ResolveEffectivePlan(ctx, userA.ID)
+	if err != nil {
+		t.Fatalf("failed to resolve plan A after file write: %v", err)
+	}
+	if planAAfter.Storage.UsedBytes != 2*1024*1024 {
+		t.Errorf("expected 2MB (%d bytes) used for User A, got %d", 2*1024*1024, planAAfter.Storage.UsedBytes)
+	}
+	if planAAfter.Storage.FreeBytes != expectedQuotaBytes-2*1024*1024 {
+		t.Errorf("expected free bytes %d, got %d", expectedQuotaBytes-2*1024*1024, planAAfter.Storage.FreeBytes)
+	}
+
+	// 3. Tenant Isolation Check: User B MUST still have 0 bytes used!
+	planB, err := quotaService.ResolveEffectivePlan(ctx, userB.ID)
+	if err != nil {
+		t.Fatalf("failed to resolve plan B: %v", err)
+	}
+	if planB.Storage.UsedBytes != 0 {
+		t.Errorf("tenant leak! User B has %d bytes used, should be 0", planB.Storage.UsedBytes)
+	}
+	if planB.Storage.FreeBytes != expectedQuotaBytes {
+		t.Errorf("expected User B free bytes %d, got %d", expectedQuotaBytes, planB.Storage.FreeBytes)
+	}
+
+	// 4. Admin Storage Override Test: Admin sets 25 GB for User A
+	overrideDiskMB := int64(25600) // 25 GB
+	override := &store.UserPlanOverride{
+		UserID:      userA.ID,
+		DiskSpaceMB: &overrideDiskMB,
+	}
+	_ = memStore.UpsertUserPlanOverride(ctx, override)
+	planAOverride, _ := quotaService.ResolveEffectivePlan(ctx, userA.ID)
+	expectedOverrideBytes := int64(25600) * 1024 * 1024
+	if planAOverride.Storage.QuotaBytes != expectedOverrideBytes {
+		t.Errorf("expected override quota %d, got %d", expectedOverrideBytes, planAOverride.Storage.QuotaBytes)
+	}
+	if planAOverride.Storage.Source != "admin_override" {
+		t.Errorf("expected source 'admin_override', got '%s'", planAOverride.Storage.Source)
+	}
+
+	// 5. Quota Check on Storage
+	if err := quotaService.CheckQuota(ctx, userA.ID, "storage"); err != nil {
+		t.Errorf("expected storage quota check to pass: %v", err)
+	}
+}
+

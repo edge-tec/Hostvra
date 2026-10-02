@@ -1453,6 +1453,15 @@ export interface UserResourceUsage {
   bandwidth_used_mb: number;
 }
 
+export interface UserStorageQuotaDetails {
+  quota_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  usage_percent: number;
+  is_unlimited: boolean;
+  source: string;
+}
+
 export interface EffectiveUserPlan {
   user_id: string;
   user_email: string;
@@ -1475,7 +1484,17 @@ export interface EffectiveUserPlan {
   bandwidth_mb: number;
   permissions: Record<string, boolean>;
   usage: UserResourceUsage;
+  storage?: UserStorageQuotaDetails;
   overrides?: UserPlanOverride;
+}
+
+export function formatBytes(bytes: number): string {
+  if (bytes <= 0 || isNaN(bytes)) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
+  const num = bytes / Math.pow(k, i);
+  return `${num >= 10 || i === 0 ? num.toFixed(0) : num.toFixed(1)} ${sizes[i]}`;
 }
 
 export interface AdminUserListItem {
@@ -1511,8 +1530,9 @@ export function getStoredUserRole(): { role: string; isSuperAdmin: boolean } {
   return { role: 'customer', isSuperAdmin: false };
 }
 
-export async function fetchUserEffectivePlan(): Promise<ApiResponse<EffectiveUserPlan>> {
-  return apiFetch<EffectiveUserPlan>('/api/v1/user/plan');
+export async function fetchUserEffectivePlan(refresh?: boolean): Promise<ApiResponse<EffectiveUserPlan>> {
+  const url = refresh ? '/api/v1/user/plan?refresh=true' : '/api/v1/user/plan';
+  return apiFetch<EffectiveUserPlan>(url);
 }
 
 export async function fetchAdminUsers(): Promise<ApiResponse<AdminUserListItem[]>> {

@@ -110,6 +110,10 @@ func (h *AdminUsersHandler) GetUserDetails(w http.ResponseWriter, r *http.Reques
 		_ = h.store.UpdateUserRole(r.Context(), user.ID, "customer")
 	}
 
+	if r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("sync") == "true" {
+		h.quotaService.InvalidateUserStorageCache(userID)
+	}
+
 	effective, err := h.quotaService.ResolveEffectivePlan(r.Context(), userID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "QUOTA_RESOLUTION_FAILED", err.Error(), nil, "")
@@ -395,6 +399,10 @@ func (h *AdminUsersHandler) GetUserEffectivePlan(w http.ResponseWriter, r *http.
 	if !ok {
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication session", nil, "")
 		return
+	}
+
+	if r.URL.Query().Get("refresh") == "true" || r.URL.Query().Get("sync") == "true" {
+		h.quotaService.InvalidateUserStorageCache(claims.UserID)
 	}
 
 	effective, err := h.quotaService.ResolveEffectivePlan(r.Context(), claims.UserID)

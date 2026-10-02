@@ -43,33 +43,45 @@ type UserResourceUsage struct {
 	BandwidthUsedMB int64 `json:"bandwidth_used_mb"`
 }
 
+// UserStorageQuotaDetails provides authoritative bytes-level storage accounting
+type UserStorageQuotaDetails struct {
+	QuotaBytes   int64   `json:"quota_bytes"`
+	UsedBytes    int64   `json:"used_bytes"`
+	FreeBytes    int64   `json:"free_bytes"`
+	UsagePercent float64 `json:"usage_percent"`
+	IsUnlimited  bool    `json:"is_unlimited"`
+	Source       string  `json:"source"`
+}
+
 // EffectiveUserPlan resolves the final effective quotas and permissions for a user
 // combining User Overrides > Package Defaults > System Defaults
 type EffectiveUserPlan struct {
-	UserID             uuid.UUID          `json:"user_id"`
-	UserEmail          string             `json:"user_email"`
-	UserName           string             `json:"user_name"`
-	Role               string             `json:"role"`
-	IsActive           bool               `json:"is_active"`
-	IsSuperAdmin       bool               `json:"is_superadmin"`
-	PlanID             uuid.UUID          `json:"plan_id"`
-	PlanName           string             `json:"plan_name"`
-	PlanSlug           string             `json:"plan_slug"`
-	PlanTier           string             `json:"plan_tier"`
-	SubscriptionStatus string             `json:"subscription_status"`
+	UserID             uuid.UUID               `json:"user_id"`
+	UserEmail          string                  `json:"user_email"`
+	UserName           string                  `json:"user_name"`
+	Role               string                  `json:"role"`
+	IsActive           bool                    `json:"is_active"`
+	IsSuperAdmin       bool                    `json:"is_superadmin"`
+	PlanID             uuid.UUID               `json:"plan_id"`
+	PlanName           string                  `json:"plan_name"`
+	PlanSlug           string                  `json:"plan_slug"`
+	PlanTier           string                  `json:"plan_tier"`
+	SubscriptionStatus string                  `json:"subscription_status"`
 	// Limits (Effective)
-	MaxWebsites        int                `json:"max_websites"`
-	MaxDatabases       int                `json:"max_databases"`
-	MaxMailboxes       int                `json:"max_mailboxes"`
-	MaxFTP             int                `json:"max_ftp"`
-	MaxCron            int                `json:"max_cron"`
-	MaxSubdomains      int                `json:"max_subdomains"`
-	DiskSpaceMB        int64              `json:"disk_space_mb"`
-	BandwidthMB        int64              `json:"bandwidth_mb"`
+	MaxWebsites        int                     `json:"max_websites"`
+	MaxDatabases       int                     `json:"max_databases"`
+	MaxMailboxes       int                     `json:"max_mailboxes"`
+	MaxFTP             int                     `json:"max_ftp"`
+	MaxCron            int                     `json:"max_cron"`
+	MaxSubdomains      int                     `json:"max_subdomains"`
+	DiskSpaceMB        int64                   `json:"disk_space_mb"`
+	BandwidthMB        int64                   `json:"bandwidth_mb"`
 	// Feature Permissions (Effective)
-	Permissions        map[string]bool    `json:"permissions"`
+	Permissions        map[string]bool         `json:"permissions"`
 	// Resource Usage
-	Usage              UserResourceUsage  `json:"usage"`
+	Usage              UserResourceUsage       `json:"usage"`
+	// Authoritative Bytes-level Storage Accounting
+	Storage            UserStorageQuotaDetails `json:"storage"`
 	// Overrides (if any present)
-	Overrides          *UserPlanOverride  `json:"overrides,omitempty"`
+	Overrides          *UserPlanOverride       `json:"overrides,omitempty"`
 }

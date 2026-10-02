@@ -17,89 +17,7 @@ import (
 // ============================================================================
 
 func (m *MemoryStore) seedAccountData() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.hostingAccounts) == 0 {
-		now := time.Now().UTC()
-		planID := uuid.MustParse("10000000-0000-0000-0000-000000000002") // Business Cloud
-
-		seedAccounts := []*HostingAccount{
-			{
-				ID:               uuid.MustParse("40000000-0000-0000-0000-000000000001"),
-				OrganizationID:   uuid.Nil,
-				UserID:           uuid.Nil,
-				Domain:           "apexagency.com",
-				Username:         "c_apexagency",
-				DocumentRoot:     "/home/c_apexagency/public_html",
-				PlanID:           planID,
-				PlanName:         "Business Cloud",
-				Status:           AccountStatusActive,
-				DiskLimitMB:      51200, // 50 GB
-				DiskUsedMB:       12400, // 12.4 GB
-				BandwidthLimitMB: 512000,
-				BandwidthUsedMB:  68500,
-				WebsitesLimit:    5,
-				DatabasesLimit:   10,
-				MailboxesLimit:   25,
-				IPAddress:        "192.168.1.105",
-				PHPVersion:       "8.3",
-				SSLActive:        true,
-				CreatedAt:        now.AddDate(0, -2, 0),
-				UpdatedAt:        now,
-			},
-			{
-				ID:               uuid.MustParse("40000000-0000-0000-0000-000000000002"),
-				OrganizationID:   uuid.Nil,
-				UserID:           uuid.Nil,
-				Domain:           "dhakastore.net",
-				Username:         "c_dhakastore",
-				DocumentRoot:     "/home/c_dhakastore/public_html",
-				PlanID:           uuid.MustParse("10000000-0000-0000-0000-000000000001"), // Starter
-				PlanName:         "Starter Cloud",
-				Status:           AccountStatusActive,
-				DiskLimitMB:      10240, // 10 GB
-				DiskUsedMB:       4200,
-				BandwidthLimitMB: 102400,
-				BandwidthUsedMB:  31000,
-				WebsitesLimit:    1,
-				DatabasesLimit:   2,
-				MailboxesLimit:   5,
-				IPAddress:        "192.168.1.105",
-				PHPVersion:       "8.2",
-				SSLActive:        true,
-				CreatedAt:        now.AddDate(0, -1, 10),
-				UpdatedAt:        now,
-			},
-			{
-				ID:               uuid.MustParse("40000000-0000-0000-0000-000000000003"),
-				OrganizationID:   uuid.Nil,
-				UserID:           uuid.Nil,
-				Domain:           "globalfintech.io",
-				Username:         "c_globalfintech",
-				DocumentRoot:     "/home/c_globalfintech/public_html",
-				PlanID:           uuid.MustParse("10000000-0000-0000-0000-000000000003"), // Enterprise
-				PlanName:         "Enterprise Cloud",
-				Status:           AccountStatusActive,
-				DiskLimitMB:      204800, // 200 GB
-				DiskUsedMB:       48900,
-				BandwidthLimitMB: 2048000,
-				BandwidthUsedMB:  412000,
-				WebsitesLimit:    25,
-				DatabasesLimit:   100,
-				MailboxesLimit:   100,
-				IPAddress:        "192.168.1.108",
-				PHPVersion:       "8.3",
-				SSLActive:        true,
-				CreatedAt:        now.AddDate(0, -3, 5),
-				UpdatedAt:        now,
-			},
-		}
-
-		for _, acc := range seedAccounts {
-			m.hostingAccounts[acc.ID] = acc
-		}
-	}
+	// Zero demo / zero mock data. Real accounts are created through API / signup.
 }
 
 func (m *MemoryStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID, serverID *uuid.UUID) ([]*HostingAccount, error) {
@@ -108,7 +26,8 @@ func (m *MemoryStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID, 
 
 	var accounts []*HostingAccount
 	for _, acc := range m.hostingAccounts {
-		if (orgID == uuid.Nil || acc.OrganizationID == uuid.Nil || acc.OrganizationID == orgID) &&
+		// Strict tenant isolation: if orgID is specified, only return accounts belonging to that organization.
+		if (orgID == uuid.Nil || acc.OrganizationID == orgID) &&
 			(serverID == nil || (acc.ServerID != nil && *acc.ServerID == *serverID)) {
 			accounts = append(accounts, acc)
 		}

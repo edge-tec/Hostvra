@@ -31,6 +31,7 @@ import {
   apiFetch,
   EffectiveUserPlan,
   fetchUserEffectivePlan,
+  formatBytes,
   Website as WebsiteModel,
 } from '@/lib/api';
 
@@ -40,10 +41,10 @@ export function CustomerDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (forceRefresh?: boolean) => {
     try {
       const [planRes, sitesRes] = await Promise.all([
-        fetchUserEffectivePlan(),
+        fetchUserEffectivePlan(forceRefresh),
         apiFetch<WebsiteModel[]>('/api/v1/websites'),
       ]);
 
@@ -67,7 +68,7 @@ export function CustomerDashboard() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadData();
+    loadData(true);
   };
 
   const getPercent = (used: number, max: number) => {
@@ -118,8 +119,27 @@ export function CustomerDashboard() {
   const sitesPercent = getPercent(usage.websites_count, maxSites);
   const dbsPercent = getPercent(usage.databases_count, maxDbs);
   const mailPercent = getPercent(usage.mailboxes_count, maxMail);
-  const diskPercent = getPercent(Number(usage.disk_used_mb), Number(maxDisk));
   const bwPercent = getPercent(Number(usage.bandwidth_used_mb), Number(maxBandwidth));
+
+  // Storage calculations - Authoritative from plan.storage
+  const storageDetails = plan?.storage;
+  const isStorageUnlimited = storageDetails?.is_unlimited ?? (maxDisk <= 0 || maxDisk >= 10485760);
+  const usedStorageBytes = storageDetails
+    ? storageDetails.used_bytes
+    : Number(usage.disk_used_mb) * 1024 * 1024;
+  const quotaStorageBytes = storageDetails
+    ? storageDetails.quota_bytes
+    : Number(maxDisk) * 1024 * 1024;
+  const freeStorageBytes = storageDetails
+    ? storageDetails.free_bytes
+    : Math.max(0, quotaStorageBytes - usedStorageBytes);
+  const storagePercent = isStorageUnlimited
+    ? 0
+    : (storageDetails ? storageDetails.usage_percent : getPercent(Number(usage.disk_used_mb), Number(maxDisk)));
+
+  const storageDisplay = isStorageUnlimited
+    ? `${formatBytes(usedStorageBytes)} / Unlimited`
+    : `${formatBytes(usedStorageBytes)} / ${formatBytes(quotaStorageBytes)}`;
 
   const hasTerminal = plan?.permissions?.terminal ?? false;
 
@@ -266,21 +286,21 @@ export function CustomerDashboard() {
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                <HardDrive className="w-4 h-4 text-amber-500" /> NVMe Storage
+                <HardDrive className="w-4 h-4 text-amber-500" /> NVMe Storage (Package Quota)
               </span>
               <span className="text-xs font-bold text-slate-900 dark:text-white">
-                {formatMB(Number(usage.disk_used_mb))} / {formatMB(Number(maxDisk))}
+                {storageDisplay}
               </span>
             </div>
             <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-surface-800 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${getProgressColor(diskPercent)}`}
-                style={{ width: `${diskPercent}%` }}
+                className={`h-full rounded-full transition-all duration-500 ${getProgressColor(storagePercent)}`}
+                style={{ width: `${Math.min(100, Math.max(0, storagePercent))}%` }}
               />
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>{diskPercent}% Used</span>
-              <span>{formatMB(Math.max(0, Number(maxDisk) - Number(usage.disk_used_mb)))} free</span>
+              <span>{isStorageUnlimited ? 'Unlimited Package' : `${storagePercent}% Used`}</span>
+              <span>{isStorageUnlimited ? 'Unmetered' : `${formatBytes(freeStorageBytes)} free`}</span>
             </div>
           </div>
         </div>
