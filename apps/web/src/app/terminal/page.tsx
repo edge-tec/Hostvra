@@ -118,12 +118,19 @@ export default function TerminalPage() {
   const [fontSize, setFontSize] = useState<number>(14);
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [disconnectInfo, setDisconnectInfo] = useState<{
+    title: string;
+    description: string;
+    type: 'shell_exit' | 'network_drop' | 'auth_expired' | 'error';
+    exitCode?: number;
+  } | null>(null);
 
   const terminalContainerNodeRef = useRef<HTMLDivElement | null>(null);
   const [containerMounted, setContainerMounted] = useState(false);
   const xtermInstanceRef = useRef<any>(null);
   const fitAddonRef = useRef<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const themeModeRef = useRef(themeMode);
   themeModeRef.current = themeMode;
   const fontSizeRef = useRef(fontSize);
@@ -166,6 +173,10 @@ export default function TerminalPage() {
     console.log('[TERMINAL] Component mounted, starting terminal initialization...');
 
     // Cleanup previous instance if any
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
     if (wsRef.current) {
       try {
         wsRef.current.close();
@@ -181,6 +192,7 @@ export default function TerminalPage() {
     container.innerHTML = '';
 
     setTerminalState('initializing');
+    setDisconnectInfo(null);
 
     try {
       // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
@@ -250,6 +262,11 @@ export default function TerminalPage() {
       if (!token) {
         console.error('[TERMINAL] Authentication token missing in storage/cookies');
         setTerminalState('error');
+        setDisconnectInfo({
+          title: 'Authentication Required',
+          description: 'Authentication token not found. Please log in to Hostvra to open a terminal.',
+          type: 'auth_expired',
+        });
         term.write('\x1b[1;31m[Hostvra: Authentication token not found. Please log in to Hostvra.]\x1b[0m\r\n');
         return;
       }
@@ -273,6 +290,11 @@ export default function TerminalPage() {
           term.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
           term.write('\x1b[90mEnsure hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
           setTerminalState('error');
+          setDisconnectInfo({
+            title: 'Connection Timed Out',
+            description: 'Could not connect to Hostvra API. Please verify hostvra-api service is running.',
+            type: 'error',
+          });
         }
       }, 7000);
 
@@ -297,6 +319,7 @@ export default function TerminalPage() {
                 clearTimeout(connectTimeout);
                 console.log('[TERMINAL] PTY allocated & shell started - READY:', msg);
                 setTerminalState('ready');
+                setDisconnectInfo(null);
                 term.write('\x1b[1;32m[Hostvra]\x1b[0m Interactive shell ready.\r\n\r\n');
                 try {
                   fitAddon.fit();
@@ -304,23 +327,51 @@ export default function TerminalPage() {
                 } catch {}
                 term.focus();
                 console.log('[TERMINAL] terminal input enabled');
+
+                // Start client-side heartbeat to ping every 20 seconds during idle periods
+                if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+                pingIntervalRef.current = setInterval(() => {
+                  if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                    try {
+                      wsRef.current.send(JSON.stringify({ type: 'ping' }));
+                    } catch {}
+                  }
+                }, 20000);
+
                 return;
               }
               if (msg.type === 'error') {
                 clearTimeout(connectTimeout);
                 console.error('[TERMINAL] Backend error:', msg);
                 setTerminalState('error');
+                setDisconnectInfo({
+                  title: 'PTY Allocation Error',
+                  description: msg.message || 'PTY allocation failed on server.',
+                  type: 'error',
+                });
                 term.write(`\r\n\x1b[1;31m[Hostvra Error: ${msg.message || 'PTY allocation failed'}]\x1b[0m\r\n`);
                 return;
               }
               if (msg.type === 'exit') {
                 clearTimeout(connectTimeout);
-                console.log('[TERMINAL] Shell process exited:', msg);
+                if (pingIntervalRef.current) {
+                  clearInterval(pingIntervalRef.current);
+                  pingIntervalRef.current = null;
+                }
+                const exitCode = typeof msg.exit_code === 'number' ? msg.exit_code : 0;
+                console.log('[TERMINAL] Shell process exited:', exitCode);
                 setTerminalState('closed');
-                term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${msg.exit_code || 0}]\x1b[0m\r\n`);
+                setDisconnectInfo({
+                  title: 'Shell Process Ended',
+                  description: `The interactive Linux shell session ended with exit status code ${exitCode}.`,
+                  type: 'shell_exit',
+                  exitCode,
+                });
+                term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${exitCode}]\x1b[0m\r\n`);
                 return;
               }
               if (msg.type === 'pong') {
+                // Heartbeat response verified
                 return;
               }
             } catch {
@@ -338,7 +389,16 @@ export default function TerminalPage() {
 
       ws.onerror = (err) => {
         clearTimeout(connectTimeout);
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
         console.error('[TERMINAL] WebSocket error:', err);
+        setDisconnectInfo({
+          title: 'Connection Error',
+          description: 'Unable to reach the Hostvra terminal service. Please ensure hostvra-api is active.',
+          type: 'error',
+        });
         term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
         term.write('\x1b[90mEnsure hostvra-api is active: systemctl restart hostvra-api\x1b[0m\r\n');
         setTerminalState('error');
@@ -346,12 +406,31 @@ export default function TerminalPage() {
 
       ws.onclose = (event) => {
         clearTimeout(connectTimeout);
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
         console.log('[TERMINAL] WebSocket closed:', event.code, event.reason);
         if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
           term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
+          setDisconnectInfo({
+            title: 'Authentication Required',
+            description: 'Your login session has expired or is unauthorized. Please re-login to Hostvra.',
+            type: 'auth_expired',
+          });
           setTerminalState('error');
         } else {
-          setTerminalState((prev) => (prev === 'closed' || prev === 'error' ? prev : 'disconnected'));
+          setTerminalState((prev) => {
+            if (prev === 'closed') {
+              return prev;
+            }
+            setDisconnectInfo({
+              title: 'Connection Interrupted',
+              description: 'The terminal connection was interrupted. The server may have restarted or network was dropped.',
+              type: 'network_drop',
+            });
+            return 'disconnected';
+          });
           term.write('\r\n\x1b[33m[Hostvra: Terminal session closed]\x1b[0m\r\n');
         }
       };
@@ -428,8 +507,43 @@ export default function TerminalPage() {
       }
     };
 
-    window.addEventListener('resize', handleWindowResize);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          try {
+            wsRef.current.send(JSON.stringify({ type: 'ping' }));
+            fitAddonRef.current?.fit();
+            xtermInstanceRef.current?.focus();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    };
 
+    window.addEventListener('resize', handleWindowResize);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch {}
+        wsRef.current = null;
+      }
+      if (xtermInstanceRef.current) {
+        try {
+          xtermInstanceRef.current.dispose();
+        } catch {}
+        xtermInstanceRef.current = null;
+      }
+    };
   }, [containerMounted, initTerminal]);
 
   // Update theme dynamically
@@ -735,34 +849,44 @@ export default function TerminalPage() {
           {(terminalState === 'disconnected' || terminalState === 'closed' || terminalState === 'error') && (
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-20">
               <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl text-center max-w-sm">
-                <div className={`w-12 h-12 rounded-full mx-auto flex items-center justify-center mb-3 ${
-                  terminalState === 'closed'
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-                    : 'bg-rose-50 dark:bg-rose-950/50 text-rose-500'
-                }`}>
+                <div
+                  className={`w-12 h-12 rounded-full mx-auto flex items-center justify-center mb-3 ${
+                    terminalState === 'closed'
+                      ? 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                      : terminalState === 'error'
+                      ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-500'
+                      : 'bg-amber-50 dark:bg-amber-950/50 text-amber-500'
+                  }`}
+                >
                   <TerminalIcon className="w-6 h-6" />
                 </div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
-                  {terminalState === 'closed'
-                    ? 'Terminal Session Ended'
-                    : terminalState === 'error'
-                    ? 'Connection Error'
-                    : 'Terminal Disconnected'}
+                  {disconnectInfo?.title ||
+                    (terminalState === 'closed'
+                      ? 'Terminal Session Ended'
+                      : terminalState === 'error'
+                      ? 'Connection Error'
+                      : 'Connection Interrupted')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                  {terminalState === 'closed'
-                    ? 'The interactive shell process has exited.'
-                    : terminalState === 'error'
-                    ? 'Unable to establish WebSocket PTY connection to Hostvra API.'
-                    : 'The interactive shell session has exited or connection was closed.'}
+                  {disconnectInfo?.description ||
+                    (terminalState === 'closed'
+                      ? 'The interactive shell process has exited.'
+                      : terminalState === 'error'
+                      ? 'Unable to establish WebSocket connection to Hostvra API.'
+                      : 'The terminal connection was interrupted. Click below to reconnect.')}
                 </p>
                 <button
                   type="button"
                   onClick={initTerminal}
-                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all"
+                  className={`w-full py-2.5 px-4 rounded-xl text-white font-semibold text-xs shadow-lg flex items-center justify-center gap-2 transition-all ${
+                    terminalState === 'closed'
+                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                      : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+                  }`}
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Start New Session</span>
+                  <span>{terminalState === 'closed' ? 'Start New Session' : 'Reconnect Terminal'}</span>
                 </button>
               </div>
             </div>

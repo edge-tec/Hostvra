@@ -97,6 +97,12 @@ func (s *safeWSConn) WriteMessage(messageType int, data []byte) error {
 	return s.conn.WriteMessage(messageType, data)
 }
 
+func (s *safeWSConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.WriteControl(messageType, data, deadline)
+}
+
 func (s *safeWSConn) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -111,6 +117,14 @@ func sendWSError(conn *safeWSConn, code, msg string) {
 	})
 	_ = conn.WriteMessage(websocket.TextMessage, payload)
 }
+
+// Terminal heartbeat & buffer limits
+const (
+	termWriteWait  = 10 * time.Second
+	termPongWait   = 60 * time.Second
+	termPingPeriod = 20 * time.Second // Ping every 20s to prevent Nginx/Cloudflare/NAT idle drops
+	termMaxMsgSize = 1024 * 1024
+)
 
 // HandleWebSocket handles real interactive full-duplex PTY terminal sessions
 func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +152,21 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		h.audit.Log(r.Context(), r, "terminal.websocket.upgrade_failed", "server", "localhost", "failure", "WebSocket upgrade failed: "+err.Error(), nil)
 		return
 	}
+
+	// CRITICAL: Clear pre-existing HTTP server WriteTimeout/ReadTimeout deadlines from hijacked socket
+	// so the connection is not killed after 15 minutes by Go's net/http server.
+	_ = rawConn.SetReadDeadline(time.Time{})
+	_ = rawConn.SetWriteDeadline(time.Time{})
+
 	safeConn := &safeWSConn{conn: rawConn}
+
+	// Configure transport-level WebSocket Ping/Pong heartbeat
+	safeConn.conn.SetReadLimit(termMaxMsgSize)
+	_ = safeConn.conn.SetReadDeadline(time.Now().Add(termPongWait))
+	safeConn.conn.SetPongHandler(func(string) error {
+		_ = safeConn.conn.SetReadDeadline(time.Now().Add(termPongWait))
+		return nil
+	})
 
 	// 3. Determine starting working directory
 	cwd := r.URL.Query().Get("cwd")
@@ -166,7 +194,7 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	}
 
 	// 5. Launch interactive login shell with both -l (login) and -i (interactive)
-	// This guarantees bash sets up readline, prints prompt (PS1) immediately, and enables job control
+	// Explicitly set TMOUT=0 to prevent Bash from executing auto-logout after inactivity
 	cmd := exec.Command(shell, "-l", "-i")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(),
@@ -174,6 +202,7 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		"COLORTERM=truecolor",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
+		"TMOUT=0", // Permanently disable idle auto-logout
 	)
 
 	// Window dimensions
@@ -223,10 +252,31 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	})
 	_ = safeConn.WriteMessage(websocket.TextMessage, readyPayload)
 
+	sessionDone := make(chan struct{})
+
+	// Dedicated Ping Ticker Goroutine: sends transport-level WebSocket Ping frames every 20 seconds.
+	// This resets idle timers in Nginx, Cloudflare, AWS ALBs, NAT routers, and firewalls.
+	go func() {
+		ticker := time.NewTicker(termPingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := safeConn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(termWriteWait)); err != nil {
+					return
+				}
+			case <-sessionDone:
+				return
+			}
+		}
+	}()
+
 	var closeOnce sync.Once
-	cleanup := func() {
+	cleanup := func(reason string) {
 		closeOnce.Do(func() {
+			close(sessionDone)
 			_ = ptyFile.Close()
+			exitCode := -1
 			if cmd.Process != nil {
 				pid := cmd.Process.Pid
 				// Send SIGHUP to the process group to notify foreground process
@@ -240,13 +290,22 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 
 				select {
 				case <-done:
+					if cmd.ProcessState != nil {
+						exitCode = cmd.ProcessState.ExitCode()
+					}
 				case <-time.After(200 * time.Millisecond):
 					_ = syscall.Kill(-pid, syscall.SIGTERM)
 					select {
 					case <-done:
+						if cmd.ProcessState != nil {
+							exitCode = cmd.ProcessState.ExitCode()
+						}
 					case <-time.After(200 * time.Millisecond):
 						_ = syscall.Kill(-pid, syscall.SIGKILL)
 						<-done
+						if cmd.ProcessState != nil {
+							exitCode = cmd.ProcessState.ExitCode()
+						}
 					}
 				}
 			}
@@ -255,14 +314,16 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 			h.audit.Log(r.Context(), r, "terminal.session.closed", "server", "localhost", "success", "Interactive PTY terminal session terminated", map[string]interface{}{
 				"session_id": sessionID,
 				"user_id":    claims.UserID.String(),
+				"reason":     reason,
+				"exit_code":  exitCode,
 			})
 		})
 	}
-	defer cleanup()
+	defer cleanup("handler_exited")
 
 	// Goroutine 1: PTY -> WebSocket (Streaming live stdout/stderr/ANSI with zero buffering lag)
 	go func() {
-		defer cleanup()
+		defer cleanup("shell_exited")
 		buf := make([]byte, 4096)
 		for {
 			n, readErr := ptyFile.Read(buf)
@@ -277,7 +338,7 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		// Notify client of exit if connection still alive
+		// Notify client that the shell process specifically exited
 		exitCode := 0
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
@@ -293,8 +354,18 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	for {
 		msgType, message, err := safeConn.conn.ReadMessage()
 		if err != nil {
+			closeReason := "client_disconnected"
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				closeReason = "normal_closure"
+			} else {
+				closeReason = fmt.Sprintf("read_error: %v", err)
+			}
+			cleanup(closeReason)
 			break
 		}
+
+		// Any message received from the client extends the read deadline
+		_ = safeConn.conn.SetReadDeadline(time.Now().Add(termPongWait))
 
 		if msgType == websocket.BinaryMessage {
 			if _, wErr := ptyFile.Write(message); wErr != nil {
@@ -317,6 +388,7 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 						return
 					}
 				case "ping":
+					// Respond to application-level ping from frontend
 					_ = safeConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 				}
 			} else {
