@@ -157,6 +157,7 @@ func main() {
 	cronHandler.SetQuotaService(quotaService)
 	terminalHandler.SetQuotaService(quotaService)
 	ftpHandler.SetQuotaService(quotaService)
+	fileHandler.SetQuotaService(quotaService)
 
 	adminUsersHandler := handlers.NewAdminUsersHandler(dataStore, quotaService, auditLogger)
 

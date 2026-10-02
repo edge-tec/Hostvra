@@ -21,15 +21,17 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type FileHandler struct {
-	cfg     *config.Config
-	store   store.Store
-	audit   *audit.Logger
-	fileMgr *files.FileManager
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	fileMgr  *files.FileManager
+	quotaSvc *quota.Service
 }
 
 func NewFileHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FileHandler {
@@ -43,6 +45,10 @@ func NewFileHandler(cfg *config.Config, s store.Store, a *audit.Logger) *FileHan
 		audit:   a,
 		fileMgr: fm,
 	}
+}
+
+func (h *FileHandler) SetQuotaService(q *quota.Service) {
+	h.quotaSvc = q
 }
 
 // checkPathAuthorization enforces multi-tenant and role-based boundaries on file operations.
@@ -408,6 +414,20 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication claims", nil, "")
+		return
+	}
+
+	// Backend quota enforcement: verify customer has remaining storage quota for this upload
+	if h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckStorageQuota(r.Context(), claims.UserID, header.Size); err != nil {
+			response.Error(w, http.StatusForbidden, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
 
 	// Normalize Windows slashes and prevent directory breakout
 	normalizedFilename := strings.ReplaceAll(header.Filename, "\\", "/")
@@ -1983,6 +2003,19 @@ func (h *FileHandler) ChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication claims", nil, "")
+		return
+	}
+
+	if h.quotaSvc != nil {
+		if err := h.quotaSvc.CheckQuota(r.Context(), claims.UserID, "storage"); err != nil {
+			response.Error(w, http.StatusForbidden, "QUOTA_EXCEEDED", err.Error(), nil, "")
+			return
+		}
+	}
 
 	chunkDir := filepath.Join(os.TempDir(), "hostvra_chunks", uploadID)
 	_ = os.MkdirAll(chunkDir, 0755)

@@ -374,6 +374,12 @@ func (s *Service) ResolveEffectivePlan(ctx context.Context, userID uuid.UUID) (*
 		effective.Usage.DiskUsedMB = 0
 	}
 
+	// Automatic reconciliation: If active subscription in database has stale disk usage, reconcile it
+	if latestSub != nil && latestSub.DiskUsedMB != effective.Usage.DiskUsedMB {
+		latestSub.DiskUsedMB = effective.Usage.DiskUsedMB
+		_ = s.store.UpdateSubscription(ctx, latestSub)
+	}
+
 	return effective, nil
 }
 
@@ -436,6 +442,42 @@ func (s *Service) CheckQuota(ctx context.Context, userID uuid.UUID, resource str
 	return nil
 }
 
+// CheckStorageQuota validates if user has enough remaining storage quota for an additional amount of bytes
+func (s *Service) CheckStorageQuota(ctx context.Context, userID uuid.UUID, additionalBytes int64) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	effective, err := s.ResolveEffectivePlan(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	// Superadmins bypass all quotas
+	if effective.IsSuperAdmin || effective.Role == "admin" || effective.Role == "superadmin" {
+		return nil
+	}
+
+	// Expired or suspended subscriptions cannot create or upload new resources
+	if effective.SubscriptionStatus == "expired" || effective.SubscriptionStatus == "suspended" || effective.SubscriptionStatus == "cancelled" {
+		return fmt.Errorf("subscription is %s: please renew your package to create or manage resources", effective.SubscriptionStatus)
+	}
+
+	if effective.Storage.IsUnlimited {
+		return nil
+	}
+
+	if effective.Storage.QuotaBytes > 0 {
+		if effective.Storage.UsedBytes+additionalBytes > effective.Storage.QuotaBytes {
+			return fmt.Errorf("storage quota exceeded: your package limit is %d MB (used: %d MB, attempted upload: %d MB). Please upgrade your package or remove files",
+				effective.Storage.QuotaBytes/(1024*1024),
+				effective.Storage.UsedBytes/(1024*1024),
+				(additionalBytes+(1024*1024-1))/(1024*1024))
+		}
+	}
+
+	return nil
+}
+
 // CheckPermission checks if a given feature toggle is enabled for this user's effective plan
 func (s *Service) CheckPermission(ctx context.Context, userID uuid.UUID, feature string) bool {
 	s.mu.RLock()
@@ -461,6 +503,25 @@ func (s *Service) CheckPermission(ctx context.Context, userID uuid.UUID, feature
 	return allowed
 }
 
+var systemUsernames = map[string]bool{
+	"root": true, "daemon": true, "bin": true, "sys": true, "sync": true,
+	"games": true, "man": true, "lp": true, "mail": true, "news": true,
+	"uucp": true, "proxy": true, "www-data": true, "backup": true, "list": true,
+	"irc": true, "gnats": true, "nobody": true, "systemd-network": true,
+	"systemd-resolve": true, "messagebus": true, "systemd-timesync": true,
+	"syslog": true, "_apt": true, "tss": true, "uuidd": true, "tcpdump": true,
+	"sshd": true, "pollinate": true, "landscape": true, "ubuntu": true,
+	"debian": true, "centos": true, "fedora": true, "ec2-user": true,
+	"vagrant": true, "admin": true, "administrator": true, "system": true,
+	"hostvra": true, "nginx": true, "apache": true, "mysql": true,
+	"postgres": true, "redis": true, "docker": true, "git": true, "node": true,
+}
+
+func isSystemUsername(user string) bool {
+	u := strings.ToLower(strings.TrimSpace(user))
+	return u == "" || systemUsernames[u]
+}
+
 // isAllowedUserStoragePath checks if a path is a safe user directory to measure and not a critical system path.
 func isAllowedUserStoragePath(path string) bool {
 	if path == "" {
@@ -475,6 +536,7 @@ func isAllowedUserStoragePath(path string) bool {
 	prohibited := []string{
 		"/etc", "/usr", "/boot", "/root", "/bin", "/sbin", "/lib", "/lib64",
 		"/sys", "/proc", "/dev", "/opt", "/run", "/var/lib/docker",
+		"/var/log", "/var/cache", "/var/tmp",
 	}
 	for _, p := range prohibited {
 		if clean == p || strings.HasPrefix(clean, p+"/") {
@@ -482,7 +544,17 @@ func isAllowedUserStoragePath(path string) bool {
 		}
 	}
 
-	// Allowed resource prefixes
+	// Prohibit system users in /home
+	for sysUser := range systemUsernames {
+		sysHome := "/home/" + sysUser
+		if clean == sysHome || strings.HasPrefix(clean, sysHome+"/") {
+			return false
+		}
+	}
+
+	// Allowed resource prefixes.
+	// CRITICAL: The base prefix itself (e.g. /home, /var/www, /var/mail/vhosts) is STRICTLY FORBIDDEN!
+	// It must be a specific tenant subfolder (e.g. /home/<user> or /var/www/<domain>) with at least one segment.
 	allowedPrefixes := []string{
 		"/var/www",
 		"/home",
@@ -491,13 +563,21 @@ func isAllowedUserStoragePath(path string) bool {
 		"/var/lib/hostvra",
 	}
 	for _, ap := range allowedPrefixes {
-		if clean == ap || strings.HasPrefix(clean, ap+"/") {
-			return true
+		// Clean cannot be the base prefix itself
+		if clean == ap {
+			return false
+		}
+		if strings.HasPrefix(clean, ap+"/") {
+			rel := strings.TrimPrefix(clean, ap+"/")
+			parts := strings.Split(rel, "/")
+			if len(parts) >= 1 && parts[0] != "" {
+				return true
+			}
 		}
 	}
 
-	// If in a testing environment (e.g. /tmp, /var/folders), allow
-	if strings.HasPrefix(clean, "/tmp") || strings.HasPrefix(clean, "/var/folders") {
+	// If in a testing environment (e.g. /tmp, /var/folders), allow only if subfolder
+	if (strings.HasPrefix(clean, "/tmp/") || strings.HasPrefix(clean, "/var/folders/")) && clean != "/tmp" {
 		return true
 	}
 
@@ -549,7 +629,7 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	if !forceRefresh {
 		if val, ok := s.storageCache.Load(userID); ok {
 			entry := val.(storageCacheEntry)
-			if time.Since(entry.timestamp) < 45*time.Second {
+			if time.Since(entry.timestamp) < 30*time.Second {
 				return entry.usedBytes
 			}
 		}
@@ -558,9 +638,21 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	var totalBytes int64
 	measuredPaths := make(map[string]bool)
 
-	// 1. Websites document roots
+	// If orgID is nil, tenant has no organization resources
+	if orgID == uuid.Nil {
+		s.storageCache.Store(userID, storageCacheEntry{
+			usedBytes: 0,
+			timestamp: time.Now(),
+		})
+		return 0
+	}
+
+	// 1. Websites document roots (tenant-scoped)
 	if sites, err := s.store.ListWebsitesByOrg(ctx, orgID); err == nil {
 		for _, site := range sites {
+			if site.OrganizationID != orgID {
+				continue
+			}
 			docRoot := filepath.Clean(site.DocumentRoot)
 			if docRoot != "" && isAllowedUserStoragePath(docRoot) && !measuredPaths[docRoot] {
 				measuredPaths[docRoot] = true
@@ -572,6 +664,9 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	// 2. Email Mailboxes (/var/mail/vhosts/<domain>)
 	if domains, err := s.store.ListEmailDomainsByOrg(ctx, orgID); err == nil {
 		for _, d := range domains {
+			if d.OrganizationID != orgID || strings.TrimSpace(d.Domain) == "" {
+				continue
+			}
 			mailDir := filepath.Clean(filepath.Join("/var/mail/vhosts", d.Domain))
 			if isAllowedUserStoragePath(mailDir) && !measuredPaths[mailDir] {
 				measuredPaths[mailDir] = true
@@ -583,7 +678,10 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	// 3. Databases (actual recorded size in DB or database folder)
 	if dbs, err := s.store.ListDatabasesByOrg(ctx, orgID); err == nil {
 		for _, db := range dbs {
-			if !db.InRecycleBin && db.SizeBytes > 0 {
+			if db.OrganizationID != orgID || db.InRecycleBin {
+				continue
+			}
+			if db.SizeBytes > 0 {
 				totalBytes += db.SizeBytes
 			}
 		}
@@ -592,11 +690,15 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	// 4. Hosting Accounts (/home/<username>) if distinct from measured doc roots
 	if accs, err := s.store.ListHostingAccounts(ctx, orgID, nil); err == nil {
 		for _, acc := range accs {
-			// Ensure tenant isolation: verify user or organization ownership
-			if acc.UserID != userID && (acc.OrganizationID == uuid.Nil || acc.OrganizationID != orgID) {
+			// Ensure tenant isolation: must belong to this organization or user
+			if acc.OrganizationID != orgID && acc.UserID != userID {
 				continue
 			}
-			homeDir := filepath.Clean(fmt.Sprintf("/home/%s", acc.Username))
+			cleanUser := strings.TrimSpace(acc.Username)
+			if cleanUser == "" || isSystemUsername(cleanUser) {
+				continue
+			}
+			homeDir := filepath.Clean(fmt.Sprintf("/home/%s", cleanUser))
 			if isAllowedUserStoragePath(homeDir) && !measuredPaths[homeDir] {
 				measuredPaths[homeDir] = true
 				totalBytes += calculateDirSizeBytes(homeDir)
@@ -605,12 +707,10 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 	}
 
 	// 5. Backups (/var/backups/hostvra/<orgID>)
-	if orgID != uuid.Nil {
-		backupDir := filepath.Clean(fmt.Sprintf("/var/backups/hostvra/%s", orgID.String()))
-		if isAllowedUserStoragePath(backupDir) && !measuredPaths[backupDir] {
-			measuredPaths[backupDir] = true
-			totalBytes += calculateDirSizeBytes(backupDir)
-		}
+	backupDir := filepath.Clean(fmt.Sprintf("/var/backups/hostvra/%s", orgID.String()))
+	if isAllowedUserStoragePath(backupDir) && !measuredPaths[backupDir] {
+		measuredPaths[backupDir] = true
+		totalBytes += calculateDirSizeBytes(backupDir)
 	}
 
 	// Cache the result
@@ -626,16 +726,23 @@ func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID 
 func (s *Service) getUsageUnchecked(ctx context.Context, userID, orgID uuid.UUID) store.UserResourceUsage {
 	usage := store.UserResourceUsage{}
 
+	if orgID == uuid.Nil {
+		return usage
+	}
+
 	// 1. Websites count
 	if sites, err := s.store.ListWebsitesByOrg(ctx, orgID); err == nil {
-		usage.WebsitesCount = len(sites)
+		for _, site := range sites {
+			if site.OrganizationID == orgID {
+				usage.WebsitesCount++
+			}
+		}
 	}
 
 	// 2. Databases count
 	if dbs, err := s.store.ListDatabasesByOrg(ctx, orgID); err == nil {
-		// Count active non-recycle databases
 		for _, db := range dbs {
-			if !db.InRecycleBin {
+			if db.OrganizationID == orgID && !db.InRecycleBin {
 				usage.DatabasesCount++
 			}
 		}
@@ -644,8 +751,10 @@ func (s *Service) getUsageUnchecked(ctx context.Context, userID, orgID uuid.UUID
 	// 3. Mailboxes count
 	if domains, err := s.store.ListEmailDomainsByOrg(ctx, orgID); err == nil {
 		for _, d := range domains {
-			if mbs, err := s.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
-				usage.MailboxesCount += len(mbs)
+			if d.OrganizationID == orgID {
+				if mbs, err := s.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
+					usage.MailboxesCount += len(mbs)
+				}
 			}
 		}
 	}
@@ -653,7 +762,11 @@ func (s *Service) getUsageUnchecked(ctx context.Context, userID, orgID uuid.UUID
 	// 4. Hosting Account usage if present (strictly tenant isolated)
 	if accs, err := s.store.ListHostingAccounts(ctx, orgID, nil); err == nil {
 		for _, a := range accs {
-			if a.UserID != userID && (a.OrganizationID == uuid.Nil || a.OrganizationID != orgID) {
+			if a.OrganizationID != orgID && a.UserID != userID {
+				continue
+			}
+			cleanUser := strings.TrimSpace(a.Username)
+			if isSystemUsername(cleanUser) {
 				continue
 			}
 			usage.BandwidthUsedMB += a.BandwidthUsedMB
@@ -665,4 +778,5 @@ func (s *Service) getUsageUnchecked(ctx context.Context, userID, orgID uuid.UUID
 
 	return usage
 }
+
 
