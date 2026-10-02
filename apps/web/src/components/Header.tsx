@@ -155,7 +155,7 @@ export function Header() {
 
   return (
     <>
-      <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] px-4 sm:px-6 flex items-center justify-between sticky top-0 z-20 shadow-xs">
+      <header className="h-16 w-full flex-shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1120] px-4 sm:px-6 flex items-center justify-between z-20 shadow-xs">
         {/* Left: Mobile Toggle & Global Search Bar */}
         <div className="flex items-center gap-3 sm:gap-4 flex-1 max-w-xl">
           {/* Mobile Hamburger Button */}

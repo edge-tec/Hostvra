@@ -302,7 +302,7 @@ export function Sidebar() {
         data-component="sidebar"
         className={`hidden lg:flex ${
           collapsed ? 'w-16' : 'w-60'
-        } bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex-col h-screen select-none sticky top-0 transition-all duration-200 ease-in-out z-30 flex-shrink-0 shadow-xs`}
+        } bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex-col h-full select-none transition-all duration-200 ease-in-out z-30 flex-shrink-0 shadow-xs`}
       >
         {/* Brand Header */}
         <div className="h-16 flex items-center px-3.5 border-b border-slate-200 dark:border-slate-800 justify-between flex-shrink-0 overflow-hidden bg-white dark:bg-[#0F172A]">
