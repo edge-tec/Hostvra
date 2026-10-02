@@ -585,7 +585,7 @@ export default function AdminUsersPage() {
                   type="button"
                   onClick={handleSavePlan}
                   disabled={saving}
-                  className="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+                  className="px-4 py-2 text-xs font-bold bg-[#16A34A] text-white rounded-xl hover:bg-[#15803D] active:bg-[#166534] disabled:opacity-50 shadow-sm"
                 >
                   {saving ? 'Updating...' : 'Save Plan'}
                 </button>

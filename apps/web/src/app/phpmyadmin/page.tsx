@@ -2803,7 +2803,7 @@ function PhpMyAdminCore() {
                       <button
                         onClick={() => handleTableOperation('check')}
                         disabled={opRunning}
-                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold cursor-pointer shadow-sm"
                       >
                         Check Table
                       </button>
@@ -3437,7 +3437,7 @@ function PhpMyAdminCore() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm">
                   Update Row
                 </button>
               </div>
@@ -3583,7 +3583,7 @@ function PhpMyAdminCore() {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm">
                   Save Changes
                 </button>
               </div>

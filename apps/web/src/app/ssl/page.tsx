@@ -1042,7 +1042,7 @@ export default function SSLPage() {
                   <button
                     type="submit"
                     disabled={importing}
-                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-bold shadow-sm transition-all disabled:opacity-50"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     <span>{importing ? 'Validating & Installing...' : 'Install Custom SSL'}</span>

@@ -326,7 +326,7 @@ html:not(.dark) .hover\:bg-slate-100:hover {
   background-color: #F1F5F9 !important;
 }
 
-/* Modal Backdrops in Light Mode */
+/* Modal Backdrops in Light Mode - Crisp, clean, no blurry background artifacts */
 html:not(.dark) .bg-black\/75,
 html:not(.dark) .bg-black\/70,
 html:not(.dark) .bg-black\/60,
@@ -334,8 +334,9 @@ html:not(.dark) .bg-black\/50,
 html:not(.dark) .bg-slate-950\/60,
 html:not(.dark) .bg-slate-950\/70,
 html:not(.dark) .bg-slate-950\/80 {
-  background-color: rgba(15, 23, 42, 0.45) !important;
-  backdrop-filter: blur(4px) !important;
+  background-color: rgba(15, 23, 42, 0.55) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 /* 2. Light Mode Borders - Clean Slate #E2E8F0 Standard */
@@ -527,20 +528,11 @@ button:disabled {
   box-shadow: none !important;
 }
 
-/* 4.1 Primary Solid Buttons (Eye-Friendly, Vibrant, Pure White Text) */
+/* 4.1 Primary Solid Buttons (Unified Green Action System) */
 html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
-  background-color: #4F46E5 !important;
-  color: #FFFFFF !important;
-  font-weight: 600 !important;
-  box-shadow: 0 2px 5px rgba(79, 70, 229, 0.25) !important;
-}
-html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover {
-  background-color: #4338CA !important;
-  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.35) !important;
-}
-
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
 html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
 html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
 html:not(.dark) button[class*="bg-[#20a53a]"],
@@ -550,27 +542,20 @@ html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):not([
   background-color: #16A34A !important;
   color: #FFFFFF !important;
   font-weight: 600 !important;
-  box-shadow: 0 2px 5px rgba(22, 163, 74, 0.25) !important;
+  box-shadow: 0 1px 2px 0 rgba(22, 163, 74, 0.25) !important;
 }
+html:not(.dark) button[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-indigo"]:not([class*="/"]):not([class*="-50"]):hover,
+html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover,
 html:not(.dark) button[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
 html:not(.dark) a[class*="bg-emerald"]:not([class*="/"]):not([class*="-50"]):hover,
 html:not(.dark) button[class*="bg-[#20a53a]"]:hover:not(:disabled),
-html:not(.dark) a[class*="bg-[#20a53a]"]:hover {
+html:not(.dark) a[class*="bg-[#20a53a]"]:hover,
+html:not(.dark) button[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
+html:not(.dark) a[class*="bg-green"]:not([class*="/"]):not([class*="-50"]):hover {
   background-color: #15803D !important;
-  box-shadow: 0 4px 10px rgba(22, 163, 74, 0.35) !important;
-}
-
-html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
-html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]) {
-  background-color: #2563EB !important;
-  color: #FFFFFF !important;
-  font-weight: 600 !important;
-  box-shadow: 0 2px 5px rgba(37, 99, 235, 0.25) !important;
-}
-html:not(.dark) button[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover:not(:disabled),
-html:not(.dark) a[class*="bg-blue"]:not([class*="/"]):not([class*="-50"]):hover {
-  background-color: #1D4ED8 !important;
-  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35) !important;
+  box-shadow: 0 2px 6px rgba(22, 163, 74, 0.3) !important;
 }
 
 html:not(.dark) button[class*="bg-purple"]:not([class*="/"]):not([class*="-50"]):not([class*="-100"]),
@@ -828,8 +813,8 @@ html:not(.dark) select:hover {
 html:not(.dark) input:focus,
 html:not(.dark) textarea:focus,
 html:not(.dark) select:focus {
-  border-color: #2563EB !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15) !important;
+  border-color: #16A34A !important;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15) !important;
   outline: none !important;
 }
 
@@ -1126,8 +1111,8 @@ html:not(.dark) div:has(> input[placeholder*="Filter"]):hover {
 
 html:not(.dark) div:has(> input[placeholder*="Search"]):focus-within,
 html:not(.dark) div:has(> input[placeholder*="Filter"]):focus-within {
-  border-color: #2563EB !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+  border-color: #16A34A !important;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15) !important;
 }
 
 html.dark div:has(> input[placeholder*="Search"]),
@@ -1261,4 +1246,33 @@ textarea.config-textarea:focus,
   outline: none !important;
   box-shadow: none !important;
 }
+
+/* ==========================================================================
+   13. ZERO BLURRY BACKGROUNDS & RESPONSIVE HARDENING
+   ========================================================================== */
+[class*="backdrop-blur"],
+.backdrop-blur-none,
+.backdrop-blur-xs,
+.backdrop-blur-sm,
+.backdrop-blur-md,
+.backdrop-blur-lg,
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.backdrop-blur-3xl {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Ensure no accidental horizontal page overflow */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Modal and dialog scroll containment */
+[role="dialog"] {
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
 

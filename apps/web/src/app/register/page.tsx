@@ -110,7 +110,7 @@ function RegisterForm() {
     <div className="w-full max-w-md space-y-6 z-10">
       <div className="text-center">
         <Link href="/" className="inline-flex items-center gap-2 group mb-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 flex items-center justify-center shadow-xl shadow-indigo-600/25 group-hover:scale-105 transition-transform">
+          <div className="w-12 h-12 rounded-xl bg-[#16A34A] flex items-center justify-center shadow-lg shadow-emerald-600/20 group-hover:scale-105 transition-transform">
             <Flame className="w-6 h-6 text-white fill-white" />
           </div>
         </Link>
@@ -124,9 +124,9 @@ function RegisterForm() {
 
       {/* Selected Plan Summary Banner */}
       {selectedPlan && (
-        <div className="p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex items-center justify-between text-xs">
+        <div className="p-4 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/50 flex items-center justify-between text-xs">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600/15 text-[#16A34A] dark:text-emerald-400 flex items-center justify-center flex-shrink-0">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
@@ -147,14 +147,14 @@ function RegisterForm() {
           </div>
           <Link
             href="/#pricing"
-            className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+            className="text-[11px] font-bold text-[#16A34A] dark:text-emerald-400 hover:underline"
           >
             Change
           </Link>
         </div>
       )}
 
-      <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-8 shadow-xl dark:shadow-2xl">
+      <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-8 shadow-sm dark:shadow-md">
         {error && (
           <div className="mb-6 p-4 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-400 text-sm flex items-start gap-3">
             <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -175,7 +175,7 @@ function RegisterForm() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Alex Mercer"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 text-sm font-medium"
+                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-sm font-medium transition-colors"
               />
             </div>
           </div>
@@ -192,7 +192,7 @@ function RegisterForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="alex@example.com"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 text-sm font-medium"
+                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-sm font-medium transition-colors"
               />
             </div>
           </div>
@@ -208,7 +208,7 @@ function RegisterForm() {
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
                 placeholder="Acme Cloud Ltd"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 text-sm font-medium"
+                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-sm font-medium transition-colors"
               />
             </div>
           </div>
@@ -226,7 +226,7 @@ function RegisterForm() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 text-sm font-medium"
+                className="w-full pl-11 pr-4 py-2.5 rounded-xl bg-white dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-[#16A34A] focus:ring-1 focus:ring-[#16A34A] text-sm font-medium transition-colors"
               />
             </div>
           </div>
@@ -235,7 +235,7 @@ function RegisterForm() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 active:scale-[0.99] disabled:opacity-50 text-white font-bold text-sm shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer group"
+              className="w-full py-3 px-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] disabled:opacity-50 text-white font-bold text-sm shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer group"
             >
               {loading ? (
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -254,7 +254,7 @@ function RegisterForm() {
 
       <p className="text-center text-sm text-slate-600 dark:text-slate-400 font-medium">
         Already have an account?{' '}
-        <Link href="/login" className="text-indigo-600 dark:text-indigo-400 font-bold hover:underline">
+        <Link href="/login" className="text-[#16A34A] dark:text-emerald-400 font-bold hover:underline">
           Sign In
         </Link>
       </p>
@@ -265,11 +265,10 @@ function RegisterForm() {
 export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#07090e] flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 relative overflow-hidden py-12 transition-colors">
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
       <Suspense
         fallback={
           <div className="flex items-center gap-3 text-slate-400">
-            <div className="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-[#16A34A] border-t-transparent rounded-full animate-spin" />
             <span>Loading...</span>
           </div>
         }

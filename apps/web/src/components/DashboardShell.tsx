@@ -33,7 +33,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white dark:bg-[#0B1120]">
         <div className="flex flex-col items-center gap-4 text-center px-4">
-          <div className="w-10 h-10 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+          <div className="w-10 h-10 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin" />
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-white">
               Authenticating Session

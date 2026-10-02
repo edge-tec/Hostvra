@@ -315,20 +315,20 @@ export default function DashboardPage() {
     return (
       <DashboardShell>
         {userRole === 'admin' && (
-          <div className="mb-4 flex items-center justify-between p-3 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 text-xs">
-            <span className="font-semibold text-indigo-900 dark:text-indigo-300">
+          <div className="mb-4 flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs">
+            <span className="font-semibold text-emerald-900 dark:text-emerald-300">
               Administrator Preview: Viewing Customer Hosting Dashboard
             </span>
             <div className="flex items-center gap-2">
               <Link
                 href="/admin/users"
-                className="px-3 py-1 font-semibold rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-200 hover:bg-indigo-200 transition-colors"
+                className="px-3 py-1 font-semibold rounded-lg bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-200 transition-colors"
               >
                 User Management
               </Link>
               <button
                 onClick={() => setViewMode('admin')}
-                className="px-3 py-1 font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                className="px-3 py-1 font-bold rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white transition-colors cursor-pointer"
               >
                 Switch to Server Telemetry
               </button>
@@ -352,13 +352,13 @@ export default function DashboardPage() {
             <div className="flex items-center gap-2">
               <Link
                 href="/admin/users"
-                className="px-3 py-1 font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
+                className="px-3 py-1 font-semibold rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white transition-colors"
               >
                 Manage Tenant Accounts
               </Link>
               <button
                 onClick={() => setViewMode('customer')}
-                className="px-3 py-1 font-semibold rounded-lg bg-slate-200 dark:bg-surface-700 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-surface-600 transition-colors"
+                className="px-3 py-1 font-semibold rounded-lg bg-slate-200 dark:bg-surface-700 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-surface-600 transition-colors cursor-pointer"
               >
                 Customer Portal View
               </button>
@@ -701,10 +701,10 @@ export default function DashboardPage() {
               className="flex flex-col p-3 rounded-xl border border-slate-200 dark:border-surface-800 hover:border-emerald-500 hover:shadow-md cursor-pointer transition bg-slate-50/50 dark:bg-surface-800/30 group"
             >
               <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 group-hover:scale-105 transition">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition">
                   <Code2 className="w-4 h-4" />
                 </div>
-                <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-500/20">
+                <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-500/20">
                   Ready
                 </span>
               </div>

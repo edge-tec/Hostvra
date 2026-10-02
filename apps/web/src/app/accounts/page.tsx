@@ -906,7 +906,7 @@ export default function AccountsPage() {
                   type="button"
                   onClick={handleConfirmChangePlan}
                   disabled={actionLoading === `change-plan-${selectedAccount.id}`}
-                  className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20"
+                  className="px-6 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-bold shadow-sm"
                 >
                   Save Changes
                 </button>

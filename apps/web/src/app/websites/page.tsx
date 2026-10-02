@@ -2433,7 +2433,7 @@ export default function WebsitesPage() {
                         showToast(`cgroups v2 limits updated for '${isolationModalSite.primary_domain}'`);
                         setIsolationModalSite(null);
                       }}
-                      className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
+                      className="px-5 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm"
                     >
                       Save Quotas
                     </button>

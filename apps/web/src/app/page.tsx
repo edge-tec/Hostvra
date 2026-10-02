@@ -229,18 +229,18 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 selection:bg-indigo-600 selection:text-white overflow-x-hidden font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-800 selection:bg-emerald-600 selection:text-white overflow-x-hidden font-sans">
       {/* Navigation Header */}
-      <header className="sticky top-0 z-50 backdrop-blur-xl bg-white/95 border-b border-slate-200/90 shadow-sm transition-all">
+      <header className="sticky top-0 z-50 bg-white/98 border-b border-slate-200/90 shadow-2xs transition-all">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 sm:gap-3 group">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-600/20 group-hover:scale-105 transition-transform flex-shrink-0">
-              <Flame className="w-5 h-5 text-white fill-white" />
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center shadow-sm shadow-emerald-600/20 group-hover:scale-105 transition-transform flex-shrink-0">
+              <Flame className="w-5 h-5 text-amber-300 fill-amber-300" />
             </div>
             <div className="flex flex-col">
               <span className="text-lg sm:text-xl font-black tracking-tight text-slate-950 flex items-center gap-1.5">
                 HOSTVRA
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 border border-indigo-200 uppercase tracking-widest">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-widest">
                   Cloud
                 </span>
               </span>
@@ -251,19 +251,19 @@ export default function LandingPage() {
           </Link>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
-            <a href="#features" className="hover:text-indigo-600 transition-colors">
+            <a href="#features" className="hover:text-emerald-600 transition-colors">
               Features
             </a>
-            <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+            <a href="#pricing" className="hover:text-emerald-600 transition-colors">
               Hosting Plans
             </a>
-            <a href="#architecture" className="hover:text-indigo-600 transition-colors">
+            <a href="#architecture" className="hover:text-emerald-600 transition-colors">
               Technology
             </a>
-            <a href="#faq" className="hover:text-indigo-600 transition-colors">
+            <a href="#faq" className="hover:text-emerald-600 transition-colors">
               FAQ
             </a>
-            <Link href="/webmail" className="hover:text-indigo-600 transition-colors flex items-center gap-1">
+            <Link href="/webmail" className="hover:text-emerald-600 transition-colors flex items-center gap-1">
               Webmail <ExternalLink className="w-3 h-3 text-slate-400" />
             </Link>
           </nav>
@@ -271,13 +271,13 @@ export default function LandingPage() {
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/login"
-              className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-indigo-600 transition-colors"
+              className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:text-emerald-600 transition-colors"
             >
               Sign In
             </Link>
             <Link
               href="/register?trial=true"
-              className="px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-indigo-600/20 hover:shadow-indigo-600/30 transition-all flex items-center gap-1.5 sm:gap-2 group whitespace-nowrap"
+              className="px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white text-xs sm:text-sm font-bold shadow-sm shadow-emerald-600/20 transition-all flex items-center gap-1.5 sm:gap-2 group whitespace-nowrap"
             >
               <span className="hidden xs:inline">Start Free Trial</span>
               <span className="xs:hidden">Free Trial</span>
@@ -297,7 +297,7 @@ export default function LandingPage() {
 
         {/* Mobile Navigation Dropdown */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-slate-200 bg-white/98 backdrop-blur-xl px-4 py-4 space-y-3 shadow-lg animate-in fade-in duration-200">
+          <div className="md:hidden border-t border-slate-200 bg-white px-4 py-4 space-y-3 shadow-lg animate-in fade-in duration-200">
             <nav className="flex flex-col space-y-2 text-sm font-semibold text-slate-700">
               <a
                 href="#features"
@@ -347,7 +347,7 @@ export default function LandingPage() {
               <Link
                 href="/register?trial=true"
                 onClick={() => setMobileMenuOpen(false)}
-                className="w-full py-2.5 rounded-xl bg-indigo-600 text-center text-xs font-bold text-white hover:bg-indigo-700 shadow-md"
+                className="w-full py-2.5 rounded-xl bg-[#16A34A] text-center text-xs font-bold text-white hover:bg-[#15803D] shadow-sm"
               >
                 Start 14-Day Free Trial
               </Link>
@@ -360,9 +360,9 @@ export default function LandingPage() {
       <section className="relative pt-16 pb-20 md:pt-24 md:pb-28 bg-gradient-to-b from-white via-slate-50 to-slate-100/70 border-b border-slate-200/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-50 border border-indigo-200/80 shadow-sm mb-6">
-            <Sparkles className="w-4 h-4 text-indigo-600" />
-            <span className="text-xs font-bold text-indigo-900">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 shadow-xs mb-6">
+            <Sparkles className="w-4 h-4 text-emerald-600" />
+            <span className="text-xs font-bold text-emerald-900">
               Enterprise Hosting Control Panel • 99.99% Guaranteed SLA
             </span>
           </div>
@@ -370,7 +370,7 @@ export default function LandingPage() {
           {/* Heading */}
           <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black tracking-tight text-slate-950 max-w-5xl mx-auto leading-[1.12]">
             Powerful Cloud Hosting.{' '}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-600">
               Effortless Management.
             </span>
           </h1>
@@ -385,14 +385,14 @@ export default function LandingPage() {
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
               href="/register?trial=true"
-              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-base shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/35 transition-all flex items-center justify-center gap-2.5 group"
+              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-base shadow-sm shadow-emerald-600/25 hover:shadow-emerald-600/35 transition-all flex items-center justify-center gap-2.5 group"
             >
               Start 14-Day Free Trial
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </Link>
             <a
               href="#pricing"
-              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-base shadow-sm hover:shadow transition-all flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-semibold text-base shadow-xs hover:shadow transition-all flex items-center justify-center gap-2"
             >
               Explore Hosting Plans
               <ChevronDown className="w-4 h-4 text-slate-500" />
@@ -431,9 +431,9 @@ export default function LandingPage() {
               <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none flex-nowrap">
                 <button
                   onClick={() => setActivePreviewTab('vhosts')}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 cursor-pointer ${
                     activePreviewTab === 'vhosts'
-                      ? 'bg-indigo-600 text-white shadow-sm'
+                      ? 'bg-[#16A34A] text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/70'
                   }`}
                 >
@@ -441,9 +441,9 @@ export default function LandingPage() {
                 </button>
                 <button
                   onClick={() => setActivePreviewTab('databases')}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 cursor-pointer ${
                     activePreviewTab === 'databases'
-                      ? 'bg-indigo-600 text-white shadow-sm'
+                      ? 'bg-[#16A34A] text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/70'
                   }`}
                 >
@@ -451,9 +451,9 @@ export default function LandingPage() {
                 </button>
                 <button
                   onClick={() => setActivePreviewTab('mail')}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 cursor-pointer ${
                     activePreviewTab === 'mail'
-                      ? 'bg-indigo-600 text-white shadow-sm'
+                      ? 'bg-[#16A34A] text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/70'
                   }`}
                 >
@@ -461,9 +461,9 @@ export default function LandingPage() {
                 </button>
                 <button
                   onClick={() => setActivePreviewTab('terminal')}
-                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                  className={`px-2.5 sm:px-3 py-1.5 text-xs rounded-lg font-bold transition-all whitespace-nowrap flex-shrink-0 cursor-pointer ${
                     activePreviewTab === 'terminal'
-                      ? 'bg-indigo-600 text-white shadow-sm'
+                      ? 'bg-[#16A34A] text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/70'
                   }`}
                 >
@@ -479,7 +479,7 @@ export default function LandingPage() {
                     <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
                       <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
                         <span>Active Websites</span>
-                        <Globe className="w-4 h-4 text-indigo-600" />
+                        <Globe className="w-4 h-4 text-emerald-600" />
                       </div>
                       <div className="text-2xl font-bold text-slate-900 mt-2">12 Live VHosts</div>
                       <div className="text-xs text-emerald-600 mt-1 flex items-center gap-1 font-semibold">
@@ -490,10 +490,10 @@ export default function LandingPage() {
                     <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
                       <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
                         <span>PHP-FPM Engines</span>
-                        <Code2 className="w-4 h-4 text-purple-600" />
+                        <Code2 className="w-4 h-4 text-emerald-600" />
                       </div>
                       <div className="text-2xl font-bold text-slate-900 mt-2">PHP 8.2 & 8.3</div>
-                      <div className="text-xs text-indigo-700 mt-1 font-semibold">Multi-Version Pool Isolated</div>
+                      <div className="text-xs text-emerald-700 mt-1 font-semibold">Multi-Version Pool Isolated</div>
                     </div>
                     <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
                       <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
@@ -565,7 +565,7 @@ export default function LandingPage() {
                     </div>
                     <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-sm">
                       <div className="text-slate-500 font-medium">Automated Backup:</div>
-                      <div className="text-indigo-700 font-bold mt-1">Snapshot Synchronized Daily</div>
+                      <div className="text-emerald-700 font-bold mt-1">Snapshot Synchronized Daily</div>
                     </div>
                   </div>
                 </div>
@@ -592,7 +592,7 @@ export default function LandingPage() {
 
               {activePreviewTab === 'terminal' && (
                 <div className="font-mono text-xs text-slate-200 space-y-1 bg-slate-950 p-4 rounded-xl border border-slate-900 shadow-inner">
-                  <div className="text-indigo-400">root@hostvra-cluster:~# systemctl status hostvra-agent nginx postfix</div>
+                  <div className="text-emerald-400">root@hostvra-cluster:~# systemctl status hostvra-agent nginx postfix</div>
                   <div className="text-emerald-400">● hostvra-agent.service - Hostvra Server Agent (Active: running)</div>
                   <div className="text-emerald-400">● nginx.service - A high performance web server (Active: running)</div>
                   <div className="text-emerald-400">● postfix.service - Postfix Mail Transport Agent (Active: running)</div>
@@ -609,7 +609,7 @@ export default function LandingPage() {
       <section id="features" className="py-20 md:py-28 bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-600 mb-2">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-600 mb-2">
               Next-Generation Stack
             </h2>
             <p className="text-3xl sm:text-4xl font-extrabold text-slate-950 tracking-tight">
@@ -622,8 +622,8 @@ export default function LandingPage() {
           </div>
 
           <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-indigo-500/50 hover:bg-white transition-all hover:shadow-lg group">
-              <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
+            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-emerald-500/50 hover:bg-white transition-all hover:shadow-lg group">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
                 <Globe className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-bold text-slate-900">Nginx & OpenLiteSpeed</h3>
@@ -698,8 +698,8 @@ export default function LandingPage() {
               </p>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-indigo-500/50 hover:bg-white transition-all hover:shadow-lg group">
-              <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
+            <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200 hover:border-emerald-500/50 hover:bg-white transition-all hover:shadow-lg group">
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center mb-5 group-hover:scale-110 transition-transform">
                 <Terminal className="w-6 h-6" />
               </div>
               <h3 className="text-lg font-bold text-slate-900">Web Terminal & Backups</h3>
@@ -716,7 +716,7 @@ export default function LandingPage() {
       <section id="pricing" className="py-20 md:py-28 bg-slate-100/60 border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-600 mb-2">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-600 mb-2">
               Transparent Cloud Pricing
             </h2>
             <p className="text-3xl sm:text-5xl font-black text-slate-950 tracking-tight">
@@ -730,9 +730,9 @@ export default function LandingPage() {
             <div className="mt-8 inline-flex items-center p-1.5 rounded-2xl bg-white border border-slate-200 shadow-sm">
               <button
                 onClick={() => setBillingCycle('monthly')}
-                className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+                className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
                   billingCycle === 'monthly'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#16A34A] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-950'
                 }`}
               >
@@ -740,9 +740,9 @@ export default function LandingPage() {
               </button>
               <button
                 onClick={() => setBillingCycle('yearly')}
-                className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                   billingCycle === 'yearly'
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#16A34A] text-white shadow-xs'
                     : 'text-slate-600 hover:text-slate-950'
                 }`}
               >
@@ -765,12 +765,12 @@ export default function LandingPage() {
                   key={plan.id}
                   className={`relative flex flex-col p-8 rounded-3xl bg-white border transition-all duration-300 hover:shadow-xl ${
                     plan.is_featured
-                      ? 'border-2 border-indigo-600 shadow-xl shadow-indigo-600/10 ring-4 ring-indigo-50'
+                      ? 'border-2 border-emerald-600 shadow-xl shadow-emerald-600/10 ring-4 ring-emerald-50'
                       : 'border-slate-200/90 hover:border-slate-300 shadow-sm'
                   }`}
                 >
                   {plan.is_featured && (
-                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-indigo-600 text-[11px] font-black uppercase tracking-wider text-white shadow-md">
+                    <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-[#16A34A] text-[11px] font-black uppercase tracking-wider text-white shadow-md">
                       Most Popular
                     </div>
                   )}
@@ -792,8 +792,8 @@ export default function LandingPage() {
                     )}
 
                     {hasTrial && (
-                      <div className="mt-4 px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-bold flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                      <div className="mt-4 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                         <span>Includes {plan.trial_days || 14}-Day Free Trial</span>
                       </div>
                     )}
@@ -838,9 +838,9 @@ export default function LandingPage() {
                       href={`/register?plan=${plan.slug}&cycle=${billingCycle}${hasTrial ? '&trial=true' : ''}`}
                       className={`w-full py-3.5 px-4 rounded-xl text-center text-xs font-bold transition-all block shadow-sm ${
                         plan.is_featured
-                          ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20'
+                          ? 'bg-[#16A34A] hover:bg-[#15803D] text-white shadow-emerald-600/20'
                           : hasTrial
-                          ? 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                          ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
                           : 'bg-slate-900 hover:bg-slate-800 text-white'
                       }`}
                     >
@@ -859,7 +859,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold uppercase tracking-wider mb-4">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold uppercase tracking-wider mb-4">
                 Architecture & Security
               </div>
               <h2 className="text-3xl sm:text-4xl font-black text-slate-950 tracking-tight">
@@ -872,7 +872,7 @@ export default function LandingPage() {
 
               <div className="mt-8 space-y-4 text-sm text-slate-700">
                 <div className="flex items-start gap-3">
-                  <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 mt-1 border border-indigo-100">
+                  <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600 mt-1 border border-emerald-100">
                     <Shield className="w-4 h-4" />
                   </div>
                   <div>
@@ -926,13 +926,13 @@ export default function LandingPage() {
 
                 <div className="flex items-center justify-between p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
                   <div className="flex items-center gap-3">
-                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
+                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-600" />
                     <div>
                       <div className="text-xs font-bold text-slate-900">Automated Let&apos;s Encrypt ACME</div>
                       <div className="text-[11px] text-slate-500">Zero-downtime certificate renewal</div>
                     </div>
                   </div>
-                  <span className="text-xs font-mono text-indigo-700 font-bold">Auto-Renewed</span>
+                  <span className="text-xs font-mono text-emerald-700 font-bold">Auto-Renewed</span>
                 </div>
 
                 <div className="flex items-center justify-between p-4 rounded-xl bg-white border border-slate-200 shadow-sm">
@@ -955,7 +955,7 @@ export default function LandingPage() {
       <section id="faq" className="py-20 md:py-28 bg-slate-50 border-b border-slate-200">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-indigo-600 mb-2">Got Questions?</h2>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-600 mb-2">Got Questions?</h2>
             <p className="text-3xl sm:text-4xl font-extrabold text-slate-950 tracking-tight">
               Frequently Asked Questions
             </p>
@@ -971,12 +971,12 @@ export default function LandingPage() {
                 >
                   <button
                     onClick={() => setOpenFaq(isOpen ? null : index)}
-                    className="w-full p-6 text-left flex items-center justify-between gap-4"
+                    className="w-full p-6 text-left flex items-center justify-between gap-4 cursor-pointer"
                   >
                     <span className="text-base font-bold text-slate-900">{faq.q}</span>
                     <ChevronDown
                       className={`w-5 h-5 text-slate-500 flex-shrink-0 transition-transform ${
-                        isOpen ? 'rotate-180 text-indigo-600' : ''
+                        isOpen ? 'rotate-180 text-emerald-600' : ''
                       }`}
                     />
                   </button>
@@ -995,24 +995,28 @@ export default function LandingPage() {
       {/* Pre-Footer CTA */}
       <section className="py-20 bg-white relative overflow-hidden">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative rounded-3xl p-10 sm:p-16 bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-700 shadow-2xl text-center overflow-hidden">
+          <div className="relative rounded-3xl p-10 sm:p-16 bg-slate-900 border border-slate-800 shadow-2xl text-center overflow-hidden">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs font-bold uppercase tracking-wider mb-4">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Instant Cloud Provisioning
+            </div>
             <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
               Ready to Upgrade Your Cloud Hosting?
             </h2>
-            <p className="mt-4 text-base sm:text-lg text-indigo-100 max-w-2xl mx-auto font-medium">
+            <p className="mt-4 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto font-medium">
               Launch your sites in seconds with automated SSL, isolated NVMe storage, and dedicated developer tooling.
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
                 href="/register?trial=true"
-                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white hover:bg-slate-100 text-indigo-900 font-extrabold text-sm sm:text-base shadow-xl transition-all"
+                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-extrabold text-sm sm:text-base shadow-xl transition-all cursor-pointer"
               >
                 Start 14-Day Free Trial
               </Link>
               <Link
                 href="/login"
-                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-indigo-800/80 hover:bg-indigo-800 border border-indigo-400/50 text-white font-bold text-sm sm:text-base transition-all"
+                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-sm sm:text-base transition-all cursor-pointer"
               >
                 Sign In to Control Panel
               </Link>
@@ -1026,8 +1030,8 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-2 md:grid-cols-5 gap-8">
           <div className="col-span-2">
             <Link href="/" className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center">
-                <Flame className="w-4 h-4 text-white fill-white" />
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center">
+                <Flame className="w-4 h-4 text-amber-300 fill-amber-300" />
               </div>
               <span className="text-lg font-black tracking-tight text-slate-950">HOSTVRA</span>
             </Link>
@@ -1044,22 +1048,22 @@ export default function LandingPage() {
             <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Hosting</h4>
             <ul className="space-y-2.5 font-medium">
               <li>
-                <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+                <a href="#pricing" className="hover:text-emerald-600 transition-colors">
                   Web Hosting
                 </a>
               </li>
               <li>
-                <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+                <a href="#pricing" className="hover:text-emerald-600 transition-colors">
                   WordPress Cloud
                 </a>
               </li>
               <li>
-                <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+                <a href="#pricing" className="hover:text-emerald-600 transition-colors">
                   Node.js & Python
                 </a>
               </li>
               <li>
-                <a href="#pricing" className="hover:text-indigo-600 transition-colors">
+                <a href="#pricing" className="hover:text-emerald-600 transition-colors">
                   Reseller Hosting
                 </a>
               </li>
@@ -1070,22 +1074,22 @@ export default function LandingPage() {
             <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Platform</h4>
             <ul className="space-y-2.5 font-medium">
               <li>
-                <Link href="/login" className="hover:text-indigo-600 transition-colors">
+                <Link href="/login" className="hover:text-emerald-600 transition-colors">
                   Control Panel
                 </Link>
               </li>
               <li>
-                <Link href="/webmail" className="hover:text-indigo-600 transition-colors">
+                <Link href="/webmail" className="hover:text-emerald-600 transition-colors">
                   Webmail Client
                 </Link>
               </li>
               <li>
-                <a href="#features" className="hover:text-indigo-600 transition-colors">
+                <a href="#features" className="hover:text-emerald-600 transition-colors">
                   In-House Mail
                 </a>
               </li>
               <li>
-                <a href="#architecture" className="hover:text-indigo-600 transition-colors">
+                <a href="#architecture" className="hover:text-emerald-600 transition-colors">
                   WAF & Security
                 </a>
               </li>
@@ -1096,12 +1100,12 @@ export default function LandingPage() {
             <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Support</h4>
             <ul className="space-y-2.5 font-medium">
               <li>
-                <Link href="/login" className="hover:text-indigo-600 transition-colors">
+                <Link href="/login" className="hover:text-emerald-600 transition-colors">
                   Help Desk
                 </Link>
               </li>
               <li>
-                <a href="#faq" className="hover:text-indigo-600 transition-colors">
+                <a href="#faq" className="hover:text-emerald-600 transition-colors">
                   Knowledgebase
                 </a>
               </li>

@@ -983,7 +983,7 @@ export function EmailUserGuide(props: EmailGuideProps) {
             <button
               disabled={activeSection.id >= 35}
               onClick={() => setSelectedSectionId((prev) => Math.min(35, prev + 1))}
-              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-xs disabled:opacity-40 transition"
+              className="px-3.5 py-1.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-semibold shadow-sm disabled:opacity-40 transition"
             >
               Next Topic &rarr;
             </button>
