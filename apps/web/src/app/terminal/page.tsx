@@ -181,21 +181,22 @@ export default function TerminalPage() {
       term.open(terminalContainerRef.current);
       xtermInstanceRef.current = term;
 
-      try {
-        fitAddon.fit();
-      } catch {
-        // Container sizing grace period
-      }
-
-      term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
-      setConnectionStatus('connecting');
+      // Small delay for DOM layout before fit
+      setTimeout(() => {
+        try {
+          fitAddon.fit();
+        } catch {
+          // Container sizing grace period
+        }
+      }, 100);
 
       // Resolve WebSocket connection endpoint and authentication token
       const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
-      let host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
+      let host = typeof window !== 'undefined' ? window.location.host : 'localhost';
+      // If accessed directly via port 3000, strip port 3000 to connect through Nginx standard port 80/443
       if (typeof window !== 'undefined' && window.location.port === '3000') {
-        host = `${window.location.hostname}:8080`;
+        host = window.location.hostname;
       }
 
       let token = getStoredToken() || '';
@@ -209,12 +210,25 @@ export default function TerminalPage() {
 
       const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}`;
 
+      term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
+      term.write(`\x1b[90mConnecting to ${wsProtocol}//${host}/api/v1/terminal/ws ...\x1b[0m\r\n`);
+      setConnectionStatus('connecting');
+
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
 
+      const connectTimeout = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          term.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
+          term.write('\x1b[90mCheck if hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
+        }
+      }, 7000);
+
       ws.onopen = () => {
+        clearTimeout(connectTimeout);
         setConnectionStatus('connected');
+        term.write('\x1b[1;32m[Hostvra]\x1b[0m Connected! Spawning interactive shell session...\r\n\r\n');
         try {
           fitAddon.fit();
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
@@ -243,12 +257,15 @@ export default function TerminalPage() {
       };
 
       ws.onerror = (err) => {
+        clearTimeout(connectTimeout);
         console.error('Terminal WebSocket error:', err);
         term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
+        term.write('\x1b[90mMake sure hostvra-api is running with latest binary: systemctl restart hostvra-api\x1b[0m\r\n');
         setConnectionStatus('disconnected');
       };
 
       ws.onclose = (event) => {
+        clearTimeout(connectTimeout);
         if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
           term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
         } else {
@@ -599,8 +616,8 @@ export default function TerminalPage() {
           {/* Terminal Screen Mount Point */}
           <div
             ref={terminalContainerRef}
-            className="w-full flex-1 p-3 overflow-hidden"
-            style={{ minHeight: '300px' }}
+            className="w-full flex-1 p-2 overflow-hidden"
+            style={{ height: 'calc(100% - 40px)', minHeight: '350px' }}
           />
 
           {/* Connection Overlay when disconnected */}
