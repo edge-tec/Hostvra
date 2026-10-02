@@ -258,6 +258,23 @@ export interface TerminalInfo {
   quick_cmds: string[];
 }
 
+export interface CreateTerminalSessionRequest {
+  request_id?: string;
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+}
+
+export interface CreateTerminalSessionResponse {
+  request_id: string;
+  session_id: string;
+  ws_url: string;
+  user: string;
+  cwd: string;
+  cols: number;
+  rows: number;
+}
+
 export interface TerminalExecutionResult {
   command: string;
   cwd: string;

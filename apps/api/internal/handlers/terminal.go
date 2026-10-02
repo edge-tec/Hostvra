@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"hostvra/api/internal/audit"
@@ -28,11 +29,27 @@ import (
 	"hostvra/api/internal/store"
 )
 
+type TerminalSessionMeta struct {
+	RequestID      string    `json:"request_id"`
+	SessionID      string    `json:"session_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Role           string    `json:"role"`
+	Username       string    `json:"username"`
+	Cwd            string    `json:"cwd"`
+	Cols           uint16    `json:"cols"`
+	Rows           uint16    `json:"rows"`
+	CreatedAt      time.Time `json:"created_at"`
+	ConnectedAt    time.Time `json:"connected_at,omitempty"`
+	Active         bool      `json:"active"`
+}
+
 type TerminalHandler struct {
 	cfg      *config.Config
 	store    store.Store
 	audit    *audit.Logger
 	quotaSvc *quota.Service
+	sessions sync.Map // map[string]*TerminalSessionMeta
 }
 
 func NewTerminalHandler(cfg *config.Config, s store.Store, a *audit.Logger) *TerminalHandler {
@@ -173,6 +190,23 @@ type ExecuteCommandResponse struct {
 	Timestamp  string `json:"timestamp"`
 }
 
+type CreateTerminalSessionRequest struct {
+	RequestID string `json:"request_id"`
+	Cols      uint16 `json:"cols,omitempty"`
+	Rows      uint16 `json:"rows,omitempty"`
+	Cwd       string `json:"cwd,omitempty"`
+}
+
+type CreateTerminalSessionResponse struct {
+	RequestID string `json:"request_id"`
+	SessionID string `json:"session_id"`
+	WsURL     string `json:"ws_url"`
+	User      string `json:"user"`
+	Cwd       string `json:"cwd"`
+	Cols      uint16 `json:"cols"`
+	Rows      uint16 `json:"rows"`
+}
+
 var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
@@ -228,35 +262,226 @@ const (
 	termMaxMsgSize = 1024 * 1024
 )
 
+// CreateSession establishes an authorized pre-flight terminal session with unique request and session IDs
+func (h *TerminalHandler) CreateSession(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		h.audit.Log(r.Context(), r, "terminal.auth.failure", "server", "localhost", "failure", "Authentication required for terminal session", nil)
+		response.Error(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "Authentication required to access terminal", nil, "")
+		return
+	}
+	h.audit.Log(r.Context(), r, "terminal.auth.success", "server", "localhost", "success", "Authentication verified for terminal session", map[string]interface{}{
+		"user_id": claims.UserID.String(),
+	})
+
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+	if !isPrivileged {
+		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+			h.audit.Log(r.Context(), r, "terminal.authorization.failure", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
+				"user_id": claims.UserID.String(),
+			})
+			response.Error(w, http.StatusForbidden, "AUTHORIZATION_ERROR", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+			return
+		}
+	}
+	h.audit.Log(r.Context(), r, "terminal.authorization.success", "server", "localhost", "success", "Terminal authorization granted", map[string]interface{}{
+		"user_id": claims.UserID.String(),
+		"role":    claims.Role,
+	})
+
+	var req CreateTerminalSessionRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	requestID := strings.TrimSpace(req.RequestID)
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+
+	sessionID := fmt.Sprintf("tsess_%s_%d", claims.UserID.String()[:8], time.Now().UnixNano())
+
+	// Resolve environment & working directory
+	defaultUser, defaultCwd := "root", "/root/Hostvra"
+	if isPrivileged {
+		if envUser := os.Getenv("USER"); envUser != "" {
+			defaultUser = envUser
+		}
+		if _, err := os.Stat(defaultCwd); os.IsNotExist(err) {
+			defaultCwd, _ = os.UserHomeDir()
+			if defaultCwd == "" {
+				defaultCwd = "/"
+			}
+		}
+	} else {
+		defaultUser, defaultCwd = h.resolveCustomerEnvironment(r.Context(), claims)
+	}
+
+	cwd := strings.TrimSpace(req.Cwd)
+	if cwd == "" {
+		cwd = defaultCwd
+	} else {
+		cleanCwd := filepath.Clean(cwd)
+		if !isPrivileged {
+			if cleanCwd == "/root" || strings.HasPrefix(cleanCwd, "/root/") ||
+				cleanCwd == "/etc" || strings.HasPrefix(cleanCwd, "/etc/") ||
+				cleanCwd == "/" {
+				cwd = defaultCwd
+			} else if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
+		} else {
+			if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
+		}
+	}
+
+	cols := req.Cols
+	if cols == 0 {
+		cols = 80
+	}
+	rows := req.Rows
+	if rows == 0 {
+		rows = 24
+	}
+
+	meta := &TerminalSessionMeta{
+		RequestID:      requestID,
+		SessionID:      sessionID,
+		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
+		Role:           claims.Role,
+		Username:       defaultUser,
+		Cwd:            cwd,
+		Cols:           cols,
+		Rows:           rows,
+		CreatedAt:      time.Now().UTC(),
+		Active:         false,
+	}
+
+	h.sessions.Store(sessionID, meta)
+
+	h.audit.Log(r.Context(), r, "terminal.session.created", "server", "localhost", "success", "Authorized terminal session created", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+		"username":   defaultUser,
+		"cwd":        cwd,
+	})
+
+	wsURL := fmt.Sprintf("/api/v1/terminal/ws?session_id=%s&request_id=%s", sessionID, requestID)
+
+	response.JSON(w, http.StatusOK, CreateTerminalSessionResponse{
+		RequestID: requestID,
+		SessionID: sessionID,
+		WsURL:     wsURL,
+		User:      defaultUser,
+		Cwd:       cwd,
+		Cols:      cols,
+		Rows:      rows,
+	}, nil)
+}
+
 // HandleWebSocket handles real interactive full-duplex PTY terminal sessions
 func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	requestID := r.URL.Query().Get("request_id")
+	sessionID := r.URL.Query().Get("session_id")
+
 	// 1. Authenticate session & enforce strict role/plan quota checks BEFORE upgrade
 	claims, ok := auth.GetClaims(r.Context())
 	if !ok || claims == nil {
-		h.audit.Log(r.Context(), r, "terminal.unauthorized", "server", "localhost", "failure", "Authentication required for terminal access", nil)
+		h.audit.Log(r.Context(), r, "terminal.auth.failure", "server", "localhost", "failure", "Authentication required for terminal access", map[string]interface{}{
+			"request_id": requestID,
+			"session_id": sessionID,
+		})
 		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required to access terminal", nil, "")
 		return
 	}
 
 	if claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
 		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
-			h.audit.Log(r.Context(), r, "terminal.forbidden", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
-				"user_id": claims.UserID.String(),
+			h.audit.Log(r.Context(), r, "terminal.authorization.failure", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
+				"request_id": requestID,
+				"session_id": sessionID,
+				"user_id":    claims.UserID.String(),
 			})
 			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
 			return
 		}
 	}
 
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+
+	// Validate pre-registered session if provided
+	var sessionMeta *TerminalSessionMeta
+	if sessionID != "" {
+		if val, exists := h.sessions.Load(sessionID); exists {
+			sessionMeta = val.(*TerminalSessionMeta)
+			// Multi-tenant security check: ensure session belongs to this user
+			if sessionMeta.UserID != claims.UserID && !isPrivileged {
+				h.audit.Log(r.Context(), r, "terminal.session.tenant_mismatch", "server", "localhost", "failure", "Cross-tenant session attachment forbidden", map[string]interface{}{
+					"request_id": requestID,
+					"session_id": sessionID,
+					"user_id":    claims.UserID.String(),
+					"owner_id":   sessionMeta.UserID.String(),
+				})
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Terminal session does not belong to your authenticated tenant", nil, "")
+				return
+			}
+			if requestID == "" {
+				requestID = sessionMeta.RequestID
+			}
+		}
+	}
+
+	if requestID == "" {
+		requestID = uuid.New().String()
+	}
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("term_%s_%d", claims.UserID.String()[:8], time.Now().UnixNano())
+	}
+
+	h.audit.Log(r.Context(), r, "terminal.auth.success", "server", "localhost", "success", "Authentication verified for WebSocket upgrade", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+	})
+	h.audit.Log(r.Context(), r, "terminal.authorization.success", "server", "localhost", "success", "Authorization verified for WebSocket upgrade", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+	})
+
 	// 2. Upgrade HTTP to WebSocket first to establish duplex channel with browser
+	h.audit.Log(r.Context(), r, "terminal.websocket.upgrade", "server", "localhost", "start", "Initiating WebSocket protocol switch (101)", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+	})
+
 	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		h.audit.Log(r.Context(), r, "terminal.websocket.upgrade_failed", "server", "localhost", "failure", "WebSocket upgrade failed: "+err.Error(), nil)
+		h.audit.Log(r.Context(), r, "terminal.websocket.error", "server", "localhost", "failure", "WebSocket upgrade failed: "+err.Error(), map[string]interface{}{
+			"request_id": requestID,
+			"session_id": sessionID,
+			"user_id":    claims.UserID.String(),
+			"error":      err.Error(),
+		})
 		return
 	}
 
+	h.audit.Log(r.Context(), r, "terminal.websocket.connected", "server", "localhost", "success", "WebSocket connected and upgraded", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+	})
+
 	// CRITICAL: Clear pre-existing HTTP server WriteTimeout/ReadTimeout deadlines from hijacked socket
-	// so the connection is not killed after 15 minutes by Go's net/http server.
 	_ = rawConn.SetReadDeadline(time.Time{})
 	_ = rawConn.SetWriteDeadline(time.Time{})
 
@@ -271,7 +496,6 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	})
 
 	// 3. Determine starting working directory and identity with tenant isolation
-	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
 	defaultUser, defaultCwd := "root", "/root/Hostvra"
 	if isPrivileged {
 		if envUser := os.Getenv("USER"); envUser != "" {
@@ -289,11 +513,14 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 
 	cwd := r.URL.Query().Get("cwd")
 	if cwd == "" {
-		cwd = defaultCwd
+		if sessionMeta != nil && sessionMeta.Cwd != "" {
+			cwd = sessionMeta.Cwd
+		} else {
+			cwd = defaultCwd
+		}
 	} else {
 		cleanCwd := filepath.Clean(cwd)
 		if !isPrivileged {
-			// Security: strictly block tenant escape to /root, /etc, /sys, /proc, /
 			if cleanCwd == "/root" || strings.HasPrefix(cleanCwd, "/root/") ||
 				cleanCwd == "/etc" || strings.HasPrefix(cleanCwd, "/etc/") ||
 				cleanCwd == "/" {
@@ -327,8 +554,38 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// Window dimensions
+	rows := uint16(24)
+	cols := uint16(80)
+	if sessionMeta != nil {
+		if sessionMeta.Rows > 0 {
+			rows = sessionMeta.Rows
+		}
+		if sessionMeta.Cols > 0 {
+			cols = sessionMeta.Cols
+		}
+	}
+	if rStr := r.URL.Query().Get("rows"); rStr != "" {
+		if parsedRows, err := strconv.ParseUint(rStr, 10, 16); err == nil && parsedRows > 0 {
+			rows = uint16(parsedRows)
+		}
+	}
+	if cStr := r.URL.Query().Get("cols"); cStr != "" {
+		if parsedCols, err := strconv.ParseUint(cStr, 10, 16); err == nil && parsedCols > 0 {
+			cols = uint16(parsedCols)
+		}
+	}
+
 	// 5. Launch interactive login shell with both -l (login) and -i (interactive)
-	// Explicitly set TMOUT=0 to prevent Bash from executing auto-logout after inactivity
+	h.audit.Log(r.Context(), r, "terminal.shell.start", "server", "localhost", "start", "Starting shell process", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+		"shell":      shell,
+		"cwd":        cwd,
+		"username":   defaultUser,
+	})
+
 	cmd := exec.Command(shell, "-l", "-i")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(),
@@ -341,57 +598,64 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		fmt.Sprintf("HOME=%s", defaultCwd),
 	)
 
-	// Window dimensions
-	rows := uint16(24)
-	cols := uint16(80)
-	if rStr := r.URL.Query().Get("rows"); rStr != "" {
-		if parsedRows, err := strconv.ParseUint(rStr, 10, 16); err == nil && parsedRows > 0 {
-			rows = uint16(parsedRows)
-		}
-	}
-	if cStr := r.URL.Query().Get("cols"); cStr != "" {
-		if parsedCols, err := strconv.ParseUint(cStr, 10, 16); err == nil && parsedCols > 0 {
-			cols = uint16(parsedCols)
-		}
-	}
-
 	// 6. Allocate real Linux PTY attached to interactive shell process
-	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
-	if err != nil {
-		h.audit.Log(r.Context(), r, "terminal.pty.failed", "server", "localhost", "failure", "Failed to allocate pseudo-terminal: "+err.Error(), map[string]interface{}{
-			"user_id": claims.UserID.String(),
-			"error":   err.Error(),
-		})
-		sendWSError(safeConn, "PTY_FAILED", "Failed to allocate pseudo-terminal: "+err.Error())
-		_ = safeConn.Close()
-		return
-	}
-
-	sessionID := fmt.Sprintf("term_%s_%d", claims.UserID.String()[:8], time.Now().UnixNano())
-	h.audit.Log(r.Context(), r, "terminal.session.created", "server", "localhost", "success", "Interactive PTY terminal session established", map[string]interface{}{
+	h.audit.Log(r.Context(), r, "terminal.pty.create.start", "server", "localhost", "start", "Creating Linux PTY master/slave", map[string]interface{}{
+		"request_id": requestID,
 		"session_id": sessionID,
 		"user_id":    claims.UserID.String(),
-		"shell":      shell,
-		"cwd":        cwd,
 		"rows":       rows,
 		"cols":       cols,
 	})
 
+	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	if err != nil {
+		h.audit.Log(r.Context(), r, "terminal.pty.create.failure", "server", "localhost", "failure", "Failed to allocate pseudo-terminal: "+err.Error(), map[string]interface{}{
+			"request_id": requestID,
+			"session_id": sessionID,
+			"user_id":    claims.UserID.String(),
+			"error":      err.Error(),
+		})
+		sendWSError(safeConn, "PTY_CREATION_ERROR", "Failed to allocate pseudo-terminal: "+err.Error())
+		_ = safeConn.Close()
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "terminal.pty.create.success", "server", "localhost", "success", "Linux PTY allocated successfully", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+		"pid":        cmd.Process.Pid,
+	})
+	h.audit.Log(r.Context(), r, "terminal.shell.started", "server", "localhost", "success", "Interactive shell process started in PTY", map[string]interface{}{
+		"request_id": requestID,
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+		"pid":        cmd.Process.Pid,
+		"shell":      shell,
+		"cwd":        cwd,
+	})
+
+	if sessionMeta != nil {
+		sessionMeta.ConnectedAt = time.Now().UTC()
+		sessionMeta.Active = true
+	}
+
 	// 7. Send immediate ready event so frontend immediately clears any loading indicators
 	readyPayload, _ := json.Marshal(map[string]interface{}{
 		"type":       "ready",
+		"request_id": requestID,
 		"session_id": sessionID,
 		"cols":       cols,
 		"rows":       rows,
 		"shell":      shell,
 		"cwd":        cwd,
+		"user":       defaultUser,
 	})
 	_ = safeConn.WriteMessage(websocket.TextMessage, readyPayload)
 
 	sessionDone := make(chan struct{})
 
 	// Dedicated Ping Ticker Goroutine: sends transport-level WebSocket Ping frames every 20 seconds.
-	// This resets idle timers in Nginx, Cloudflare, AWS ALBs, NAT routers, and firewalls.
 	go func() {
 		ticker := time.NewTicker(termPingPeriod)
 		defer ticker.Stop()
@@ -415,10 +679,8 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 			exitCode := -1
 			if cmd.Process != nil {
 				pid := cmd.Process.Pid
-				// Send SIGHUP to the process group to notify foreground process
 				_ = syscall.Kill(-pid, syscall.SIGHUP)
 
-				// Asynchronously wait for exit with timeout to prevent goroutine leak or hang
 				done := make(chan error, 1)
 				go func() {
 					done <- cmd.Wait()
@@ -446,12 +708,24 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 				}
 			}
 			_ = safeConn.Close()
+			h.sessions.Delete(sessionID)
 
-			h.audit.Log(r.Context(), r, "terminal.session.closed", "server", "localhost", "success", "Interactive PTY terminal session terminated", map[string]interface{}{
+			h.audit.Log(r.Context(), r, "terminal.shell.exited", "server", "localhost", "success", "Shell process exited", map[string]interface{}{
+				"request_id": requestID,
+				"session_id": sessionID,
+				"user_id":    claims.UserID.String(),
+				"exit_code":  exitCode,
+			})
+			h.audit.Log(r.Context(), r, "terminal.websocket.closed", "server", "localhost", "success", "WebSocket connection closed", map[string]interface{}{
+				"request_id": requestID,
 				"session_id": sessionID,
 				"user_id":    claims.UserID.String(),
 				"reason":     reason,
-				"exit_code":  exitCode,
+			})
+			h.audit.Log(r.Context(), r, "terminal.cleanup", "server", "localhost", "success", "Terminal PTY resources cleaned up", map[string]interface{}{
+				"request_id": requestID,
+				"session_id": sessionID,
+				"user_id":    claims.UserID.String(),
 			})
 		})
 	}
@@ -469,19 +743,19 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 				}
 			}
 			if readErr != nil {
-				// EOF or EIO means child shell process exited
 				break
 			}
 		}
 
-		// Notify client that the shell process specifically exited
 		exitCode := 0
 		if cmd.ProcessState != nil {
 			exitCode = cmd.ProcessState.ExitCode()
 		}
 		exitPayload, _ := json.Marshal(map[string]interface{}{
-			"type":      "exit",
-			"exit_code": exitCode,
+			"type":       "exit",
+			"request_id": requestID,
+			"session_id": sessionID,
+			"exit_code":  exitCode,
 		})
 		_ = safeConn.WriteMessage(websocket.TextMessage, exitPayload)
 	}()
@@ -500,7 +774,6 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 			break
 		}
 
-		// Any message received from the client extends the read deadline
 		_ = safeConn.conn.SetReadDeadline(time.Now().Add(termPongWait))
 
 		if msgType == websocket.BinaryMessage {
@@ -508,7 +781,6 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 				break
 			}
 		} else if msgType == websocket.TextMessage {
-			// Check if it's a JSON control command
 			var wsMsg WSMessage
 			if len(message) > 0 && message[0] == '{' && json.Unmarshal(message, &wsMsg) == nil && wsMsg.Type != "" {
 				switch wsMsg.Type {
@@ -524,11 +796,9 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 						return
 					}
 				case "ping":
-					// Respond to application-level ping from frontend
 					_ = safeConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 				}
 			} else {
-				// Raw keystrokes or text
 				if _, wErr := ptyFile.Write(message); wErr != nil {
 					break
 				}

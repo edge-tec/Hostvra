@@ -656,3 +656,237 @@ func TestTerminal_Customer_PathIsolation(t *testing.T) {
 	}
 }
 
+func TestTerminal_CreateSession_Lifecycle(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	quotaSvc := quota.NewService(s)
+
+	h := NewTerminalHandler(cfg, s, auditLogger)
+	h.SetQuotaService(quotaSvc)
+
+	custUserID := uuid.New()
+	custOrgID := uuid.New()
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       custOrgID,
+		Name:     "Session Cust Org",
+		Slug:     "session-cust",
+		PlanTier: "business",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       custUserID,
+		Email:    "sessionuser@example.com",
+		FullName: "Session Customer",
+		IsActive: true,
+	}, custOrgID, "customer")
+
+	overrideTerm := true
+	_ = s.UpsertUserPlanOverride(ctx, &store.UserPlanOverride{
+		UserID:             custUserID,
+		PermissionTerminal: &overrideTerm,
+	})
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         custUserID,
+				OrganizationID: custOrgID,
+				Role:           "customer",
+			}
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Use(h.AuthorizeTerminalAccess)
+	r.Post("/session", h.CreateSession)
+	r.Get("/ws", h.HandleWebSocket)
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	// 1. Phase 1: Request terminal session
+	sessionReqPayload, _ := json.Marshal(CreateTerminalSessionRequest{
+		RequestID: "req_test_abc123",
+		Cols:      90,
+		Rows:      28,
+	})
+	resp, err := http.Post(server.URL+"/session", "application/json", bytes.NewReader(sessionReqPayload))
+	if err != nil {
+		t.Fatalf("failed to POST /session: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 OK from /session, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	var sessionResp struct {
+		Data CreateTerminalSessionResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&sessionResp); err != nil {
+		t.Fatalf("failed to decode /session response: %v", err)
+	}
+
+	sess := sessionResp.Data
+	if sess.SessionID == "" || sess.RequestID != "req_test_abc123" {
+		t.Fatalf("unexpected session response: %+v", sess)
+	}
+
+	// 2. Phase 2: Connect WebSocket using session_id & request_id
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?session_id=" + sess.SessionID + "&request_id=" + sess.RequestID
+	ws, wsResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial websocket with session: %v", err)
+	}
+	defer ws.Close()
+
+	if wsResp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected status 101 Switching Protocols, got %d", wsResp.StatusCode)
+	}
+
+	// 3. Receive ready event
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read initial message: %v", err)
+	}
+	if !strings.Contains(string(msg), `"type":"ready"`) {
+		t.Fatalf("expected ready event, got: %s", string(msg))
+	}
+
+	// 4. Send interactive command and read output
+	_ = ws.WriteMessage(websocket.TextMessage, []byte("echo HOSTVRA_PTY_OK\n"))
+	deadline := time.Now().Add(3 * time.Second)
+	var output string
+	for time.Now().Before(deadline) {
+		_ = ws.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, out, rErr := ws.ReadMessage()
+		if rErr == nil {
+			output += string(out)
+			if strings.Contains(output, "HOSTVRA_PTY_OK") {
+				break
+			}
+		}
+		if rErr != nil {
+			break
+		}
+	}
+
+	if !strings.Contains(output, "HOSTVRA_PTY_OK") {
+		t.Fatalf("expected terminal output to contain 'HOSTVRA_PTY_OK', got: %s", output)
+	}
+}
+
+func TestTerminal_MultiTenant_SessionIsolation(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	quotaSvc := quota.NewService(s)
+
+	h := NewTerminalHandler(cfg, s, auditLogger)
+	h.SetQuotaService(quotaSvc)
+
+	userA := uuid.New()
+	orgA := uuid.New()
+	userB := uuid.New()
+	orgB := uuid.New()
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       orgA,
+		Name:     "Org A",
+		Slug:     "org-a",
+		PlanTier: "business",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       userA,
+		Email:    "usera@example.com",
+		FullName: "User A",
+		IsActive: true,
+	}, orgA, "customer")
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       orgB,
+		Name:     "Org B",
+		Slug:     "org-b",
+		PlanTier: "business",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       userB,
+		Email:    "userb@example.com",
+		FullName: "User B",
+		IsActive: true,
+	}, orgB, "customer")
+
+	overrideTerm := true
+	_ = s.UpsertUserPlanOverride(ctx, &store.UserPlanOverride{
+		UserID:             userA,
+		PermissionTerminal: &overrideTerm,
+	})
+	_ = s.UpsertUserPlanOverride(ctx, &store.UserPlanOverride{
+		UserID:             userB,
+		PermissionTerminal: &overrideTerm,
+	})
+
+	var currentClaims *auth.Claims
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, currentClaims)
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Use(h.AuthorizeTerminalAccess)
+	r.Post("/session", h.CreateSession)
+	r.Get("/ws", h.HandleWebSocket)
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	// 1. User A creates session
+	currentClaims = &auth.Claims{
+		UserID:         userA,
+		OrganizationID: orgA,
+		Role:           "customer",
+	}
+
+	resp, err := http.Post(server.URL+"/session", "application/json", strings.NewReader(`{"request_id":"req_user_a"}`))
+	if err != nil {
+		t.Fatalf("failed to create session for User A: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var sessionResp struct {
+		Data CreateTerminalSessionResponse `json:"data"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&sessionResp)
+	sessID := sessionResp.Data.SessionID
+	if sessID == "" {
+		t.Fatalf("missing session ID for User A")
+	}
+
+	// 2. User B attempts to hijack / attach to User A's session
+	currentClaims = &auth.Claims{
+		UserID:         userB,
+		OrganizationID: orgB,
+		Role:           "customer",
+	}
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?session_id=" + sessID
+	_, wsResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatalf("expected dial to fail for cross-tenant session attachment, but succeeded")
+	}
+	if wsResp != nil && wsResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for cross-tenant session attachment, got %d", wsResp.StatusCode)
+	}
+}
+
+

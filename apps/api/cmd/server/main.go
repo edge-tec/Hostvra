@@ -636,6 +636,7 @@ func main() {
 				r.Use(terminalHandler.AuthorizeTerminalAccess)
 				r.Get("/info", terminalHandler.GetInfo)
 				r.Post("/execute", terminalHandler.Execute)
+				r.Post("/session", terminalHandler.CreateSession)
 				r.Get("/ws", terminalHandler.HandleWebSocket)
 			})
 

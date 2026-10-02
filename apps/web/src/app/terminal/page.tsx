@@ -21,7 +21,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, getStoredToken, TerminalInfo } from '@/lib/api';
+import { apiFetch, getStoredToken, TerminalInfo, CreateTerminalSessionResponse } from '@/lib/api';
 
 type TerminalThemeMode = 'white' | 'dark' | 'matrix';
 
@@ -103,6 +103,7 @@ const TERMINAL_THEMES = {
 
 export type TerminalLifecycleState =
   | 'initializing'
+  | 'creating_session'
   | 'connecting'
   | 'allocating'
   | 'ready'
@@ -111,20 +112,37 @@ export type TerminalLifecycleState =
   | 'disabled'
   | 'closed';
 
+export interface DisconnectInfo {
+  title: string;
+  description: string;
+  type:
+    | 'shell_exit'
+    | 'network_drop'
+    | 'auth_expired'
+    | 'error'
+    | 'feature_disabled'
+    | 'pty_error'
+    | 'handshake_error'
+    | 'api_unavailable';
+  exitCode?: number;
+  closeCode?: number;
+  closeReason?: string;
+  requestId?: string;
+  sessionId?: string;
+  errorCode?: string;
+}
+
 export default function TerminalPage() {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   const [terminalState, setTerminalState] = useState<TerminalLifecycleState>('initializing');
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [themeMode, setThemeMode] = useState<TerminalThemeMode>('dark');
   const [fontSize, setFontSize] = useState<number>(14);
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-  const [disconnectInfo, setDisconnectInfo] = useState<{
-    title: string;
-    description: string;
-    type: 'shell_exit' | 'network_drop' | 'auth_expired' | 'error' | 'feature_disabled';
-    exitCode?: number;
-  } | null>(null);
+  const [disconnectInfo, setDisconnectInfo] = useState<DisconnectInfo | null>(null);
 
   const terminalContainerNodeRef = useRef<HTMLDivElement | null>(null);
   const [containerMounted, setContainerMounted] = useState(false);
@@ -132,6 +150,10 @@ export default function TerminalPage() {
   const fitAddonRef = useRef<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isConnectingRef = useRef(false);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const hasStartedRef = useRef(false);
   const themeModeRef = useRef(themeMode);
   themeModeRef.current = themeMode;
   const fontSizeRef = useRef(fontSize);
@@ -148,144 +170,240 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Fetch system environment metadata
-  useEffect(() => {
-    async function loadInfo() {
-      try {
-        const res = await apiFetch<TerminalInfo>('/api/v1/terminal/info');
-        if (res.success && res.data) {
-          setInfo(res.data);
-        } else if (res.error?.code === 'FEATURE_DISABLED' || res.error?.code === 'FORBIDDEN') {
-          setTerminalState('disabled');
-          setDisconnectInfo({
-            title: 'Terminal Not Included in Package',
-            description: res.error.message || 'Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.',
-            type: 'feature_disabled',
-          });
-        }
-      } catch (err) {
-        console.warn('Could not load terminal metadata:', err);
-      }
+  // Initialize xterm instance attached to DOM
+  const ensureTerminalEmulator = useCallback(async (container: HTMLDivElement) => {
+    if (xtermInstanceRef.current && fitAddonRef.current) {
+      return { term: xtermInstanceRef.current, fitAddon: fitAddonRef.current };
     }
-    loadInfo();
+
+    const xtermMod: any = await import('@xterm/xterm');
+    const TerminalClass = xtermMod.Terminal || (xtermMod.default && (xtermMod.default.Terminal || xtermMod.default));
+    const fitMod: any = await import('@xterm/addon-fit');
+    const FitAddonClass = fitMod.FitAddon || (fitMod.default && (fitMod.default.FitAddon || fitMod.default));
+
+    if (!TerminalClass || !FitAddonClass) {
+      throw new Error('Terminal or FitAddon module could not be initialized');
+    }
+
+    container.innerHTML = '';
+    const fitAddon = new FitAddonClass();
+    fitAddonRef.current = fitAddon;
+
+    const currentTheme = TERMINAL_THEMES[themeModeRef.current] || TERMINAL_THEMES.dark;
+    const term = new TerminalClass({
+      cursorBlink: true,
+      cursorStyle: 'block',
+      fontSize: fontSizeRef.current,
+      fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      theme: currentTheme,
+      convertEol: true,
+      allowProposedApi: true,
+      scrollback: 10000,
+    });
+
+    term.loadAddon(fitAddon);
+    term.open(container);
+    xtermInstanceRef.current = term;
+
+    // Attach user input listeners
+    term.onData((data: string) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(data);
+      }
+    });
+
+    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }));
+      }
+    });
+
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection());
+        return false;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        navigator.clipboard.readText().then((text) => {
+          if (text && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(text);
+          }
+        });
+        return false;
+      }
+      return true;
+    });
+
+    setTimeout(() => {
+      try {
+        fitAddon.fit();
+      } catch {}
+    }, 50);
+
+    return { term, fitAddon };
   }, []);
 
-  // Initialize xterm and WebSocket connection
-  const initTerminal = useCallback(async () => {
+  // Real two-phase terminal connection lifecycle
+  const startNewSession = useCallback(async (isManual = false) => {
     const container = terminalContainerNodeRef.current;
     if (!container) {
       console.warn('[TERMINAL] Container ref not yet available');
       return;
     }
 
-    console.log('[TERMINAL] Component mounted, starting terminal initialization...');
+    if (isConnectingRef.current) {
+      console.log('[TERMINAL] Connection already in progress, skipping duplicate call');
+      return;
+    }
+    isConnectingRef.current = true;
 
-    // Cleanup previous instance if any
+    // Clear heartbeat
     if (pingIntervalRef.current) {
       clearInterval(pingIntervalRef.current);
       pingIntervalRef.current = null;
     }
+
+    // Clean up existing WebSocket
     if (wsRef.current) {
       try {
         wsRef.current.close();
       } catch {}
       wsRef.current = null;
     }
-    if (xtermInstanceRef.current) {
-      try {
-        xtermInstanceRef.current.dispose();
-      } catch {}
-      xtermInstanceRef.current = null;
-    }
-    container.innerHTML = '';
 
-    setTerminalState('initializing');
+    setTerminalState('creating_session');
     setDisconnectInfo(null);
 
+    let termInstance: any = null;
+    let fitAddonInstance: any = null;
+
     try {
-      // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
-      const xtermMod: any = await import('@xterm/xterm');
-      const TerminalClass = xtermMod.Terminal || (xtermMod.default && (xtermMod.default.Terminal || xtermMod.default));
+      const emu = await ensureTerminalEmulator(container);
+      termInstance = emu.term;
+      fitAddonInstance = emu.fitAddon;
+    } catch (err: any) {
+      console.error('[TERMINAL] Failed to initialize terminal emulator:', err);
+      setTerminalState('error');
+      setDisconnectInfo({
+        title: 'Terminal Initialization Error',
+        description: err?.message || 'Failed to initialize terminal emulator component.',
+        type: 'error',
+      });
+      isConnectingRef.current = false;
+      return;
+    }
 
-      const fitMod: any = await import('@xterm/addon-fit');
-      const FitAddonClass = fitMod.FitAddon || (fitMod.default && (fitMod.default.FitAddon || fitMod.default));
+    if (isManual) {
+      termInstance.clear();
+    }
 
-      if (!TerminalClass || !FitAddonClass) {
-        throw new Error('Terminal or FitAddon module could not be initialized');
+    // Resolve authentication token
+    let token = getStoredToken() || '';
+    if (!token && typeof window !== 'undefined') {
+      token = localStorage.getItem('hostvra_access_token') || localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+      if (!token) {
+        const match = document.cookie.match(/(?:hostvra_token|access_token|token)=([^;]+)/);
+        if (match) token = decodeURIComponent(match[1]);
       }
+    }
 
-      const fitAddon = new FitAddonClass();
-      fitAddonRef.current = fitAddon;
+    if (!token) {
+      isConnectingRef.current = false;
+      setTerminalState('error');
+      setDisconnectInfo({
+        title: 'Authentication Required',
+        description: 'Authentication token not found. Please log in to Hostvra to open a terminal.',
+        type: 'auth_expired',
+        errorCode: 'AUTHENTICATION_REQUIRED',
+      });
+      termInstance.write('\x1b[1;31m[Hostvra: Authentication token not found. Please log in to Hostvra.]\x1b[0m\r\n');
+      return;
+    }
 
-      const currentTheme = TERMINAL_THEMES[themeModeRef.current] || TERMINAL_THEMES.dark;
-      const term = new TerminalClass({
-        cursorBlink: true,
-        cursorStyle: 'block',
-        fontSize: fontSizeRef.current,
-        fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-        theme: currentTheme,
-        convertEol: true,
-        allowProposedApi: true,
-        scrollback: 10000,
+    const requestId = 'req_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now();
+    setActiveRequestId(requestId);
+    activeRequestIdRef.current = requestId;
+
+    termInstance.write('\x1b[1;36m[Hostvra]\x1b[0m Requesting authorized terminal session...\r\n');
+    termInstance.write(`\x1b[90mRequest ID: ${requestId}\x1b[0m\r\n`);
+
+    const queryCwd = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('cwd') || '' : '';
+
+    // Phase 1: POST /api/v1/terminal/session for pre-flight authorization
+    try {
+      const sessionRes = await apiFetch<CreateTerminalSessionResponse>('/api/v1/terminal/session', {
+        method: 'POST',
+        body: JSON.stringify({
+          request_id: requestId,
+          cols: termInstance.cols || 80,
+          rows: termInstance.rows || 24,
+          cwd: queryCwd,
+        }),
       });
 
-      term.loadAddon(fitAddon);
-      term.open(container);
-      xtermInstanceRef.current = term;
-      console.log('[TERMINAL] xterm initialized and attached to DOM');
+      if (!sessionRes.success || !sessionRes.data) {
+        isConnectingRef.current = false;
+        const errCode = sessionRes.error?.code || 'SERVER_ERROR';
+        const errMsg = sessionRes.error?.message || 'Failed to create terminal session.';
 
-      // Small delay for DOM layout before initial fit
-      setTimeout(() => {
-        try {
-          fitAddon.fit();
-        } catch {
-          // Container sizing grace period
+        if (errCode === 'FEATURE_DISABLED' || errCode === 'FORBIDDEN' || errCode === 'AUTHORIZATION_ERROR') {
+          setTerminalState('disabled');
+          setDisconnectInfo({
+            title: 'Terminal Not Included in Package',
+            description: errMsg,
+            type: 'feature_disabled',
+            requestId,
+            errorCode: errCode,
+          });
+          termInstance.write(`\r\n\x1b[1;31m[Hostvra: ${errCode} - Web Terminal SSH access is not enabled for your hosting plan]\x1b[0m\r\n`);
+          termInstance.write('\x1b[90mPlease upgrade your package or contact administration.\x1b[0m\r\n');
+        } else if (errCode === 'UNAUTHORIZED' || errCode === 'AUTHENTICATION_REQUIRED') {
+          setTerminalState('error');
+          setDisconnectInfo({
+            title: 'Authentication Required',
+            description: errMsg,
+            type: 'auth_expired',
+            requestId,
+            errorCode: errCode,
+          });
+          termInstance.write(`\r\n\x1b[1;31m[Hostvra: ${errCode} - Please log in again]\x1b[0m\r\n`);
+        } else {
+          setTerminalState('error');
+          setDisconnectInfo({
+            title: 'Session Creation Failed',
+            description: errMsg,
+            type: 'api_unavailable',
+            requestId,
+            errorCode: errCode,
+          });
+          termInstance.write(`\r\n\x1b[1;31m[Hostvra: ${errCode} - ${errMsg}]\x1b[0m\r\n`);
         }
-      }, 50);
+        return;
+      }
 
-      // Resolve WebSocket connection endpoint and authentication token
+      const sess = sessionRes.data;
+      setActiveSessionId(sess.session_id);
+      activeSessionIdRef.current = sess.session_id;
+
+      termInstance.write(`\x1b[90mSession ID: ${sess.session_id} (User: ${sess.user}, Cwd: ${sess.cwd})\x1b[0m\r\n`);
+      termInstance.write('\x1b[90mConnecting full-duplex WebSocket PTY...\x1b[0m\r\n');
+
+      // Phase 2: Open WebSocket
       const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
       let host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
-
       if (typeof window !== 'undefined') {
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         if (isLocal) {
           host = `${window.location.hostname}:8080`;
         } else if (window.location.port === '3000') {
-          // If remote access on port 3000, strip port 3000 so WebSocket connects through standard Nginx reverse proxy on 80/443
           host = window.location.hostname;
         }
       }
 
-      let token = getStoredToken() || '';
-      if (!token && typeof window !== 'undefined') {
-        token = localStorage.getItem('hostvra_access_token') || localStorage.getItem('token') || localStorage.getItem('access_token') || '';
-        if (!token) {
-          const match = document.cookie.match(/(?:hostvra_token|access_token|token)=([^;]+)/);
-          if (match) token = decodeURIComponent(match[1]);
-        }
-      }
+      const cwdParam = sess.cwd ? `&cwd=${encodeURIComponent(sess.cwd)}` : '';
+      const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?session_id=${encodeURIComponent(sess.session_id)}&request_id=${encodeURIComponent(sess.request_id)}&token=${encodeURIComponent(token)}&rows=${termInstance.rows || 24}&cols=${termInstance.cols || 80}${cwdParam}`;
 
-      if (!token) {
-        console.error('[TERMINAL] Authentication token missing in storage/cookies');
-        setTerminalState('error');
-        setDisconnectInfo({
-          title: 'Authentication Required',
-          description: 'Authentication token not found. Please log in to Hostvra to open a terminal.',
-          type: 'auth_expired',
-        });
-        term.write('\x1b[1;31m[Hostvra: Authentication token not found. Please log in to Hostvra.]\x1b[0m\r\n');
-        return;
-      }
-
-      const queryCwd = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('cwd') || '' : '';
-      const cwdParam = queryCwd ? `&cwd=${encodeURIComponent(queryCwd)}` : '';
-      const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}${cwdParam}`;
-
-      console.log('[TERMINAL] WebSocket connecting to:', `${wsProtocol}//${host}/api/v1/terminal/ws`);
-      term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
-      term.write(`\x1b[90mConnecting to ${wsProtocol}//${host}/api/v1/terminal/ws ...\x1b[0m\r\n`);
       setTerminalState('connecting');
 
       const ws = new WebSocket(wsUrl);
@@ -294,14 +412,16 @@ export default function TerminalPage() {
 
       const connectTimeout = setTimeout(() => {
         if (ws.readyState === WebSocket.CONNECTING) {
-          console.warn('[TERMINAL] WebSocket connecting timeout watchdog triggered');
-          term.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
-          term.write('\x1b[90mEnsure hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
+          console.warn('[TERMINAL] WebSocket connect timeout watchdog triggered');
+          isConnectingRef.current = false;
+          termInstance.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
           setTerminalState('error');
           setDisconnectInfo({
             title: 'Connection Timed Out',
             description: 'Could not connect to Hostvra API. Please verify hostvra-api service is running.',
             type: 'error',
+            sessionId: sess.session_id,
+            requestId: sess.request_id,
           });
         }
       }, 7000);
@@ -309,10 +429,10 @@ export default function TerminalPage() {
       ws.onopen = () => {
         console.log('[TERMINAL] WebSocket connected, PTY allocation started');
         setTerminalState('allocating');
-        term.write('\x1b[90mWebSocket handshake verified. Allocating Linux PTY session...\x1b[0m\r\n');
+        termInstance.write('\x1b[90mWebSocket handshake verified. Allocating Linux PTY session...\x1b[0m\r\n');
         try {
-          fitAddon.fit();
-          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          fitAddonInstance.fit();
+          ws.send(JSON.stringify({ type: 'resize', cols: termInstance.cols, rows: termInstance.rows }));
         } catch (err) {
           console.warn('Failed initial terminal resize:', err);
         }
@@ -325,18 +445,18 @@ export default function TerminalPage() {
               const msg = JSON.parse(event.data);
               if (msg.type === 'ready') {
                 clearTimeout(connectTimeout);
+                isConnectingRef.current = false;
                 console.log('[TERMINAL] PTY allocated & shell started - READY:', msg);
                 setTerminalState('ready');
                 setDisconnectInfo(null);
-                term.write('\x1b[1;32m[Hostvra]\x1b[0m Interactive shell ready.\r\n\r\n');
+                termInstance.write('\x1b[1;32m[Hostvra]\x1b[0m Interactive shell ready.\r\n\r\n');
                 try {
-                  fitAddon.fit();
-                  ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+                  fitAddonInstance.fit();
+                  ws.send(JSON.stringify({ type: 'resize', cols: termInstance.cols, rows: termInstance.rows }));
                 } catch {}
-                term.focus();
-                console.log('[TERMINAL] terminal input enabled');
+                termInstance.focus();
 
-                // Start client-side heartbeat to ping every 20 seconds during idle periods
+                // Start 20s heartbeat ping
                 if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
                 pingIntervalRef.current = setInterval(() => {
                   if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -345,23 +465,27 @@ export default function TerminalPage() {
                     } catch {}
                   }
                 }, 20000);
-
                 return;
               }
               if (msg.type === 'error') {
                 clearTimeout(connectTimeout);
+                isConnectingRef.current = false;
                 console.error('[TERMINAL] Backend error:', msg);
                 setTerminalState('error');
                 setDisconnectInfo({
                   title: 'PTY Allocation Error',
                   description: msg.message || 'PTY allocation failed on server.',
-                  type: 'error',
+                  type: 'pty_error',
+                  errorCode: msg.code || 'PTY_ERROR',
+                  sessionId: sess.session_id,
+                  requestId: sess.request_id,
                 });
-                term.write(`\r\n\x1b[1;31m[Hostvra Error: ${msg.message || 'PTY allocation failed'}]\x1b[0m\r\n`);
+                termInstance.write(`\r\n\x1b[1;31m[Hostvra Error: ${msg.message || 'PTY allocation failed'}]\x1b[0m\r\n`);
                 return;
               }
               if (msg.type === 'exit') {
                 clearTimeout(connectTimeout);
+                isConnectingRef.current = false;
                 if (pingIntervalRef.current) {
                   clearInterval(pingIntervalRef.current);
                   pingIntervalRef.current = null;
@@ -374,144 +498,150 @@ export default function TerminalPage() {
                   description: `The interactive Linux shell session ended with exit status code ${exitCode}.`,
                   type: 'shell_exit',
                   exitCode,
+                  sessionId: sess.session_id,
+                  requestId: sess.request_id,
                 });
-                term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${exitCode}]\x1b[0m\r\n`);
+                termInstance.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${exitCode}]\x1b[0m\r\n`);
                 return;
               }
               if (msg.type === 'pong') {
-                // Heartbeat response verified
                 return;
               }
-            } catch {
-              // Not a control message, write raw string
-            }
+            } catch {}
           }
-          term.write(event.data);
+          termInstance.write(event.data);
         } else if (event.data instanceof ArrayBuffer) {
-          term.write(new Uint8Array(event.data));
+          termInstance.write(new Uint8Array(event.data));
         } else if (event.data instanceof Blob) {
           const buf = await event.data.arrayBuffer();
-          term.write(new Uint8Array(buf));
+          termInstance.write(new Uint8Array(buf));
         }
       };
 
       ws.onerror = (err) => {
         clearTimeout(connectTimeout);
+        isConnectingRef.current = false;
         if (pingIntervalRef.current) {
           clearInterval(pingIntervalRef.current);
           pingIntervalRef.current = null;
         }
-        console.error('[TERMINAL] WebSocket error:', err);
-        setDisconnectInfo({
-          title: 'Connection Error',
-          description: 'Unable to reach the Hostvra terminal service. Please ensure hostvra-api is active.',
-          type: 'error',
+        console.error('[TERMINAL] WebSocket error for session:', sess.session_id, err);
+        setTerminalState((prev) => {
+          if (prev === 'disabled' || prev === 'closed') return prev;
+          setDisconnectInfo({
+            title: 'Connection Error',
+            description: 'Unable to reach the Hostvra terminal service. Please ensure hostvra-api is active.',
+            type: 'error',
+            sessionId: sess.session_id,
+            requestId: sess.request_id,
+          });
+          return 'error';
         });
-        term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
-        term.write('\x1b[90mEnsure hostvra-api is active: systemctl restart hostvra-api\x1b[0m\r\n');
-        setTerminalState('error');
+        termInstance.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
+        termInstance.write('\x1b[90mEnsure hostvra-api is active: systemctl restart hostvra-api\x1b[0m\r\n');
       };
 
       ws.onclose = (event) => {
         clearTimeout(connectTimeout);
+        isConnectingRef.current = false;
         if (pingIntervalRef.current) {
           clearInterval(pingIntervalRef.current);
           pingIntervalRef.current = null;
         }
-        console.log('[TERMINAL] WebSocket closed:', event.code, event.reason);
-        if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
-          term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
-          setDisconnectInfo({
-            title: 'Authentication Required',
-            description: 'Your login session has expired or is unauthorized. Please re-login to Hostvra.',
-            type: 'auth_expired',
-          });
-          setTerminalState('error');
-        } else {
-          setTerminalState((prev) => {
-            if (prev === 'closed') {
-              return prev;
-            }
+        console.log('[TERMINAL] WebSocket closed: code=' + event.code + ', reason=' + event.reason + ', wasClean=' + event.wasClean);
+
+        setTerminalState((prev) => {
+          if (prev === 'closed' || prev === 'disabled') {
+            return prev;
+          }
+          if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
+            termInstance.write('\r\n\x1b[1;31m[Hostvra: Authentication/Policy rejected (Code 1008)]\x1b[0m\r\n');
             setDisconnectInfo({
-              title: 'Connection Interrupted',
-              description: 'The terminal connection was interrupted. The server may have restarted or network was dropped.',
-              type: 'network_drop',
+              title: 'Authentication/Policy Rejected',
+              description: event.reason || 'Your terminal session was rejected due to authorization policy.',
+              type: 'auth_expired',
+              closeCode: event.code,
+              closeReason: event.reason,
+              sessionId: sess.session_id,
+              requestId: sess.request_id,
             });
-            return 'disconnected';
+            return 'error';
+          }
+          if (event.code === 1000) {
+            termInstance.write('\r\n\x1b[33m[Hostvra: Terminal session closed cleanly]\x1b[0m\r\n');
+            setDisconnectInfo({
+              title: 'Terminal Session Closed',
+              description: 'The terminal session was closed normally.',
+              type: 'shell_exit',
+              closeCode: 1000,
+              sessionId: sess.session_id,
+              requestId: sess.request_id,
+            });
+            return 'closed';
+          }
+
+          setDisconnectInfo({
+            title: 'Connection Interrupted',
+            description: event.reason || `The terminal connection was closed (code ${event.code}). The server may have restarted or network was dropped.`,
+            type: 'network_drop',
+            closeCode: event.code,
+            closeReason: event.reason,
+            sessionId: sess.session_id,
+            requestId: sess.request_id,
           });
-          term.write('\r\n\x1b[33m[Hostvra: Terminal session closed]\x1b[0m\r\n');
-        }
+          termInstance.write(`\r\n\x1b[33m[Hostvra: Terminal session closed (code ${event.code})]\x1b[0m\r\n`);
+          return 'disconnected';
+        });
       };
-
-      // Forward terminal keyboard input directly to PTY stdin
-      term.onData((data: string) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data);
-        }
-      });
-
-      // Notify backend PTY of window dimension changes
-      term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-        }
-      });
-
-      // Handle Copy / Paste keystrokes seamlessly
-      term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-        // Ctrl+Shift+C or Cmd+C when text is selected -> Copy selection
-        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
-          navigator.clipboard.writeText(term.getSelection());
-          return false;
-        }
-        // Ctrl+Shift+V or Cmd+V -> Paste from clipboard
-        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-          navigator.clipboard.readText().then((text) => {
-            if (text && ws.readyState === WebSocket.OPEN) {
-              ws.send(text);
-            }
-          });
-          return false;
-        }
-        return true;
-      });
-
-      // Focus terminal
-      setTimeout(() => {
-        try {
-          fitAddon.fit();
-          term.focus();
-        } catch {
-          // ignore
-        }
-      }, 150);
     } catch (err: any) {
-      console.error('[TERMINAL] Failed to initialize terminal emulator:', err);
+      isConnectingRef.current = false;
+      console.error('[TERMINAL] Session establishment failed:', err);
       setTerminalState('error');
-      if (container) {
-        container.innerHTML = `
-          <div class="p-6 text-center text-rose-500 font-mono text-sm">
-            <p class="font-bold mb-2">Failed to initialize terminal emulator</p>
-            <p class="text-xs text-slate-500">${err?.message || 'Unknown error'}</p>
-          </div>
-        `;
+      setDisconnectInfo({
+        title: 'Connection Failed',
+        description: err?.message || 'Failed to establish terminal session.',
+        type: 'error',
+        requestId,
+      });
+      termInstance.write(`\r\n\x1b[1;31m[Hostvra: Exception - ${err?.message || 'Connection failed'}]\x1b[0m\r\n`);
+    }
+  }, [ensureTerminalEmulator]);
+
+  // Load terminal metadata & start session if entitled
+  useEffect(() => {
+    async function loadInfo() {
+      try {
+        const res = await apiFetch<TerminalInfo>('/api/v1/terminal/info');
+        if (res.success && res.data) {
+          setInfo(res.data);
+          // If container is ready and has not yet started, initialize
+          if (containerMounted && !hasStartedRef.current) {
+            hasStartedRef.current = true;
+            startNewSession();
+          }
+        } else if (res.error?.code === 'FEATURE_DISABLED' || res.error?.code === 'FORBIDDEN' || res.error?.code === 'AUTHORIZATION_ERROR') {
+          setTerminalState('disabled');
+          setDisconnectInfo({
+            title: 'Terminal Not Included in Package',
+            description: res.error.message || 'Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.',
+            type: 'feature_disabled',
+            errorCode: res.error.code,
+          });
+        }
+      } catch (err) {
+        console.warn('Could not load terminal metadata:', err);
       }
     }
-  }, []);
+    loadInfo();
+  }, [containerMounted, startNewSession]);
 
-  // Trigger terminal initialization whenever container mounts into the DOM
+  // Handle window resize and visibility
   useEffect(() => {
-    if (containerMounted && terminalContainerNodeRef.current) {
-      initTerminal();
-    }
-
     const handleWindowResize = () => {
       if (fitAddonRef.current) {
         try {
           fitAddonRef.current.fit();
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
     };
 
@@ -522,9 +652,7 @@ export default function TerminalPage() {
             wsRef.current.send(JSON.stringify({ type: 'ping' }));
             fitAddonRef.current?.fit();
             xtermInstanceRef.current?.focus();
-          } catch {
-            // ignore
-          }
+          } catch {}
         }
       }
     };
@@ -552,7 +680,8 @@ export default function TerminalPage() {
         xtermInstanceRef.current = null;
       }
     };
-  }, [containerMounted, initTerminal]);
+  }, []);
+
 
   // Update theme dynamically
   useEffect(() => {
@@ -627,13 +756,22 @@ export default function TerminalPage() {
           dotClass: 'bg-amber-500',
           headerText: 'CONNECTING...',
         };
+      case 'creating_session':
       case 'initializing':
         return {
-          label: 'Starting terminal...',
+          label: 'Starting session...',
           badgeClass:
             'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800 animate-pulse',
           dotClass: 'bg-blue-500',
           headerText: 'STARTING...',
+        };
+      case 'disabled':
+        return {
+          label: 'Upgrade Plan Required',
+          badgeClass:
+            'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800',
+          dotClass: 'bg-amber-500',
+          headerText: 'PLAN UPGRADE',
         };
       case 'error':
         return {
@@ -794,10 +932,21 @@ export default function TerminalPage() {
               <Trash2 className="w-4 h-4" />
             </button>
 
+            {/* Start New Session Button */}
+            <button
+              type="button"
+              onClick={() => startNewSession(true)}
+              className="px-3 py-1.5 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-400 text-xs font-semibold transition-colors flex items-center gap-1.5"
+              title="Start New Terminal Session"
+            >
+              <Zap className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="hidden sm:inline">New Session</span>
+            </button>
+
             {/* Reconnect Button */}
             <button
               type="button"
-              onClick={initTerminal}
+              onClick={() => startNewSession(true)}
               className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
               title="Reconnect Terminal Session"
             >
@@ -839,6 +988,11 @@ export default function TerminalPage() {
               <span className="text-xs font-mono font-medium text-slate-700 dark:text-slate-300 ml-2">
                 {info ? `${info.user}@${info.hostname}: ~ (${info.shell})` : 'root@hostvra: ~ (/bin/bash)'}
               </span>
+              {activeSessionId && (
+                <span className="hidden md:inline-block text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                  {activeSessionId}
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
               <span className={`w-2 h-2 rounded-full ${statusBadge.dotClass}`} />
@@ -880,7 +1034,7 @@ export default function TerminalPage() {
                       ? 'Terminal Not Enabled'
                       : 'Connection Interrupted')}
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
                   {disconnectInfo?.description ||
                     (terminalState === 'closed'
                       ? 'The interactive shell process has exited.'
@@ -890,6 +1044,25 @@ export default function TerminalPage() {
                       ? 'Web Terminal SSH access is not enabled for your hosting package.'
                       : 'The terminal connection was interrupted. Click below to reconnect.')}
                 </p>
+
+                {/* Diagnostics details if present */}
+                {(disconnectInfo?.sessionId || disconnectInfo?.requestId || disconnectInfo?.closeCode !== undefined || disconnectInfo?.errorCode) && (
+                  <div className="mb-4 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-left space-y-1 text-slate-600 dark:text-slate-400">
+                    {disconnectInfo.errorCode && (
+                      <div><span className="font-semibold text-slate-800 dark:text-slate-200">Error:</span> {disconnectInfo.errorCode}</div>
+                    )}
+                    {disconnectInfo.sessionId && (
+                      <div><span className="font-semibold text-slate-800 dark:text-slate-200">Session:</span> {disconnectInfo.sessionId}</div>
+                    )}
+                    {disconnectInfo.requestId && (
+                      <div><span className="font-semibold text-slate-800 dark:text-slate-200">Request:</span> {disconnectInfo.requestId}</div>
+                    )}
+                    {disconnectInfo.closeCode !== undefined && (
+                      <div><span className="font-semibold text-slate-800 dark:text-slate-200">Code:</span> {disconnectInfo.closeCode} {disconnectInfo.closeReason ? `(${disconnectInfo.closeReason})` : ''}</div>
+                    )}
+                  </div>
+                )}
+
                 {terminalState === 'disabled' ? (
                   <a
                     href="/billing"
@@ -901,7 +1074,7 @@ export default function TerminalPage() {
                 ) : (
                   <button
                     type="button"
-                    onClick={initTerminal}
+                    onClick={() => startNewSession(true)}
                     className={`w-full py-2.5 px-4 rounded-xl text-white font-semibold text-xs shadow-lg flex items-center justify-center gap-2 transition-all ${
                       terminalState === 'closed'
                         ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
@@ -916,6 +1089,7 @@ export default function TerminalPage() {
             </div>
           )}
         </div>
+
 
         {/* Quick Commands & Operations Bar */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
