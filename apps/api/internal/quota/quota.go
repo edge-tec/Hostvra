@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -95,18 +96,46 @@ func (s *Service) ResolveEffectivePlan(ctx context.Context, userID uuid.UUID) (*
 	// 2. Fetch User's Active Subscription & Plan
 	var assignedPlan *store.HostingPlan
 	var subStatus string = "active"
+	var latestSub *store.Subscription
+	now := time.Now().UTC()
 
 	subs, err := s.store.ListSubscriptions(ctx, user.DefaultOrgID)
 	if err == nil {
 		for _, sub := range subs {
-			if sub.UserID == user.ID && (sub.Status == store.SubStatusActive || sub.Status == store.SubStatusTrial) {
-				plan, pErr := s.store.GetPlanByID(ctx, sub.PlanID)
-				if pErr == nil && plan != nil {
-					assignedPlan = plan
-					subStatus = string(sub.Status)
-					break
+			if sub.UserID == user.ID {
+				if latestSub == nil || sub.CreatedAt.After(latestSub.CreatedAt) {
+					latestSub = sub
+				}
+
+				// Check trial expiration
+				if sub.Status == store.SubStatusTrial && sub.TrialEndsAt != nil && sub.TrialEndsAt.Before(now) {
+					sub.Status = store.SubStatusExpired
+					_ = s.store.UpdateSubscription(ctx, sub)
+				}
+
+				// Check overdue active subscription expiration (grace period 7 days)
+				if sub.Status == store.SubStatusActive && !sub.NextBillingDate.IsZero() && sub.NextBillingDate.AddDate(0, 0, 7).Before(now) && !sub.AutoRenew {
+					sub.Status = store.SubStatusExpired
+					_ = s.store.UpdateSubscription(ctx, sub)
+				}
+
+				if sub.Status == store.SubStatusActive || sub.Status == store.SubStatusTrial {
+					plan, pErr := s.store.GetPlanByID(ctx, sub.PlanID)
+					if pErr == nil && plan != nil {
+						assignedPlan = plan
+						subStatus = string(sub.Status)
+						break
+					}
 				}
 			}
+		}
+	}
+
+	if assignedPlan == nil && latestSub != nil {
+		// User had a subscription that is now expired/suspended/cancelled/pending
+		subStatus = string(latestSub.Status)
+		if plan, pErr := s.store.GetPlanByID(ctx, latestSub.PlanID); pErr == nil && plan != nil {
+			assignedPlan = plan
 		}
 	}
 
@@ -193,6 +222,21 @@ func (s *Service) ResolveEffectivePlan(ctx context.Context, userID uuid.UUID) (*
 		Usage: s.getUsageUnchecked(ctx, user.ID, user.DefaultOrgID),
 	}
 
+	// If subscription is expired or suspended, restrict creation limits and features
+	if subStatus == "expired" || subStatus == "suspended" || subStatus == "cancelled" {
+		effective.MaxWebsites = 0
+		effective.MaxDatabases = 0
+		effective.MaxMailboxes = 0
+		effective.MaxFTP = 0
+		effective.MaxCron = 0
+		effective.MaxSubdomains = 0
+		effective.DiskSpaceMB = 0
+		effective.BandwidthMB = 0
+		for k := range effective.Permissions {
+			effective.Permissions[k] = false
+		}
+	}
+
 	// 4. Layer User-Specific Overrides (if any configured by Admin)
 	override, err := s.store.GetUserPlanOverride(ctx, user.ID)
 	if err == nil && override != nil {
@@ -274,6 +318,11 @@ func (s *Service) CheckQuota(ctx context.Context, userID uuid.UUID, resource str
 		return nil
 	}
 
+	// Expired or suspended subscriptions cannot create new resources
+	if effective.SubscriptionStatus == "expired" || effective.SubscriptionStatus == "suspended" || effective.SubscriptionStatus == "cancelled" {
+		return fmt.Errorf("subscription is %s: please renew your package to create or manage resources", effective.SubscriptionStatus)
+	}
+
 	var current, limit int
 	switch strings.ToLower(resource) {
 	case "website", "websites":
@@ -317,6 +366,10 @@ func (s *Service) CheckPermission(ctx context.Context, userID uuid.UUID, feature
 
 	if effective.IsSuperAdmin || effective.Role == "admin" || effective.Role == "superadmin" {
 		return true
+	}
+
+	if effective.SubscriptionStatus == "expired" || effective.SubscriptionStatus == "suspended" || effective.SubscriptionStatus == "cancelled" {
+		return false
 	}
 
 	allowed, ok := effective.Permissions[strings.ToLower(feature)]

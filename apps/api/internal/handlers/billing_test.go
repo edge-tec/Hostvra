@@ -53,6 +53,15 @@ func TestBillingHandler_Flow(t *testing.T) {
 	r.Post("/invoices/{id}/pay", h.PayInvoice)
 	r.Get("/gateways", h.ListGateways)
 
+	// Setup enabled gateway for testing
+	_ = s.SaveGatewayConfig(context.Background(), &store.PaymentGatewayConfig{
+		Gateway:   "stripe",
+		SecretKey: "mock_test_secret",
+		ApiKey:    "pk_test_123",
+		TestMode:  true,
+		Enabled:   true,
+	})
+
 	// 1. Test List Seed Plans
 	req := httptest.NewRequest("GET", "/plans", nil)
 	rec := httptest.NewRecorder()
@@ -73,7 +82,7 @@ func TestBillingHandler_Flow(t *testing.T) {
 	}
 	starterPlan := plansResp.Data[0]
 
-	// 2. Test Subscribe to Starter Plan
+	// 2. Test Subscribe to Starter Plan (Paid Subscription Starts as PENDING with Unpaid Invoice)
 	subBody, _ := json.Marshal(CreateSubscriptionRequest{
 		PlanID:        starterPlan.ID.String(),
 		BillingCycle:  "monthly",
@@ -87,6 +96,23 @@ func TestBillingHandler_Flow(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for subscription, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var subResp struct {
+		Data struct {
+			Subscription *store.Subscription `json:"subscription"`
+			Invoice      *store.Invoice      `json:"invoice"`
+			CheckoutURL  string              `json:"checkout_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &subResp); err != nil {
+		t.Fatalf("failed to parse subscription response: %v", err)
+	}
+	if subResp.Data.Subscription.Status != store.SubStatusPending {
+		t.Fatalf("expected subscription to be pending, got %s", subResp.Data.Subscription.Status)
+	}
+	if subResp.Data.Invoice == nil || subResp.Data.Invoice.Status != store.InvoiceStatusUnpaid {
+		t.Fatalf("expected unpaid invoice for paid subscription")
 	}
 
 	// 3. Test List Invoices
@@ -115,6 +141,224 @@ func TestBillingHandler_Flow(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for gateways, got %d", rec.Code)
+	}
+}
+
+// TestBilling_TrialLifecycle tests free trial start, package limits application, and anti-abuse duplicate check
+func TestBilling_TrialLifecycle(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewBillingHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	userID := uuid.New()
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, &auth.Claims{
+				UserID:         userID,
+				OrganizationID: orgID,
+				Role:           "owner",
+			})
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Post("/subscriptions", h.CreateSubscription)
+
+	plans, _ := s.ListPlans(context.Background())
+	var trialPlan *store.HostingPlan
+	for _, p := range plans {
+		if p.TrialDays > 0 {
+			trialPlan = p
+			break
+		}
+	}
+	if trialPlan == nil {
+		t.Fatalf("no plan with trial days found")
+	}
+
+	// 1. Eligible user starts trial
+	trialReqBody, _ := json.Marshal(CreateSubscriptionRequest{
+		PlanID:     trialPlan.ID.String(),
+		StartTrial: true,
+	})
+	req := httptest.NewRequest("POST", "/subscriptions", bytes.NewReader(trialReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for trial creation, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var subResp struct {
+		Data struct {
+			Subscription *store.Subscription `json:"subscription"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &subResp)
+	if subResp.Data.Subscription.Status != store.SubStatusTrial && subResp.Data.Subscription.Status != store.SubStatusActive {
+		t.Fatalf("expected trial subscription to be active or trial, got %s", subResp.Data.Subscription.Status)
+	}
+	if subResp.Data.Subscription.TrialEndsAt == nil {
+		t.Fatalf("expected trial ends at to be set")
+	}
+
+	// 2. Anti-abuse: Ineligible user cannot start duplicate trial
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("POST", "/subscriptions", bytes.NewReader(trialReqBody))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(rec2, req2)
+
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for duplicate trial abuse, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	if !bytes.Contains(rec2.Body.Bytes(), []byte("TRIAL_ALREADY_USED")) {
+		t.Fatalf("expected trial abuse error message, got: %s", rec2.Body.String())
+	}
+}
+
+// TestBilling_ServerSidePaymentVerification tests server-side verification of payment gateway transactions
+func TestBilling_ServerSidePaymentVerification(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewBillingHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	userID := uuid.New()
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, &auth.Claims{
+				UserID:         userID,
+				OrganizationID: orgID,
+				Role:           "owner",
+			})
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Post("/invoices/{id}/verify", h.VerifyInvoicePayment)
+
+	// Configure Stripe in test mode
+	_ = s.SaveGatewayConfig(context.Background(), &store.PaymentGatewayConfig{
+		Gateway:   "stripe",
+		SecretKey: "mock_test_secret",
+		ApiKey:    "pk_test_123",
+		TestMode:  true,
+		Enabled:   true,
+	})
+
+	// Create plan & subscription
+	plan := &store.HostingPlan{
+		ID:           uuid.New(),
+		Name:         "Pro",
+		PriceMonthly: 20.00,
+	}
+	_ = s.CreatePlan(context.Background(), plan)
+
+	sub := &store.Subscription{
+		ID:             uuid.New(),
+		UserID:         userID,
+		OrganizationID: orgID,
+		PlanID:         plan.ID,
+		Status:         store.SubStatusPending,
+	}
+	_ = s.CreateSubscription(context.Background(), sub)
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-PRO-001",
+		UserID:         userID,
+		OrganizationID: orgID,
+		SubscriptionID: &sub.ID,
+		PlanID:         plan.ID,
+		Subtotal:       20.00,
+		Total:          20.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+	}
+	_ = s.CreateInvoice(context.Background(), inv)
+
+	// 1. Test verification with failed payment reference -> must fail
+	failedReq, _ := json.Marshal(VerifyPaymentRequest{
+		PaymentMethod: "stripe",
+		PaymentRef:    "cs_fail_test",
+	})
+	req := httptest.NewRequest("POST", "/invoices/"+inv.ID.String()+"/verify", bytes.NewReader(failedReq))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for failed payment reference, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Test verification with valid test transaction
+	validReq, _ := json.Marshal(VerifyPaymentRequest{
+		PaymentMethod: "stripe",
+		PaymentRef:    "cs_test_mock_123",
+	})
+	req = httptest.NewRequest("POST", "/invoices/"+inv.ID.String()+"/verify", bytes.NewReader(validReq))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for valid verification, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify invoice marked paid and subscription active
+	updatedInv, _ := s.GetInvoiceByID(context.Background(), inv.ID)
+	if updatedInv.Status != store.InvoiceStatusPaid {
+		t.Fatalf("expected invoice status paid, got %s", updatedInv.Status)
+	}
+
+	updatedSub, _ := s.GetSubscriptionByID(context.Background(), sub.ID)
+	if updatedSub.Status != store.SubStatusActive {
+		t.Fatalf("expected subscription status active, got %s", updatedSub.Status)
+	}
+
+	// 3. Test Idempotency: Re-verifying the same invoice returns OK without duplicate side effects
+	reqDup := httptest.NewRequest("POST", "/invoices/"+inv.ID.String()+"/verify", bytes.NewReader(validReq))
+	reqDup.Header.Set("Content-Type", "application/json")
+	recDup := httptest.NewRecorder()
+	r.ServeHTTP(recDup, reqDup)
+
+	if recDup.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for idempotent repeat verification, got %d", recDup.Code)
+	}
+
+	// 4. Test Multi-tenant Isolation: User from Org B cannot verify invoice of Org A
+	orgB := uuid.New()
+	userB := uuid.New()
+	rB := chi.NewRouter()
+	rB.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, &auth.Claims{
+				UserID:         userB,
+				OrganizationID: orgB,
+				Role:           "member",
+			})
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	rB.Post("/invoices/{id}/verify", h.VerifyInvoicePayment)
+
+	reqB := httptest.NewRequest("POST", "/invoices/"+inv.ID.String()+"/verify", bytes.NewReader(validReq))
+	reqB.Header.Set("Content-Type", "application/json")
+	recB := httptest.NewRecorder()
+	rB.ServeHTTP(recB, reqB)
+
+	if recB.Code != http.StatusForbidden && recB.Code != http.StatusNotFound {
+		t.Fatalf("expected 403 or 404 for cross-tenant invoice verification, got %d: %s", recB.Code, recB.Body.String())
 	}
 }
 

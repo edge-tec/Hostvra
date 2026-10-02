@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -21,27 +22,41 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/domains"
+	"hostvra/api/internal/payment"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type BillingHandler struct {
-	cfg       *config.Config
-	store     store.Store
-	audit     *audit.Logger
-	domainSvc *domains.Service
+	cfg        *config.Config
+	store      store.Store
+	audit      *audit.Logger
+	domainSvc  *domains.Service
+	quotaSvc   *quota.Service
+	paymentSvc *payment.Service
 }
 
 func NewBillingHandler(cfg *config.Config, s store.Store, a *audit.Logger) *BillingHandler {
 	return &BillingHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+		cfg:        cfg,
+		store:      s,
+		audit:      a,
+		paymentSvc: payment.NewService(),
+		quotaSvc:   quota.NewService(s),
 	}
 }
 
 func (h *BillingHandler) SetDomainService(svc *domains.Service) {
 	h.domainSvc = svc
+}
+
+func (h *BillingHandler) SetQuotaService(svc *quota.Service) {
+	h.quotaSvc = svc
+}
+
+func (h *BillingHandler) SetPaymentService(svc *payment.Service) {
+	h.paymentSvc = svc
 }
 
 // ----------------------------------------------------------------------------
@@ -308,12 +323,40 @@ func (h *BillingHandler) GetSubscription(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, sub, nil)
 }
 
+func (h *BillingHandler) provisionUserForPlan(ctx context.Context, userID, orgID uuid.UUID, plan *store.HostingPlan) {
+	if plan == nil {
+		return
+	}
+
+	// 1. Synchronize WHM Hosting Accounts if present
+	if accounts, err := h.store.ListHostingAccounts(ctx, orgID, nil); err == nil {
+		for _, acc := range accounts {
+			if acc.UserID == userID || orgID != uuid.Nil {
+				acc.PlanID = plan.ID
+				acc.PlanName = plan.Name
+				acc.DiskLimitMB = plan.DiskSpaceMB
+				acc.BandwidthLimitMB = plan.BandwidthMB
+				acc.WebsitesLimit = plan.MaxWebsites
+				acc.DatabasesLimit = plan.MaxDatabases
+				acc.MailboxesLimit = plan.MaxMailboxes
+				if acc.Status == "suspended" && (acc.SuspendReason == "" || strings.Contains(strings.ToLower(acc.SuspendReason), "billing") || strings.Contains(strings.ToLower(acc.SuspendReason), "trial")) {
+					acc.Status = "active"
+					acc.SuspendReason = ""
+				}
+				_ = h.store.UpdateHostingAccount(ctx, acc)
+			}
+		}
+	}
+}
+
 type CreateSubscriptionRequest struct {
 	PlanID        string `json:"plan_id"`
 	BillingCycle  string `json:"billing_cycle"` // monthly, yearly
-	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad, sslcommerz, paypal
+	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad
 	AutoRenew     bool   `json:"auto_renew"`
 	StartTrial    bool   `json:"start_trial"`
+	SuccessURL    string `json:"success_url"`
+	CancelURL     string `json:"cancel_url"`
 }
 
 func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -334,6 +377,11 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 	plan, err := h.store.GetPlanByID(r.Context(), planUUID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "PLAN_NOT_FOUND", "Selected hosting plan does not exist", nil, "")
+		return
+	}
+
+	if !plan.IsActive {
+		response.Error(w, http.StatusBadRequest, "PLAN_INACTIVE", "Selected hosting plan is currently not available for purchase", nil, "")
 		return
 	}
 
@@ -362,12 +410,12 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 			return
 		}
 
-		if trialSettings != nil && trialSettings.OneTrialPerCustomer {
+		if trialSettings == nil || trialSettings.OneTrialPerCustomer {
 			// Anti-abuse: verify user has not previously claimed a trial
 			existingSubs, err := h.store.ListSubscriptions(r.Context(), claims.OrganizationID)
 			if err == nil {
 				for _, es := range existingSubs {
-					if es.Status == store.SubStatusTrial || es.TrialEndsAt != nil {
+					if es.Status == store.SubStatusTrial || es.TrialStartedAt != nil || es.TrialEndsAt != nil {
 						response.Error(w, http.StatusBadRequest, "TRIAL_ALREADY_USED", "A free trial has already been claimed for this account", nil, "")
 						return
 					}
@@ -435,6 +483,29 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		}
 		_ = h.store.CreateInvoice(r.Context(), inv)
 
+		// Provision user profile and limits directly from plan
+		h.provisionUserForPlan(r.Context(), claims.UserID, claims.OrganizationID, plan)
+
+		// Record trial transaction
+		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+			ID:             uuid.New(),
+			UserID:         claims.UserID,
+			OrganizationID: claims.OrganizationID,
+			PackageID:      plan.ID,
+			SubscriptionID: &subID,
+			InvoiceID:      inv.ID,
+			Gateway:        "free_trial",
+			TransactionID:  inv.TransactionID,
+			OrderID:        inv.InvoiceNumber,
+			Amount:         0.0,
+			Currency:       plan.Currency,
+			Status:         "completed",
+			PaymentMethod:  "free_trial",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			ConfirmedAt:    &now,
+		})
+
 		h.audit.Log(r.Context(), r, "billing.trial.start", "subscription", sub.ID.String(), "success", fmt.Sprintf("Started %d-day free trial on %s", trialDays, plan.Name), nil)
 
 		response.JSON(w, http.StatusCreated, map[string]interface{}{
@@ -448,24 +519,38 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// ------------------------------------------------------------------------
+	// Paid Subscription Flow: NEVER activate without verified payment!
+	// ------------------------------------------------------------------------
+	gwName := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if gwName == "" {
+		gwName = "stripe"
+	}
+	gwConfig, err := h.store.GetGatewayConfig(r.Context(), gwName)
+	if err != nil || gwConfig == nil || !gwConfig.Enabled {
+		response.Error(w, http.StatusBadRequest, "GATEWAY_DISABLED", fmt.Sprintf("Payment gateway %s is not enabled by administrator", gwName), nil, "")
+		return
+	}
+
 	subID := uuid.New()
+	now := time.Now().UTC()
 	sub := &store.Subscription{
 		ID:              subID,
 		UserID:          claims.UserID,
 		OrganizationID:  claims.OrganizationID,
 		PlanID:          plan.ID,
 		PlanName:        plan.Name,
-		Status:          store.SubStatusActive,
+		Status:          store.SubStatusPending, // Subscriptions MUST start as pending until paid!
 		BillingCycle:    req.BillingCycle,
 		Amount:          amount,
 		Currency:        plan.Currency,
-		DiskUsedMB:      100, // starting baseline
-		BandwidthUsedMB: 50,
+		DiskUsedMB:      0,
+		BandwidthUsedMB: 0,
 		WebsitesCount:   0,
 		NextBillingDate: nextBilling,
 		AutoRenew:       req.AutoRenew,
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := h.store.CreateSubscription(r.Context(), sub); err != nil {
@@ -473,9 +558,7 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Create Corresponding Initial Invoice
-	now := time.Now().UTC()
-	paidAt := now
+	// Create Corresponding Initial Unpaid Invoice
 	inv := &store.Invoice{
 		ID:             uuid.New(),
 		InvoiceNumber:  fmt.Sprintf("INV-%d-%05d", now.Year(), rand.Intn(90000)+10000),
@@ -489,23 +572,58 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		Discount:       0.0,
 		Total:          amount,
 		Currency:       plan.Currency,
-		Status:         store.InvoiceStatusPaid,
-		PaymentMethod:  req.PaymentMethod,
-		TransactionID:  fmt.Sprintf("txn_%s_%d", req.PaymentMethod, time.Now().UnixNano()),
+		Status:         store.InvoiceStatusUnpaid, // UNPAID until verified!
+		PaymentMethod:  gwName,
+		TransactionID:  "",
 		DueDate:        now.AddDate(0, 0, 7),
-		PaidAt:         &paidAt,
+		PaidAt:         nil,
 		CreatedAt:      now,
 	}
 	_ = h.store.CreateInvoice(r.Context(), inv)
 
-	h.audit.Log(r.Context(), r, "billing.subscription.create", "subscription", sub.ID.String(), "success", "Subscribed to plan "+plan.Name, nil)
+	// Record Pending Payment Transaction
+	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+		ID:             uuid.New(),
+		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
+		PackageID:      plan.ID,
+		SubscriptionID: &subID,
+		InvoiceID:      inv.ID,
+		Gateway:        gwName,
+		TransactionID:  "",
+		OrderID:        inv.InvoiceNumber,
+		Amount:         amount,
+		Currency:       plan.Currency,
+		Status:         "pending",
+		PaymentMethod:  gwName,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	})
+
+	// Initiate Payment with Gateway Client
+	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, req.BillingCycle, req.SuccessURL, req.CancelURL, "")
+
+	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
+	var gwRef string
+	if initErr == nil && initResult != nil {
+		if initResult.CheckoutURL != "" {
+			checkoutURL = initResult.CheckoutURL
+		}
+		gwRef = initResult.GatewayReference
+	}
+
+	h.audit.Log(r.Context(), r, "billing.subscription.pending", "subscription", sub.ID.String(), "success", fmt.Sprintf("Created pending order for %s (inv: %s)", plan.Name, inv.InvoiceNumber), nil)
 
 	response.JSON(w, http.StatusCreated, map[string]interface{}{
-		"subscription": sub,
-		"invoice":      inv,
-		"message":      "Hosting package subscription activated successfully!",
+		"subscription":      sub,
+		"invoice":           inv,
+		"status":            "pending",
+		"checkout_url":      checkoutURL,
+		"gateway_reference": gwRef,
+		"message":           "Order created as pending. Please complete payment to activate your package subscription.",
 	}, nil)
 }
+
 
 func (h *BillingHandler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
@@ -620,6 +738,12 @@ func (h *BillingHandler) GetInvoice(w http.ResponseWriter, r *http.Request) {
 type PayInvoiceRequest struct {
 	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad, sslcommerz, paypal
 	TransactionID string `json:"transaction_id"`
+	PaymentRef    string `json:"payment_ref"`
+}
+
+type VerifyPaymentRequest struct {
+	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad
+	PaymentRef    string `json:"payment_ref"`    // session_id, paymentID, payment_ref_id
 }
 
 func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
@@ -637,8 +761,9 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, hasClaims := auth.GetClaims(r.Context())
-	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
-	if inv.UserID != claims.UserID && (inv.OrganizationID == uuid.Nil || inv.OrganizationID != claims.OrganizationID) && !isAdmin {
+	isAdmin := hasClaims && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin")
+	isOwnerOrMember := hasClaims && (inv.UserID == claims.UserID || (inv.OrganizationID != uuid.Nil && inv.OrganizationID == claims.OrganizationID))
+	if !isOwnerOrMember && !isAdmin {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
 		return
 	}
@@ -655,28 +780,39 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	if !isAdmin {
-		// Non-admins must provide an external verified transaction ID from the payment gateway
-		cleanTxn := strings.TrimSpace(req.TransactionID)
-		if cleanTxn == "" {
-			response.Error(w, http.StatusPaymentRequired, "PAYMENT_REQUIRED", "Manual payment confirmation requires administrator authorization or a verified gateway transaction ID", nil, "")
+		// Non-admins cannot mark an invoice paid without verified payment confirmation!
+		ref := strings.TrimSpace(req.PaymentRef)
+		if ref == "" {
+			ref = strings.TrimSpace(req.TransactionID)
+		}
+		if ref == "" {
+			response.Error(w, http.StatusPaymentRequired, "PAYMENT_REQUIRED", "Manual payment confirmation requires administrator authorization or a verified gateway payment reference", nil, "")
 			return
 		}
-		if req.PaymentMethod == "" {
-			req.PaymentMethod = "gateway"
+		verifyReq := VerifyPaymentRequest{
+			PaymentMethod: req.PaymentMethod,
+			PaymentRef:    ref,
 		}
-	} else {
-		if req.PaymentMethod == "" {
-			req.PaymentMethod = "manual_admin"
-		}
-		if req.TransactionID == "" {
-			req.TransactionID = fmt.Sprintf("txn_admin_%d", time.Now().Unix())
-		}
+		verifyJSON, _ := json.Marshal(verifyReq)
+		r.Body = io.NopCloser(bytes.NewReader(verifyJSON))
+		h.VerifyInvoicePayment(w, r)
+		return
 	}
 
+	// Admin Override Flow: explicitly distinguishable from customer gateway payments
 	now := time.Now().UTC()
+	payMethod := req.PaymentMethod
+	if payMethod == "" {
+		payMethod = "admin_override"
+	}
+	txnID := req.TransactionID
+	if txnID == "" {
+		txnID = fmt.Sprintf("admin_override_%s_%d", claims.UserID.String()[:8], now.Unix())
+	}
+
 	inv.Status = store.InvoiceStatusPaid
-	inv.PaymentMethod = req.PaymentMethod
-	inv.TransactionID = req.TransactionID
+	inv.PaymentMethod = payMethod
+	inv.TransactionID = txnID
 	inv.PaidAt = &now
 
 	if err := h.store.UpdateInvoice(r.Context(), inv); err != nil {
@@ -684,13 +820,44 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If linked to subscription, make sure subscription is Active
+	// If linked to subscription, make sure subscription is Active and user is provisioned
 	if inv.SubscriptionID != nil {
 		if sub, err := h.store.GetSubscriptionByID(r.Context(), *inv.SubscriptionID); err == nil {
 			sub.Status = store.SubStatusActive
+			if sub.NextBillingDate.Before(now) {
+				if sub.BillingCycle == "yearly" {
+					sub.NextBillingDate = now.AddDate(1, 0, 0)
+				} else {
+					sub.NextBillingDate = now.AddDate(0, 1, 0)
+				}
+			}
 			_ = h.store.UpdateSubscription(r.Context(), sub)
+
+			if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
+				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
+			}
 		}
 	}
+
+	// Record transaction
+	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+		ID:             uuid.New(),
+		UserID:         inv.UserID,
+		OrganizationID: inv.OrganizationID,
+		PackageID:      inv.PlanID,
+		SubscriptionID: inv.SubscriptionID,
+		InvoiceID:      inv.ID,
+		Gateway:        "admin",
+		TransactionID:  txnID,
+		OrderID:        inv.InvoiceNumber,
+		Amount:         inv.Total,
+		Currency:       inv.Currency,
+		Status:         "completed",
+		PaymentMethod:  payMethod,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		ConfirmedAt:    &now,
+	})
 
 	// If linked to domain order, provision it
 	if h.domainSvc != nil {
@@ -705,18 +872,309 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.audit.Log(r.Context(), r, "billing.invoice.pay", "invoice", inv.ID.String(), "success", fmt.Sprintf("Paid invoice %s via %s (txn: %s)", inv.InvoiceNumber, inv.PaymentMethod, inv.TransactionID), map[string]interface{}{
+	h.audit.Log(r.Context(), r, "billing.invoice.pay_admin_override", "invoice", inv.ID.String(), "success", fmt.Sprintf("Admin marked invoice %s paid (txn: %s)", inv.InvoiceNumber, inv.TransactionID), map[string]interface{}{
 		"invoice_number": inv.InvoiceNumber,
 		"payment_method": inv.PaymentMethod,
 		"transaction_id": inv.TransactionID,
-		"is_admin":       isAdmin,
+		"is_admin":       true,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"message": "Invoice paid successfully",
+		"message": "Invoice marked as paid via admin override",
 		"invoice": inv,
 	}, nil)
 }
+
+type InvoiceCheckoutRequest struct {
+	PaymentMethod string `json:"payment_method"`
+	SuccessURL    string `json:"success_url"`
+	CancelURL     string `json:"cancel_url"`
+}
+
+func (h *BillingHandler) CheckoutInvoice(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	if !hasClaims {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication session", nil, "")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	invID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid invoice ID", nil, "")
+		return
+	}
+
+	inv, err := h.store.GetInvoiceByID(r.Context(), invID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin"
+	isOwnerOrMember := inv.UserID == claims.UserID || (inv.OrganizationID != uuid.Nil && inv.OrganizationID == claims.OrganizationID)
+	if !isOwnerOrMember && !isAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to pay this invoice", nil, "")
+		return
+	}
+
+	if inv.Status == store.InvoiceStatusPaid {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "already_paid",
+			"message": "Invoice is already paid",
+			"invoice": inv,
+		}, nil)
+		return
+	}
+
+	var req InvoiceCheckoutRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	gwName := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if gwName == "" {
+		gwName = strings.ToLower(inv.PaymentMethod)
+	}
+	if gwName == "" {
+		gwName = "stripe"
+	}
+
+	gwConfig, err := h.store.GetGatewayConfig(r.Context(), gwName)
+	if err != nil || gwConfig == nil || !gwConfig.Enabled {
+		response.Error(w, http.StatusBadRequest, "GATEWAY_DISABLED", fmt.Sprintf("Payment gateway %s is not enabled by administrator", gwName), nil, "")
+		return
+	}
+
+	var plan *store.HostingPlan
+	if inv.PlanID != uuid.Nil {
+		plan, _ = h.store.GetPlanByID(r.Context(), inv.PlanID)
+	}
+
+	inv.PaymentMethod = gwName
+	_ = h.store.UpdateInvoice(r.Context(), inv)
+
+	now := time.Now().UTC()
+	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+		ID:             uuid.New(),
+		UserID:         inv.UserID,
+		OrganizationID: inv.OrganizationID,
+		PackageID:      inv.PlanID,
+		SubscriptionID: inv.SubscriptionID,
+		InvoiceID:      inv.ID,
+		Gateway:        gwName,
+		TransactionID:  "",
+		OrderID:        inv.InvoiceNumber,
+		Amount:         inv.Total,
+		Currency:       inv.Currency,
+		Status:         "pending",
+		PaymentMethod:  gwName,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	})
+
+	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, "monthly", req.SuccessURL, req.CancelURL, "")
+
+	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
+	var gwRef string
+	if initErr == nil && initResult != nil {
+		if initResult.CheckoutURL != "" {
+			checkoutURL = initResult.CheckoutURL
+		}
+		gwRef = initResult.GatewayReference
+	}
+
+	h.audit.Log(r.Context(), r, "billing.invoice.checkout_initiated", "invoice", inv.ID.String(), "success", fmt.Sprintf("Initiated checkout for invoice %s via %s", inv.InvoiceNumber, gwName), map[string]interface{}{
+		"gateway": gwName,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"invoice_id":        inv.ID,
+		"invoice_number":    inv.InvoiceNumber,
+		"amount":            inv.Total,
+		"currency":          inv.Currency,
+		"payment_method":    gwName,
+		"checkout_url":      checkoutURL,
+		"gateway_reference": gwRef,
+	}, nil)
+}
+
+func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	if !hasClaims {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication session", nil, "")
+		return
+	}
+
+	idStr := chi.URLParam(r, "id")
+	invID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid invoice ID", nil, "")
+		return
+	}
+
+	inv, err := h.store.GetInvoiceByID(r.Context(), invID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin"
+	if inv.UserID != claims.UserID && (inv.OrganizationID == uuid.Nil || inv.OrganizationID != claims.OrganizationID) && !isAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to verify this invoice", nil, "")
+		return
+	}
+
+	if inv.Status == store.InvoiceStatusPaid {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":         "already_paid",
+			"message":        "Invoice is already paid and subscription is active",
+			"invoice":        inv,
+			"transaction_id": inv.TransactionID,
+		}, nil)
+		return
+	}
+
+	var req VerifyPaymentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	gwName := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if gwName == "" {
+		gwName = strings.ToLower(inv.PaymentMethod)
+	}
+	if gwName == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_GATEWAY", "Payment gateway is required", nil, "")
+		return
+	}
+
+	cfg, err := h.store.GetGatewayConfig(r.Context(), gwName)
+	if err != nil || cfg == nil || !cfg.Enabled {
+		response.Error(w, http.StatusBadRequest, "GATEWAY_UNAVAILABLE", fmt.Sprintf("Payment gateway %s is not enabled", gwName), nil, "")
+		return
+	}
+
+	paymentRef := strings.TrimSpace(req.PaymentRef)
+	if paymentRef == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_PAYMENT_REF", "Payment transaction reference is required", nil, "")
+		return
+	}
+
+	// Server-side verification with gateway
+	verifyResult, err := h.paymentSvc.VerifyPayment(r.Context(), cfg, inv, paymentRef)
+	if err != nil {
+		h.audit.Log(r.Context(), r, "billing.payment.verify_failed", "invoice", inv.ID.String(), "failure", err.Error(), map[string]interface{}{
+			"gateway":     gwName,
+			"payment_ref": paymentRef,
+		})
+
+		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+			ID:               uuid.New(),
+			UserID:           inv.UserID,
+			OrganizationID:   inv.OrganizationID,
+			PackageID:        inv.PlanID,
+			SubscriptionID:   inv.SubscriptionID,
+			InvoiceID:        inv.ID,
+			Gateway:          gwName,
+			TransactionID:    paymentRef,
+			OrderID:          inv.InvoiceNumber,
+			Amount:           inv.Total,
+			Currency:         inv.Currency,
+			Status:           "failed",
+			GatewayReference: paymentRef,
+			PaymentMethod:    gwName,
+			RawResponse:      err.Error(),
+		})
+
+		response.Error(w, http.StatusBadRequest, "PAYMENT_UNVERIFIED", "Gateway payment verification failed: "+err.Error(), nil, "")
+		return
+	}
+
+	// Idempotency: anti-replay check
+	if existingTxn, _ := h.store.GetPaymentTransactionByTxnID(r.Context(), verifyResult.Gateway, verifyResult.TransactionID); existingTxn != nil && existingTxn.Status == "completed" && existingTxn.InvoiceID != inv.ID {
+		response.Error(w, http.StatusConflict, "DUPLICATE_TRANSACTION", "This payment transaction has already been verified for another invoice", nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	inv.Status = store.InvoiceStatusPaid
+	inv.PaidAt = &now
+	inv.PaymentMethod = verifyResult.PaymentMethod
+	inv.TransactionID = verifyResult.TransactionID
+
+	if err := h.store.UpdateInvoice(r.Context(), inv); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update invoice", err.Error(), "")
+		return
+	}
+
+	var sub *store.Subscription
+	if inv.SubscriptionID != nil {
+		if s, err := h.store.GetSubscriptionByID(r.Context(), *inv.SubscriptionID); err == nil {
+			sub = s
+			sub.Status = store.SubStatusActive
+			if sub.NextBillingDate.Before(now) {
+				if sub.BillingCycle == "yearly" {
+					sub.NextBillingDate = now.AddDate(1, 0, 0)
+				} else {
+					sub.NextBillingDate = now.AddDate(0, 1, 0)
+				}
+			}
+			_ = h.store.UpdateSubscription(r.Context(), sub)
+
+			if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
+				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
+			}
+		}
+	}
+
+	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+		ID:               uuid.New(),
+		UserID:           inv.UserID,
+		OrganizationID:   inv.OrganizationID,
+		PackageID:        inv.PlanID,
+		SubscriptionID:   inv.SubscriptionID,
+		InvoiceID:        inv.ID,
+		Gateway:          verifyResult.Gateway,
+		TransactionID:    verifyResult.TransactionID,
+		OrderID:          inv.InvoiceNumber,
+		Amount:           verifyResult.Amount,
+		Currency:         verifyResult.Currency,
+		Status:           "completed",
+		GatewayReference: verifyResult.GatewayReference,
+		PaymentMethod:    verifyResult.PaymentMethod,
+		RawResponse:      verifyResult.RawResponse,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		ConfirmedAt:      &now,
+	})
+
+	if h.domainSvc != nil {
+		if domainOrder, err := h.store.GetDomainOrderByInvoiceID(r.Context(), inv.ID); err == nil && domainOrder != nil {
+			if domainOrder.PaymentStatus != "paid" {
+				domainOrder.PaymentStatus = "paid"
+				_ = h.store.UpdateDomainOrder(r.Context(), domainOrder)
+				go func(orderID uuid.UUID) {
+					_ = h.domainSvc.Provisioning.ProcessPaidOrder(context.Background(), orderID, nil, nil)
+				}(domainOrder.ID)
+			}
+		}
+	}
+
+	h.audit.Log(r.Context(), r, "billing.payment.verified", "invoice", inv.ID.String(), "success", fmt.Sprintf("Verified payment via %s (txn: %s)", verifyResult.Gateway, verifyResult.TransactionID), map[string]interface{}{
+		"gateway":        verifyResult.Gateway,
+		"transaction_id": verifyResult.TransactionID,
+		"amount":         verifyResult.Amount,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"status":         "paid",
+		"message":        "Payment verified and subscription activated successfully!",
+		"invoice":        inv,
+		"subscription":   sub,
+		"transaction_id": verifyResult.TransactionID,
+	}, nil)
+}
+
 
 // ----------------------------------------------------------------------------
 // Payment Gateways API
@@ -970,6 +1428,11 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				}
 				_ = h.store.UpdateSubscription(r.Context(), sub)
 
+				// Provision user quotas and features from hosting package
+				if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
+					h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
+				}
+
 				// Automatically unsuspend user's hosting accounts if suspended for billing
 				if accounts, err := h.store.ListHostingAccounts(r.Context(), sub.OrganizationID, nil); err == nil {
 					for _, acc := range accounts {
@@ -981,6 +1444,28 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+
+		// Record Completed Payment Transaction
+		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+			ID:               uuid.New(),
+			UserID:           inv.UserID,
+			OrganizationID:   inv.OrganizationID,
+			PackageID:        inv.PlanID,
+			SubscriptionID:   inv.SubscriptionID,
+			InvoiceID:        inv.ID,
+			Gateway:          gatewayName,
+			TransactionID:    inv.TransactionID,
+			OrderID:          inv.InvoiceNumber,
+			Amount:           inv.Total,
+			Currency:         inv.Currency,
+			Status:           "completed",
+			GatewayReference: eventID,
+			PaymentMethod:    gatewayName,
+			RawResponse:      string(bodyBytes),
+			CreatedAt:        now,
+			UpdatedAt:        now,
+			ConfirmedAt:      &now,
+		})
 
 		// Record Webhook to prevent replays
 		_ = h.store.RecordDomainWebhook(r.Context(), &store.DomainWebhook{
@@ -1326,6 +1811,17 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Validate payment gateway is enabled
+	gwName := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if gwName == "" {
+		gwName = "stripe"
+	}
+	gwConfig, err := h.store.GetGatewayConfig(r.Context(), gwName)
+	if err != nil || gwConfig == nil || !gwConfig.Enabled {
+		response.Error(w, http.StatusBadRequest, "GATEWAY_DISABLED", fmt.Sprintf("Payment gateway %s is not enabled by administrator", gwName), nil, "")
+		return
+	}
+
 	// Create Pending Subscription & Invoice
 	subID := uuid.New()
 	now := time.Now().UTC()
@@ -1368,26 +1864,81 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 		Total:          amount,
 		Currency:       plan.Currency,
 		Status:         store.InvoiceStatusUnpaid,
-		PaymentMethod:  req.PaymentMethod,
+		PaymentMethod:  gwName,
 		DueDate:        now.AddDate(0, 0, 3),
 		CreatedAt:      now,
 	}
 	_ = h.store.CreateInvoice(r.Context(), inv)
 
+	// Record Pending Payment Transaction
+	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
+		ID:             uuid.New(),
+		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
+		PackageID:      plan.ID,
+		SubscriptionID: &subID,
+		InvoiceID:      inv.ID,
+		Gateway:        gwName,
+		TransactionID:  "",
+		OrderID:        inv.InvoiceNumber,
+		Amount:         amount,
+		Currency:       plan.Currency,
+		Status:         "pending",
+		PaymentMethod:  gwName,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	})
+
+	// Initiate Payment with Gateway Client
+	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, req.BillingCycle, req.SuccessURL, req.CancelURL, "")
+
+	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
+	var gwRef string
+	if initErr == nil && initResult != nil {
+		if initResult.CheckoutURL != "" {
+			checkoutURL = initResult.CheckoutURL
+		}
+		gwRef = initResult.GatewayReference
+	}
+
 	h.audit.Log(r.Context(), r, "billing.checkout.create", "invoice", inv.ID.String(), "success", fmt.Sprintf("Created checkout session for %s", plan.Name), nil)
 
 	response.JSON(w, http.StatusCreated, map[string]interface{}{
-		"subscription_id": sub.ID,
-		"invoice_id":      inv.ID,
-		"invoice_number":  inv.InvoiceNumber,
-		"amount":          amount,
-		"currency":        plan.Currency,
-		"plan_name":       plan.Name,
-		"billing_cycle":   req.BillingCycle,
-		"payment_method":  req.PaymentMethod,
-		"status":          "pending",
-		"checkout_url":    fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String()),
+		"subscription_id":   sub.ID,
+		"invoice_id":        inv.ID,
+		"invoice_number":    inv.InvoiceNumber,
+		"amount":            amount,
+		"currency":          plan.Currency,
+		"plan_name":         plan.Name,
+		"billing_cycle":     req.BillingCycle,
+		"payment_method":    gwName,
+		"status":            "pending",
+		"checkout_url":      checkoutURL,
+		"gateway_reference": gwRef,
 	}, nil)
 }
+
+func (h *BillingHandler) ListTransactions(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	if !hasClaims {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authentication session", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin"
+	var orgID uuid.UUID
+	if !isAdmin {
+		orgID = claims.OrganizationID
+	}
+
+	txns, err := h.store.ListPaymentTransactions(r.Context(), orgID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve transactions", err.Error(), "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, txns, &response.Meta{Total: len(txns)})
+}
+
 
 

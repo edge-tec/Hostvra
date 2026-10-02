@@ -580,6 +580,62 @@ func (m *MemoryStore) SaveGatewayConfig(ctx context.Context, config *PaymentGate
 	return nil
 }
 
+func (m *MemoryStore) RecordPaymentTransaction(ctx context.Context, txn *PaymentTransaction) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if txn.ID == uuid.Nil {
+		txn.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if txn.CreatedAt.IsZero() {
+		txn.CreatedAt = now
+	}
+	txn.UpdatedAt = now
+
+	for i, existing := range m.paymentTransactions {
+		if existing.ID == txn.ID || (txn.Gateway != "" && txn.TransactionID != "" && existing.Gateway == txn.Gateway && existing.TransactionID == txn.TransactionID) {
+			m.paymentTransactions[i] = txn
+			m.saveToDiskLocked()
+			return nil
+		}
+	}
+
+	m.paymentTransactions = append(m.paymentTransactions, txn)
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) GetPaymentTransactionByTxnID(ctx context.Context, gateway, txnID string) (*PaymentTransaction, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	gwLower := strings.ToLower(gateway)
+	for _, txn := range m.paymentTransactions {
+		if strings.ToLower(txn.Gateway) == gwLower && txn.TransactionID == txnID {
+			return txn, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (m *MemoryStore) ListPaymentTransactions(ctx context.Context, orgID uuid.UUID) ([]*PaymentTransaction, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var list []*PaymentTransaction
+	for _, txn := range m.paymentTransactions {
+		if orgID == uuid.Nil || txn.OrganizationID == orgID {
+			list = append(list, txn)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].CreatedAt.After(list[j].CreatedAt)
+	})
+	return list, nil
+}
+
+
 // ============================================================================
 // POSTGRES STORE BILLING IMPLEMENTATION (Safe fallback delegating to MemoryStore if not migrated)
 // ============================================================================
@@ -1129,3 +1185,131 @@ func (p *PostgresStore) SaveGatewayConfig(ctx context.Context, config *PaymentGa
 	}
 	return nil
 }
+
+func (p *PostgresStore) RecordPaymentTransaction(ctx context.Context, txn *PaymentTransaction) error {
+	if txn.ID == uuid.Nil {
+		txn.ID = uuid.New()
+	}
+	now := time.Now().UTC()
+	if txn.CreatedAt.IsZero() {
+		txn.CreatedAt = now
+	}
+	txn.UpdatedAt = now
+
+	query := `
+		INSERT INTO payment_transactions (
+			id, user_id, organization_id, package_id, subscription_id, invoice_id,
+			gateway, transaction_id, order_id, amount, currency, status,
+			gateway_reference, payment_method, raw_response, created_at, updated_at, confirmed_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		ON CONFLICT (id) DO UPDATE SET
+			status = EXCLUDED.status,
+			gateway_reference = EXCLUDED.gateway_reference,
+			payment_method = EXCLUDED.payment_method,
+			raw_response = EXCLUDED.raw_response,
+			updated_at = EXCLUDED.updated_at,
+			confirmed_at = EXCLUDED.confirmed_at
+	`
+	_, err := p.db.ExecContext(ctx, query,
+		txn.ID, txn.UserID, txn.OrganizationID, txn.PackageID, txn.SubscriptionID, txn.InvoiceID,
+		txn.Gateway, txn.TransactionID, txn.OrderID, txn.Amount, txn.Currency, txn.Status,
+		txn.GatewayReference, txn.PaymentMethod, txn.RawResponse, txn.CreatedAt, txn.UpdatedAt, txn.ConfirmedAt,
+	)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.RecordPaymentTransaction(ctx, txn)
+	}
+	return nil
+}
+
+func (p *PostgresStore) GetPaymentTransactionByTxnID(ctx context.Context, gateway, txnID string) (*PaymentTransaction, error) {
+	query := `
+		SELECT id, user_id, organization_id, package_id, subscription_id, invoice_id,
+		       gateway, transaction_id, order_id, amount, currency, status,
+		       gateway_reference, payment_method, raw_response, created_at, updated_at, confirmed_at
+		FROM payment_transactions
+		WHERE gateway = $1 AND transaction_id = $2
+		LIMIT 1
+	`
+	row := p.db.QueryRowContext(ctx, query, strings.ToLower(gateway), txnID)
+	txn := &PaymentTransaction{}
+	var subID *uuid.UUID
+	var gwRef, payMethod, rawResp sql.NullString
+	var confirmedAt sql.NullTime
+
+	err := row.Scan(
+		&txn.ID, &txn.UserID, &txn.OrganizationID, &txn.PackageID, &subID, &txn.InvoiceID,
+		&txn.Gateway, &txn.TransactionID, &txn.OrderID, &txn.Amount, &txn.Currency, &txn.Status,
+		&gwRef, &payMethod, &rawResp, &txn.CreatedAt, &txn.UpdatedAt, &confirmedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		m := NewMemoryStore()
+		return m.GetPaymentTransactionByTxnID(ctx, gateway, txnID)
+	}
+	txn.SubscriptionID = subID
+	if gwRef.Valid {
+		txn.GatewayReference = gwRef.String
+	}
+	if payMethod.Valid {
+		txn.PaymentMethod = payMethod.String
+	}
+	if rawResp.Valid {
+		txn.RawResponse = rawResp.String
+	}
+	if confirmedAt.Valid {
+		txn.ConfirmedAt = &confirmedAt.Time
+	}
+	return txn, nil
+}
+
+func (p *PostgresStore) ListPaymentTransactions(ctx context.Context, orgID uuid.UUID) ([]*PaymentTransaction, error) {
+	query := `
+		SELECT id, user_id, organization_id, package_id, subscription_id, invoice_id,
+		       gateway, transaction_id, order_id, amount, currency, status,
+		       gateway_reference, payment_method, raw_response, created_at, updated_at, confirmed_at
+		FROM payment_transactions
+		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1)
+		ORDER BY created_at DESC
+	`
+	rows, err := p.db.QueryContext(ctx, query, orgID)
+	if err != nil {
+		m := NewMemoryStore()
+		return m.ListPaymentTransactions(ctx, orgID)
+	}
+	defer rows.Close()
+
+	var list []*PaymentTransaction
+	for rows.Next() {
+		txn := &PaymentTransaction{}
+		var subID *uuid.UUID
+		var gwRef, payMethod, rawResp sql.NullString
+		var confirmedAt sql.NullTime
+
+		if err := rows.Scan(
+			&txn.ID, &txn.UserID, &txn.OrganizationID, &txn.PackageID, &subID, &txn.InvoiceID,
+			&txn.Gateway, &txn.TransactionID, &txn.OrderID, &txn.Amount, &txn.Currency, &txn.Status,
+			&gwRef, &payMethod, &rawResp, &txn.CreatedAt, &txn.UpdatedAt, &confirmedAt,
+		); err != nil {
+			continue
+		}
+		txn.SubscriptionID = subID
+		if gwRef.Valid {
+			txn.GatewayReference = gwRef.String
+		}
+		if payMethod.Valid {
+			txn.PaymentMethod = payMethod.String
+		}
+		if rawResp.Valid {
+			txn.RawResponse = rawResp.String
+		}
+		if confirmedAt.Valid {
+			txn.ConfirmedAt = &confirmedAt.Time
+		}
+		list = append(list, txn)
+	}
+	return list, nil
+}
+

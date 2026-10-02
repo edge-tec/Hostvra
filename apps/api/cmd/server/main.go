@@ -150,6 +150,7 @@ func main() {
 
 	// Initialize Centralized Quota & Permission Engine
 	quotaService := quota.NewService(dataStore)
+	billingHandler.SetQuotaService(quotaService)
 	websiteHandler.SetQuotaService(quotaService)
 	databaseHandler.SetQuotaService(quotaService)
 	emailHandler.SetQuotaService(quotaService)
@@ -301,6 +302,7 @@ func main() {
 		r.Get("/billing/plans/{id}", billingHandler.GetPlan)
 		r.Get("/billing/trial-settings", billingHandler.GetTrialSettings)
 		r.Post("/billing/webhooks/{gateway}", billingHandler.HandleWebhook)
+		r.Post("/billing/webhook/{gateway}", billingHandler.HandleWebhook)
 
 		// Public Domain Search, Whois & TLD Pricing
 		r.Get("/domains/search", domainRegistrarHandler.SearchDomains)
@@ -943,10 +945,13 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/invoices", billingHandler.ListInvoices)
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/invoices/{id}", billingHandler.GetInvoice)
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/invoices/{id}/pay", billingHandler.PayInvoice)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/invoices/{id}/checkout", billingHandler.CheckoutInvoice)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/invoices/{id}/verify", billingHandler.VerifyInvoicePayment)
 
-				// Payment Gateways
+				// Payment Gateways & Accounting Transactions
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/gateways", billingHandler.ListGateways)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/gateways/{gateway}", billingHandler.UpdateGateway)
+				r.With(rbac.RequirePermission(rbac.PermBillingView)).Get("/transactions", billingHandler.ListTransactions)
 
 				// Unified Checkout
 				r.With(rbac.RequirePermission(rbac.PermBillingView)).Post("/checkout", billingHandler.CreateCheckoutSession)

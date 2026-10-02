@@ -258,10 +258,13 @@ type Store interface {
 	CreateInvoice(ctx context.Context, inv *Invoice) error
 	UpdateInvoice(ctx context.Context, inv *Invoice) error
 
-	// Payment Gateways
+	// Payment Gateways & Transactions
 	ListGateways(ctx context.Context) ([]*PaymentGatewayConfig, error)
 	GetGatewayConfig(ctx context.Context, gateway string) (*PaymentGatewayConfig, error)
 	SaveGatewayConfig(ctx context.Context, config *PaymentGatewayConfig) error
+	RecordPaymentTransaction(ctx context.Context, txn *PaymentTransaction) error
+	GetPaymentTransactionByTxnID(ctx context.Context, gateway, txnID string) (*PaymentTransaction, error)
+	ListPaymentTransactions(ctx context.Context, orgID uuid.UUID) ([]*PaymentTransaction, error)
 
 	// Hosting Accounts (WHM-Style Client Tenancy)
 	ListHostingAccounts(ctx context.Context, orgID uuid.UUID, serverID *uuid.UUID) ([]*HostingAccount, error)
@@ -422,6 +425,7 @@ type MemoryStore struct {
 	invoices            map[uuid.UUID]*Invoice
 	trialSettings       *TrialSettings
 	gatewayConfigs      map[string]*PaymentGatewayConfig
+	paymentTransactions []*PaymentTransaction
 	hostingAccounts     map[uuid.UUID]*HostingAccount
 	tldPricings         map[string]*TLDPricing
 	registrarConfigs    map[string]*DomainRegistrarConfig
@@ -492,6 +496,7 @@ type memoryDumpData struct {
 	Invoices             map[uuid.UUID]*Invoice                 `json:"invoices,omitempty"`
 	TrialSettings        *TrialSettings                         `json:"trial_settings,omitempty"`
 	GatewayConfigs       map[string]*PaymentGatewayConfig       `json:"gateway_configs,omitempty"`
+	PaymentTransactions  []*PaymentTransaction                  `json:"payment_transactions,omitempty"`
 	HostingAccounts      map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
 	TLDPricings          map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
 	RegistrarConfigs     map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
@@ -579,6 +584,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		Invoices:             m.invoices,
 		TrialSettings:        m.trialSettings,
 		GatewayConfigs:       m.gatewayConfigs,
+		PaymentTransactions:  m.paymentTransactions,
 		HostingAccounts:      m.hostingAccounts,
 		TLDPricings:          m.tldPricings,
 		RegistrarConfigs:     m.registrarConfigs,
@@ -742,6 +748,9 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.GatewayConfigs != nil {
 		m.gatewayConfigs = data.GatewayConfigs
 	}
+	if data.PaymentTransactions != nil {
+		m.paymentTransactions = data.PaymentTransactions
+	}
 	if data.HostingAccounts != nil {
 		m.hostingAccounts = data.HostingAccounts
 	}
@@ -854,6 +863,7 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 			UpdatedAt:            time.Now().UTC(),
 		},
 		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
+		paymentTransactions: make([]*PaymentTransaction, 0),
 		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
 		tldPricings:         make(map[string]*TLDPricing),
 		registrarConfigs:    make(map[string]*DomainRegistrarConfig),

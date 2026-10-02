@@ -129,3 +129,25 @@ type PaymentGatewayConfig struct {
 	MerchantID  string    `json:"merchant_id,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+type PaymentTransaction struct {
+	ID               uuid.UUID  `json:"id"`
+	UserID           uuid.UUID  `json:"user_id"`
+	OrganizationID   uuid.UUID  `json:"organization_id"`
+	PackageID        uuid.UUID  `json:"package_id"`
+	SubscriptionID   *uuid.UUID `json:"subscription_id,omitempty"`
+	InvoiceID        uuid.UUID  `json:"invoice_id"`
+	Gateway          string     `json:"gateway"` // stripe, bkash, nagad
+	TransactionID    string     `json:"transaction_id"`
+	OrderID          string     `json:"order_id"`
+	Amount           float64    `json:"amount"`
+	Currency         string     `json:"currency"`
+	Status           string     `json:"status"` // pending, initiated, completed, failed, cancelled
+	GatewayReference string     `json:"gateway_reference,omitempty"`
+	PaymentMethod    string     `json:"payment_method,omitempty"`
+	RawResponse      string     `json:"raw_response,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	ConfirmedAt      *time.Time `json:"confirmed_at,omitempty"`
+}
+

@@ -360,7 +360,7 @@ export default function BillingPage() {
   const [trialsList, setTrialsList] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   // Modal States
   const [checkoutModalOpen, setCheckoutModalOpen] = useState(false);
@@ -400,7 +400,7 @@ export default function BillingPage() {
     return `$${usdAmount.toFixed(2)}`;
   };
 
-  const showNotify = (type: 'success' | 'error', message: string) => {
+  const showNotify = (type: 'success' | 'error' | 'info', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 4500);
   };
@@ -490,6 +490,40 @@ export default function BillingPage() {
 
   useEffect(() => {
     loadData();
+
+    // Check for returning payment gateway callbacks (Stripe session_id, bKash paymentID, Nagad payment_ref_id)
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const invoiceId = params.get('invoice_id');
+      const gateway = params.get('gateway') || 'stripe';
+      const paymentRef = params.get('session_id') || params.get('paymentID') || params.get('payment_ref_id') || params.get('payment_ref');
+
+      if (invoiceId && paymentRef) {
+        (async () => {
+          showNotify('info', `Verifying ${gateway.toUpperCase()} payment confirmation with server...`);
+          try {
+            const verifyRes = await apiFetch<any>(`/api/v1/billing/invoices/${invoiceId}/verify`, {
+              method: 'POST',
+              body: JSON.stringify({
+                payment_method: gateway,
+                payment_ref: paymentRef,
+              }),
+            });
+            if (verifyRes.data) {
+              showNotify('success', `Payment confirmed! Subscription and package features are now active.`);
+              loadData();
+              setActiveTab('subscriptions');
+            } else {
+              showNotify('error', verifyRes.error?.message || 'Payment verification failed');
+            }
+          } catch (err: any) {
+            showNotify('error', err.message || 'Payment verification failed');
+          } finally {
+            window.history.replaceState({}, document.title, window.location.pathname);
+          }
+        })();
+      }
+    }
   }, []);
 
   // Handle Checkout / Subscription Order
@@ -514,14 +548,32 @@ export default function BillingPage() {
           billing_cycle: billingCycle,
           payment_method: selectedPaymentGateway,
           auto_renew: true,
+          success_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?session_id={CHECKOUT_SESSION_ID}&gateway=${selectedPaymentGateway}` : undefined,
+          cancel_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?cancelled=true` : undefined,
         }),
       });
 
       if (res.data) {
-        showNotify('success', `Thank you! The ${selectedPlanForOrder.name} package has been successfully activated!`);
-        setCheckoutModalOpen(false);
-        loadData();
-        setActiveTab('subscriptions');
+        const checkoutURL = res.data.checkout_url;
+        // If an external payment gateway URL is returned, redirect immediately to genuine gateway
+        if (checkoutURL && (checkoutURL.startsWith('http://') || checkoutURL.startsWith('https://'))) {
+          showNotify('info', `Redirecting to ${selectedPaymentGateway.toUpperCase()} secure checkout...`);
+          setCheckoutModalOpen(false);
+          window.location.href = checkoutURL;
+          return;
+        }
+
+        if (res.data.subscription?.status === 'active' || res.data.subscription?.status === 'trial') {
+          showNotify('success', `Thank you! The ${selectedPlanForOrder.name} package has been successfully activated!`);
+          setCheckoutModalOpen(false);
+          loadData();
+          setActiveTab('subscriptions');
+        } else {
+          showNotify('info', `Subscription created for ${selectedPlanForOrder.name}. Invoice #${res.data.invoice?.invoice_number || ''} is awaiting payment.`);
+          setCheckoutModalOpen(false);
+          loadData();
+          setActiveTab('invoices');
+        }
       } else {
         showNotify('error', res.error?.message || 'Failed to order package');
       }
@@ -536,30 +588,31 @@ export default function BillingPage() {
   const handlePayInvoice = async (invoice: Invoice, paymentMethod: string = 'stripe') => {
     setActionLoading(`pay-${invoice.id}`);
     try {
-      const res = await apiFetch<any>(`/api/v1/billing/invoices/${invoice.id}/pay`, {
+      const res = await apiFetch<any>(`/api/v1/billing/invoices/${invoice.id}/checkout`, {
         method: 'POST',
         body: JSON.stringify({
           payment_method: paymentMethod,
-          transaction_id: `txn_${paymentMethod}_${Date.now()}`,
+          success_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?invoice_id=${invoice.id}&session_id={CHECKOUT_SESSION_ID}&gateway=${paymentMethod}` : undefined,
+          cancel_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?invoice_id=${invoice.id}&cancelled=true` : undefined,
         }),
       });
       if (res.data) {
-        showNotify('success', `Invoice #${invoice.invoice_number} has been successfully paid!`);
-        loadData();
-        if (receiptModalOpen && selectedInvoice?.id === invoice.id) {
-          setSelectedInvoice({
-            ...invoice,
-            status: 'paid',
-            paid_at: new Date().toISOString(),
-            payment_method: paymentMethod,
-          });
+        if (res.data.status === 'already_paid') {
+          showNotify('info', `Invoice #${invoice.invoice_number} is already paid.`);
+          loadData();
+          return;
         }
+        if (res.data.checkout_url && (res.data.checkout_url.startsWith('http://') || res.data.checkout_url.startsWith('https://'))) {
+          showNotify('info', `Redirecting to ${paymentMethod.toUpperCase()} secure checkout...`);
+          window.location.href = res.data.checkout_url;
+          return;
+        }
+        showNotify('info', `Checkout initiated for Invoice #${invoice.invoice_number}.`);
+      } else {
+        showNotify('error', res.error?.message || 'Failed to initiate invoice payment');
       }
     } catch (err: any) {
-      setInvoices(prev =>
-        prev.map(i => (i.id === invoice.id ? { ...i, status: 'paid', paid_at: new Date().toISOString(), payment_method: paymentMethod } : i))
-      );
-      showNotify('success', `Invoice #${invoice.invoice_number} payment completed!`);
+      showNotify('error', err.message || 'Failed to initiate invoice payment');
     } finally {
       setActionLoading(null);
     }
@@ -749,7 +802,8 @@ export default function BillingPage() {
       });
 
       if (res.data) {
-        showNotify('success', `Congratulations! Your 14-day free trial of ${plan.name} has been activated!`);
+        const days = plan.trial_days || 14;
+        showNotify('success', `Congratulations! Your ${days}-day free trial of ${plan.name} has been activated!`);
         await loadData();
         setActiveTab('subscriptions');
       } else {
@@ -890,11 +944,15 @@ export default function BillingPage() {
             className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-2xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-5 duration-300 border ${
               notification.type === 'success'
                 ? 'bg-emerald-500/90 text-white border-emerald-400/50 shadow-emerald-500/20'
+                : notification.type === 'info'
+                ? 'bg-blue-600/90 text-white border-blue-400/50 shadow-blue-500/20'
                 : 'bg-rose-500/90 text-white border-rose-400/50 shadow-rose-500/20'
             }`}
           >
             {notification.type === 'success' ? (
               <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : notification.type === 'info' ? (
+              <Zap className="w-5 h-5 flex-shrink-0" />
             ) : (
               <AlertCircle className="w-5 h-5 flex-shrink-0" />
             )}
@@ -2520,25 +2578,31 @@ export default function BillingPage() {
                   Select Payment Method:
                 </label>
                 <div className="grid grid-cols-2 gap-2.5">
-                  {gateways
-                    .filter(g => g.enabled)
-                    .map(gw => (
-                      <button
-                        key={gw.gateway}
-                        type="button"
-                        onClick={() => setSelectedPaymentGateway(gw.gateway)}
-                        className={`p-3 rounded-xl border text-left transition-all ${
-                          selectedPaymentGateway === gw.gateway
-                            ? 'border-blue-500 bg-blue-500/5 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 font-bold ring-2 ring-blue-500/30'
-                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        <div className="text-xs font-bold">{gw.display_name}</div>
-                        <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider">
-                          {gw.test_mode ? 'Instant Test' : 'Live Gateway'}
-                        </div>
-                      </button>
-                    ))}
+                  {gateways.filter(g => g.enabled).length === 0 ? (
+                    <div className="col-span-2 p-3 text-xs text-amber-700 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200">
+                      No online payment gateways are currently enabled by administrator. Please contact billing support.
+                    </div>
+                  ) : (
+                    gateways
+                      .filter(g => g.enabled)
+                      .map(gw => (
+                        <button
+                          key={gw.gateway}
+                          type="button"
+                          onClick={() => setSelectedPaymentGateway(gw.gateway)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            selectedPaymentGateway === gw.gateway
+                              ? 'border-blue-500 bg-blue-500/5 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 font-bold ring-2 ring-blue-500/30'
+                              : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <div className="text-xs font-bold">{gw.display_name}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-wider">
+                            {gw.test_mode ? 'Sandbox / Test' : 'Production Verified'}
+                          </div>
+                        </button>
+                      ))
+                  )}
                 </div>
               </div>
 
@@ -2572,8 +2636,8 @@ export default function BillingPage() {
                   <button
                     type="button"
                     onClick={handleConfirmCheckout}
-                    disabled={actionLoading === 'checkout'}
-                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+                    disabled={actionLoading === 'checkout' || gateways.filter(g => g.enabled).length === 0}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {actionLoading === 'checkout' && <RefreshCw className="w-4 h-4 animate-spin" />}
                     <span>Confirm Order</span>
