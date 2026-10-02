@@ -30,7 +30,9 @@ func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 			} else {
 				tokenStr = r.URL.Query().Get("token")
 				if tokenStr == "" {
-					if c, err := r.Cookie("access_token"); err == nil && c != nil {
+					if c, err := r.Cookie("hostvra_token"); err == nil && c != nil {
+						tokenStr = c.Value
+					} else if c, err := r.Cookie("access_token"); err == nil && c != nil {
 						tokenStr = c.Value
 					}
 				}

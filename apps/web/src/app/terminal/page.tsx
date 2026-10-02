@@ -21,7 +21,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, TerminalInfo } from '@/lib/api';
+import { apiFetch, getStoredToken, TerminalInfo } from '@/lib/api';
 
 type TerminalThemeMode = 'white' | 'dark' | 'matrix';
 
@@ -143,138 +143,166 @@ export default function TerminalPage() {
       xtermInstanceRef.current.dispose();
       xtermInstanceRef.current = null;
     }
-    terminalContainerRef.current.innerHTML = '';
-
-    // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
-    const { Terminal } = await import('@xterm/xterm');
-    const { FitAddon } = await import('@xterm/addon-fit');
-
-    const fitAddon = new FitAddon();
-    fitAddonRef.current = fitAddon;
-
-    const term = new Terminal({
-      cursorBlink: true,
-      cursorStyle: 'bar',
-      fontSize: fontSize,
-      fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      theme: TERMINAL_THEMES[themeMode],
-      convertEol: true,
-      allowProposedApi: true,
-      scrollback: 10000,
-    });
-
-    term.loadAddon(fitAddon);
-    term.open(terminalContainerRef.current);
-    xtermInstanceRef.current = term;
-
     try {
-      fitAddon.fit();
-    } catch {
-      // Container sizing grace period
-    }
+      // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
+      const xtermMod: any = await import('@xterm/xterm');
+      const TerminalClass = xtermMod.Terminal || (xtermMod.default && (xtermMod.default.Terminal || xtermMod.default));
 
-    setConnectionStatus('connecting');
+      const fitMod: any = await import('@xterm/addon-fit');
+      const FitAddonClass = fitMod.FitAddon || (fitMod.default && (fitMod.default.FitAddon || fitMod.default));
 
-    // Resolve WebSocket connection endpoint and authentication token
-    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
-    const wsProtocol = isHttps ? 'wss:' : 'ws:';
-    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
-    
-    let token = '';
-    if (typeof window !== 'undefined') {
-      token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
-      if (!token) {
-        const match = document.cookie.match(/access_token=([^;]+)/);
-        if (match) token = match[1];
+      if (!TerminalClass || !FitAddonClass) {
+        throw new Error('Terminal or FitAddon module could not be initialized');
       }
-    }
 
-    const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows}&cols=${term.cols}`;
+      const fitAddon = new FitAddonClass();
+      fitAddonRef.current = fitAddon;
 
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
-    wsRef.current = ws;
+      const term = new TerminalClass({
+        cursorBlink: true,
+        cursorStyle: 'bar',
+        fontSize: fontSize,
+        fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        theme: TERMINAL_THEMES[themeMode],
+        convertEol: true,
+        allowProposedApi: true,
+        scrollback: 10000,
+      });
 
-    ws.onopen = () => {
-      setConnectionStatus('connected');
+      term.loadAddon(fitAddon);
+      term.open(terminalContainerRef.current);
+      xtermInstanceRef.current = term;
+
       try {
         fitAddon.fit();
-        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
-      } catch (err) {
-        console.warn('Failed initial terminal resize:', err);
-      }
-      term.focus();
-    };
-
-    ws.onmessage = (event: MessageEvent) => {
-      if (typeof event.data === 'string') {
-        if (event.data.startsWith('{"type":"exit"')) {
-          try {
-            const parsed = JSON.parse(event.data);
-            term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${parsed.exit_code || 0}]\x1b[0m\r\n`);
-          } catch {
-            term.write('\r\n\x1b[33m[Hostvra: Shell session ended]\x1b[0m\r\n');
-          }
-          setConnectionStatus('disconnected');
-          return;
-        }
-        term.write(event.data);
-      } else if (event.data instanceof ArrayBuffer) {
-        term.write(new Uint8Array(event.data));
-      }
-    };
-
-    ws.onerror = (err) => {
-      console.error('Terminal WebSocket error:', err);
-      setConnectionStatus('disconnected');
-    };
-
-    ws.onclose = () => {
-      setConnectionStatus('disconnected');
-    };
-
-    // Forward terminal input directly to PTY stdin
-    term.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(data);
-      }
-    });
-
-    // Notify backend PTY of window dimension changes
-    term.onResize(({ cols, rows }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-      }
-    });
-
-    // Handle Copy / Paste keystrokes seamlessly
-    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      // Ctrl+Shift+C or Cmd+C when text is selected -> Copy selection
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection());
-        return false;
-      }
-      // Ctrl+Shift+V or Cmd+V -> Paste from clipboard
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        navigator.clipboard.readText().then((text) => {
-          if (text && ws.readyState === WebSocket.OPEN) {
-            ws.send(text);
-          }
-        });
-        return false;
-      }
-      return true;
-    });
-
-    // Focus terminal
-    setTimeout(() => {
-      try {
-        fitAddon.fit();
-        term.focus();
       } catch {
-        // ignore
+        // Container sizing grace period
       }
-    }, 150);
+
+      term.write('\x1b[1;34m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY)...\r\n');
+      setConnectionStatus('connecting');
+
+      // Resolve WebSocket connection endpoint and authentication token
+      const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+      const wsProtocol = isHttps ? 'wss:' : 'ws:';
+      let host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
+      if (typeof window !== 'undefined' && window.location.port === '3000') {
+        host = `${window.location.hostname}:8080`;
+      }
+
+      let token = getStoredToken() || '';
+      if (!token && typeof window !== 'undefined') {
+        token = localStorage.getItem('hostvra_access_token') || localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+        if (!token) {
+          const match = document.cookie.match(/(?:hostvra_token|access_token|token)=([^;]+)/);
+          if (match) token = decodeURIComponent(match[1]);
+        }
+      }
+
+      const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}`;
+
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnectionStatus('connected');
+        try {
+          fitAddon.fit();
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        } catch (err) {
+          console.warn('Failed initial terminal resize:', err);
+        }
+        term.focus();
+      };
+
+      ws.onmessage = (event: MessageEvent) => {
+        if (typeof event.data === 'string') {
+          if (event.data.startsWith('{"type":"exit"')) {
+            try {
+              const parsed = JSON.parse(event.data);
+              term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${parsed.exit_code || 0}]\x1b[0m\r\n`);
+            } catch {
+              term.write('\r\n\x1b[33m[Hostvra: Shell session ended]\x1b[0m\r\n');
+            }
+            setConnectionStatus('disconnected');
+            return;
+          }
+          term.write(event.data);
+        } else if (event.data instanceof ArrayBuffer) {
+          term.write(new Uint8Array(event.data));
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('Terminal WebSocket error:', err);
+        term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
+        setConnectionStatus('disconnected');
+      };
+
+      ws.onclose = (event) => {
+        if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
+          term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
+        } else {
+          term.write('\r\n\x1b[33m[Hostvra: Terminal session closed]\x1b[0m\r\n');
+        }
+        setConnectionStatus('disconnected');
+      };
+
+      // Forward terminal input directly to PTY stdin
+      term.onData((data: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
+      });
+
+      // Notify backend PTY of window dimension changes
+      term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+        }
+      });
+
+      // Handle Copy / Paste keystrokes seamlessly
+      term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        // Ctrl+Shift+C or Cmd+C when text is selected -> Copy selection
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection());
+          return false;
+        }
+        // Ctrl+Shift+V or Cmd+V -> Paste from clipboard
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+          navigator.clipboard.readText().then((text) => {
+            if (text && ws.readyState === WebSocket.OPEN) {
+              ws.send(text);
+            }
+          });
+          return false;
+        }
+        return true;
+      });
+
+      // Focus terminal
+      setTimeout(() => {
+        try {
+          fitAddon.fit();
+          term.focus();
+        } catch {
+          // ignore
+        }
+      }, 150);
+    } catch (err: any) {
+      console.error('Failed to initialize terminal emulator:', err);
+      setConnectionStatus('disconnected');
+      if (terminalContainerRef.current) {
+        terminalContainerRef.current.innerHTML = `
+          <div class="p-6 text-center text-rose-500 font-mono text-sm">
+            <p class="font-bold mb-2">Failed to initialize terminal emulator</p>
+            <p class="text-xs text-slate-500">${err?.message || 'Unknown error'}</p>
+          </div>
+        `;
+      }
+    }
   }, [fontSize, themeMode]);
 
   // Initial terminal mount
