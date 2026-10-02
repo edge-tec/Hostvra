@@ -101,9 +101,18 @@ const TERMINAL_THEMES = {
   },
 };
 
+export type TerminalLifecycleState =
+  | 'initializing'
+  | 'connecting'
+  | 'allocating'
+  | 'ready'
+  | 'disconnected'
+  | 'error'
+  | 'closed';
+
 export default function TerminalPage() {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [terminalState, setTerminalState] = useState<TerminalLifecycleState>('initializing');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [themeMode, setThemeMode] = useState<TerminalThemeMode>('dark');
   const [fontSize, setFontSize] = useState<number>(14);
@@ -140,16 +149,23 @@ export default function TerminalPage() {
 
     // Cleanup previous instance if any
     if (wsRef.current) {
-      wsRef.current.close();
+      try {
+        wsRef.current.close();
+      } catch {}
       wsRef.current = null;
     }
     if (xtermInstanceRef.current) {
-      xtermInstanceRef.current.dispose();
+      try {
+        xtermInstanceRef.current.dispose();
+      } catch {}
       xtermInstanceRef.current = null;
     }
     if (terminalContainerRef.current) {
       terminalContainerRef.current.innerHTML = '';
     }
+
+    setTerminalState('initializing');
+
     try {
       // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
       const xtermMod: any = await import('@xterm/xterm');
@@ -181,22 +197,28 @@ export default function TerminalPage() {
       term.open(terminalContainerRef.current);
       xtermInstanceRef.current = term;
 
-      // Small delay for DOM layout before fit
+      // Small delay for DOM layout before initial fit
       setTimeout(() => {
         try {
           fitAddon.fit();
         } catch {
           // Container sizing grace period
         }
-      }, 100);
+      }, 50);
 
       // Resolve WebSocket connection endpoint and authentication token
       const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
       const wsProtocol = isHttps ? 'wss:' : 'ws:';
-      let host = typeof window !== 'undefined' ? window.location.host : 'localhost';
-      // If accessed directly via port 3000, strip port 3000 to connect through Nginx standard port 80/443
-      if (typeof window !== 'undefined' && window.location.port === '3000') {
-        host = window.location.hostname;
+      let host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
+
+      if (typeof window !== 'undefined') {
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        if (isLocal) {
+          host = `${window.location.hostname}:8080`;
+        } else if (window.location.port === '3000') {
+          // If remote access on port 3000, strip port 3000 so WebSocket connects through standard Nginx reverse proxy on 80/443
+          host = window.location.hostname;
+        }
       }
 
       let token = getStoredToken() || '';
@@ -208,11 +230,17 @@ export default function TerminalPage() {
         }
       }
 
+      if (!token) {
+        setTerminalState('error');
+        term.write('\x1b[1;31m[Hostvra: Authentication token not found. Please log in to Hostvra.]\x1b[0m\r\n');
+        return;
+      }
+
       const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}`;
 
       term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
       term.write(`\x1b[90mConnecting to ${wsProtocol}//${host}/api/v1/terminal/ws ...\x1b[0m\r\n`);
-      setConnectionStatus('connecting');
+      setTerminalState('connecting');
 
       const ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
@@ -221,38 +249,63 @@ export default function TerminalPage() {
       const connectTimeout = setTimeout(() => {
         if (ws.readyState === WebSocket.CONNECTING) {
           term.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
-          term.write('\x1b[90mCheck if hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
+          term.write('\x1b[90mEnsure hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
+          setTerminalState('error');
         }
       }, 7000);
 
       ws.onopen = () => {
-        clearTimeout(connectTimeout);
-        setConnectionStatus('connected');
-        term.write('\x1b[1;32m[Hostvra]\x1b[0m Connected! Spawning interactive shell session...\r\n\r\n');
+        setTerminalState('allocating');
+        term.write('\x1b[90mWebSocket handshake verified. Allocating Linux PTY session...\x1b[0m\r\n');
         try {
           fitAddon.fit();
           ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         } catch (err) {
           console.warn('Failed initial terminal resize:', err);
         }
-        term.focus();
       };
 
-      ws.onmessage = (event: MessageEvent) => {
+      ws.onmessage = async (event: MessageEvent) => {
         if (typeof event.data === 'string') {
-          if (event.data.startsWith('{"type":"exit"')) {
+          if (event.data.startsWith('{')) {
             try {
-              const parsed = JSON.parse(event.data);
-              term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${parsed.exit_code || 0}]\x1b[0m\r\n`);
+              const msg = JSON.parse(event.data);
+              if (msg.type === 'ready') {
+                clearTimeout(connectTimeout);
+                setTerminalState('ready');
+                term.write('\x1b[1;32m[Hostvra]\x1b[0m Interactive shell ready.\r\n\r\n');
+                try {
+                  fitAddon.fit();
+                  ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+                } catch {}
+                term.focus();
+                return;
+              }
+              if (msg.type === 'error') {
+                clearTimeout(connectTimeout);
+                setTerminalState('error');
+                term.write(`\r\n\x1b[1;31m[Hostvra Error: ${msg.message || 'PTY allocation failed'}]\x1b[0m\r\n`);
+                return;
+              }
+              if (msg.type === 'exit') {
+                clearTimeout(connectTimeout);
+                setTerminalState('closed');
+                term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${msg.exit_code || 0}]\x1b[0m\r\n`);
+                return;
+              }
+              if (msg.type === 'pong') {
+                return;
+              }
             } catch {
-              term.write('\r\n\x1b[33m[Hostvra: Shell session ended]\x1b[0m\r\n');
+              // Not a control message, write raw string
             }
-            setConnectionStatus('disconnected');
-            return;
           }
           term.write(event.data);
         } else if (event.data instanceof ArrayBuffer) {
           term.write(new Uint8Array(event.data));
+        } else if (event.data instanceof Blob) {
+          const buf = await event.data.arrayBuffer();
+          term.write(new Uint8Array(buf));
         }
       };
 
@@ -260,21 +313,22 @@ export default function TerminalPage() {
         clearTimeout(connectTimeout);
         console.error('Terminal WebSocket error:', err);
         term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
-        term.write('\x1b[90mMake sure hostvra-api is running with latest binary: systemctl restart hostvra-api\x1b[0m\r\n');
-        setConnectionStatus('disconnected');
+        term.write('\x1b[90mEnsure hostvra-api is active: systemctl restart hostvra-api\x1b[0m\r\n');
+        setTerminalState('error');
       };
 
       ws.onclose = (event) => {
         clearTimeout(connectTimeout);
         if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
           term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
+          setTerminalState('error');
         } else {
+          setTerminalState((prev) => (prev === 'closed' || prev === 'error' ? prev : 'disconnected'));
           term.write('\r\n\x1b[33m[Hostvra: Terminal session closed]\x1b[0m\r\n');
         }
-        setConnectionStatus('disconnected');
       };
 
-      // Forward terminal input directly to PTY stdin
+      // Forward terminal keyboard input directly to PTY stdin
       term.onData((data: string) => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(data);
@@ -318,7 +372,7 @@ export default function TerminalPage() {
       }, 150);
     } catch (err: any) {
       console.error('Failed to initialize terminal emulator:', err);
-      setConnectionStatus('disconnected');
+      setTerminalState('error');
       if (terminalContainerRef.current) {
         terminalContainerRef.current.innerHTML = `
           <div class="p-6 text-center text-rose-500 font-mono text-sm">
@@ -404,6 +458,70 @@ export default function TerminalPage() {
     }
   };
 
+  const getStatusBadge = () => {
+    switch (terminalState) {
+      case 'ready':
+        return {
+          label: 'Connected (Live PTY)',
+          badgeClass:
+            'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800',
+          dotClass: 'bg-emerald-500',
+          headerText: 'LIVE PTY',
+        };
+      case 'allocating':
+        return {
+          label: 'Allocating PTY...',
+          badgeClass:
+            'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 animate-pulse',
+          dotClass: 'bg-amber-500',
+          headerText: 'ALLOCATING PTY',
+        };
+      case 'connecting':
+        return {
+          label: 'Connecting to API...',
+          badgeClass:
+            'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 animate-pulse',
+          dotClass: 'bg-amber-500',
+          headerText: 'CONNECTING...',
+        };
+      case 'initializing':
+        return {
+          label: 'Starting terminal...',
+          badgeClass:
+            'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800 animate-pulse',
+          dotClass: 'bg-blue-500',
+          headerText: 'STARTING...',
+        };
+      case 'error':
+        return {
+          label: 'Connection Error',
+          badgeClass:
+            'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800',
+          dotClass: 'bg-rose-500',
+          headerText: 'ERROR',
+        };
+      case 'closed':
+        return {
+          label: 'Session Closed',
+          badgeClass:
+            'bg-slate-100 text-slate-700 border border-slate-300 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
+          dotClass: 'bg-slate-400',
+          headerText: 'CLOSED',
+        };
+      case 'disconnected':
+      default:
+        return {
+          label: 'Disconnected',
+          badgeClass:
+            'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800',
+          dotClass: 'bg-rose-500',
+          headerText: 'OFFLINE',
+        };
+    }
+  };
+
+  const statusBadge = getStatusBadge();
+
   return (
     <DashboardShell>
       <div className={`space-y-4 ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-slate-950 p-4' : 'pb-16'}`}>
@@ -416,32 +534,12 @@ export default function TerminalPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-bold text-slate-900 dark:text-white">Web Terminal</h1>
-                {/* Real-time Connection Status Badge */}
+                {/* Real-time Dynamic Connection Status Badge */}
                 <div
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                    connectionStatus === 'connected'
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
-                      : connectionStatus === 'connecting'
-                      ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 animate-pulse'
-                      : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
-                  }`}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusBadge.badgeClass}`}
                 >
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      connectionStatus === 'connected'
-                        ? 'bg-emerald-500'
-                        : connectionStatus === 'connecting'
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
-                    }`}
-                  />
-                  <span>
-                    {connectionStatus === 'connected'
-                      ? 'Connected (PTY/TTY)'
-                      : connectionStatus === 'connecting'
-                      ? 'Allocating PTY...'
-                      : 'Disconnected'}
-                  </span>
+                  <span className={`w-2 h-2 rounded-full ${statusBadge.dotClass}`} />
+                  <span>{statusBadge.label}</span>
                 </div>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -600,16 +698,8 @@ export default function TerminalPage() {
               </span>
             </div>
             <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  connectionStatus === 'connected'
-                    ? 'bg-emerald-500'
-                    : connectionStatus === 'connecting'
-                    ? 'bg-amber-500 animate-pulse'
-                    : 'bg-rose-500'
-                }`}
-              />
-              <span>{connectionStatus === 'connected' ? 'LIVE PTY' : connectionStatus === 'connecting' ? 'ALLOCATING...' : 'OFFLINE'}</span>
+              <span className={`w-2 h-2 rounded-full ${statusBadge.dotClass}`} />
+              <span>{statusBadge.headerText}</span>
             </div>
           </div>
 
@@ -620,16 +710,30 @@ export default function TerminalPage() {
             style={{ height: 'calc(100% - 40px)', minHeight: '350px' }}
           />
 
-          {/* Connection Overlay when disconnected */}
-          {connectionStatus === 'disconnected' && (
+          {/* Connection Overlay when disconnected, closed, or error */}
+          {(terminalState === 'disconnected' || terminalState === 'closed' || terminalState === 'error') && (
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-20">
               <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl text-center max-w-sm">
-                <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-500 mx-auto flex items-center justify-center mb-3">
+                <div className={`w-12 h-12 rounded-full mx-auto flex items-center justify-center mb-3 ${
+                  terminalState === 'closed'
+                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                    : 'bg-rose-50 dark:bg-rose-950/50 text-rose-500'
+                }`}>
                   <TerminalIcon className="w-6 h-6" />
                 </div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">Terminal Session Disconnected</h3>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">
+                  {terminalState === 'closed'
+                    ? 'Terminal Session Ended'
+                    : terminalState === 'error'
+                    ? 'Connection Error'
+                    : 'Terminal Disconnected'}
+                </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                  The interactive shell session has exited or connection was closed.
+                  {terminalState === 'closed'
+                    ? 'The interactive shell process has exited.'
+                    : terminalState === 'error'
+                    ? 'Unable to establish WebSocket PTY connection to Hostvra API.'
+                    : 'The interactive shell session has exited or connection was closed.'}
                 </p>
                 <button
                   type="button"

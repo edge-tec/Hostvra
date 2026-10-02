@@ -134,6 +134,16 @@ func TestTerminal_WebSocket_PTY_Interactive(t *testing.T) {
 	}
 	defer ws.Close()
 
+	// Assert immediate "ready" event is sent on PTY allocation
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	msgType, firstMsg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read initial message from websocket: %v", err)
+	}
+	if msgType != websocket.TextMessage || !strings.Contains(string(firstMsg), `"type":"ready"`) {
+		t.Fatalf("expected first message to be ready event, got: %s", string(firstMsg))
+	}
+
 	// Helper to read output from websocket until expected pattern or timeout
 	readUntil := func(target string, timeout time.Duration) (string, bool) {
 		deadline := time.Now().Add(timeout)

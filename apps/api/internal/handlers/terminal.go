@@ -103,22 +103,44 @@ func (s *safeWSConn) Close() error {
 	return s.conn.Close()
 }
 
+func sendWSError(conn *safeWSConn, code, msg string) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type":    "error",
+		"code":    code,
+		"message": msg,
+	})
+	_ = conn.WriteMessage(websocket.TextMessage, payload)
+}
+
 // HandleWebSocket handles real interactive full-duplex PTY terminal sessions
 func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	// 1. Authenticate session & enforce strict role/plan quota checks BEFORE upgrade
 	claims, ok := auth.GetClaims(r.Context())
 	if !ok || claims == nil {
-		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		h.audit.Log(r.Context(), r, "terminal.unauthorized", "server", "localhost", "failure", "Authentication required for terminal access", nil)
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required to access terminal", nil, "")
 		return
 	}
 
 	if claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
 		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+			h.audit.Log(r.Context(), r, "terminal.forbidden", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
+				"user_id": claims.UserID.String(),
+			})
 			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
 			return
 		}
 	}
 
-	// Determine starting working directory
+	// 2. Upgrade HTTP to WebSocket first to establish duplex channel with browser
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		h.audit.Log(r.Context(), r, "terminal.websocket.upgrade_failed", "server", "localhost", "failure", "WebSocket upgrade failed: "+err.Error(), nil)
+		return
+	}
+	safeConn := &safeWSConn{conn: rawConn}
+
+	// 3. Determine starting working directory
 	cwd := r.URL.Query().Get("cwd")
 	if cwd == "" {
 		cwd = "/root/Hostvra"
@@ -137,14 +159,15 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// Determine available shell
+	// 4. Determine available shell
 	shell := "/bin/bash"
 	if _, err := os.Stat("/bin/bash"); os.IsNotExist(err) {
 		shell = "/bin/sh"
 	}
 
-	// Launch interactive login shell
-	cmd := exec.Command(shell, "-l")
+	// 5. Launch interactive login shell with both -l (login) and -i (interactive)
+	// This guarantees bash sets up readline, prints prompt (PS1) immediately, and enables job control
+	cmd := exec.Command(shell, "-l", "-i")
 	cmd.Dir = cwd
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",
@@ -167,24 +190,19 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// 6. Allocate real Linux PTY attached to interactive shell process
 	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "PTY_FAILED", "Failed to allocate pseudo-terminal: "+err.Error(), nil, "")
+		h.audit.Log(r.Context(), r, "terminal.pty.failed", "server", "localhost", "failure", "Failed to allocate pseudo-terminal: "+err.Error(), map[string]interface{}{
+			"user_id": claims.UserID.String(),
+			"error":   err.Error(),
+		})
+		sendWSError(safeConn, "PTY_FAILED", "Failed to allocate pseudo-terminal: "+err.Error())
+		_ = safeConn.Close()
 		return
 	}
 
-	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
-	if err != nil {
-		_ = ptyFile.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		return
-	}
-
-	safeConn := &safeWSConn{conn: rawConn}
-
-	sessionID := fmt.Sprintf("term_%s_%d", claims.UserID.String()[:8], time.Now().Unix())
+	sessionID := fmt.Sprintf("term_%s_%d", claims.UserID.String()[:8], time.Now().UnixNano())
 	h.audit.Log(r.Context(), r, "terminal.session.created", "server", "localhost", "success", "Interactive PTY terminal session established", map[string]interface{}{
 		"session_id": sessionID,
 		"user_id":    claims.UserID.String(),
@@ -194,16 +212,43 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		"cols":       cols,
 	})
 
+	// 7. Send immediate ready event so frontend immediately clears any loading indicators
+	readyPayload, _ := json.Marshal(map[string]interface{}{
+		"type":       "ready",
+		"session_id": sessionID,
+		"cols":       cols,
+		"rows":       rows,
+		"shell":      shell,
+		"cwd":        cwd,
+	})
+	_ = safeConn.WriteMessage(websocket.TextMessage, readyPayload)
+
 	var closeOnce sync.Once
 	cleanup := func() {
 		closeOnce.Do(func() {
 			_ = ptyFile.Close()
 			if cmd.Process != nil {
-				// Kill the shell process group cleanly
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
-				time.Sleep(50 * time.Millisecond)
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-				_ = cmd.Wait()
+				pid := cmd.Process.Pid
+				// Send SIGHUP to the process group to notify foreground process
+				_ = syscall.Kill(-pid, syscall.SIGHUP)
+
+				// Asynchronously wait for exit with timeout to prevent goroutine leak or hang
+				done := make(chan error, 1)
+				go func() {
+					done <- cmd.Wait()
+				}()
+
+				select {
+				case <-done:
+				case <-time.After(200 * time.Millisecond):
+					_ = syscall.Kill(-pid, syscall.SIGTERM)
+					select {
+					case <-done:
+					case <-time.After(200 * time.Millisecond):
+						_ = syscall.Kill(-pid, syscall.SIGKILL)
+						<-done
+					}
+				}
 			}
 			_ = safeConn.Close()
 
