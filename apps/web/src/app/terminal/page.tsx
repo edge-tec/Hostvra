@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Terminal as TerminalIcon,
   Trash2,
@@ -12,1033 +12,631 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
-  X,
-  Minus,
-  Plus,
+  RefreshCw,
+  Sun,
+  Moon,
+  Zap,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, TerminalInfo, TerminalExecutionResult } from '@/lib/api';
+import { apiFetch, TerminalInfo } from '@/lib/api';
 
-interface TerminalEntry {
-  id: string;
-  command: string;
-  cwd: string;
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  durationMs: number;
-  timestamp: string;
-  aborted?: boolean;
-}
+type TerminalThemeMode = 'white' | 'dark' | 'matrix';
 
-// Convert ANSI escape codes to styled React elements with light/dark awareness
-function renderAnsi(text: string, isDark: boolean): React.ReactNode {
-  if (!text) return null;
-
-  // Match ANSI escape codes like \u001b[32m or \033[1;34m
-  const parts = text.split(/(\u001b\[[0-9;]*m)/g);
-  if (parts.length === 1) return text;
-
-  const colorMap: Record<string, string> = isDark
-    ? {
-        '0': '', // reset
-        '1': 'font-bold',
-        '2': 'opacity-60',
-        '3': 'italic',
-        '4': 'underline',
-        // Standard Foreground (Dark)
-        '30': 'text-slate-400',
-        '31': 'text-rose-400 font-semibold',
-        '32': 'text-emerald-400 font-semibold',
-        '33': 'text-amber-400 font-semibold',
-        '34': 'text-sky-400 font-semibold',
-        '35': 'text-fuchsia-400 font-semibold',
-        '36': 'text-cyan-400 font-semibold',
-        '37': 'text-slate-200',
-        // High Intensity (Dark)
-        '90': 'text-slate-500',
-        '91': 'text-red-400 font-bold',
-        '92': 'text-emerald-300 font-bold',
-        '93': 'text-yellow-300 font-bold',
-        '94': 'text-blue-300 font-bold',
-        '95': 'text-pink-400 font-bold',
-        '96': 'text-cyan-300 font-bold',
-        '97': 'text-white font-bold',
-      }
-    : {
-        '0': '', // reset
-        '1': 'font-bold',
-        '2': 'opacity-70',
-        '3': 'italic',
-        '4': 'underline',
-        // Standard Foreground (Light/White theme)
-        '30': 'text-slate-900',
-        '31': 'text-rose-700 font-semibold',
-        '32': 'text-emerald-700 font-semibold',
-        '33': 'text-amber-700 font-semibold',
-        '34': 'text-blue-700 font-semibold',
-        '35': 'text-purple-700 font-semibold',
-        '36': 'text-teal-700 font-semibold',
-        '37': 'text-slate-700', // Never pure white on white background!
-        // High Intensity (Light/White theme)
-        '90': 'text-slate-500',
-        '91': 'text-red-700 font-bold',
-        '92': 'text-emerald-700 font-bold',
-        '93': 'text-amber-800 font-bold',
-        '94': 'text-blue-800 font-bold',
-        '95': 'text-purple-800 font-bold',
-        '96': 'text-teal-800 font-bold',
-        '97': 'text-slate-950 font-bold',
-      };
-
-  let activeStyles = new Set<string>();
-  const elements: React.ReactNode[] = [];
-
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    const match = part.match(/^\u001b\[([0-9;]*m)$/);
-    if (match) {
-      const codes = (match[1] || '0').split(';');
-      for (const code of codes) {
-        if (code === '0' || code === '') {
-          activeStyles.clear();
-        } else if (colorMap[code]) {
-          activeStyles.add(colorMap[code]);
-        }
-      }
-    } else if (part) {
-      const className = Array.from(activeStyles).join(' ');
-      elements.push(
-        className ? (
-          <span key={i} className={className}>
-            {part}
-          </span>
-        ) : (
-          part
-        )
-      );
-    }
-  }
-
-  return elements;
-}
-
-// Shorten /root or /home/user paths to ~ like real Unix shells
-function formatPath(path: string): string {
-  if (!path) return '~';
-  if (path === '/root') return '~';
-  if (path.startsWith('/root/')) return '~/' + path.slice(6);
-  if (path.startsWith('/home/')) {
-    const parts = path.split('/');
-    if (parts.length >= 3) {
-      return '~' + path.slice(parts.slice(0, 3).join('/').length);
-    }
-  }
-  return path;
-}
-
-// Robust clipboard copy that works on both HTTPS and plain HTTP IP addresses
-async function copyToClipboard(text: string): Promise<boolean> {
-  if (!text) return false;
-
-  // Try modern navigator.clipboard first (if available and secure context)
-  if (typeof window !== 'undefined' && window.isSecureContext && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // fallback to execCommand below
-    }
-  }
-
-  // Reliable fallback for non-secure HTTP connections (e.g. http://13.140.157.238:3000)
-  try {
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    textArea.setAttribute('readonly', '');
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textArea);
-    return successful;
-  } catch (err) {
-    console.error('Fallback clipboard copy failed:', err);
-    return false;
-  }
-}
-
-type TerminalTheme = 'white' | 'macos' | 'ubuntu' | 'matrix';
+// Define terminal color themes at module scope
+const TERMINAL_THEMES = {
+  white: {
+    background: '#ffffff',
+    foreground: '#0f172a',
+    cursor: '#0f172a',
+    cursorAccent: '#ffffff',
+    selectionBackground: '#bfdbfe',
+    selectionForeground: '#1e3a8a',
+    black: '#0f172a',
+    red: '#dc2626',
+    green: '#16a34a',
+    yellow: '#d97706',
+    blue: '#2563eb',
+    magenta: '#9333ea',
+    cyan: '#0891b2',
+    white: '#f1f5f9',
+    brightBlack: '#64748b',
+    brightRed: '#ef4444',
+    brightGreen: '#22c55e',
+    brightYellow: '#f59e0b',
+    brightBlue: '#3b82f6',
+    brightMagenta: '#a855f7',
+    brightCyan: '#06b6d4',
+    brightWhite: '#000000',
+  },
+  dark: {
+    background: '#090d16',
+    foreground: '#f8fafc',
+    cursor: '#38bdf8',
+    cursorAccent: '#090d16',
+    selectionBackground: '#1e293b',
+    selectionForeground: '#ffffff',
+    black: '#1e293b',
+    red: '#f87171',
+    green: '#4ade80',
+    yellow: '#fbbf24',
+    blue: '#60a5fa',
+    magenta: '#c084fc',
+    cyan: '#38bdf8',
+    white: '#f8fafc',
+    brightBlack: '#475569',
+    brightRed: '#ef4444',
+    brightGreen: '#22c55e',
+    brightYellow: '#f59e0b',
+    brightBlue: '#3b82f6',
+    brightMagenta: '#a855f7',
+    brightCyan: '#06b6d4',
+    brightWhite: '#ffffff',
+  },
+  matrix: {
+    background: '#040705',
+    foreground: '#00ff66',
+    cursor: '#00ff66',
+    cursorAccent: '#040705',
+    selectionBackground: '#003311',
+    selectionForeground: '#00ff66',
+    black: '#040705',
+    red: '#ff3333',
+    green: '#00ff66',
+    yellow: '#ffcc00',
+    blue: '#3399ff',
+    magenta: '#cc33ff',
+    cyan: '#00ffff',
+    white: '#ffffff',
+    brightBlack: '#1a3320',
+    brightRed: '#ff6666',
+    brightGreen: '#33ff88',
+    brightYellow: '#ffdd33',
+    brightBlue: '#66b2ff',
+    brightMagenta: '#dd66ff',
+    brightCyan: '#66ffff',
+    brightWhite: '#ffffff',
+  },
+};
 
 export default function TerminalPage() {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
-  const [cwd, setCwd] = useState<string>('/root/Hostvra');
-  const [command, setCommand] = useState('');
-  const [history, setHistory] = useState<TerminalEntry[]>([]);
-  const [commandHistory, setCommandHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1);
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [copiedAll, setCopiedAll] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
-  // Default to pure white background + black text as requested!
-  const [theme, setTheme] = useState<TerminalTheme>('white');
-  const [fontSize, setFontSize] = useState<number>(13);
+  const [themeMode, setThemeMode] = useState<TerminalThemeMode>('white');
+  const [fontSize, setFontSize] = useState<number>(14);
+  const [copiedNotification, setCopiedNotification] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
   const terminalContainerRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const xtermInstanceRef = useRef<any>(null);
+  const fitAddonRef = useRef<any>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
-  // Fetch initial terminal environment metadata
+  // Fetch system environment metadata
   useEffect(() => {
     async function loadInfo() {
-      const res = await apiFetch<TerminalInfo>('/api/v1/terminal/info');
-      if (res.success && res.data) {
-        setInfo(res.data);
-        if (res.data.default_cwd) {
-          setCwd(res.data.default_cwd);
+      try {
+        const res = await apiFetch<TerminalInfo>('/api/v1/terminal/info');
+        if (res.success && res.data) {
+          setInfo(res.data);
         }
+      } catch (err) {
+        console.warn('Could not load terminal metadata:', err);
       }
     }
     loadInfo();
-
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const initialCmd = params.get('cmd');
-      if (initialCmd) {
-        setCommand(initialCmd);
-      }
-    }
   }, []);
 
-  // Auto-scroll terminal to bottom when new entries arrive
-  useEffect(() => {
-    if (autoScroll && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  // Initialize xterm and WebSocket connection
+  const initTerminal = useCallback(async () => {
+    if (!terminalContainerRef.current) return;
+
+    // Cleanup previous instance if any
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
-  }, [history, isExecuting, autoScroll, command]);
-
-  // Keep focus on the terminal prompt automatically
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, [isExecuting, history]);
-
-  const handleCancel = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      abortControllerRef.current = null;
+    if (xtermInstanceRef.current) {
+      xtermInstanceRef.current.dispose();
+      xtermInstanceRef.current = null;
     }
-    setIsExecuting(false);
-    setHistory((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(),
-        command: command || (commandHistory[commandHistory.length - 1] || ''),
-        cwd,
-        stdout: '',
-        stderr: '^C',
-        exitCode: 130,
-        durationMs: 0,
-        timestamp: new Date().toLocaleTimeString(),
-        aborted: true,
-      },
-    ]);
-    setCommand('');
-  };
+    terminalContainerRef.current.innerHTML = '';
 
-  // Helper to execute a single command line against the backend
-  const executeSingleCommand = async (rawCmd: string, execCwd: string): Promise<string> => {
-    const startTs = new Date().toLocaleTimeString();
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
+    // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
+    const { Terminal } = await import('@xterm/xterm');
+    const { FitAddon } = await import('@xterm/addon-fit');
+
+    const fitAddon = new FitAddon();
+    fitAddonRef.current = fitAddon;
+
+    const term = new Terminal({
+      cursorBlink: true,
+      cursorStyle: 'bar',
+      fontSize: fontSize,
+      fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      theme: TERMINAL_THEMES[themeMode],
+      convertEol: true,
+      allowProposedApi: true,
+      scrollback: 10000,
+    });
+
+    term.loadAddon(fitAddon);
+    term.open(terminalContainerRef.current);
+    xtermInstanceRef.current = term;
 
     try {
-      const res = await apiFetch<TerminalExecutionResult>('/api/v1/terminal/execute', {
-        method: 'POST',
-        signal: controller.signal,
-        body: JSON.stringify({
-          command: rawCmd,
-          cwd: execCwd,
-        }),
-      });
+      fitAddon.fit();
+    } catch {
+      // Container sizing grace period
+    }
 
-      if (res.success && res.data) {
-        const result = res.data;
-        const resultingCwd = result.cwd || execCwd;
-        setHistory((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(),
-            command: rawCmd,
-            cwd: resultingCwd,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            exitCode: result.exit_code,
-            durationMs: result.duration_ms,
-            timestamp: startTs,
-          },
-        ]);
-        return resultingCwd;
-      } else {
-        setHistory((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(),
-            command: rawCmd,
-            cwd: execCwd,
-            stdout: '',
-            stderr: res.error?.message || 'bash: command failed or rejected by server API',
-            exitCode: 1,
-            durationMs: 0,
-            timestamp: startTs,
-          },
-        ]);
-        return execCwd;
+    setConnectionStatus('connecting');
+
+    // Resolve WebSocket connection endpoint and authentication token
+    const isHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const wsProtocol = isHttps ? 'wss:' : 'ws:';
+    const host = typeof window !== 'undefined' ? window.location.host : 'localhost:8080';
+    
+    let token = '';
+    if (typeof window !== 'undefined') {
+      token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+      if (!token) {
+        const match = document.cookie.match(/access_token=([^;]+)/);
+        if (match) token = match[1];
       }
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.message?.includes('aborted')) {
-        return execCwd;
+    }
+
+    const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows}&cols=${term.cols}`;
+
+    const ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setConnectionStatus('connected');
+      try {
+        fitAddon.fit();
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      } catch (err) {
+        console.warn('Failed initial terminal resize:', err);
       }
-      let errMsg = err.message || 'Network communication error';
-      if (
-        errMsg === 'Load failed' ||
-        errMsg.includes('Failed to fetch') ||
-        errMsg.includes('NetworkError')
-      ) {
-        errMsg =
-          'Connection reset or closed by host server. If you executed a service restart (e.g. systemctl restart hostvra-web), the server restarted. Please refresh your browser page.';
+      term.focus();
+    };
+
+    ws.onmessage = (event: MessageEvent) => {
+      if (typeof event.data === 'string') {
+        if (event.data.startsWith('{"type":"exit"')) {
+          try {
+            const parsed = JSON.parse(event.data);
+            term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${parsed.exit_code || 0}]\x1b[0m\r\n`);
+          } catch {
+            term.write('\r\n\x1b[33m[Hostvra: Shell session ended]\x1b[0m\r\n');
+          }
+          setConnectionStatus('disconnected');
+          return;
+        }
+        term.write(event.data);
+      } else if (event.data instanceof ArrayBuffer) {
+        term.write(new Uint8Array(event.data));
       }
-      setHistory((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          command: rawCmd,
-          cwd: execCwd,
-          stdout: '',
-          stderr: errMsg,
-          exitCode: 1,
-          durationMs: 0,
-          timestamp: startTs,
-        },
-      ]);
-      return execCwd;
+    };
+
+    ws.onerror = (err) => {
+      console.error('Terminal WebSocket error:', err);
+      setConnectionStatus('disconnected');
+    };
+
+    ws.onclose = () => {
+      setConnectionStatus('disconnected');
+    };
+
+    // Forward terminal input directly to PTY stdin
+    term.onData((data: string) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+
+    // Notify backend PTY of window dimension changes
+    term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      }
+    });
+
+    // Handle Copy / Paste keystrokes seamlessly
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // Ctrl+Shift+C or Cmd+C when text is selected -> Copy selection
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection());
+        return false;
+      }
+      // Ctrl+Shift+V or Cmd+V -> Paste from clipboard
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        navigator.clipboard.readText().then((text) => {
+          if (text && ws.readyState === WebSocket.OPEN) {
+            ws.send(text);
+          }
+        });
+        return false;
+      }
+      return true;
+    });
+
+    // Focus terminal
+    setTimeout(() => {
+      try {
+        fitAddon.fit();
+        term.focus();
+      } catch {
+        // ignore
+      }
+    }, 150);
+  }, [fontSize, themeMode]);
+
+  // Initial terminal mount
+  useEffect(() => {
+    initTerminal();
+
+    const handleWindowResize = () => {
+      if (fitAddonRef.current) {
+        try {
+          fitAddonRef.current.fit();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+      if (xtermInstanceRef.current) {
+        xtermInstanceRef.current.dispose();
+      }
+    };
+  }, [initTerminal]);
+
+  // Update theme dynamically
+  useEffect(() => {
+    if (xtermInstanceRef.current) {
+      xtermInstanceRef.current.options.theme = TERMINAL_THEMES[themeMode];
+    }
+  }, [themeMode]);
+
+  // Update font size dynamically
+  useEffect(() => {
+    if (xtermInstanceRef.current && fitAddonRef.current) {
+      xtermInstanceRef.current.options.fontSize = fontSize;
+      try {
+        fitAddonRef.current.fit();
+      } catch {
+        // ignore
+      }
+    }
+  }, [fontSize]);
+
+  // Quick Command Launcher
+  const sendCommand = (cmd: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(cmd + '\n');
+      xtermInstanceRef.current?.focus();
     }
   };
 
-  // Smart execution that seamlessly handles single, sequential, or multi-line pasted commands
-  const handleExecute = async (cmdToRun?: string) => {
-    const rawInput = (cmdToRun !== undefined ? cmdToRun : command).trim();
-    if (!rawInput || isExecuting) return;
-
-    // Built-in client commands
-    if (rawInput === 'clear') {
-      setHistory([]);
-      setCommand('');
-      return;
-    }
-
-    if (rawInput === 'help') {
-      setHistory((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          command: 'help',
-          cwd,
-          stdout: `Hostvra Cloud OS Shell (${info?.os || 'linux'} ${info?.arch || 'amd64'})
-==============================================
-Available commands & features:
-  • Any Linux command : git, npm, pm2, systemctl, mariadb, nginx, docker, etc.
-  • cd <directory>    : Navigate directories (state is preserved across commands)
-  • Multi-command     : Paste multi-line scripts or separate commands; all execute sequentially!
-  • clear / Ctrl+L    : Clear terminal screen
-  • Ctrl+C            : Interrupt running process or cancel line (copies text if highlighted)
-  • Up / Down Arrow   : Browse command history
-  • Tab               : Autocomplete shell commands
-  • Copy All / Copy   : 1-click clipboard copying (compatible with HTTP IP addresses)`,
-          stderr: '',
-          exitCode: 0,
-          durationMs: 0,
-          timestamp: new Date().toLocaleTimeString(),
-        },
-      ]);
-      setCommand('');
-      return;
-    }
-
-    if (rawInput === 'history') {
-      const historyList = commandHistory
-        .map((cmd, idx) => `  ${String(idx + 1).padStart(4, ' ')}  ${cmd}`)
-        .join('\n');
-      setHistory((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(),
-          command: 'history',
-          cwd,
-          stdout: historyList || 'No command history recorded yet.',
-          stderr: '',
-          exitCode: 0,
-          durationMs: 0,
-          timestamp: new Date().toLocaleTimeString(),
-        },
-      ]);
-      setCommand('');
-      return;
-    }
-
-    // Split lines
-    const lines = rawInput
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && !l.startsWith('#'));
-
-    // Check if it's a compound script (e.g. heredoc `<< EOF`, unclosed quotes, or control flow)
-    const isCompoundScript =
-      rawInput.includes('<<') ||
-      rawInput.includes('\\') ||
-      (rawInput.match(/"/g) || []).length % 2 !== 0 ||
-      (rawInput.match(/'/g) || []).length % 2 !== 0 ||
-      /^\s*(if|for|while|case)\b/.test(rawInput);
-
-    setIsExecuting(true);
-    setCommand('');
-    setHistoryIndex(-1);
-
-    if (isCompoundScript || lines.length <= 1) {
-      // Execute as a single script
-      setCommandHistory((prev) => [...prev, rawInput]);
-      const newCwd = await executeSingleCommand(rawInput, cwd);
-      setCwd(newCwd);
-    } else {
-      // Execute multi-line commands sequentially, maintaining cwd between commands
-      let activeDir = cwd;
-      for (const line of lines) {
-        setCommandHistory((prev) => [...prev, line]);
-        activeDir = await executeSingleCommand(line, activeDir);
-        setCwd(activeDir);
-      }
-    }
-
-    setIsExecuting(false);
-    abortControllerRef.current = null;
-    setTimeout(() => inputRef.current?.focus(), 30);
-  };
-
-  // Intercept paste to properly handle multi-line commands
-  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const pastedText = e.clipboardData.getData('text');
-    if (!pastedText) return;
-
-    if (pastedText.includes('\n')) {
-      e.preventDefault();
-      // Execute the pasted multi-line commands
-      await handleExecute(pastedText);
+  // Clear Terminal
+  const handleClear = () => {
+    if (xtermInstanceRef.current) {
+      xtermInstanceRef.current.clear();
+      xtermInstanceRef.current.focus();
     }
   };
 
-  const commonCommands = [
-    'systemctl status',
-    'systemctl restart',
-    'git status',
-    'git pull origin main',
-    'git log -n 5',
-    'npm run build',
-    'pm2 status',
-    'pm2 restart all',
-    'docker ps',
-    'df -h',
-    'free -m',
-    'uptime',
-    'ls -la',
-    'cat',
-    'nano',
-    'mkdir',
-    'chmod',
-    'chown',
-    'mariadb',
-    'nginx -t',
-    'journalctl -xeu',
-    'clear',
-    'help',
-  ];
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Ctrl + C / Cmd + C Handling:
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
-      // If user has highlighted/selected text on the page, DO NOT cancel. Allow browser to copy!
-      const selection = window.getSelection();
-      if (selection && selection.toString().trim().length > 0) {
-        return; // Allow native copy
+  // Copy Selection to Clipboard
+  const handleCopySelection = () => {
+    if (xtermInstanceRef.current) {
+      const selection = xtermInstanceRef.current.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection);
+        setCopiedNotification(true);
+        setTimeout(() => setCopiedNotification(false), 2000);
       }
-
-      // Otherwise, act as terminal interrupt ^C
-      e.preventDefault();
-      if (isExecuting) {
-        handleCancel();
-      } else {
-        // Echo ^C and create a fresh line
-        setHistory((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(),
-            command: command,
-            cwd,
-            stdout: '',
-            stderr: '^C',
-            exitCode: 130,
-            durationMs: 0,
-            timestamp: new Date().toLocaleTimeString(),
-            aborted: true,
-          },
-        ]);
-        setCommand('');
-      }
-      return;
-    }
-
-    // Ctrl + L (clear buffer)
-    if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
-      e.preventDefault();
-      setHistory([]);
-      return;
-    }
-
-    // Tab (Autocompletion)
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const current = command.trim();
-      if (!current) return;
-      const match = commonCommands.find((c) => c.startsWith(current) && c !== current);
-      if (match) {
-        setCommand(match);
-      }
-      return;
-    }
-
-    // Enter (Execute)
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      handleExecute();
-      return;
-    }
-
-    // History navigation with Up/Down arrows
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (commandHistory.length === 0) return;
-      const nextIndex =
-        historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
-      setHistoryIndex(nextIndex);
-      setCommand(commandHistory[nextIndex]);
-      return;
-    }
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (commandHistory.length === 0 || historyIndex === -1) return;
-      const nextIndex = historyIndex + 1;
-      if (nextIndex >= commandHistory.length) {
-        setHistoryIndex(-1);
-        setCommand('');
-      } else {
-        setHistoryIndex(nextIndex);
-        setCommand(commandHistory[nextIndex]);
-      }
-      return;
     }
   };
-
-  const handleCopySingle = async (id: string, text: string) => {
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
-    }
-  };
-
-  const handleCopyAll = async () => {
-    const allText = history
-      .map((h) => {
-        let block = `${currentUser}@${currentHost}:${h.cwd}# ${h.command}`;
-        if (h.stdout) block += `\n${h.stdout}`;
-        if (h.stderr) block += `\n${h.stderr}`;
-        return block;
-      })
-      .join('\n\n');
-
-    if (!allText) return;
-    const ok = await copyToClipboard(allText);
-    if (ok) {
-      setCopiedAll(true);
-      setTimeout(() => setCopiedAll(false), 2000);
-    }
-  };
-
-  const quickCommands = [
-    { label: 'Git Status', cmd: 'git status' },
-    { label: 'Git Pull', cmd: 'git pull origin main' },
-    { label: 'API Service', cmd: 'systemctl status hostvra-api' },
-    { label: 'Web UI Service', cmd: 'systemctl status hostvra-web' },
-    { label: 'Uptime', cmd: 'uptime' },
-    { label: 'Memory (RAM)', cmd: 'free -m' },
-    { label: 'Disk Space', cmd: 'df -h' },
-    { label: 'Docker Containers', cmd: 'docker ps' },
-  ];
-
-  // Theme styling configurations (White background + black text as default!)
-  const themeStyles = {
-    white: {
-      bg: 'bg-white',
-      border: 'border border-slate-300 shadow-xl',
-      headerBg: 'bg-[#f4f5f7] border-b border-slate-200',
-      titleText: 'text-slate-800',
-      welcomeDate: 'text-slate-500',
-      welcomeOs: 'text-slate-600',
-      welcomeHelp: 'text-slate-500',
-      welcomeHighlight: 'text-amber-700 font-semibold',
-      welcomeDivider: 'border-slate-200',
-      userColor: 'text-emerald-700',
-      pathColor: 'text-blue-700',
-      promptChar: 'text-slate-900',
-      commandText: 'text-slate-950',
-      inputText: 'text-slate-950',
-      stdoutText: 'text-slate-900',
-      stderrText: 'text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded',
-      caretColor: '#000000',
-      selection: 'selection:bg-blue-100 selection:text-slate-950',
-      toolbarBtn: 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/80',
-      isDark: false,
-    },
-    macos: {
-      bg: 'bg-[#18181b]',
-      border: 'border border-slate-800/90 shadow-2xl',
-      headerBg: 'bg-[#27272a]/90 border-b border-[#3f3f46]',
-      titleText: 'text-slate-300',
-      welcomeDate: 'text-slate-400',
-      welcomeOs: 'text-slate-500',
-      welcomeHelp: 'text-slate-600',
-      welcomeHighlight: 'text-amber-400 font-semibold',
-      welcomeDivider: 'border-white/5',
-      userColor: 'text-emerald-400',
-      pathColor: 'text-sky-400',
-      promptChar: 'text-slate-300',
-      commandText: 'text-white',
-      inputText: 'text-white',
-      stdoutText: 'text-slate-200',
-      stderrText: 'text-rose-400',
-      caretColor: '#34d399',
-      selection: 'selection:bg-emerald-500/40 selection:text-white',
-      toolbarBtn: 'text-slate-400 hover:text-white hover:bg-white/10',
-      isDark: true,
-    },
-    ubuntu: {
-      bg: 'bg-[#300a24]',
-      border: 'border border-[#5a1b47] shadow-2xl',
-      headerBg: 'bg-[#3e1130] border-b border-[#5a1b47]',
-      titleText: 'text-slate-200',
-      welcomeDate: 'text-slate-400',
-      welcomeOs: 'text-slate-400',
-      welcomeHelp: 'text-slate-400',
-      welcomeHighlight: 'text-amber-300 font-semibold',
-      welcomeDivider: 'border-[#5a1b47]',
-      userColor: 'text-[#8ae234]',
-      pathColor: 'text-[#729fcf]',
-      promptChar: 'text-white',
-      commandText: 'text-[#f5f5f5]',
-      inputText: 'text-[#f5f5f5]',
-      stdoutText: 'text-[#f5f5f5]',
-      stderrText: 'text-rose-400',
-      caretColor: '#8ae234',
-      selection: 'selection:bg-purple-500/40 selection:text-white',
-      toolbarBtn: 'text-slate-300 hover:text-white hover:bg-white/10',
-      isDark: true,
-    },
-    matrix: {
-      bg: 'bg-[#0a0e14]',
-      border: 'border border-emerald-950/80 shadow-2xl',
-      headerBg: 'bg-[#0f141c] border-b border-[#1f2937]',
-      titleText: 'text-emerald-400',
-      welcomeDate: 'text-emerald-600',
-      welcomeOs: 'text-emerald-500',
-      welcomeHelp: 'text-emerald-600',
-      welcomeHighlight: 'text-emerald-300 font-semibold',
-      welcomeDivider: 'border-emerald-950',
-      userColor: 'text-emerald-400 font-bold',
-      pathColor: 'text-cyan-400 font-bold',
-      promptChar: 'text-emerald-500 font-bold',
-      commandText: 'text-emerald-300',
-      inputText: 'text-emerald-300',
-      stdoutText: 'text-emerald-400',
-      stderrText: 'text-rose-400',
-      caretColor: '#10b981',
-      selection: 'selection:bg-emerald-900/60 selection:text-emerald-200',
-      toolbarBtn: 'text-emerald-500 hover:text-emerald-300 hover:bg-emerald-950/40',
-      isDark: true,
-    },
-  }[theme];
-
-  const currentUser = info?.user || 'root';
-  const currentHost = info?.hostname || 'vmi3561516';
-  const isRoot = currentUser === 'root';
 
   return (
     <DashboardShell>
-      <div
-        className={`space-y-4 transition-all ${
-          isFullscreen
-            ? 'fixed inset-0 z-50 bg-slate-950 p-4 sm:p-6 flex flex-col'
-            : ''
-        }`}
-      >
-        {/* Header Title and Server Environment Badges */}
-        {!isFullscreen && (
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className={`space-y-4 ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-slate-950 p-4' : 'pb-16'}`}>
+        {/* Terminal Header & Server Information */}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 flex items-center justify-center text-blue-600 dark:text-blue-400">
+              <TerminalIcon className="w-5 h-5" />
+            </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 dark:text-indigo-400">
-                  <TerminalIcon className="w-5 h-5" />
-                </span>
-                Web Terminal
-                <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Root Shell
-                </span>
-              </h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-slate-900 dark:text-white">Web Terminal</h1>
+                {/* Real-time Connection Status Badge */}
+                <div
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                    connectionStatus === 'connected'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
+                      : connectionStatus === 'connecting'
+                      ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800 animate-pulse'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
+                  }`}
+                >
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      connectionStatus === 'connected'
+                        ? 'bg-emerald-500'
+                        : connectionStatus === 'connecting'
+                        ? 'bg-amber-500'
+                        : 'bg-rose-500'
+                    }`}
+                  />
+                  <span>
+                    {connectionStatus === 'connected'
+                      ? 'Connected (PTY/TTY)'
+                      : connectionStatus === 'connecting'
+                      ? 'Allocating PTY...'
+                      : 'Disconnected'}
+                  </span>
+                </div>
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Authentic Unix terminal stream with multi-command execution, sequential directory tracking, and ANSI color rendering.
+                Full-duplex Linux pseudo-terminal with interactive ANSI, nano, vim, top, and signals.
               </p>
             </div>
+          </div>
 
-            {/* Server Badges */}
-            <div className="flex flex-wrap items-center gap-2 text-xs">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-200 shadow-2xs">
-                <Server className="w-3.5 h-3.5 text-indigo-500" />
-                <span className="font-mono font-semibold">{currentHost}</span>
+          {/* Node Metadata & Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {info && (
+              <div className="hidden sm:flex items-center gap-3 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
+                <div className="flex items-center gap-1">
+                  <Server className="w-3.5 h-3.5 text-blue-500" />
+                  <span className="font-semibold">{info.hostname}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>{info.user}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Folder className="w-3.5 h-3.5 text-amber-500" />
+                  <span>{info.shell}</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-200 shadow-2xs">
-                <User className="w-3.5 h-3.5 text-emerald-500" />
-                <span className="font-mono font-semibold">{currentUser}</span>
-              </div>
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-200 shadow-2xs">
-                <Folder className="w-3.5 h-3.5 text-sky-500" />
-                <span className="font-mono font-semibold truncate max-w-[150px]">{formatPath(cwd)}</span>
+            )}
+
+            {/* Theme Selector */}
+            <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-50 dark:bg-slate-800">
+              <button
+                type="button"
+                onClick={() => setThemeMode('white')}
+                title="Light White Theme"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                  themeMode === 'white'
+                    ? 'bg-white text-slate-900 shadow-sm font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span>Light</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode('dark')}
+                title="Obsidian Dark Theme"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                  themeMode === 'dark'
+                    ? 'bg-slate-900 text-white shadow-sm font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5 text-blue-400" />
+                <span>Dark</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode('matrix')}
+                title="Matrix Green Theme"
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                  themeMode === 'matrix'
+                    ? 'bg-black text-emerald-400 shadow-sm font-bold border border-emerald-500/40'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Matrix</span>
+              </button>
+            </div>
+
+            {/* Font Size Adjusters */}
+            <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setFontSize((prev) => Math.max(11, prev - 1))}
+                className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-l-xl text-slate-600 dark:text-slate-300"
+                title="Decrease Font Size"
+              >
+                A-
+              </button>
+              <span className="px-2 text-slate-500 dark:text-slate-400 font-mono text-[11px]">{fontSize}px</span>
+              <button
+                type="button"
+                onClick={() => setFontSize((prev) => Math.min(20, prev + 1))}
+                className="px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-r-xl text-slate-600 dark:text-slate-300"
+                title="Increase Font Size"
+              >
+                A+
+              </button>
+            </div>
+
+            {/* Copy Selection */}
+            <button
+              type="button"
+              onClick={handleCopySelection}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+              title="Copy Selected Text"
+            >
+              {copiedNotification ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+            </button>
+
+            {/* Clear Screen */}
+            <button
+              type="button"
+              onClick={handleClear}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+              title="Clear Terminal Screen (Ctrl+L)"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+
+            {/* Reconnect Button */}
+            <button
+              type="button"
+              onClick={initTerminal}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+              title="Reconnect Terminal Session"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+
+            {/* Fullscreen Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                setIsFullscreen((prev) => !prev);
+                setTimeout(() => fitAddonRef.current?.fit(), 100);
+              }}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+              title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Terminal'}
+            >
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Real Interactive xterm.js Terminal Container */}
+        <div
+          className={`relative rounded-2xl border transition-all overflow-hidden shadow-sm ${
+            themeMode === 'white'
+              ? 'bg-white border-slate-300 shadow-slate-200/50'
+              : themeMode === 'matrix'
+              ? 'bg-[#040705] border-emerald-950 shadow-emerald-950/20'
+              : 'bg-[#090d16] border-slate-800 shadow-slate-900/50'
+          }`}
+          style={{ height: isFullscreen ? 'calc(100vh - 120px)' : '620px' }}
+        >
+          {/* Terminal Screen Mount Point */}
+          <div
+            ref={terminalContainerRef}
+            className="w-full h-full p-4"
+            style={{ minHeight: '100%' }}
+          />
+
+          {/* Connection Overlay when disconnected */}
+          {connectionStatus === 'disconnected' && (
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-20">
+              <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl text-center max-w-sm">
+                <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-500 mx-auto flex items-center justify-center mb-3">
+                  <TerminalIcon className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-1">Terminal Session Disconnected</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                  The interactive shell session has exited or connection was closed.
+                </p>
+                <button
+                  type="button"
+                  onClick={initTerminal}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs shadow-lg shadow-blue-500/20 flex items-center justify-center gap-2 transition-all"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Start New Session</span>
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {/* Quick Command Chips */}
-        {!isFullscreen && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs no-scrollbar">
-            <span className="text-slate-500 dark:text-slate-400 font-bold text-[11px] uppercase tracking-wider whitespace-nowrap mr-1 flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Quick:
-            </span>
-            {quickCommands.map((q) => (
+        {/* Quick Commands & Operations Bar */}
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <Sparkles className="w-4 h-4 text-blue-500" />
+              <span>Interactive Quick Commands</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowShortcuts((prev) => !prev)}
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>{showShortcuts ? 'Hide Keyboard Shortcuts' : 'Show Keyboard Shortcuts'}</span>
+              {showShortcuts ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {[
+              { label: 'git status', cmd: 'git status' },
+              { label: 'nano .env', cmd: 'nano .env' },
+              { label: 'top', cmd: 'top' },
+              { label: 'uptime', cmd: 'uptime' },
+              { label: 'status api', cmd: 'systemctl status hostvra-api' },
+              { label: 'status web', cmd: 'systemctl status hostvra-web' },
+              { label: 'docker ps', cmd: 'docker ps' },
+              { label: 'free -m', cmd: 'free -m' },
+              { label: 'df -h', cmd: 'df -h' },
+            ].map((q) => (
               <button
                 key={q.cmd}
-                onClick={() => handleExecute(q.cmd)}
-                disabled={isExecuting}
-                className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-surface-700 text-[11px] font-mono whitespace-nowrap transition-all shadow-2xs active:scale-95 disabled:opacity-40 cursor-pointer"
+                type="button"
+                onClick={() => sendCommand(q.cmd)}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-600 dark:hover:bg-blue-950/40 dark:hover:border-blue-800 dark:hover:text-blue-400 text-xs font-mono font-medium text-slate-700 dark:text-slate-300 transition-all"
               >
                 {q.label}
               </button>
             ))}
           </div>
-        )}
 
-        {/* Real Mac / Linux Terminal Window */}
-        <div
-          ref={terminalContainerRef}
-          className={`flex-1 rounded-2xl overflow-hidden ${themeStyles.border} ${themeStyles.bg} flex flex-col font-mono select-text transition-colors duration-150 ${
-            isFullscreen ? 'h-full min-h-0' : 'min-h-[580px] max-h-[76vh]'
-          }`}
-          style={{ fontSize: `${fontSize}px` }}
-        >
-          {/* Authentic macOS Window Titlebar with Traffic Lights */}
-          <div className={`h-10 px-4 ${themeStyles.headerBg} flex items-center justify-between select-none`}>
-            {/* Window Traffic Lights */}
-            <div className="flex items-center gap-2 group/dots">
-              <button
-                type="button"
-                onClick={() => setHistory([])}
-                title="Clear Terminal Output (Ctrl+L)"
-                className="w-3 h-3 rounded-full bg-[#ff5f56] hover:brightness-110 flex items-center justify-center transition cursor-pointer shadow-xs"
-              >
-                <X className="w-2 h-2 text-black/70 opacity-0 group-hover/dots:opacity-100 transition-opacity" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setHistory([])}
-                title="Minimize Buffer"
-                className="w-3 h-3 rounded-full bg-[#ffbd2e] hover:brightness-110 flex items-center justify-center transition cursor-pointer shadow-xs"
-              >
-                <Minus className="w-2 h-2 text-black/70 opacity-0 group-hover/dots:opacity-100 transition-opacity" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsFullscreen(!isFullscreen)}
-                title={isFullscreen ? 'Exit Fullscreen' : 'Maximize / Fullscreen'}
-                className="w-3 h-3 rounded-full bg-[#27c93f] hover:brightness-110 flex items-center justify-center transition cursor-pointer shadow-xs"
-              >
-                <Plus className="w-2 h-2 text-black/70 opacity-0 group-hover/dots:opacity-100 transition-opacity" />
-              </button>
-            </div>
-
-            {/* Window Title (Center) */}
-            <div className={`text-xs ${themeStyles.titleText} font-mono font-medium flex items-center gap-2 truncate max-w-[260px] sm:max-w-md`}>
-              <span className={`${themeStyles.userColor} font-bold`}>{currentUser}@{currentHost}</span>
-              <span className="opacity-50">:</span>
-              <span className={`${themeStyles.pathColor} font-semibold`}>{formatPath(cwd)}</span>
-              <span className="opacity-50 hidden sm:inline">— bash — 80×24</span>
-            </div>
-
-            {/* Terminal Controls & Theme Selector (Right) */}
-            <div className="flex items-center gap-1.5 text-xs">
-              {/* Theme Selector */}
-              <div className={`flex items-center rounded-lg p-0.5 border text-[10px] ${
-                theme === 'white'
-                  ? 'bg-slate-200/80 border-slate-300'
-                  : 'bg-black/40 border-white/10'
-              }`}>
-                {(['white', 'macos', 'ubuntu', 'matrix'] as TerminalTheme[]).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTheme(t)}
-                    className={`px-2 py-0.5 rounded capitalize transition cursor-pointer ${
-                      theme === t
-                        ? theme === 'white'
-                          ? 'bg-white text-slate-900 font-bold shadow-xs'
-                          : 'bg-white/20 text-white font-bold'
-                        : theme === 'white'
-                          ? 'text-slate-600 hover:text-slate-900'
-                          : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {t === 'white' ? 'White' : t === 'macos' ? 'Dark' : t === 'ubuntu' ? 'Linux' : 'Matrix'}
-                  </button>
-                ))}
+          {/* Keyboard Shortcuts Reference Guide */}
+          {showShortcuts && (
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-slate-600 dark:text-slate-400">
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <div className="font-bold text-slate-800 dark:text-slate-200 mb-1">Process Controls</div>
+                <ul className="space-y-1">
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Ctrl + C</kbd> Interrupt running task</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Ctrl + D</kbd> Send EOF / Close shell</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Ctrl + Z</kbd> Suspend foreground task</li>
+                </ul>
               </div>
-
-              {/* Font Size Adjust */}
-              <div className={`hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-lg border text-[11px] ${
-                theme === 'white'
-                  ? 'bg-slate-200/80 border-slate-300 text-slate-700'
-                  : 'bg-black/40 border-white/10 text-slate-300'
-              }`}>
-                <button
-                  type="button"
-                  onClick={() => setFontSize((f) => Math.max(11, f - 1))}
-                  className="px-1 cursor-pointer hover:font-bold"
-                  title="Smaller Font"
-                >
-                  A-
-                </button>
-                <span className="text-[9px] opacity-70 font-mono">{fontSize}</span>
-                <button
-                  type="button"
-                  onClick={() => setFontSize((f) => Math.min(18, f + 1))}
-                  className="px-1 cursor-pointer hover:font-bold"
-                  title="Larger Font"
-                >
-                  A+
-                </button>
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <div className="font-bold text-slate-800 dark:text-slate-200 mb-1">Editors & Navigation</div>
+                <ul className="space-y-1">
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">nano file</kbd> Interactive Nano editor</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Ctrl + O / X</kbd> Nano save &amp; exit</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">vim / vi</kbd> Full Vim editor support</li>
+                </ul>
               </div>
-
-              {/* Copy All Terminal Output */}
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                title="Copy Terminal History to Clipboard"
-                className={`p-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${themeStyles.toolbarBtn}`}
-              >
-                {copiedAll ? (
-                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                ) : (
-                  <Copy className="w-3.5 h-3.5" />
-                )}
-                <span className="hidden md:inline text-[10px] font-sans font-medium">
-                  {copiedAll ? 'Copied!' : 'Copy'}
-                </span>
-              </button>
-
-              {/* Clear Output */}
-              <button
-                type="button"
-                onClick={() => setHistory([])}
-                title="Clear Terminal Screen (Ctrl+L)"
-                className={`p-1 rounded-lg transition cursor-pointer ${themeStyles.toolbarBtn}`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Fullscreen Toggle */}
-              <button
-                type="button"
-                onClick={() => setIsFullscreen(!isFullscreen)}
-                title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-                className={`p-1 rounded-lg transition cursor-pointer ${themeStyles.toolbarBtn}`}
-              >
-                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Terminal Viewport / Screen (Click anywhere to focus) */}
-          <div
-            onClick={() => {
-              // Don't focus input if user is selecting text
-              const sel = window.getSelection();
-              if (sel && sel.toString().trim().length > 0) return;
-              inputRef.current?.focus();
-            }}
-            className={`flex-1 overflow-y-auto p-4 space-y-2 cursor-text leading-relaxed font-mono ${themeStyles.selection}`}
-          >
-            {/* Authentic Unix Welcome Header */}
-            <div className={`text-xs space-y-0.5 pb-2 border-b ${themeStyles.welcomeDivider} select-text`}>
-              <p className={themeStyles.welcomeDate}>Last login: {new Date().toLocaleDateString()} on pts/0</p>
-              <p className={themeStyles.welcomeOs}>
-                Hostvra Cloud OS ({info?.os || 'GNU/Linux'} {info?.arch || 'x86_64'}) • {info?.shell || 'bash'}
-              </p>
-              <p className={themeStyles.welcomeHelp}>
-                Type <span className={themeStyles.welcomeHighlight}>help</span> for commands,{' '}
-                <span className={themeStyles.welcomeHighlight}>clear</span> (or Ctrl+L) to wipe screen. You can paste multi-line commands.
-              </p>
-            </div>
-
-            {/* Historical Command & Output Log */}
-            {history.map((entry) => (
-              <div key={entry.id} className="space-y-0.5 leading-snug group/entry">
-                {/* Command Prompt Line */}
-                <div className="flex items-center justify-between flex-wrap gap-x-2">
-                  <div className="flex items-baseline flex-wrap">
-                    <span className={`${themeStyles.userColor} font-bold mr-0.5 select-none`}>
-                      {currentUser}@{currentHost}
-                    </span>
-                    <span className="opacity-50 mr-0.5 select-none">:</span>
-                    <span className={`${themeStyles.pathColor} font-semibold mr-1.5 select-none`}>
-                      {formatPath(entry.cwd)}
-                    </span>
-                    <span className={`${themeStyles.promptChar} font-bold mr-2 select-none`}>
-                      {isRoot ? '#' : '$'}
-                    </span>
-                    <span className={`${themeStyles.commandText} font-semibold break-all select-text`}>
-                      {entry.command}
-                    </span>
-                    {entry.aborted && <span className="text-rose-600 font-bold ml-1">^C</span>}
-                  </div>
-
-                  <div className="opacity-0 group-hover/entry:opacity-100 transition-opacity flex items-center gap-2 text-[10px] text-slate-500">
-                    {entry.durationMs > 0 && <span>{entry.durationMs}ms</span>}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCopySingle(entry.id, entry.stdout || entry.stderr);
-                      }}
-                      className="p-0.5 rounded cursor-pointer hover:bg-slate-200/60 dark:hover:bg-slate-800"
-                      title="Copy Output"
-                    >
-                      {copiedId === entry.id ? (
-                        <Check className="w-3 h-3 text-emerald-600" />
-                      ) : (
-                        <Copy className="w-3 h-3" />
-                      )}
-                    </button>
-                    {entry.exitCode !== 0 && !entry.aborted && (
-                      <span className="text-rose-700 bg-rose-100 dark:text-rose-400 dark:bg-rose-950/40 px-1 rounded border border-rose-300 dark:border-rose-800/40 font-mono text-[9px]">
-                        [{entry.exitCode}]
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Raw Stdout Stream */}
-                {entry.stdout && (
-                  <div className={`whitespace-pre-wrap break-all ${themeStyles.stdoutText} py-0.5 pl-0 leading-relaxed select-text font-mono`}>
-                    {renderAnsi(entry.stdout, themeStyles.isDark)}
-                  </div>
-                )}
-
-                {/* Raw Stderr Stream */}
-                {entry.stderr && !entry.aborted && (
-                  <div
-                    className={`whitespace-pre-wrap break-all py-0.5 pl-0 leading-relaxed select-text font-mono ${
-                      entry.exitCode === 0 ? themeStyles.stdoutText : themeStyles.stderrText
-                    }`}
-                  >
-                    {renderAnsi(entry.stderr, themeStyles.isDark)}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Currently Executing Spinner Banner */}
-            {isExecuting && (
-              <div className={`flex items-center justify-between text-xs py-1 px-2.5 rounded-lg my-1 ${
-                theme === 'white'
-                  ? 'bg-emerald-50 border border-emerald-300 text-emerald-800'
-                  : 'bg-emerald-950/30 border border-emerald-800/40 text-emerald-400'
-              }`}>
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                  <span className="font-semibold">Running command on host...</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCancel}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] rounded bg-rose-100 hover:bg-rose-200 border border-rose-300 text-rose-800 dark:bg-rose-950 dark:hover:bg-rose-900 dark:border-rose-800 dark:text-rose-300 font-mono cursor-pointer transition shadow-2xs"
-                >
-                  <span>Interrupt</span>
-                  <kbd className="text-[9px] bg-black/10 dark:bg-black/40 px-1 rounded">Ctrl+C</kbd>
-                </button>
-              </div>
-            )}
-
-            {/* Active Inline Command Prompt (Seamless terminal stream like Mac/Linux) */}
-            <div className="flex items-baseline flex-wrap leading-snug pt-1">
-              <span className={`${themeStyles.userColor} font-bold mr-0.5 select-none`}>
-                {currentUser}@{currentHost}
-              </span>
-              <span className="opacity-50 mr-0.5 select-none">:</span>
-              <span className={`${themeStyles.pathColor} font-semibold mr-1.5 select-none`}>
-                {formatPath(cwd)}
-              </span>
-              <span className={`${themeStyles.promptChar} font-bold mr-2 select-none`}>
-                {isRoot ? '#' : '$'}
-              </span>
-
-              {/* Native Continuous Command Input with Blinking Cursor and 0 border/outline */}
-              <div className="relative inline-flex items-center flex-1 min-w-[200px]">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={command}
-                  onChange={(e) => setCommand(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  onPaste={handlePaste}
-                  disabled={isExecuting}
-                  className={`w-full bg-transparent ${themeStyles.inputText} font-mono focus:outline-none focus:ring-0 outline-none border-none ring-0 p-0 m-0 shadow-none leading-none appearance-none`}
-                  style={{
-                    caretColor: themeStyles.caretColor,
-                    fontSize: `${fontSize}px`,
-                  }}
-                  autoFocus
-                  spellCheck={false}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                />
+              <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700">
+                <div className="font-bold text-slate-800 dark:text-slate-200 mb-1">Terminal Navigation</div>
+                <ul className="space-y-1">
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Ctrl + L</kbd> Clear terminal screen</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">Tab</kbd> Autocomplete commands</li>
+                  <li><kbd className="px-1.5 py-0.5 rounded bg-white dark:bg-slate-700 border text-[11px] font-mono">↑ / ↓</kbd> Browse command history</li>
+                </ul>
               </div>
             </div>
-
-            <div ref={terminalEndRef} />
-          </div>
+          )}
         </div>
       </div>
     </DashboardShell>

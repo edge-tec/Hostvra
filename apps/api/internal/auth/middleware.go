@@ -17,19 +17,31 @@ const (
 func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenStr := ""
 			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					tokenStr = parts[1]
+				} else {
+					response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authorization header format", nil, "")
+					return
+				}
+			} else {
+				tokenStr = r.URL.Query().Get("token")
+				if tokenStr == "" {
+					if c, err := r.Cookie("access_token"); err == nil && c != nil {
+						tokenStr = c.Value
+					}
+				}
+			}
+
+			if tokenStr == "" {
 				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authorization header", nil, "")
 				return
 			}
 
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid authorization header format", nil, "")
-				return
-			}
-
-			claims, err := ValidateAccessToken(parts[1], jwtSecret)
+			claims, err := ValidateAccessToken(tokenStr, jwtSecret)
 			if err != nil {
 				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Invalid or expired access token", nil, "")
 				return

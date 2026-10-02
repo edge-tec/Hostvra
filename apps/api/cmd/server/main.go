@@ -634,6 +634,7 @@ func main() {
 			r.Route("/terminal", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Get("/info", terminalHandler.GetInfo)
 				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Post("/execute", terminalHandler.Execute)
+				r.With(rbac.RequirePermission(rbac.PermTerminalAccess)).Get("/ws", terminalHandler.HandleWebSocket)
 			})
 
 			// File Manager Subsystem v3.0 (Enterprise)

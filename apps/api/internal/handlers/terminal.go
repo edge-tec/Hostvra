@@ -10,8 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
+
+	"github.com/creack/pty"
+	"github.com/gorilla/websocket"
 
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
@@ -63,6 +69,219 @@ type ExecuteCommandResponse struct {
 	ExitCode   int    `json:"exit_code"`
 	DurationMs int64  `json:"duration_ms"`
 	Timestamp  string `json:"timestamp"`
+}
+
+var wsUpgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 4096,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Origin checked via auth claims/JWT
+	},
+}
+
+type WSMessage struct {
+	Type string `json:"type"` // "input", "resize", "ping"
+	Data string `json:"data,omitempty"`
+	Cols uint16 `json:"cols,omitempty"`
+	Rows uint16 `json:"rows,omitempty"`
+}
+
+type safeWSConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (s *safeWSConn) WriteMessage(messageType int, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.WriteMessage(messageType, data)
+}
+
+func (s *safeWSConn) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn.Close()
+}
+
+// HandleWebSocket handles real interactive full-duplex PTY terminal sessions
+func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok || claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	if claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
+		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+			return
+		}
+	}
+
+	// Determine starting working directory
+	cwd := r.URL.Query().Get("cwd")
+	if cwd == "" {
+		cwd = "/root/Hostvra"
+		if _, err := os.Stat(cwd); os.IsNotExist(err) {
+			cwd, _ = os.UserHomeDir()
+			if cwd == "" {
+				cwd = "/"
+			}
+		}
+	} else {
+		cleanCwd := filepath.Clean(cwd)
+		if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+			cwd = cleanCwd
+		} else {
+			cwd = "/"
+		}
+	}
+
+	// Determine available shell
+	shell := "/bin/bash"
+	if _, err := os.Stat("/bin/bash"); os.IsNotExist(err) {
+		shell = "/bin/sh"
+	}
+
+	// Launch interactive login shell
+	cmd := exec.Command(shell, "-l")
+	cmd.Dir = cwd
+	cmd.Env = append(os.Environ(),
+		"TERM=xterm-256color",
+		"COLORTERM=truecolor",
+		"LANG=en_US.UTF-8",
+		"LC_ALL=en_US.UTF-8",
+	)
+
+	// Window dimensions
+	rows := uint16(24)
+	cols := uint16(80)
+	if rStr := r.URL.Query().Get("rows"); rStr != "" {
+		if parsedRows, err := strconv.ParseUint(rStr, 10, 16); err == nil && parsedRows > 0 {
+			rows = uint16(parsedRows)
+		}
+	}
+	if cStr := r.URL.Query().Get("cols"); cStr != "" {
+		if parsedCols, err := strconv.ParseUint(cStr, 10, 16); err == nil && parsedCols > 0 {
+			cols = uint16(parsedCols)
+		}
+	}
+
+	ptyFile, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "PTY_FAILED", "Failed to allocate pseudo-terminal: "+err.Error(), nil, "")
+		return
+	}
+
+	rawConn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = ptyFile.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		return
+	}
+
+	safeConn := &safeWSConn{conn: rawConn}
+
+	sessionID := fmt.Sprintf("term_%s_%d", claims.UserID.String()[:8], time.Now().Unix())
+	h.audit.Log(r.Context(), r, "terminal.session.created", "server", "localhost", "success", "Interactive PTY terminal session established", map[string]interface{}{
+		"session_id": sessionID,
+		"user_id":    claims.UserID.String(),
+		"shell":      shell,
+		"cwd":        cwd,
+		"rows":       rows,
+		"cols":       cols,
+	})
+
+	var closeOnce sync.Once
+	cleanup := func() {
+		closeOnce.Do(func() {
+			_ = ptyFile.Close()
+			if cmd.Process != nil {
+				// Kill the shell process group cleanly
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
+				time.Sleep(50 * time.Millisecond)
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+				_ = cmd.Wait()
+			}
+			_ = safeConn.Close()
+
+			h.audit.Log(r.Context(), r, "terminal.session.closed", "server", "localhost", "success", "Interactive PTY terminal session terminated", map[string]interface{}{
+				"session_id": sessionID,
+				"user_id":    claims.UserID.String(),
+			})
+		})
+	}
+	defer cleanup()
+
+	// Goroutine 1: PTY -> WebSocket (Streaming live stdout/stderr/ANSI with zero buffering lag)
+	go func() {
+		defer cleanup()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := ptyFile.Read(buf)
+			if n > 0 {
+				if writeErr := safeConn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				// EOF or EIO means child shell process exited
+				break
+			}
+		}
+
+		// Notify client of exit if connection still alive
+		exitCode := 0
+		if cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+		}
+		exitPayload, _ := json.Marshal(map[string]interface{}{
+			"type":      "exit",
+			"exit_code": exitCode,
+		})
+		_ = safeConn.WriteMessage(websocket.TextMessage, exitPayload)
+	}()
+
+	// Goroutine 2: WebSocket -> PTY (Handling keyboard input, control keys, and terminal resize)
+	for {
+		msgType, message, err := safeConn.conn.ReadMessage()
+		if err != nil {
+			break
+		}
+
+		if msgType == websocket.BinaryMessage {
+			if _, wErr := ptyFile.Write(message); wErr != nil {
+				break
+			}
+		} else if msgType == websocket.TextMessage {
+			// Check if it's a JSON control command
+			var wsMsg WSMessage
+			if len(message) > 0 && message[0] == '{' && json.Unmarshal(message, &wsMsg) == nil && wsMsg.Type != "" {
+				switch wsMsg.Type {
+				case "resize":
+					if wsMsg.Cols > 0 && wsMsg.Rows > 0 {
+						_ = pty.Setsize(ptyFile, &pty.Winsize{
+							Rows: wsMsg.Rows,
+							Cols: wsMsg.Cols,
+						})
+					}
+				case "input":
+					if _, wErr := ptyFile.Write([]byte(wsMsg.Data)); wErr != nil {
+						return
+					}
+				case "ping":
+					_ = safeConn.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
+				}
+			} else {
+				// Raw keystrokes or text
+				if _, wErr := ptyFile.Write(message); wErr != nil {
+					break
+				}
+			}
+		}
+	}
 }
 
 // GetInfo returns system environment metadata for the Web Terminal
@@ -117,7 +336,7 @@ func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, info, nil)
 }
 
-// Execute runs a terminal command inside the host environment
+// Execute runs a terminal command inside the host environment (kept for backward compatibility with scripts & APIs)
 func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.GetClaims(r.Context())
 	if !ok {
@@ -125,16 +344,13 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims.Role != "owner" && claims.Role != "admin" {
-		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can execute system terminal commands", nil, "")
-		return
-	}
-
-	if h.quotaSvc != nil {
-		if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+	if claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
+		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
 			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
 			return
 		}
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can execute system terminal commands", nil, "")
+		return
 	}
 
 	var req ExecuteCommandRequest
