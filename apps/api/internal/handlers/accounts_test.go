@@ -48,6 +48,16 @@ func TestAccountHandler_Flow(t *testing.T) {
 	r.Post("/accounts/{id}/unsuspend", h.UnsuspendAccount)
 	r.Post("/accounts/{id}/login-token", h.GenerateLoginToken)
 
+	_ = s.CreateHostingAccount(context.Background(), &store.HostingAccount{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		UserID:         userID,
+		Username:       "seeduser",
+		Domain:         "seeduser.com",
+		PlanName:       "Pro",
+		Status:         store.AccountStatusActive,
+	})
+
 	// 1. List seed accounts
 	req := httptest.NewRequest("GET", "/accounts", nil)
 	rec := httptest.NewRecorder()

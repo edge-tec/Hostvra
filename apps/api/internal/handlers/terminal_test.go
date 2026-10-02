@@ -390,3 +390,269 @@ func TestTerminal_ShellExitNotification(t *testing.T) {
 		t.Fatalf("expected server to notify client with exit control message")
 	}
 }
+
+func TestTerminal_Customer_AuthorizedWithPackage(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	quotaSvc := quota.NewService(s)
+
+	h := NewTerminalHandler(cfg, s, auditLogger)
+	h.SetQuotaService(quotaSvc)
+
+	ctx := context.Background()
+	custUserID := uuid.New()
+	custOrgID := uuid.New()
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       custOrgID,
+		Name:     "Cust Org",
+		Slug:     "cust-org",
+		PlanTier: "business",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       custUserID,
+		Email:    "cust@example.com",
+		FullName: "Authorized Customer",
+		IsActive: true,
+	}, custOrgID, "customer")
+
+	// Grant terminal permission via Plan Override
+	overrideTerm := true
+	_ = s.UpsertUserPlanOverride(ctx, &store.UserPlanOverride{
+		UserID:             custUserID,
+		PermissionTerminal: &overrideTerm,
+	})
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         custUserID,
+				OrganizationID: custOrgID,
+				Role:           "customer",
+			}
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Use(h.AuthorizeTerminalAccess)
+	r.Get("/info", h.GetInfo)
+	r.Get("/ws", h.HandleWebSocket)
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	// 1. Verify /info succeeds
+	infoResp, err := http.Get(server.URL + "/info")
+	if err != nil {
+		t.Fatalf("failed to call /info: %v", err)
+	}
+	defer infoResp.Body.Close()
+	if infoResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(infoResp.Body)
+		t.Fatalf("expected 200 OK for customer /info, got %d: %s", infoResp.StatusCode, string(body))
+	}
+
+	// 2. Verify WebSocket connection succeeds and provides real interactive shell
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	ws, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial customer websocket: %v (status: %v)", err, resp)
+	}
+	defer ws.Close()
+
+	// Receive ready message
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read initial message from customer websocket: %v", err)
+	}
+	if !strings.Contains(string(msg), `"type":"ready"`) {
+		t.Fatalf("expected ready event for customer, got: %s", string(msg))
+	}
+
+	// Send echo command and read output
+	_ = ws.WriteMessage(websocket.TextMessage, []byte("echo 'CUST_TERM_OK'\n"))
+	deadline := time.Now().Add(3 * time.Second)
+	var outputReceived bool
+	for time.Now().Before(deadline) {
+		_ = ws.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, out, rErr := ws.ReadMessage()
+		if rErr == nil && strings.Contains(string(out), "CUST_TERM_OK") {
+			outputReceived = true
+			break
+		}
+		if rErr != nil {
+			break
+		}
+	}
+	if !outputReceived {
+		t.Fatalf("expected to receive echo output from customer PTY shell")
+	}
+}
+
+func TestTerminal_Customer_UnauthorizedWithoutPackage(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	quotaSvc := quota.NewService(s)
+
+	h := NewTerminalHandler(cfg, s, auditLogger)
+	h.SetQuotaService(quotaSvc)
+
+	ctx := context.Background()
+	custUserID := uuid.New()
+	custOrgID := uuid.New()
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       custOrgID,
+		Name:     "Starter Org",
+		Slug:     "starter-org",
+		PlanTier: "starter",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       custUserID,
+		Email:    "unauthorized@example.com",
+		FullName: "Starter Customer",
+		IsActive: true,
+	}, custOrgID, "customer")
+
+	// Notice: Terminal permission is explicitly NOT granted in Starter plan and no override exists.
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         custUserID,
+				OrganizationID: custOrgID,
+				Role:           "customer",
+			}
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Use(h.AuthorizeTerminalAccess)
+	r.Get("/info", h.GetInfo)
+	r.Get("/ws", h.HandleWebSocket)
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	// 1. Verify /info returns 403 Forbidden
+	infoResp, err := http.Get(server.URL + "/info")
+	if err != nil {
+		t.Fatalf("failed to call /info: %v", err)
+	}
+	defer infoResp.Body.Close()
+	if infoResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for unauthorized customer /info, got %d", infoResp.StatusCode)
+	}
+	body, _ := io.ReadAll(infoResp.Body)
+	if !strings.Contains(string(body), "FEATURE_DISABLED") {
+		t.Fatalf("expected FEATURE_DISABLED code, got: %s", string(body))
+	}
+
+	// 2. Verify WebSocket connection is rejected with 403 Forbidden
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatalf("expected WebSocket dial to fail for unauthorized customer, but succeeded")
+	}
+	if resp != nil && resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden on WebSocket handshake, got: %d", resp.StatusCode)
+	}
+}
+
+func TestTerminal_Customer_PathIsolation(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	quotaSvc := quota.NewService(s)
+
+	h := NewTerminalHandler(cfg, s, auditLogger)
+	h.SetQuotaService(quotaSvc)
+
+	ctx := context.Background()
+	custUserID := uuid.New()
+	custOrgID := uuid.New()
+
+	_ = s.CreateOrganization(ctx, &store.Organization{
+		ID:       custOrgID,
+		Name:     "Secure Cust Org",
+		Slug:     "secure-cust",
+		PlanTier: "business",
+	})
+	_ = s.CreateUser(ctx, &store.User{
+		ID:       custUserID,
+		Email:    "secureuser@example.com",
+		FullName: "Secure Customer",
+		IsActive: true,
+	}, custOrgID, "customer")
+
+	overrideTerm := true
+	_ = s.UpsertUserPlanOverride(ctx, &store.UserPlanOverride{
+		UserID:             custUserID,
+		PermissionTerminal: &overrideTerm,
+	})
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         custUserID,
+				OrganizationID: custOrgID,
+				Role:           "customer",
+			}
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Use(h.AuthorizeTerminalAccess)
+	r.Get("/ws", h.HandleWebSocket)
+
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	// Customer tries path traversal to /root
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?cwd=/root"
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("failed to dial websocket: %v", err)
+	}
+	defer ws.Close()
+
+	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read initial message: %v", err)
+	}
+	if !strings.Contains(string(msg), `"type":"ready"`) {
+		t.Fatalf("expected ready event, got: %s", string(msg))
+	}
+
+	// Verify working directory is NOT /root
+	_ = ws.WriteMessage(websocket.TextMessage, []byte("pwd\n"))
+	deadline := time.Now().Add(3 * time.Second)
+	var pwdOutput string
+	for time.Now().Before(deadline) {
+		_ = ws.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		_, out, rErr := ws.ReadMessage()
+		if rErr == nil {
+			pwdOutput += string(out)
+			if strings.Contains(pwdOutput, "/home") || strings.Contains(pwdOutput, "/var/www") || strings.Contains(pwdOutput, "customer") {
+				break
+			}
+		}
+		if rErr != nil {
+			break
+		}
+	}
+	if strings.Contains(pwdOutput, "\r\n/root\r\n") || strings.Contains(pwdOutput, "\n/root\n") {
+		t.Fatalf("security violation: customer PTY was started in /root: %s", pwdOutput)
+	}
+}
+

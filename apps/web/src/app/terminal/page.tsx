@@ -108,6 +108,7 @@ export type TerminalLifecycleState =
   | 'ready'
   | 'disconnected'
   | 'error'
+  | 'disabled'
   | 'closed';
 
 export default function TerminalPage() {
@@ -121,7 +122,7 @@ export default function TerminalPage() {
   const [disconnectInfo, setDisconnectInfo] = useState<{
     title: string;
     description: string;
-    type: 'shell_exit' | 'network_drop' | 'auth_expired' | 'error';
+    type: 'shell_exit' | 'network_drop' | 'auth_expired' | 'error' | 'feature_disabled';
     exitCode?: number;
   } | null>(null);
 
@@ -154,6 +155,13 @@ export default function TerminalPage() {
         const res = await apiFetch<TerminalInfo>('/api/v1/terminal/info');
         if (res.success && res.data) {
           setInfo(res.data);
+        } else if (res.error?.code === 'FEATURE_DISABLED' || res.error?.code === 'FORBIDDEN') {
+          setTerminalState('disabled');
+          setDisconnectInfo({
+            title: 'Terminal Not Included in Package',
+            description: res.error.message || 'Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.',
+            type: 'feature_disabled',
+          });
         }
       } catch (err) {
         console.warn('Could not load terminal metadata:', err);
@@ -845,8 +853,8 @@ export default function TerminalPage() {
             style={{ height: 'calc(100% - 40px)', minHeight: '350px' }}
           />
 
-          {/* Connection Overlay when disconnected, closed, or error */}
-          {(terminalState === 'disconnected' || terminalState === 'closed' || terminalState === 'error') && (
+          {/* Connection Overlay when disconnected, closed, error, or disabled */}
+          {(terminalState === 'disconnected' || terminalState === 'closed' || terminalState === 'error' || terminalState === 'disabled') && (
             <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-20">
               <div className="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl text-center max-w-sm">
                 <div
@@ -855,6 +863,8 @@ export default function TerminalPage() {
                       ? 'bg-slate-100 dark:bg-slate-800 text-slate-500'
                       : terminalState === 'error'
                       ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-500'
+                      : terminalState === 'disabled'
+                      ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-500'
                       : 'bg-amber-50 dark:bg-amber-950/50 text-amber-500'
                   }`}
                 >
@@ -866,6 +876,8 @@ export default function TerminalPage() {
                       ? 'Terminal Session Ended'
                       : terminalState === 'error'
                       ? 'Connection Error'
+                      : terminalState === 'disabled'
+                      ? 'Terminal Not Enabled'
                       : 'Connection Interrupted')}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
@@ -874,20 +886,32 @@ export default function TerminalPage() {
                       ? 'The interactive shell process has exited.'
                       : terminalState === 'error'
                       ? 'Unable to establish WebSocket connection to Hostvra API.'
+                      : terminalState === 'disabled'
+                      ? 'Web Terminal SSH access is not enabled for your hosting package.'
                       : 'The terminal connection was interrupted. Click below to reconnect.')}
                 </p>
-                <button
-                  type="button"
-                  onClick={initTerminal}
-                  className={`w-full py-2.5 px-4 rounded-xl text-white font-semibold text-xs shadow-lg flex items-center justify-center gap-2 transition-all ${
-                    terminalState === 'closed'
-                      ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
-                      : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
-                  }`}
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>{terminalState === 'closed' ? 'Start New Session' : 'Reconnect Terminal'}</span>
-                </button>
+                {terminalState === 'disabled' ? (
+                  <a
+                    href="/billing"
+                    className="w-full py-2.5 px-4 rounded-xl text-white font-semibold text-xs shadow-lg flex items-center justify-center gap-2 transition-all bg-amber-600 hover:bg-amber-700 shadow-amber-500/20"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Upgrade Hosting Package</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={initTerminal}
+                    className={`w-full py-2.5 px-4 rounded-xl text-white font-semibold text-xs shadow-lg flex items-center justify-center gap-2 transition-all ${
+                      terminalState === 'closed'
+                        ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-500/20'
+                        : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+                    }`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>{terminalState === 'closed' ? 'Start New Session' : 'Reconnect Terminal'}</span>
+                  </button>
+                )}
               </div>
             </div>
           )}

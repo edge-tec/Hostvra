@@ -23,6 +23,7 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/quota"
+	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
@@ -44,6 +45,107 @@ func NewTerminalHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Ter
 
 func (h *TerminalHandler) SetQuotaService(q *quota.Service) {
 	h.quotaSvc = q
+}
+
+// AuthorizeTerminalAccess verifies authentication and ensures customer account has package permission for terminal access
+func (h *TerminalHandler) AuthorizeTerminalAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := auth.GetClaims(r.Context())
+		if !ok || claims == nil {
+			response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required to access terminal", nil, "")
+			return
+		}
+
+		if claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// For customer/user roles, verify package/subscription or admin override grants terminal access
+		if h.quotaSvc != nil {
+			if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+				h.audit.Log(r.Context(), r, "terminal.forbidden", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
+					"user_id": claims.UserID.String(),
+				})
+				response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Fallback to standard RBAC check if quota service not configured
+		if !rbac.HasPermission(claims.Role, claims.IsSuperAdmin, rbac.PermTerminalAccess) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Terminal access requires administrator privilege or hosting package entitlement", nil, "")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// resolveCustomerEnvironment determines the isolated user and working directory for a customer account
+func (h *TerminalHandler) resolveCustomerEnvironment(ctx context.Context, claims *auth.Claims) (string, string) {
+	custName := "customer"
+	if claims.Email != "" {
+		parts := strings.Split(claims.Email, "@")
+		if len(parts) > 0 && parts[0] != "" {
+			custName = parts[0]
+		}
+	}
+
+	if h.store != nil {
+		// 1. Check for hosting account
+		if accounts, err := h.store.ListHostingAccounts(ctx, claims.OrganizationID, nil); err == nil && len(accounts) > 0 {
+			for _, acc := range accounts {
+				if acc.UserID == claims.UserID || acc.OrganizationID == claims.OrganizationID {
+					homeDir := fmt.Sprintf("/home/%s", acc.Username)
+					if stat, err := os.Stat(homeDir); err == nil && stat.IsDir() {
+						return acc.Username, homeDir
+					}
+					if acc.DocumentRoot != "" {
+						if stat, err := os.Stat(acc.DocumentRoot); err == nil && stat.IsDir() {
+							return acc.Username, acc.DocumentRoot
+						}
+					}
+					return acc.Username, homeDir
+				}
+			}
+		}
+
+		// 2. Check for website document root
+		if sites, err := h.store.ListWebsitesByOrg(ctx, claims.OrganizationID); err == nil && len(sites) > 0 {
+			for _, s := range sites {
+				if s.DocumentRoot != "" {
+					if stat, err := os.Stat(s.DocumentRoot); err == nil && stat.IsDir() {
+						sysUser := s.SystemUser
+						if sysUser == "" {
+							sysUser = custName
+						}
+						return sysUser, s.DocumentRoot
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Fallback: User home directory or safe directory
+	userHome := fmt.Sprintf("/home/%s", custName)
+	if stat, err := os.Stat(userHome); err == nil && stat.IsDir() {
+		return custName, userHome
+	}
+
+	if stat, err := os.Stat("/var/www"); err == nil && stat.IsDir() {
+		return custName, "/var/www"
+	}
+
+	tempCustDir := filepath.Join(os.TempDir(), "hostvra-users", custName)
+	_ = os.MkdirAll(tempCustDir, 0755)
+	if stat, err := os.Stat(tempCustDir); err == nil && stat.IsDir() {
+		return custName, tempCustDir
+	}
+
+	return custName, os.TempDir()
 }
 
 type TerminalInfoResponse struct {
@@ -168,22 +270,45 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		return nil
 	})
 
-	// 3. Determine starting working directory
-	cwd := r.URL.Query().Get("cwd")
-	if cwd == "" {
-		cwd = "/root/Hostvra"
-		if _, err := os.Stat(cwd); os.IsNotExist(err) {
-			cwd, _ = os.UserHomeDir()
-			if cwd == "" {
-				cwd = "/"
+	// 3. Determine starting working directory and identity with tenant isolation
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+	defaultUser, defaultCwd := "root", "/root/Hostvra"
+	if isPrivileged {
+		if envUser := os.Getenv("USER"); envUser != "" {
+			defaultUser = envUser
+		}
+		if _, err := os.Stat(defaultCwd); os.IsNotExist(err) {
+			defaultCwd, _ = os.UserHomeDir()
+			if defaultCwd == "" {
+				defaultCwd = "/"
 			}
 		}
 	} else {
+		defaultUser, defaultCwd = h.resolveCustomerEnvironment(r.Context(), claims)
+	}
+
+	cwd := r.URL.Query().Get("cwd")
+	if cwd == "" {
+		cwd = defaultCwd
+	} else {
 		cleanCwd := filepath.Clean(cwd)
-		if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
-			cwd = cleanCwd
+		if !isPrivileged {
+			// Security: strictly block tenant escape to /root, /etc, /sys, /proc, /
+			if cleanCwd == "/root" || strings.HasPrefix(cleanCwd, "/root/") ||
+				cleanCwd == "/etc" || strings.HasPrefix(cleanCwd, "/etc/") ||
+				cleanCwd == "/" {
+				cwd = defaultCwd
+			} else if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
 		} else {
-			cwd = "/"
+			if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
 		}
 	}
 
@@ -191,6 +316,15 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 	shell := "/bin/bash"
 	if _, err := os.Stat("/bin/bash"); os.IsNotExist(err) {
 		shell = "/bin/sh"
+	}
+
+	// Ensure working directory exists, otherwise fallback safely
+	if stat, err := os.Stat(cwd); err != nil || !stat.IsDir() {
+		if stat, err := os.Stat(defaultCwd); err == nil && stat.IsDir() {
+			cwd = defaultCwd
+		} else {
+			cwd = os.TempDir()
+		}
 	}
 
 	// 5. Launch interactive login shell with both -l (login) and -i (interactive)
@@ -203,6 +337,8 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",
 		"TMOUT=0", // Permanently disable idle auto-logout
+		fmt.Sprintf("USER=%s", defaultUser),
+		fmt.Sprintf("HOME=%s", defaultCwd),
 	)
 
 	// Window dimensions
@@ -404,9 +540,22 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 // GetInfo returns system environment metadata for the Web Terminal
 func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.GetClaims(r.Context())
-	if !ok || claims == nil || (claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin) {
-		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can access terminal metadata", nil, "")
+	if !ok || claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required to access terminal", nil, "")
 		return
+	}
+
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+	if !isPrivileged {
+		if h.quotaSvc != nil {
+			if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+				response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+				return
+			}
+		} else if !rbac.HasPermission(claims.Role, claims.IsSuperAdmin, rbac.PermTerminalAccess) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Terminal access requires administrator privilege or hosting package entitlement", nil, "")
+			return
+		}
 	}
 
 	hostname, _ := os.Hostname()
@@ -414,22 +563,46 @@ func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 		hostname = "hostvra-node"
 	}
 
-	currentUser := os.Getenv("USER")
-	if currentUser == "" {
-		currentUser = "root"
-	}
-
+	currentUser := "root"
 	defaultCwd := "/root/Hostvra"
-	if _, err := os.Stat(defaultCwd); os.IsNotExist(err) {
-		defaultCwd, _ = os.UserHomeDir()
-		if defaultCwd == "" {
-			defaultCwd = "/"
+
+	if isPrivileged {
+		if envUser := os.Getenv("USER"); envUser != "" {
+			currentUser = envUser
 		}
+		if _, err := os.Stat(defaultCwd); os.IsNotExist(err) {
+			defaultCwd, _ = os.UserHomeDir()
+			if defaultCwd == "" {
+				defaultCwd = "/"
+			}
+		}
+	} else {
+		currentUser, defaultCwd = h.resolveCustomerEnvironment(r.Context(), claims)
 	}
 
 	shell := "/bin/bash"
 	if _, err := os.Stat("/bin/bash"); os.IsNotExist(err) {
 		shell = "/bin/sh"
+	}
+
+	quickCmds := []string{
+		"uptime",
+		"free -m",
+		"df -h",
+		"whoami",
+		"pwd",
+		"ls -la",
+		"php -v",
+		"node -v",
+		"python3 --version",
+	}
+	if isPrivileged {
+		quickCmds = append([]string{
+			"git status",
+			"systemctl status hostvra-api",
+			"systemctl status hostvra-web",
+			"docker ps",
+		}, quickCmds...)
 	}
 
 	info := TerminalInfoResponse{
@@ -439,15 +612,7 @@ func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 		User:       currentUser,
 		DefaultCwd: defaultCwd,
 		Shell:      shell,
-		QuickCmds: []string{
-			"git status",
-			"systemctl status hostvra-api",
-			"systemctl status hostvra-web",
-			"uptime",
-			"free -m",
-			"df -h",
-			"docker ps",
-		},
+		QuickCmds:  quickCmds,
 	}
 
 	response.JSON(w, http.StatusOK, info, nil)
@@ -461,13 +626,17 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
-		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
-			response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+	if !isPrivileged {
+		if h.quotaSvc != nil {
+			if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
+				response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
+				return
+			}
+		} else if !rbac.HasPermission(claims.Role, claims.IsSuperAdmin, rbac.PermTerminalAccess) {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Terminal access requires administrator privilege or hosting package entitlement", nil, "")
 			return
 		}
-		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only panel owner or administrator can execute system terminal commands", nil, "")
-		return
 	}
 
 	var req ExecuteCommandRequest
@@ -496,7 +665,35 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine starting working directory
+	defaultUser, defaultCwd := "root", "/root/Hostvra"
+	if !isPrivileged {
+		defaultUser, defaultCwd = h.resolveCustomerEnvironment(r.Context(), claims)
+		_ = defaultUser
+	}
+
 	cwd := req.Cwd
+	if cwd == "" {
+		cwd = defaultCwd
+	} else {
+		cleanCwd := filepath.Clean(cwd)
+		if !isPrivileged {
+			if cleanCwd == "/root" || strings.HasPrefix(cleanCwd, "/root/") ||
+				cleanCwd == "/etc" || strings.HasPrefix(cleanCwd, "/etc/") ||
+				cleanCwd == "/" {
+				cwd = defaultCwd
+			} else if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
+		} else {
+			if stat, err := os.Stat(cleanCwd); err == nil && stat.IsDir() {
+				cwd = cleanCwd
+			} else {
+				cwd = defaultCwd
+			}
+		}
+	}
 	if cwd == "" {
 		cwd = "/root/Hostvra"
 		if _, err := os.Stat(cwd); os.IsNotExist(err) {
