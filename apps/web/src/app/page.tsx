@@ -591,13 +591,13 @@ export default function LandingPage() {
               )}
 
               {activePreviewTab === 'terminal' && (
-                <div className="font-mono text-xs text-slate-200 space-y-1 bg-slate-950 p-4 rounded-xl border border-slate-900 shadow-inner">
-                  <div className="text-emerald-400">root@hostvra-cluster:~# systemctl status hostvra-agent nginx postfix</div>
-                  <div className="text-emerald-400">● hostvra-agent.service - Hostvra Server Agent (Active: running)</div>
-                  <div className="text-emerald-400">● nginx.service - A high performance web server (Active: running)</div>
-                  <div className="text-emerald-400">● postfix.service - Postfix Mail Transport Agent (Active: running)</div>
-                  <div className="text-slate-500 mt-2">root@hostvra-cluster:~# hostvra status --all-vhosts</div>
-                  <div className="text-slate-300">[OK] 12 VHosts verified. Zero configuration anomalies detected.</div>
+                <div className="font-mono text-xs text-slate-800 space-y-1 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <div className="text-emerald-700 font-bold">root@hostvra-cluster:~# systemctl status hostvra-agent nginx postfix</div>
+                  <div className="text-emerald-700 font-semibold">● hostvra-agent.service - Hostvra Server Agent (Active: running)</div>
+                  <div className="text-emerald-700 font-semibold">● nginx.service - A high performance web server (Active: running)</div>
+                  <div className="text-emerald-700 font-semibold">● postfix.service - Postfix Mail Transport Agent (Active: running)</div>
+                  <div className="text-slate-500 mt-2 font-bold">root@hostvra-cluster:~# hostvra status --all-vhosts</div>
+                  <div className="text-slate-700 font-medium">[OK] 12 VHosts verified. Zero configuration anomalies detected.</div>
                 </div>
               )}
             </div>
@@ -841,7 +841,7 @@ export default function LandingPage() {
                           ? 'bg-[#16A34A] hover:bg-[#15803D] text-white shadow-emerald-600/20'
                           : hasTrial
                           ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
-                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                          : 'bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 hover:border-slate-400'
                       }`}
                     >
                       {hasTrial ? `Start ${plan.trial_days || 14}-Day Free Trial` : 'Choose Plan'}
@@ -995,28 +995,28 @@ export default function LandingPage() {
       {/* Pre-Footer CTA */}
       <section className="py-20 bg-white relative overflow-hidden">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="relative rounded-3xl p-10 sm:p-16 bg-slate-900 border border-slate-800 shadow-2xl text-center overflow-hidden">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-xs font-bold uppercase tracking-wider mb-4">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="relative rounded-3xl p-10 sm:p-16 bg-white border border-slate-200 shadow-xl text-center overflow-hidden">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-[#16A34A] text-xs font-bold uppercase tracking-wider mb-4">
+              <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse" />
               Instant Cloud Provisioning
             </div>
-            <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
+            <h2 className="text-3xl sm:text-5xl font-black text-slate-950 tracking-tight">
               Ready to Upgrade Your Cloud Hosting?
             </h2>
-            <p className="mt-4 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto font-medium">
+            <p className="mt-4 text-base sm:text-lg text-slate-600 max-w-2xl mx-auto font-medium">
               Launch your sites in seconds with automated SSL, isolated NVMe storage, and dedicated developer tooling.
             </p>
 
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
                 href="/register?trial=true"
-                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-extrabold text-sm sm:text-base shadow-xl transition-all cursor-pointer"
+                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-extrabold text-sm sm:text-base shadow-sm transition-all cursor-pointer"
               >
                 Start 14-Day Free Trial
               </Link>
               <Link
                 href="/login"
-                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white font-bold text-sm sm:text-base transition-all cursor-pointer"
+                className="w-full sm:w-auto px-8 py-4 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-sm sm:text-base transition-all cursor-pointer"
               >
                 Sign In to Control Panel
               </Link>

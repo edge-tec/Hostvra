@@ -1253,10 +1253,10 @@ export default function BillingPage() {
                         onClick={() => handleOpenCheckout(plan)}
                         className={`w-full py-3.5 px-5 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${
                           isFeatured
-                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25 hover:shadow-lg'
+                            ? 'bg-[#16A34A] hover:bg-[#15803D] text-white shadow-sm'
                             : isReseller
-                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
-                            : 'bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900'
+                            ? 'bg-[#16A34A] hover:bg-[#15803D] text-white shadow-sm'
+                            : 'bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 hover:border-slate-400'
                         }`}
                       >
                         <span>Get Started</span>
@@ -1301,7 +1301,7 @@ export default function BillingPage() {
                   const enterprise = plans.find(p => p.tier === 'enterprise') || plans[0];
                   handleOpenCheckout(enterprise);
                 }}
-                className="px-6 py-3 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-extrabold text-sm flex-shrink-0 transition-all shadow-md"
+                className="px-6 py-3 rounded-2xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-extrabold text-sm flex-shrink-0 transition-all shadow-sm"
               >
                 Enterprise Support Team
               </button>
@@ -1914,7 +1914,7 @@ export default function BillingPage() {
                           setShowSecretInModal(false);
                           setGatewayModalOpen(true);
                         }}
-                        className="py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-black dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                        className="py-2.5 px-3 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
                       >
                         <Settings className="w-3.5 h-3.5" />
                         <span>Configure</span>
