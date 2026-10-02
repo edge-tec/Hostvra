@@ -119,7 +119,8 @@ export default function TerminalPage() {
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
-  const terminalContainerRef = useRef<HTMLDivElement>(null);
+  const terminalContainerNodeRef = useRef<HTMLDivElement | null>(null);
+  const [containerMounted, setContainerMounted] = useState(false);
   const xtermInstanceRef = useRef<any>(null);
   const fitAddonRef = useRef<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -127,6 +128,17 @@ export default function TerminalPage() {
   themeModeRef.current = themeMode;
   const fontSizeRef = useRef(fontSize);
   fontSizeRef.current = fontSize;
+
+  const setTerminalContainerRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      console.log('[TERMINAL] DOM container attached');
+      terminalContainerNodeRef.current = node;
+      setContainerMounted(true);
+    } else {
+      terminalContainerNodeRef.current = null;
+      setContainerMounted(false);
+    }
+  }, []);
 
   // Fetch system environment metadata
   useEffect(() => {
@@ -145,7 +157,13 @@ export default function TerminalPage() {
 
   // Initialize xterm and WebSocket connection
   const initTerminal = useCallback(async () => {
-    if (!terminalContainerRef.current) return;
+    const container = terminalContainerNodeRef.current;
+    if (!container) {
+      console.warn('[TERMINAL] Container ref not yet available');
+      return;
+    }
+
+    console.log('[TERMINAL] Component mounted, starting terminal initialization...');
 
     // Cleanup previous instance if any
     if (wsRef.current) {
@@ -160,9 +178,7 @@ export default function TerminalPage() {
       } catch {}
       xtermInstanceRef.current = null;
     }
-    if (terminalContainerRef.current) {
-      terminalContainerRef.current.innerHTML = '';
-    }
+    container.innerHTML = '';
 
     setTerminalState('initializing');
 
@@ -194,8 +210,9 @@ export default function TerminalPage() {
       });
 
       term.loadAddon(fitAddon);
-      term.open(terminalContainerRef.current);
+      term.open(container);
       xtermInstanceRef.current = term;
+      console.log('[TERMINAL] xterm initialized and attached to DOM');
 
       // Small delay for DOM layout before initial fit
       setTimeout(() => {
@@ -231,13 +248,17 @@ export default function TerminalPage() {
       }
 
       if (!token) {
+        console.error('[TERMINAL] Authentication token missing in storage/cookies');
         setTerminalState('error');
         term.write('\x1b[1;31m[Hostvra: Authentication token not found. Please log in to Hostvra.]\x1b[0m\r\n');
         return;
       }
 
-      const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}`;
+      const queryCwd = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('cwd') || '' : '';
+      const cwdParam = queryCwd ? `&cwd=${encodeURIComponent(queryCwd)}` : '';
+      const wsUrl = `${wsProtocol}//${host}/api/v1/terminal/ws?token=${encodeURIComponent(token)}&rows=${term.rows || 24}&cols=${term.cols || 80}${cwdParam}`;
 
+      console.log('[TERMINAL] WebSocket connecting to:', `${wsProtocol}//${host}/api/v1/terminal/ws`);
       term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
       term.write(`\x1b[90mConnecting to ${wsProtocol}//${host}/api/v1/terminal/ws ...\x1b[0m\r\n`);
       setTerminalState('connecting');
@@ -248,6 +269,7 @@ export default function TerminalPage() {
 
       const connectTimeout = setTimeout(() => {
         if (ws.readyState === WebSocket.CONNECTING) {
+          console.warn('[TERMINAL] WebSocket connecting timeout watchdog triggered');
           term.write('\r\n\x1b[1;33m[Hostvra: Connection taking longer than expected...]\x1b[0m\r\n');
           term.write('\x1b[90mEnsure hostvra-api service is running: systemctl status hostvra-api\x1b[0m\r\n');
           setTerminalState('error');
@@ -255,6 +277,7 @@ export default function TerminalPage() {
       }, 7000);
 
       ws.onopen = () => {
+        console.log('[TERMINAL] WebSocket connected, PTY allocation started');
         setTerminalState('allocating');
         term.write('\x1b[90mWebSocket handshake verified. Allocating Linux PTY session...\x1b[0m\r\n');
         try {
@@ -272,6 +295,7 @@ export default function TerminalPage() {
               const msg = JSON.parse(event.data);
               if (msg.type === 'ready') {
                 clearTimeout(connectTimeout);
+                console.log('[TERMINAL] PTY allocated & shell started - READY:', msg);
                 setTerminalState('ready');
                 term.write('\x1b[1;32m[Hostvra]\x1b[0m Interactive shell ready.\r\n\r\n');
                 try {
@@ -279,16 +303,19 @@ export default function TerminalPage() {
                   ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
                 } catch {}
                 term.focus();
+                console.log('[TERMINAL] terminal input enabled');
                 return;
               }
               if (msg.type === 'error') {
                 clearTimeout(connectTimeout);
+                console.error('[TERMINAL] Backend error:', msg);
                 setTerminalState('error');
                 term.write(`\r\n\x1b[1;31m[Hostvra Error: ${msg.message || 'PTY allocation failed'}]\x1b[0m\r\n`);
                 return;
               }
               if (msg.type === 'exit') {
                 clearTimeout(connectTimeout);
+                console.log('[TERMINAL] Shell process exited:', msg);
                 setTerminalState('closed');
                 term.write(`\r\n\x1b[33m[Hostvra: Shell process exited with code ${msg.exit_code || 0}]\x1b[0m\r\n`);
                 return;
@@ -311,7 +338,7 @@ export default function TerminalPage() {
 
       ws.onerror = (err) => {
         clearTimeout(connectTimeout);
-        console.error('Terminal WebSocket error:', err);
+        console.error('[TERMINAL] WebSocket error:', err);
         term.write('\r\n\x1b[1;31m[Hostvra: WebSocket connection error]\x1b[0m\r\n');
         term.write('\x1b[90mEnsure hostvra-api is active: systemctl restart hostvra-api\x1b[0m\r\n');
         setTerminalState('error');
@@ -319,6 +346,7 @@ export default function TerminalPage() {
 
       ws.onclose = (event) => {
         clearTimeout(connectTimeout);
+        console.log('[TERMINAL] WebSocket closed:', event.code, event.reason);
         if (event.code === 1008 || (event.reason && event.reason.includes('Unauthorized'))) {
           term.write('\r\n\x1b[1;31m[Hostvra: Authentication failed (HTTP 401). Please re-login to Hostvra]\x1b[0m\r\n');
           setTerminalState('error');
@@ -371,10 +399,10 @@ export default function TerminalPage() {
         }
       }, 150);
     } catch (err: any) {
-      console.error('Failed to initialize terminal emulator:', err);
+      console.error('[TERMINAL] Failed to initialize terminal emulator:', err);
       setTerminalState('error');
-      if (terminalContainerRef.current) {
-        terminalContainerRef.current.innerHTML = `
+      if (container) {
+        container.innerHTML = `
           <div class="p-6 text-center text-rose-500 font-mono text-sm">
             <p class="font-bold mb-2">Failed to initialize terminal emulator</p>
             <p class="text-xs text-slate-500">${err?.message || 'Unknown error'}</p>
@@ -384,9 +412,11 @@ export default function TerminalPage() {
     }
   }, []);
 
-  // Initial terminal mount
+  // Trigger terminal initialization whenever container mounts into the DOM
   useEffect(() => {
-    initTerminal();
+    if (containerMounted && terminalContainerNodeRef.current) {
+      initTerminal();
+    }
 
     const handleWindowResize = () => {
       if (fitAddonRef.current) {
@@ -400,16 +430,7 @@ export default function TerminalPage() {
 
     window.addEventListener('resize', handleWindowResize);
 
-    return () => {
-      window.removeEventListener('resize', handleWindowResize);
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-      if (xtermInstanceRef.current) {
-        xtermInstanceRef.current.dispose();
-      }
-    };
-  }, [initTerminal]);
+  }, [containerMounted, initTerminal]);
 
   // Update theme dynamically
   useEffect(() => {
@@ -705,7 +726,7 @@ export default function TerminalPage() {
 
           {/* Terminal Screen Mount Point */}
           <div
-            ref={terminalContainerRef}
+            ref={setTerminalContainerRef}
             className="w-full flex-1 p-2 overflow-hidden"
             style={{ height: 'calc(100% - 40px)', minHeight: '350px' }}
           />

@@ -9,7 +9,12 @@ import { getStoredToken } from '@/lib/api';
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(() => {
+    if (typeof window !== 'undefined') {
+      return getStoredToken() !== null;
+    }
+    return null;
+  });
 
   useEffect(() => {
     const token = getStoredToken();
