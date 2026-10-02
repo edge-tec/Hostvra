@@ -28,10 +28,10 @@ type TerminalThemeMode = 'white' | 'dark' | 'matrix';
 // Define terminal color themes at module scope
 const TERMINAL_THEMES = {
   white: {
-    background: '#ffffff',
+    background: '#f8fafc',
     foreground: '#0f172a',
-    cursor: '#0f172a',
-    cursorAccent: '#ffffff',
+    cursor: '#2563eb',
+    cursorAccent: '#f8fafc',
     selectionBackground: '#bfdbfe',
     selectionForeground: '#1e3a8a',
     black: '#0f172a',
@@ -105,7 +105,7 @@ export default function TerminalPage() {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [themeMode, setThemeMode] = useState<TerminalThemeMode>('white');
+  const [themeMode, setThemeMode] = useState<TerminalThemeMode>('dark');
   const [fontSize, setFontSize] = useState<number>(14);
   const [copiedNotification, setCopiedNotification] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -114,6 +114,10 @@ export default function TerminalPage() {
   const xtermInstanceRef = useRef<any>(null);
   const fitAddonRef = useRef<any>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const themeModeRef = useRef(themeMode);
+  themeModeRef.current = themeMode;
+  const fontSizeRef = useRef(fontSize);
+  fontSizeRef.current = fontSize;
 
   // Fetch system environment metadata
   useEffect(() => {
@@ -143,6 +147,9 @@ export default function TerminalPage() {
       xtermInstanceRef.current.dispose();
       xtermInstanceRef.current = null;
     }
+    if (terminalContainerRef.current) {
+      terminalContainerRef.current.innerHTML = '';
+    }
     try {
       // Dynamically load @xterm/xterm and @xterm/addon-fit for SSR safety
       const xtermMod: any = await import('@xterm/xterm');
@@ -158,12 +165,13 @@ export default function TerminalPage() {
       const fitAddon = new FitAddonClass();
       fitAddonRef.current = fitAddon;
 
+      const currentTheme = TERMINAL_THEMES[themeModeRef.current] || TERMINAL_THEMES.dark;
       const term = new TerminalClass({
         cursorBlink: true,
-        cursorStyle: 'bar',
-        fontSize: fontSize,
+        cursorStyle: 'block',
+        fontSize: fontSizeRef.current,
         fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-        theme: TERMINAL_THEMES[themeMode],
+        theme: currentTheme,
         convertEol: true,
         allowProposedApi: true,
         scrollback: 10000,
@@ -179,7 +187,7 @@ export default function TerminalPage() {
         // Container sizing grace period
       }
 
-      term.write('\x1b[1;34m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY)...\r\n');
+      term.write('\x1b[1;36m[Hostvra]\x1b[0m Initializing interactive pseudo-terminal (PTY/TTY)...\r\n');
       setConnectionStatus('connecting');
 
       // Resolve WebSocket connection endpoint and authentication token
@@ -303,7 +311,7 @@ export default function TerminalPage() {
         `;
       }
     }
-  }, [fontSize, themeMode]);
+  }, []);
 
   // Initial terminal mount
   useEffect(() => {
@@ -555,20 +563,44 @@ export default function TerminalPage() {
 
         {/* Real Interactive xterm.js Terminal Container */}
         <div
-          className={`relative rounded-2xl border transition-all overflow-hidden shadow-sm ${
+          className={`relative rounded-2xl border transition-all overflow-hidden shadow-md flex flex-col ${
             themeMode === 'white'
-              ? 'bg-white border-slate-300 shadow-slate-200/50'
+              ? 'bg-[#f8fafc] border-slate-300 shadow-slate-200/50'
               : themeMode === 'matrix'
               ? 'bg-[#040705] border-emerald-950 shadow-emerald-950/20'
               : 'bg-[#090d16] border-slate-800 shadow-slate-900/50'
           }`}
           style={{ height: isFullscreen ? 'calc(100vh - 120px)' : '620px' }}
         >
+          {/* Terminal Window Header Bar / Chrome */}
+          <div className="flex items-center justify-between px-4 py-2 bg-slate-100 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 select-none shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-rose-500 inline-block shadow-sm" />
+              <span className="w-3 h-3 rounded-full bg-amber-500 inline-block shadow-sm" />
+              <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-sm" />
+              <span className="text-xs font-mono font-medium text-slate-700 dark:text-slate-300 ml-2">
+                {info ? `${info.user}@${info.hostname}: ~ (${info.shell})` : 'root@hostvra: ~ (/bin/bash)'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  connectionStatus === 'connected'
+                    ? 'bg-emerald-500'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-amber-500 animate-pulse'
+                    : 'bg-rose-500'
+                }`}
+              />
+              <span>{connectionStatus === 'connected' ? 'LIVE PTY' : connectionStatus === 'connecting' ? 'ALLOCATING...' : 'OFFLINE'}</span>
+            </div>
+          </div>
+
           {/* Terminal Screen Mount Point */}
           <div
             ref={terminalContainerRef}
-            className="w-full h-full p-4"
-            style={{ minHeight: '100%' }}
+            className="w-full flex-1 p-3 overflow-hidden"
+            style={{ minHeight: '300px' }}
           />
 
           {/* Connection Overlay when disconnected */}
