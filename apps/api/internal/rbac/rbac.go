@@ -241,6 +241,13 @@ func RequireAdmin() func(http.Handler) http.Handler {
 				return
 			}
 
+			if claims.ImpersonatedBy != nil {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative APIs cannot be accessed during impersonation sessions", map[string]string{
+					"error": "impersonated_session_restricted",
+				}, "")
+				return
+			}
+
 			if !claims.IsSuperAdmin && claims.Role != RoleAdmin {
 				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privileges required", map[string]string{
 					"user_role": claims.Role,

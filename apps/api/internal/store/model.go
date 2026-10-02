@@ -26,6 +26,7 @@ type User struct {
 	IsActive           bool       `json:"is_active"`
 	IsSuperAdmin       bool       `json:"is_superadmin"`
 	TwoFactorEnabled   bool       `json:"two_factor_enabled"`
+	EmailVerified      bool       `json:"email_verified"`
 	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
 	LastLoginIP        string     `json:"last_login_ip,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
@@ -101,3 +102,34 @@ type AuditLog struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 }
+
+type EmailVerificationToken struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	TokenHash string     `json:"-"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type PasswordResetToken struct {
+	ID        uuid.UUID  `json:"id"`
+	UserID    uuid.UUID  `json:"user_id"`
+	TokenHash string     `json:"-"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+type EmailDelivery struct {
+	ID             uuid.UUID `json:"id"`
+	EventType      string    `json:"event_type"`
+	EventKey       string    `json:"event_key"`
+	RecipientEmail string    `json:"recipient_email"`
+	Subject        string    `json:"subject"`
+	Status         string    `json:"status"` // sent, failed, simulated
+	ErrorMessage   string    `json:"error_message,omitempty"`
+	Metadata       string    `json:"metadata,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+

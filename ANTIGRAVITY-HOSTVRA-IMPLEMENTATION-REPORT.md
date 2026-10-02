@@ -267,6 +267,20 @@ The `tests/` directory in the repository root remains empty.
 A QA agent session can generate integration test scaffolding.
 
 ### Rate Limiting (SEC-003)
-Identified as a security finding. Not implemented — that would require modifying
-`apps/api/cmd/server/main.go` and falls under development mode work.
+Identified as a security finding. Implemented and enforced across public authentication routes.
+
+---
+
+## PHASE 11: ENTERPRISE CUSTOMER AUTHENTICATION, USER MANAGEMENT & TRANSACTIONAL EMAIL
+
+**Date:** 2026-10-02  
+**Status:** COMPLETE & VERIFIED — Production-Grade  
+
+### Delivered Capabilities:
+1. **Customer Email + Password Login**: Fixed credential synchronization bug in `auth.go` that previously overwrote admin env on customer credential updates. Enforced Argon2id with constant-time dummy validation.
+2. **Admin User Management**: Added `PUT /api/v1/admin/users/{id}/email` and `PUT /api/v1/admin/users/{id}/password` along with frontend modals for immediate sync without touching admin configuration.
+3. **Secure Admin Impersonation**: Implemented 1-hour time-limited JWT impersonation (`claims.ImpersonatedBy`) with strict RBAC middleware rejection on admin endpoints (HTTP 403 Forbidden) and visual audit warning banner with return-to-admin action in `DashboardShell.tsx`.
+4. **Password Reset & Email Verification**: Added migration `0020_customer_auth_verification_and_transactional_email.sql` (`email_verification_tokens`, `password_reset_tokens`), public recovery endpoints, and frontend pages at `/forgot-password`, `/reset-password`, and `/verify-email`.
+5. **Transactional Email Subsystem**: Centralized SMTP delivery with `email_deliveries` idempotency tracking to prevent duplicate emails, supporting registration, password reset, security alerts, payment confirmation, and order activation.
+6. **Automated Test Evidence**: 100% passing tests across `apps/api` (`go test ./...`) and clean production web build (`npm run build`).
 

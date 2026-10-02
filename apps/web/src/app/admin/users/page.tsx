@@ -29,6 +29,8 @@ import {
   Save,
   RotateCcw,
   Sparkles,
+  LogIn,
+  KeyRound,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import {
@@ -43,6 +45,10 @@ import {
   deleteAdminUserOverrides,
   updateAdminUserStatus,
   updateAdminUserRole,
+  updateAdminUserEmail,
+  updateAdminUserPassword,
+  impersonateAdminUser,
+  setStoredToken,
   getStoredUserRole,
 } from '@/lib/api';
 
@@ -59,6 +65,11 @@ export default function AdminUsersPage() {
   const [editOverrideModal, setEditOverrideModal] = useState(false);
   const [editRoleModal, setEditRoleModal] = useState(false);
   const [selectedRole, setSelectedRole] = useState<'customer' | 'user' | 'admin'>('customer');
+  const [editEmailModal, setEditEmailModal] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [editPasswordModal, setEditPasswordModal] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [impersonating, setImpersonating] = useState<string | null>(null);
 
   // Form states
   const [selectedPlanId, setSelectedPlanId] = useState('');
@@ -155,6 +166,101 @@ export default function AdminUsersPage() {
       setMessage({ type: 'error', text: err?.message || 'Request failed' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEmailModal = (u: AdminUserListItem) => {
+    setSelectedUser(u);
+    setNewEmail(u.email);
+    setEditEmailModal(true);
+  };
+
+  const openPasswordModal = (u: AdminUserListItem) => {
+    setSelectedUser(u);
+    setNewPassword('');
+    setEditPasswordModal(true);
+  };
+
+  const handleSaveEmail = async () => {
+    if (!selectedUser || !newEmail.trim()) return;
+    setSaving(true);
+    try {
+      const res = await updateAdminUserEmail(selectedUser.id, newEmail.trim());
+      if (res.success) {
+        setMessage({ type: 'success', text: `Email updated to ${newEmail.trim()} successfully` });
+        setEditEmailModal(false);
+        loadData();
+      } else {
+        setMessage({ type: 'error', text: res.error?.message || 'Failed to update email' });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err?.message || 'Failed to update email' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSavePassword = async () => {
+    if (!selectedUser || !newPassword) return;
+    if (newPassword.length < 6) {
+      setMessage({ type: 'error', text: 'Password must be at least 6 characters' });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await updateAdminUserPassword(selectedUser.id, newPassword);
+      if (res.success) {
+        setMessage({ type: 'success', text: `Password for ${selectedUser.email} updated successfully` });
+        setEditPasswordModal(false);
+        loadData();
+      } else {
+        setMessage({ type: 'error', text: res.error?.message || 'Failed to update password' });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err?.message || 'Failed to update password' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleImpersonate = async (u: AdminUserListItem) => {
+    if (u.is_superadmin) {
+      setMessage({ type: 'error', text: 'Cannot impersonate a SuperAdmin account' });
+      return;
+    }
+    if (!confirm(`Are you sure you want to securely log in as ${u.email}? You will be granted customer session access.`)) {
+      return;
+    }
+    setImpersonating(u.id);
+    try {
+      const res = await impersonateAdminUser(u.id);
+      if (res.success && res.data) {
+        const currentToken = localStorage.getItem('hostvra_token');
+        if (currentToken) {
+          localStorage.setItem('hostvra_admin_backup_token', currentToken);
+        }
+        setStoredToken(res.data.tokens.access_token);
+        if (typeof document !== 'undefined') {
+          document.cookie = `hostvra_token=${encodeURIComponent(res.data.tokens.access_token)}; path=/; max-age=3600; SameSite=Lax`;
+        }
+        localStorage.setItem(
+          'hostvra_user',
+          JSON.stringify({
+            id: res.data.user?.id,
+            email: res.data.user?.email,
+            role: 'customer',
+            is_superadmin: false,
+            impersonated: true,
+          })
+        );
+        window.location.href = '/dashboard';
+      } else {
+        setMessage({ type: 'error', text: res.error?.message || 'Failed to impersonate user' });
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err?.message || 'Impersonation failed' });
+    } finally {
+      setImpersonating(null);
     }
   };
 
@@ -466,6 +572,30 @@ export default function AdminUsersPage() {
                         {/* Admin Controls */}
                         <td className="py-3.5 px-4 text-right">
                           <div className="inline-flex items-center gap-1.5">
+                            {!u.is_superadmin && (
+                              <button
+                                onClick={() => handleImpersonate(u)}
+                                disabled={impersonating === u.id}
+                                className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                title="Login directly into customer account (Impersonation)"
+                              >
+                                {impersonating === u.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />} Login
+                              </button>
+                            )}
+                            <button
+                              onClick={() => openEmailModal(u)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                              title="Edit User Email"
+                            >
+                              <Mail className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => openPasswordModal(u)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                              title="Set User Password"
+                            >
+                              <KeyRound className="w-3.5 h-3.5" />
+                            </button>
                             <button
                               onClick={() => openRoleModal(u)}
                               className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-100 transition-colors flex items-center gap-1"
@@ -886,6 +1016,120 @@ export default function AdminUsersPage() {
                   className="px-4 py-2 text-xs font-bold bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50"
                 >
                   {saving ? 'Saving...' : 'Update Role'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Email Modal */}
+        {editEmailModal && selectedUser && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-emerald-500" />
+                  Update Email Address
+                </h3>
+                <button
+                  onClick={() => setEditEmailModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                    User: {selectedUser.full_name || selectedUser.email}
+                  </label>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                    Changing this email updates the primary login and authentication record across the system.
+                  </p>
+                  <input
+                    type="email"
+                    required
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="new.email@example.com"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-950 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-surface-800">
+                <button
+                  type="button"
+                  onClick={() => setEditEmailModal(false)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEmail}
+                  disabled={saving || !newEmail.trim()}
+                  className="px-4 py-2 text-xs font-bold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {saving ? 'Updating...' : 'Save Email'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Password Modal */}
+        {editPasswordModal && selectedUser && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-3">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-emerald-500" />
+                  Set User Password
+                </h3>
+                <button
+                  onClick={() => setEditPasswordModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                    Account: {selectedUser.email}
+                  </label>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                    Enter the new password. It will be encrypted with Argon2id and synchronized immediately.
+                  </p>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="Min 6 characters"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-950 text-slate-900 dark:text-white text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-surface-800">
+                <button
+                  type="button"
+                  onClick={() => setEditPasswordModal(false)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePassword}
+                  disabled={saving || newPassword.length < 6}
+                  className="px-4 py-2 text-xs font-bold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {saving ? 'Updating...' : 'Set Password'}
                 </button>
               </div>
             </div>

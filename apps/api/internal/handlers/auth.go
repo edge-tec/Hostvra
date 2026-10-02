@@ -12,22 +12,28 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type AuthHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	emailSvc *email.Service
 }
 
-func NewAuthHandler(cfg *config.Config, s store.Store, a *audit.Logger) *AuthHandler {
-	return &AuthHandler{
+func NewAuthHandler(cfg *config.Config, s store.Store, a *audit.Logger, emailSvc ...*email.Service) *AuthHandler {
+	h := &AuthHandler{
 		cfg:   cfg,
 		store: s,
 		audit: a,
 	}
+	if len(emailSvc) > 0 && emailSvc[0] != nil {
+		h.emailSvc = emailSvc[0]
+	}
+	return h
 }
 
 type RegisterRequest struct {
@@ -98,19 +104,39 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	// Create User with Customer / User Role (NEVER Admin or SuperAdmin)
 	userRole := "customer"
 	user := &store.User{
-		ID:           uuid.New(),
-		Email:        req.Email,
-		PasswordHash: hashedPassword,
-		FullName:     req.FullName,
-		IsActive:     true,
-		IsSuperAdmin: false,
-		Role:         userRole,
-		DefaultOrgID: org.ID,
+		ID:            uuid.New(),
+		Email:         req.Email,
+		PasswordHash:  hashedPassword,
+		FullName:      req.FullName,
+		IsActive:      true,
+		IsSuperAdmin:  false,
+		EmailVerified: true, // Default true; if email service is configured, set false and send verification
+		Role:          userRole,
+		DefaultOrgID:  org.ID,
+	}
+
+	// If email service is configured, require verification
+	if h.emailSvc != nil && h.emailSvc.IsConfigured() {
+		user.EmailVerified = false
 	}
 
 	if err := h.store.CreateUser(r.Context(), user, org.ID, userRole); err != nil {
 		response.Error(w, http.StatusConflict, "USER_EXISTS", "User with this email already exists", nil, "")
 		return
+	}
+
+	// Send verification email if service is configured
+	if h.emailSvc != nil && h.emailSvc.IsConfigured() && !user.EmailVerified {
+		rawToken, tokenHash := email.GenerateSecureToken()
+		vToken := &store.EmailVerificationToken{
+			ID:        uuid.New(),
+			UserID:    user.ID,
+			TokenHash: tokenHash,
+			ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+		}
+		if err := h.store.CreateEmailVerificationToken(r.Context(), vToken); err == nil {
+			go h.emailSvc.SendEmailVerification(r.Context(), user.Email, user.FullName, rawToken)
+		}
 	}
 
 	// Auto-assign Hosting Package and create initial Subscription
@@ -267,12 +293,19 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 
 	org, _ := h.store.GetOrganizationByID(r.Context(), claims.OrganizationID)
 
-	response.JSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"user":          user,
 		"org":           org,
 		"role":          claims.Role,
 		"is_superadmin": claims.IsSuperAdmin,
-	}, nil)
+	}
+
+	// Include impersonation context if present
+	if claims.ImpersonatedBy != nil {
+		resp["impersonated_by"] = claims.ImpersonatedBy
+	}
+
+	response.JSON(w, http.StatusOK, resp, nil)
 }
 
 type ChangePasswordRequest struct {
@@ -325,8 +358,15 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist to /etc/hostvra/api.env if running on server
-	syncEnvCredentials("", req.NewPassword)
+	// CRITICAL FIX: Only sync env credentials if this is an admin/superadmin user
+	if user.IsSuperAdmin || strings.HasPrefix(strings.ToLower(user.Email), "admin@") || strings.HasSuffix(strings.ToLower(user.Email), "@hostvra.com") {
+		syncEnvCredentials("", req.NewPassword)
+	}
+
+	// Send password changed notification email
+	if h.emailSvc != nil {
+		go h.emailSvc.SendPasswordChanged(r.Context(), user.Email, user.FullName)
+	}
 
 	h.audit.Log(r.Context(), r, "auth.password_change", "user", user.ID.String(), "success", "", map[string]interface{}{
 		"email": user.Email,
@@ -380,8 +420,10 @@ func (h *AuthHandler) ChangeEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist to /etc/hostvra/api.env if running on server
-	syncEnvCredentials(newEmail, "")
+	// CRITICAL FIX: Only sync env credentials if this is an admin/superadmin user
+	if user.IsSuperAdmin || strings.HasPrefix(strings.ToLower(user.Email), "admin@") || strings.HasSuffix(strings.ToLower(user.Email), "@hostvra.com") {
+		syncEnvCredentials(newEmail, "")
+	}
 
 	h.audit.Log(r.Context(), r, "auth.email_change", "user", user.ID.String(), "success", "", map[string]interface{}{
 		"old_email": user.Email,
@@ -393,6 +435,263 @@ func (h *AuthHandler) ChangeEmail(w http.ResponseWriter, r *http.Request) {
 		"email":   newEmail,
 		"message": "Email address updated successfully",
 	}, nil)
+}
+
+// ================================
+// FORGOT PASSWORD / RESET PASSWORD
+// ================================
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+// ForgotPassword initiates a password reset flow (no user enumeration)
+func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var req ForgotPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body", nil, "")
+		return
+	}
+
+	normalizedEmail := strings.TrimSpace(strings.ToLower(req.Email))
+
+	// Always return generic 200 to prevent user enumeration
+	genericResponse := func() {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "If an account with that email exists, a password reset link has been sent.",
+		}, nil)
+	}
+
+	if normalizedEmail == "" || !strings.Contains(normalizedEmail, "@") {
+		genericResponse()
+		return
+	}
+
+	user, err := h.store.GetUserByEmail(r.Context(), normalizedEmail)
+	if err != nil || user == nil {
+		// Timing attack mitigation: spend similar time even when user doesn't exist
+		auth.VerifyPasswordDummy("dummy-timing-equalization")
+		genericResponse()
+		return
+	}
+
+	// Generate secure token
+	rawToken, tokenHash := email.GenerateSecureToken()
+	resetToken := &store.PasswordResetToken{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().UTC().Add(1 * time.Hour),
+	}
+
+	if err := h.store.CreatePasswordResetToken(r.Context(), resetToken); err != nil {
+		genericResponse()
+		return
+	}
+
+	// Send reset email
+	if h.emailSvc != nil {
+		go h.emailSvc.SendPasswordReset(r.Context(), user.Email, user.FullName, rawToken)
+	}
+
+	h.audit.Log(r.Context(), r, "auth.forgot_password", "user", user.ID.String(), "success", "", map[string]interface{}{
+		"email": normalizedEmail,
+	})
+
+	genericResponse()
+}
+
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	NewPassword string `json:"new_password"`
+}
+
+// ResetPassword validates a reset token and updates the password
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var req ResetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.Token == "" || req.NewPassword == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Token and new password are required", nil, "")
+		return
+	}
+
+	if err := auth.ValidatePasswordComplexity(req.NewPassword); err != nil {
+		response.Error(w, http.StatusBadRequest, "WEAK_PASSWORD", err.Error(), nil, "")
+		return
+	}
+
+	// Hash the raw token to look up in database
+	tokenHash := email.HashToken(req.Token)
+
+	resetToken, err := h.store.GetPasswordResetTokenByHash(r.Context(), tokenHash)
+	if err != nil || resetToken == nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_TOKEN", "Invalid or expired reset token", nil, "")
+		return
+	}
+
+	// Check if token is already used
+	if resetToken.UsedAt != nil {
+		response.Error(w, http.StatusBadRequest, "TOKEN_USED", "This reset token has already been used", nil, "")
+		return
+	}
+
+	// Check if token is expired
+	if time.Now().UTC().After(resetToken.ExpiresAt) {
+		response.Error(w, http.StatusBadRequest, "TOKEN_EXPIRED", "This reset token has expired. Please request a new one.", nil, "")
+		return
+	}
+
+	// Hash new password
+	newHash, err := auth.HashPassword(req.NewPassword, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "HASH_FAILED", "Failed to secure password", nil, "")
+		return
+	}
+
+	// Update password
+	if err := h.store.UpdateUserPassword(r.Context(), resetToken.UserID, newHash); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update password", nil, "")
+		return
+	}
+
+	// Mark token as used
+	_ = h.store.MarkPasswordResetTokenUsed(r.Context(), resetToken.ID)
+
+	// Invalidate all other reset tokens for this user
+	_ = h.store.InvalidateUserPasswordResetTokens(r.Context(), resetToken.UserID)
+
+	// Send password changed notification
+	if h.emailSvc != nil {
+		user, _ := h.store.GetUserByID(r.Context(), resetToken.UserID)
+		if user != nil {
+			go h.emailSvc.SendPasswordChanged(r.Context(), user.Email, user.FullName)
+		}
+	}
+
+	h.audit.Log(r.Context(), r, "auth.reset_password", "user", resetToken.UserID.String(), "success", "", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Password has been reset successfully. You can now sign in with your new password.",
+	}, nil)
+}
+
+// ================================
+// EMAIL VERIFICATION
+// ================================
+
+type VerifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+// VerifyEmail validates an email verification token
+func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	// Accept token from query param or body
+	rawToken := r.URL.Query().Get("token")
+	if rawToken == "" {
+		var req VerifyEmailRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			rawToken = req.Token
+		}
+	}
+
+	if rawToken == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_TOKEN", "Verification token is required", nil, "")
+		return
+	}
+
+	tokenHash := email.HashToken(rawToken)
+
+	vToken, err := h.store.GetEmailVerificationTokenByHash(r.Context(), tokenHash)
+	if err != nil || vToken == nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_TOKEN", "Invalid or expired verification token", nil, "")
+		return
+	}
+
+	if vToken.UsedAt != nil {
+		response.Error(w, http.StatusBadRequest, "TOKEN_USED", "This verification token has already been used", nil, "")
+		return
+	}
+
+	if time.Now().UTC().After(vToken.ExpiresAt) {
+		response.Error(w, http.StatusBadRequest, "TOKEN_EXPIRED", "Verification token has expired. Please request a new one.", nil, "")
+		return
+	}
+
+	// Mark email as verified
+	if err := h.store.MarkUserEmailVerified(r.Context(), vToken.UserID); err != nil {
+		response.Error(w, http.StatusInternalServerError, "VERIFICATION_FAILED", "Failed to verify email", nil, "")
+		return
+	}
+
+	// Mark token as used
+	_ = h.store.MarkEmailVerificationTokenUsed(r.Context(), vToken.ID)
+
+	h.audit.Log(r.Context(), r, "auth.email_verified", "user", vToken.UserID.String(), "success", "", nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "Email address verified successfully. You can now sign in.",
+	}, nil)
+}
+
+type ResendVerificationRequest struct {
+	Email string `json:"email"`
+}
+
+// ResendVerification resends the email verification link
+func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request) {
+	var req ResendVerificationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body", nil, "")
+		return
+	}
+
+	normalizedEmail := strings.TrimSpace(strings.ToLower(req.Email))
+
+	// Generic response to prevent enumeration
+	genericResponse := func() {
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"success": true,
+			"message": "If the account exists and is unverified, a new verification email has been sent.",
+		}, nil)
+	}
+
+	if normalizedEmail == "" {
+		genericResponse()
+		return
+	}
+
+	user, err := h.store.GetUserByEmail(r.Context(), normalizedEmail)
+	if err != nil || user == nil || user.EmailVerified {
+		genericResponse()
+		return
+	}
+
+	// Generate new token
+	rawToken, tokenHash := email.GenerateSecureToken()
+	vToken := &store.EmailVerificationToken{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+	}
+
+	if err := h.store.CreateEmailVerificationToken(r.Context(), vToken); err != nil {
+		genericResponse()
+		return
+	}
+
+	if h.emailSvc != nil {
+		go h.emailSvc.SendEmailVerification(r.Context(), user.Email, user.FullName, rawToken)
+	}
+
+	genericResponse()
 }
 
 func syncEnvCredentials(newEmail, newPassword string) {

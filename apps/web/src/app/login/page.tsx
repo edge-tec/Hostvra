@@ -134,7 +134,10 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end text-xs pt-1">
+            <div className="flex items-center justify-between text-xs pt-1">
+              <Link href="/forgot-password" className="text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition-colors">
+                Forgot password?
+              </Link>
               <Link href="/register" className="text-[#16A34A] dark:text-emerald-400 font-semibold hover:underline">
                 Create Account
               </Link>

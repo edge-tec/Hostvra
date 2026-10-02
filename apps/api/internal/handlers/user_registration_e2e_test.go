@@ -30,7 +30,7 @@ func setupTestRouter(memStore *store.MemoryStore, cfg *config.Config, quotaSvc *
 	auditLogger := audit.NewLogger(memStore, logger)
 
 	authHandler := handlers.NewAuthHandler(cfg, memStore, auditLogger)
-	adminUsersHandler := handlers.NewAdminUsersHandler(memStore, quotaSvc, auditLogger)
+	adminUsersHandler := handlers.NewAdminUsersHandler(cfg, memStore, quotaSvc, auditLogger)
 
 	authMiddleware := auth.Middleware(cfg.JWTSecret)
 

@@ -119,7 +119,7 @@ func (m *MemoryStore) DeleteUserPlanOverride(ctx context.Context, userID uuid.UU
 func (p *PostgresStore) ListUsers(ctx context.Context) ([]*User, error) {
 	query := `
 		SELECT u.id, u.email, u.password_hash, u.full_name, u.is_active, u.is_superadmin,
-		       u.two_factor_enabled, u.last_login_at, COALESCE(u.last_login_ip::text, ''),
+		       u.two_factor_enabled, COALESCE(u.email_verified, true), u.last_login_at, COALESCE(u.last_login_ip::text, ''),
 		       u.created_at, u.updated_at,
 		       COALESCE(om.organization_id, '00000000-0000-0000-0000-000000000000'::uuid) as default_org_id,
 		       COALESCE(r.name, CASE WHEN u.is_superadmin THEN 'admin' ELSE 'owner' END) as role
@@ -143,7 +143,7 @@ func (p *PostgresStore) ListUsers(ctx context.Context) ([]*User, error) {
 		var lastLoginIP string
 		err := rows.Scan(
 			&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.IsActive, &u.IsSuperAdmin,
-			&u.TwoFactorEnabled, &u.LastLoginAt, &lastLoginIP,
+			&u.TwoFactorEnabled, &u.EmailVerified, &u.LastLoginAt, &lastLoginIP,
 			&u.CreatedAt, &u.UpdatedAt, &u.DefaultOrgID, &u.Role,
 		)
 		if err != nil {

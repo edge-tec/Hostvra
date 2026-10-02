@@ -16,11 +16,12 @@ var (
 )
 
 type Claims struct {
-	UserID         uuid.UUID `json:"user_id"`
-	Email          string    `json:"email"`
-	OrganizationID uuid.UUID `json:"org_id"`
-	Role           string    `json:"role"`
-	IsSuperAdmin   bool      `json:"is_superadmin"`
+	UserID         uuid.UUID  `json:"user_id"`
+	Email          string     `json:"email"`
+	OrganizationID uuid.UUID  `json:"org_id"`
+	Role           string     `json:"role"`
+	IsSuperAdmin   bool       `json:"is_superadmin"`
+	ImpersonatedBy *uuid.UUID `json:"impersonated_by,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -98,3 +99,39 @@ func HashOpaqueToken(rawToken string) string {
 	h := sha256.Sum256([]byte(rawToken))
 	return hex.EncodeToString(h[:])
 }
+
+// GenerateImpersonationTokenPair creates a short-lived session token allowing an authorized admin to support a customer
+func GenerateImpersonationTokenPair(adminID, targetUserID, targetOrgID uuid.UUID, targetEmail string, secret string, duration time.Duration) (*TokenPair, error) {
+	now := time.Now().UTC()
+	accessExpiresAt := now.Add(duration)
+
+	claims := &Claims{
+		UserID:         targetUserID,
+		Email:          targetEmail,
+		OrganizationID: targetOrgID,
+		Role:           "customer",
+		IsSuperAdmin:   false,
+		ImpersonatedBy: &adminID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			Issuer:    "hostvra-core-api",
+			Subject:   targetUserID.String(),
+			ID:        uuid.New().String(),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	accessTokenString, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return nil, err
+	}
+
+	return &TokenPair{
+		AccessToken:  accessTokenString,
+		RefreshToken: "", // Impersonation sessions deliberately do not issue persistent refresh tokens
+		ExpiresAt:    accessExpiresAt,
+	}, nil
+}
+

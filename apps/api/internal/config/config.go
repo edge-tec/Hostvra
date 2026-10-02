@@ -34,6 +34,14 @@ type Config struct {
 	DomainDefaultNS1       string
 	DomainDefaultNS2       string
 	DomainEncryptionSecret string
+
+	// Transactional Email (SMTP)
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUser     string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPFromName string
 }
 
 func Load() *Config {
@@ -62,6 +70,13 @@ func Load() *Config {
 		DomainDefaultNS1:       getEnv("DOMAIN_DEFAULT_NS1", "ns1.hostvra.com"),
 		DomainDefaultNS2:       getEnv("DOMAIN_DEFAULT_NS2", "ns2.hostvra.com"),
 		DomainEncryptionSecret: getEnv("DOMAIN_ENCRYPTION_SECRET", "hostvra-domain-auth-encryption-key-32b"),
+
+		SMTPHost:     getEnv("SMTP_HOST", ""),
+		SMTPPort:     getEnvInt("SMTP_PORT", 587),
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", "noreply@hostvra.com"),
+		SMTPFromName: getEnv("SMTP_FROM_NAME", "Hostvra"),
 	}
 }
 

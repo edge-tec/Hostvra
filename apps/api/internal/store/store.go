@@ -41,6 +41,15 @@ type Store interface {
 	UpdateUserPassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	UpdateUserEmail(ctx context.Context, id uuid.UUID, newEmail string) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	MarkUserEmailVerified(ctx context.Context, userID uuid.UUID) error
+	CreateEmailVerificationToken(ctx context.Context, token *EmailVerificationToken) error
+	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error)
+	MarkEmailVerificationTokenUsed(ctx context.Context, id uuid.UUID) error
+	CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error
+	GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (*PasswordResetToken, error)
+	MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error
+	InvalidateUserPasswordResetTokens(ctx context.Context, userID uuid.UUID) error
+	RecordEmailDelivery(ctx context.Context, delivery *EmailDelivery) (bool, error)
 
 	// User Plan Overrides
 	GetUserPlanOverride(ctx context.Context, userID uuid.UUID) (*UserPlanOverride, error)
@@ -453,6 +462,9 @@ type MemoryStore struct {
 	fmTrash             map[uuid.UUID]*FileManagerTrashItem
 	fmActivityLogs      []*FileManagerActivityLog
 	userPlanOverrides   map[uuid.UUID]*UserPlanOverride
+	emailVerifyTokens   map[string]*EmailVerificationToken // key: tokenHash
+	passwordResetTokens map[string]*PasswordResetToken     // key: tokenHash
+	emailDeliveries     map[string]*EmailDelivery          // key: eventType:eventKey
 	filePath            string
 }
 
@@ -890,6 +902,9 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		fmTrash:             make(map[uuid.UUID]*FileManagerTrashItem),
 		fmActivityLogs:      make([]*FileManagerActivityLog, 0),
 		userPlanOverrides:   make(map[uuid.UUID]*UserPlanOverride),
+		emailVerifyTokens:   make(map[string]*EmailVerificationToken),
+		passwordResetTokens: make(map[string]*PasswordResetToken),
+		emailDeliveries:     make(map[string]*EmailDelivery),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
@@ -970,8 +985,10 @@ func (m *MemoryStore) CreateUser(ctx context.Context, user *User, orgID uuid.UUI
 	user.DefaultOrgID = orgID
 	user.Role = role
 
+	normEmail := strings.ToLower(strings.TrimSpace(user.Email))
+	user.Email = normEmail
 	m.users[user.ID] = user
-	m.usersByEmail[user.Email] = user.ID
+	m.usersByEmail[normEmail] = user.ID
 	m.saveToDiskLocked()
 	return nil
 }
@@ -980,7 +997,18 @@ func (m *MemoryStore) GetUserByEmail(ctx context.Context, email string) (*User, 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	id, exists := m.usersByEmail[email]
+	normEmail := strings.ToLower(strings.TrimSpace(email))
+	id, exists := m.usersByEmail[normEmail]
+	if !exists {
+		// Fallback lookup
+		for _, u := range m.users {
+			if strings.EqualFold(u.Email, normEmail) {
+				id = u.ID
+				exists = true
+				break
+			}
+		}
+	}
 	if !exists {
 		return nil, ErrNotFound
 	}
@@ -1042,12 +1070,144 @@ func (m *MemoryStore) UpdateUserEmail(ctx context.Context, id uuid.UUID, newEmai
 	if !exists {
 		return ErrNotFound
 	}
+	oldNorm := strings.ToLower(strings.TrimSpace(user.Email))
+	newNorm := strings.ToLower(strings.TrimSpace(newEmail))
+	delete(m.usersByEmail, oldNorm)
 	delete(m.usersByEmail, user.Email)
-	user.Email = newEmail
-	m.usersByEmail[newEmail] = user.ID
+	user.Email = newNorm
+	m.usersByEmail[newNorm] = user.ID
 	user.UpdatedAt = time.Now().UTC()
 	m.saveToDiskLocked()
 	return nil
+}
+
+func (m *MemoryStore) MarkUserEmailVerified(ctx context.Context, userID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, exists := m.users[userID]
+	if !exists {
+		return ErrNotFound
+	}
+	user.EmailVerified = true
+	user.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) CreateEmailVerificationToken(ctx context.Context, token *EmailVerificationToken) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if token.ID == uuid.Nil {
+		token.ID = uuid.New()
+	}
+	if token.CreatedAt.IsZero() {
+		token.CreatedAt = time.Now().UTC()
+	}
+	m.emailVerifyTokens[token.TokenHash] = token
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	token, exists := m.emailVerifyTokens[tokenHash]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return token, nil
+}
+
+func (m *MemoryStore) MarkEmailVerificationTokenUsed(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, t := range m.emailVerifyTokens {
+		if t.ID == id {
+			now := time.Now().UTC()
+			t.UsedAt = &now
+			m.saveToDiskLocked()
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (m *MemoryStore) CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if token.ID == uuid.Nil {
+		token.ID = uuid.New()
+	}
+	if token.CreatedAt.IsZero() {
+		token.CreatedAt = time.Now().UTC()
+	}
+	m.passwordResetTokens[token.TokenHash] = token
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	token, exists := m.passwordResetTokens[tokenHash]
+	if !exists {
+		return nil, ErrNotFound
+	}
+	return token, nil
+}
+
+func (m *MemoryStore) MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, t := range m.passwordResetTokens {
+		if t.ID == id {
+			now := time.Now().UTC()
+			t.UsedAt = &now
+			m.saveToDiskLocked()
+			return nil
+		}
+	}
+	return ErrNotFound
+}
+
+func (m *MemoryStore) InvalidateUserPasswordResetTokens(ctx context.Context, userID uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	for _, t := range m.passwordResetTokens {
+		if t.UserID == userID && t.UsedAt == nil {
+			t.UsedAt = &now
+		}
+	}
+	m.saveToDiskLocked()
+	return nil
+}
+
+func (m *MemoryStore) RecordEmailDelivery(ctx context.Context, delivery *EmailDelivery) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := delivery.EventType + ":" + delivery.EventKey
+	if _, exists := m.emailDeliveries[key]; exists {
+		return false, nil // Idempotent duplicate: already delivered
+	}
+	if delivery.ID == uuid.Nil {
+		delivery.ID = uuid.New()
+	}
+	if delivery.CreatedAt.IsZero() {
+		delivery.CreatedAt = time.Now().UTC()
+	}
+	m.emailDeliveries[key] = delivery
+	m.saveToDiskLocked()
+	return true, nil
 }
 
 func (m *MemoryStore) CreateServer(ctx context.Context, server *Server) error {
@@ -1521,14 +1681,16 @@ func (p *PostgresStore) CreateUser(ctx context.Context, user *User, orgID uuid.U
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
 	}
+	normEmail := strings.ToLower(strings.TrimSpace(user.Email))
+	user.Email = normEmail
 
 	userQuery := `
-		INSERT INTO users (id, email, password_hash, full_name, is_active, is_superadmin)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO users (id, email, password_hash, full_name, is_active, is_superadmin, email_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING created_at, updated_at
 	`
 	err = tx.QueryRowContext(ctx, userQuery,
-		user.ID, user.Email, user.PasswordHash, user.FullName, user.IsActive, user.IsSuperAdmin,
+		user.ID, normEmail, user.PasswordHash, user.FullName, user.IsActive, user.IsSuperAdmin, user.EmailVerified,
 	).Scan(&user.CreatedAt, &user.UpdatedAt)
 	if err != nil {
 		return err
@@ -1536,19 +1698,22 @@ func (p *PostgresStore) CreateUser(ctx context.Context, user *User, orgID uuid.U
 
 	// Fetch or create role ID
 	var roleID uuid.UUID
-	roleQuery := `SELECT id FROM roles WHERE name = $1 LIMIT 1`
-	err = tx.QueryRowContext(ctx, roleQuery, role).Scan(&roleID)
+	roleQuery := `SELECT id FROM roles WHERE organization_id = $1 AND name = $2 LIMIT 1`
+	err = tx.QueryRowContext(ctx, roleQuery, orgID, role).Scan(&roleID)
 	if err != nil {
-		// Insert default role for org
-		insertRole := `INSERT INTO roles (organization_id, name) VALUES ($1, $2) RETURNING id`
-		if err := tx.QueryRowContext(ctx, insertRole, orgID, role).Scan(&roleID); err != nil {
-			return err
+		roleGlobalQuery := `SELECT id FROM roles WHERE name = $1 LIMIT 1`
+		if gErr := tx.QueryRowContext(ctx, roleGlobalQuery, role).Scan(&roleID); gErr != nil {
+			insertRole := `INSERT INTO roles (organization_id, name) VALUES ($1, $2) RETURNING id`
+			if iErr := tx.QueryRowContext(ctx, insertRole, orgID, role).Scan(&roleID); iErr != nil {
+				return iErr
+			}
 		}
 	}
 
 	memberQuery := `
 		INSERT INTO organization_members (organization_id, user_id, role_id)
 		VALUES ($1, $2, $3)
+		ON CONFLICT (organization_id, user_id) DO UPDATE SET role_id = EXCLUDED.role_id
 	`
 	if _, err := tx.ExecContext(ctx, memberQuery, orgID, user.ID, roleID); err != nil {
 		return err
@@ -1560,33 +1725,44 @@ func (p *PostgresStore) CreateUser(ctx context.Context, user *User, orgID uuid.U
 }
 
 func (p *PostgresStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	normEmail := strings.ToLower(strings.TrimSpace(email))
 	query := `
-		SELECT u.id, u.email, u.password_hash, u.full_name, u.is_active, u.is_superadmin, u.two_factor_enabled,
-		       om.organization_id, r.name
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.full_name, ''), u.is_active, u.is_superadmin, u.two_factor_enabled,
+		       COALESCE(u.email_verified, true),
+		       COALESCE(om.organization_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(r.name, 'customer')
 		FROM users u
 		LEFT JOIN organization_members om ON om.user_id = u.id
 		LEFT JOIN roles r ON r.id = om.role_id
-		WHERE u.email = $1 AND u.deleted_at IS NULL
+		WHERE LOWER(u.email) = $1 AND u.deleted_at IS NULL
 		LIMIT 1
 	`
 	user := &User{}
-	err := p.db.QueryRowContext(ctx, query, email).Scan(
+	err := p.db.QueryRowContext(ctx, query, normEmail).Scan(
 		&user.ID, &user.Email, &user.PasswordHash, &user.FullName, &user.IsActive, &user.IsSuperAdmin, &user.TwoFactorEnabled,
+		&user.EmailVerified,
 		&user.DefaultOrgID, &user.Role,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err == nil && user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
-		user.Role = "customer"
+	if err != nil {
+		return nil, err
 	}
-	return user, err
+	if !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "" || user.Role == "admin") {
+		if !strings.HasPrefix(strings.ToLower(user.Email), "admin@") && !strings.HasSuffix(strings.ToLower(user.Email), "@hostvra.com") {
+			user.Role = "customer"
+		}
+	}
+	return user, nil
 }
 
 func (p *PostgresStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, error) {
 	query := `
-		SELECT u.id, u.email, u.password_hash, u.full_name, u.is_active, u.is_superadmin, u.two_factor_enabled,
-		       om.organization_id, CASE WHEN r.name = 'owner' OR r.name IS NULL OR r.name = '' THEN 'customer' ELSE r.name END
+		SELECT u.id, u.email, u.password_hash, COALESCE(u.full_name, ''), u.is_active, u.is_superadmin, u.two_factor_enabled,
+		       COALESCE(u.email_verified, true),
+		       COALESCE(om.organization_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       COALESCE(CASE WHEN r.name = 'owner' OR r.name IS NULL OR r.name = '' THEN 'customer' ELSE r.name END, 'customer')
 		FROM users u
 		LEFT JOIN organization_members om ON om.user_id = u.id
 		LEFT JOIN roles r ON r.id = om.role_id
@@ -1596,15 +1772,19 @@ func (p *PostgresStore) GetUserByID(ctx context.Context, id uuid.UUID) (*User, e
 	user := &User{}
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
 		&user.ID, &user.Email, &user.PasswordHash, &user.FullName, &user.IsActive, &user.IsSuperAdmin, &user.TwoFactorEnabled,
+		&user.EmailVerified,
 		&user.DefaultOrgID, &user.Role,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	if err == nil && user != nil && !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
+	if err != nil {
+		return nil, err
+	}
+	if !user.IsSuperAdmin && (user.Role == "owner" || user.Role == "") {
 		user.Role = "customer"
 	}
-	return user, err
+	return user, nil
 }
 
 func (p *PostgresStore) UpdateUserLastLogin(ctx context.Context, id uuid.UUID, ip string) error {
@@ -1620,9 +1800,135 @@ func (p *PostgresStore) UpdateUserPassword(ctx context.Context, id uuid.UUID, pa
 }
 
 func (p *PostgresStore) UpdateUserEmail(ctx context.Context, id uuid.UUID, newEmail string) error {
+	normEmail := strings.ToLower(strings.TrimSpace(newEmail))
 	query := `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`
-	_, err := p.db.ExecContext(ctx, query, newEmail, id)
+	_, err := p.db.ExecContext(ctx, query, normEmail, id)
 	return err
+}
+
+func (p *PostgresStore) MarkUserEmailVerified(ctx context.Context, userID uuid.UUID) error {
+	query := `UPDATE users SET email_verified = true, updated_at = NOW() WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+func (p *PostgresStore) CreateEmailVerificationToken(ctx context.Context, token *EmailVerificationToken) error {
+	query := `
+		INSERT INTO email_verification_tokens (id, user_id, token_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`
+	if token.ID == uuid.Nil {
+		token.ID = uuid.New()
+	}
+	_, err := p.db.ExecContext(ctx, query, token.ID, token.UserID, token.TokenHash, token.ExpiresAt)
+	return err
+}
+
+func (p *PostgresStore) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (*EmailVerificationToken, error) {
+	query := `
+		SELECT id, user_id, token_hash, expires_at, used_at, created_at
+		FROM email_verification_tokens
+		WHERE token_hash = $1
+		LIMIT 1
+	`
+	t := &EmailVerificationToken{}
+	var usedAt sql.NullTime
+	err := p.db.QueryRowContext(ctx, query, tokenHash).Scan(
+		&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &usedAt, &t.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if usedAt.Valid {
+		t.UsedAt = &usedAt.Time
+	}
+	return t, nil
+}
+
+func (p *PostgresStore) MarkEmailVerificationTokenUsed(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE email_verification_tokens SET used_at = NOW() WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (p *PostgresStore) CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
+	query := `
+		INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, NOW())
+	`
+	if token.ID == uuid.Nil {
+		token.ID = uuid.New()
+	}
+	_, err := p.db.ExecContext(ctx, query, token.ID, token.UserID, token.TokenHash, token.ExpiresAt)
+	return err
+}
+
+func (p *PostgresStore) GetPasswordResetTokenByHash(ctx context.Context, tokenHash string) (*PasswordResetToken, error) {
+	query := `
+		SELECT id, user_id, token_hash, expires_at, used_at, created_at
+		FROM password_reset_tokens
+		WHERE token_hash = $1
+		LIMIT 1
+	`
+	t := &PasswordResetToken{}
+	var usedAt sql.NullTime
+	err := p.db.QueryRowContext(ctx, query, tokenHash).Scan(
+		&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &usedAt, &t.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if usedAt.Valid {
+		t.UsedAt = &usedAt.Time
+	}
+	return t, nil
+}
+
+func (p *PostgresStore) MarkPasswordResetTokenUsed(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1`
+	_, err := p.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (p *PostgresStore) InvalidateUserPasswordResetTokens(ctx context.Context, userID uuid.UUID) error {
+	query := `UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = $1 AND used_at IS NULL`
+	_, err := p.db.ExecContext(ctx, query, userID)
+	return err
+}
+
+func (p *PostgresStore) RecordEmailDelivery(ctx context.Context, delivery *EmailDelivery) (bool, error) {
+	query := `
+		INSERT INTO email_deliveries (id, event_type, event_key, recipient_email, subject, status, error_message, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+		ON CONFLICT (event_type, event_key) DO NOTHING
+		RETURNING id
+	`
+	if delivery.ID == uuid.Nil {
+		delivery.ID = uuid.New()
+	}
+	metaJSON := "{}"
+	if delivery.Metadata != "" {
+		metaJSON = delivery.Metadata
+	}
+	var insertedID uuid.UUID
+	err := p.db.QueryRowContext(ctx, query,
+		delivery.ID, delivery.EventType, delivery.EventKey,
+		delivery.RecipientEmail, delivery.Subject, delivery.Status,
+		delivery.ErrorMessage, metaJSON,
+	).Scan(&insertedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil // Already delivered
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p *PostgresStore) CreateServer(ctx context.Context, server *Server) error {

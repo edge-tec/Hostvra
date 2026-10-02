@@ -25,6 +25,7 @@ import (
 	"hostvra/api/internal/dns"
 	"hostvra/api/internal/domains"
 	"hostvra/api/internal/domains/resellerclub"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/handlers"
 	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/license"
@@ -88,8 +89,11 @@ func main() {
 	// Initialize Audit Logger
 	auditLogger := audit.NewLogger(dataStore, logger)
 
+	// Initialize Centralized Transactional Email Service
+	emailService := email.New(cfg, dataStore)
+
 	// Initialize Handlers
-	authHandler := handlers.NewAuthHandler(cfg, dataStore, auditLogger)
+	authHandler := handlers.NewAuthHandler(cfg, dataStore, auditLogger, emailService)
 	serverHandler := handlers.NewServerHandler(cfg, dataStore, auditLogger)
 	agentHandler := handlers.NewAgentHandler(cfg, dataStore, auditLogger)
 	websiteHandler := handlers.NewWebsiteHandler(cfg, dataStore, auditLogger)
@@ -158,8 +162,9 @@ func main() {
 	terminalHandler.SetQuotaService(quotaService)
 	ftpHandler.SetQuotaService(quotaService)
 	fileHandler.SetQuotaService(quotaService)
+	billingHandler.SetEmailService(emailService)
 
-	adminUsersHandler := handlers.NewAdminUsersHandler(dataStore, quotaService, auditLogger)
+	adminUsersHandler := handlers.NewAdminUsersHandler(cfg, dataStore, quotaService, auditLogger, emailService)
 
 	// Build Router
 	r := chi.NewRouter()
@@ -282,6 +287,13 @@ func main() {
 			loginLimiter := auth.NewLoginRateLimiter(5, 60*time.Second) // 5 login attempts per minute per IP
 			r.With(loginLimiter.RateLimitMiddleware).Post("/login", authHandler.Login)
 			r.With(loginLimiter.RateLimitMiddleware).Post("/webmail", webmailHandler.DirectAuth)
+
+			// Password Reset & Email Verification Flows
+			r.Post("/forgot-password", authHandler.ForgotPassword)
+			r.Post("/reset-password", authHandler.ResetPassword)
+			r.Get("/verify-email", authHandler.VerifyEmail)
+			r.Post("/verify-email", authHandler.VerifyEmail)
+			r.Post("/resend-verification", authHandler.ResendVerification)
 
 			// Authenticated User Info & Profile Updates
 			r.Group(func(r chi.Router) {
@@ -415,6 +427,9 @@ func main() {
 				r.Put("/{id}/overrides", adminUsersHandler.UpdateUserOverrides)
 				r.Delete("/{id}/overrides", adminUsersHandler.DeleteUserOverrides)
 				r.Put("/{id}/status", adminUsersHandler.UpdateUserStatus)
+				r.Put("/{id}/email", adminUsersHandler.AdminUpdateEmail)
+				r.Put("/{id}/password", adminUsersHandler.AdminUpdatePassword)
+				r.Post("/{id}/impersonate", adminUsersHandler.ImpersonateUser)
 				r.Delete("/{id}", adminUsersHandler.DeleteUser)
 			})
 

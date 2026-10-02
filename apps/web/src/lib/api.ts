@@ -1600,3 +1600,29 @@ export async function deleteAdminUser(userId: string): Promise<ApiResponse<{ mes
   });
 }
 
+export async function updateAdminUserEmail(userId: string, email: string): Promise<ApiResponse<{ success: boolean; email: string; message: string }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/email`, {
+    method: 'PUT',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function updateAdminUserPassword(userId: string, password: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
+  });
+}
+
+export async function impersonateAdminUser(userId: string): Promise<ApiResponse<{
+  tokens: { access_token: string; refresh_token: string };
+  user: User;
+  role: string;
+  expires_at: string;
+  message: string;
+}>> {
+  return apiFetch(`/api/v1/admin/users/${userId}/impersonate`, {
+    method: 'POST',
+  });
+}
+

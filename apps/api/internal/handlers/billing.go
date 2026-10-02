@@ -22,6 +22,7 @@ import (
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/domains"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/payment"
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
@@ -35,6 +36,7 @@ type BillingHandler struct {
 	domainSvc  *domains.Service
 	quotaSvc   *quota.Service
 	paymentSvc *payment.Service
+	emailSvc   *email.Service
 }
 
 func NewBillingHandler(cfg *config.Config, s store.Store, a *audit.Logger) *BillingHandler {
@@ -57,6 +59,47 @@ func (h *BillingHandler) SetQuotaService(svc *quota.Service) {
 
 func (h *BillingHandler) SetPaymentService(svc *payment.Service) {
 	h.paymentSvc = svc
+}
+
+func (h *BillingHandler) SetEmailService(svc *email.Service) {
+	h.emailSvc = svc
+}
+
+func (h *BillingHandler) notifyInvoicePaid(ctx context.Context, inv *store.Invoice) {
+	if h.emailSvc == nil {
+		return
+	}
+	go func() {
+		bgCtx := context.Background()
+		user, err := h.store.GetUserByID(bgCtx, inv.UserID)
+		if err != nil || user == nil {
+			return
+		}
+		planName := inv.Description
+		if plan, err := h.store.GetPlanByID(bgCtx, inv.PlanID); err == nil && plan != nil {
+			planName = plan.Name
+		}
+		_ = h.emailSvc.SendPaymentConfirmation(
+			bgCtx,
+			user.Email,
+			user.FullName,
+			inv.InvoiceNumber,
+			fmt.Sprintf("%.2f", inv.Total),
+			inv.Currency,
+			planName,
+		)
+		if inv.SubscriptionID != nil {
+			if sub, err := h.store.GetSubscriptionByID(bgCtx, *inv.SubscriptionID); err == nil && sub != nil {
+				_ = h.emailSvc.SendOrderConfirmation(
+					bgCtx,
+					user.Email,
+					user.FullName,
+					planName,
+					sub.BillingCycle,
+				)
+			}
+		}
+	}()
 }
 
 // ----------------------------------------------------------------------------
@@ -508,6 +551,8 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 
 		h.audit.Log(r.Context(), r, "billing.trial.start", "subscription", sub.ID.String(), "success", fmt.Sprintf("Started %d-day free trial on %s", trialDays, plan.Name), nil)
 
+		h.notifyInvoicePaid(r.Context(), inv)
+
 		response.JSON(w, http.StatusCreated, map[string]interface{}{
 			"subscription":    sub,
 			"invoice":         inv,
@@ -872,6 +917,8 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.notifyInvoicePaid(r.Context(), inv)
+
 	h.audit.Log(r.Context(), r, "billing.invoice.pay_admin_override", "invoice", inv.ID.String(), "success", fmt.Sprintf("Admin marked invoice %s paid (txn: %s)", inv.InvoiceNumber, inv.TransactionID), map[string]interface{}{
 		"invoice_number": inv.InvoiceNumber,
 		"payment_method": inv.PaymentMethod,
@@ -1159,6 +1206,8 @@ func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
+
+	h.notifyInvoicePaid(r.Context(), inv)
 
 	h.audit.Log(r.Context(), r, "billing.payment.verified", "invoice", inv.ID.String(), "success", fmt.Sprintf("Verified payment via %s (txn: %s)", verifyResult.Gateway, verifyResult.TransactionID), map[string]interface{}{
 		"gateway":        verifyResult.Gateway,
@@ -1505,6 +1554,8 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+
+		h.notifyInvoicePaid(r.Context(), inv)
 
 		h.audit.Log(r.Context(), r, "billing.webhook.paid", "invoice", inv.ID.String(), "success", fmt.Sprintf("Processed %s webhook payment for %s", gatewayName, inv.InvoiceNumber), map[string]interface{}{
 			"gateway":        gatewayName,

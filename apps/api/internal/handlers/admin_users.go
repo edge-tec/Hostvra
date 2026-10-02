@@ -5,29 +5,39 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
+	"hostvra/api/internal/config"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/quota"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type AdminUsersHandler struct {
+	cfg          *config.Config
 	store        store.Store
 	quotaService *quota.Service
 	audit        *audit.Logger
+	emailSvc     *email.Service
 }
 
-func NewAdminUsersHandler(s store.Store, q *quota.Service, a *audit.Logger) *AdminUsersHandler {
-	return &AdminUsersHandler{
+func NewAdminUsersHandler(cfg *config.Config, s store.Store, q *quota.Service, a *audit.Logger, emailSvc ...*email.Service) *AdminUsersHandler {
+	h := &AdminUsersHandler{
+		cfg:          cfg,
 		store:        s,
 		quotaService: q,
 		audit:        a,
 	}
+	if len(emailSvc) > 0 && emailSvc[0] != nil {
+		h.emailSvc = emailSvc[0]
+	}
+	return h
 }
 
 // UserListItemDTO represents user summary in Admin User Management
@@ -412,4 +422,199 @@ func (h *AdminUsersHandler) GetUserEffectivePlan(w http.ResponseWriter, r *http.
 	}
 
 	response.JSON(w, http.StatusOK, effective, nil)
+}
+
+// ================================
+// ADMIN: UPDATE USER EMAIL
+// ================================
+
+type AdminUpdateEmailRequest struct {
+	Email string `json:"email"`
+}
+
+// AdminUpdateEmail handles PUT /api/v1/admin/users/{id}/email
+func (h *AdminUsersHandler) AdminUpdateEmail(w http.ResponseWriter, r *http.Request) {
+	userIDStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user UUID", nil, "")
+		return
+	}
+
+	var req AdminUpdateEmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid request body", nil, "")
+		return
+	}
+
+	newEmail := strings.TrimSpace(strings.ToLower(req.Email))
+	if newEmail == "" || !strings.Contains(newEmail, "@") {
+		response.Error(w, http.StatusBadRequest, "INVALID_EMAIL", "A valid email address is required", nil, "")
+		return
+	}
+
+	// Check uniqueness
+	existing, err := h.store.GetUserByEmail(r.Context(), newEmail)
+	if err == nil && existing != nil && existing.ID != userID {
+		response.Error(w, http.StatusConflict, "EMAIL_EXISTS", "This email is already in use by another account", nil, "")
+		return
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found", nil, "")
+		return
+	}
+
+	oldEmail := user.Email
+	if err := h.store.UpdateUserEmail(r.Context(), userID, newEmail); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update email", nil, "")
+		return
+	}
+
+	// If updating admin's own email, sync env
+	if user.IsSuperAdmin {
+		syncEnvCredentials(newEmail, "")
+	}
+
+	h.audit.Log(r.Context(), r, "admin.user.update_email", "user", userID.String(), "success", "", map[string]interface{}{
+		"old_email": oldEmail,
+		"new_email": newEmail,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"email":   newEmail,
+		"message": "User email updated successfully",
+	}, nil)
+}
+
+// ================================
+// ADMIN: UPDATE USER PASSWORD
+// ================================
+
+type AdminUpdatePasswordRequest struct {
+	Password string `json:"password"`
+}
+
+// AdminUpdatePassword handles PUT /api/v1/admin/users/{id}/password
+func (h *AdminUsersHandler) AdminUpdatePassword(w http.ResponseWriter, r *http.Request) {
+	userIDStr := chi.URLParam(r, "id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user UUID", nil, "")
+		return
+	}
+
+	var req AdminUpdatePasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Password is required", nil, "")
+		return
+	}
+
+	if err := auth.ValidatePasswordComplexity(req.Password); err != nil {
+		response.Error(w, http.StatusBadRequest, "WEAK_PASSWORD", err.Error(), nil, "")
+		return
+	}
+
+	user, err := h.store.GetUserByID(r.Context(), userID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found", nil, "")
+		return
+	}
+
+	newHash, err := auth.HashPassword(req.Password, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "HASH_FAILED", "Failed to secure password", nil, "")
+		return
+	}
+
+	if err := h.store.UpdateUserPassword(r.Context(), userID, newHash); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update password", nil, "")
+		return
+	}
+
+	// If updating admin's own password, sync env
+	if user.IsSuperAdmin {
+		syncEnvCredentials("", req.Password)
+	}
+
+	// Send password changed notification
+	if h.emailSvc != nil {
+		go h.emailSvc.SendPasswordChanged(r.Context(), user.Email, user.FullName)
+	}
+
+	h.audit.Log(r.Context(), r, "admin.user.update_password", "user", userID.String(), "success", "", map[string]interface{}{
+		"email": user.Email,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": "User password updated successfully",
+	}, nil)
+}
+
+// ================================
+// ADMIN: IMPERSONATE USER
+// ================================
+
+// ImpersonateUser handles POST /api/v1/admin/users/{id}/impersonate
+func (h *AdminUsersHandler) ImpersonateUser(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	userIDStr := chi.URLParam(r, "id")
+	targetUserID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user UUID", nil, "")
+		return
+	}
+
+	// Cannot impersonate yourself
+	if targetUserID == claims.UserID {
+		response.Error(w, http.StatusBadRequest, "SELF_IMPERSONATION", "Cannot impersonate your own account", nil, "")
+		return
+	}
+
+	targetUser, err := h.store.GetUserByID(r.Context(), targetUserID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "USER_NOT_FOUND", "Target user not found", nil, "")
+		return
+	}
+
+	// Cannot impersonate superadmin
+	if targetUser.IsSuperAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cannot impersonate a superadmin account", nil, "")
+		return
+	}
+
+	// Generate short-lived impersonation token (1 hour)
+	impersonationDuration := 1 * time.Hour
+	tokens, err := auth.GenerateImpersonationTokenPair(
+		claims.UserID, targetUser.ID, targetUser.DefaultOrgID, targetUser.Email,
+		h.cfg.JWTSecret, impersonationDuration,
+	)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "TOKEN_ERROR", "Failed to generate impersonation token", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "admin.impersonation.started", "user", targetUserID.String(), "success", "", map[string]interface{}{
+		"admin_id":    claims.UserID,
+		"admin_email": claims.Email,
+		"target_id":   targetUser.ID,
+		"target_email":targetUser.Email,
+		"duration":    impersonationDuration.String(),
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"tokens":     tokens,
+		"user":       targetUser,
+		"role":       "customer",
+		"expires_at": tokens.ExpiresAt,
+		"message":    fmt.Sprintf("Impersonation session started for %s (expires in 1 hour)", targetUser.Email),
+	}, nil)
 }
