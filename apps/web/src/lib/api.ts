@@ -1,13 +1,17 @@
 export function getApiBaseUrl(): string {
   if (typeof window !== 'undefined') {
-    const customUrl = process.env.NEXT_PUBLIC_API_URL;
-    // If NEXT_PUBLIC_API_URL points to blocked internal port 8080, ignore it and use same-origin proxy
-    if (customUrl && !customUrl.includes(':8080')) {
-      return customUrl;
-    }
+    // In browser, always use relative path so requests route through Nginx reverse proxy
+    // on the current host/origin (e.g. 192.168.64.3, localhost, public IP)
     return '';
   }
-  return process.env.INTERNAL_API_URL || 'http://127.0.0.1:8080';
+  let internal = process.env.INTERNAL_API_URL || 'http://127.0.0.1:8080';
+  if (internal.endsWith('/')) {
+    internal = internal.slice(0, -1);
+  }
+  if (internal.endsWith('/api')) {
+    internal = internal.slice(0, -4);
+  }
+  return internal;
 }
 
 export interface ApiResponse<T> {
@@ -451,11 +455,15 @@ async function executeFetch<T>(
     endpoint.includes('databases');
   const timeoutMs = isLongRunning ? 900000 : 60000;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const formattedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  let cleanBase = baseUrl ? (baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl) : '';
+  if (cleanBase.endsWith('/api') && formattedEndpoint.startsWith('/api')) {
+    cleanBase = cleanBase.slice(0, -4);
+  }
+  const requestUrl = cleanBase ? `${cleanBase}${formattedEndpoint}` : formattedEndpoint;
 
   try {
-    const res = await fetch(`${baseUrl}${endpoint}`, {
+    const res = await fetch(requestUrl, {
       credentials: 'include',
       ...options,
       headers,

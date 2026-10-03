@@ -182,7 +182,7 @@ func main() {
 			return true // Configurable per deployment domain
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Server-ID"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Server-ID", "X-Webmail-Token", "*"},
 		ExposedHeaders:   []string{"Link", "X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -1122,7 +1122,13 @@ func main() {
 
 func seedDefaultAdmin(ctx context.Context, s store.Store, cfg *config.Config, logger *slog.Logger) {
 	adminEmail := strings.TrimSpace(os.Getenv("INITIAL_ADMIN_EMAIL"))
+	if adminEmail == "" {
+		adminEmail = strings.TrimSpace(os.Getenv("ADMIN_EMAIL"))
+	}
 	adminPass := strings.TrimSpace(os.Getenv("INITIAL_ADMIN_PASSWORD"))
+	if adminPass == "" {
+		adminPass = strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
+	}
 
 	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	org := &store.Organization{
