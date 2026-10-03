@@ -50,7 +50,8 @@ if [[ "$DOV_VER" =~ ^2\.4 ]]; then
     cat > "$MAIL_CONF" << 'EOF'
 # Hostvra Dovecot 2.4+ Mail Location
 mail_driver = maildir
-mail_path = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_home = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_path = ~/
 mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
@@ -108,8 +109,7 @@ service auth {
     group = postfix
   }
   unix_listener auth-userdb {
-    mode = 0600
-    user = vmail
+    mode = 0666
   }
 }
 
@@ -145,12 +145,12 @@ if [[ "$DOV_VER" =~ ^2\.4 ]]; then
 # Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
   driver = passwd-file
-  passwd_file_path = /etc/dovecot/users
+  args = username_format=%u /etc/dovecot/users
 }
 
 userdb passwd-file {
   driver = passwd-file
-  passwd_file_path = /etc/dovecot/users
+  args = username_format=%u /etc/dovecot/users
 }
 EOF
 else
@@ -246,6 +246,10 @@ if command -v postconf &>/dev/null; then
     postconf -e "virtual_transport = lmtp:unix:private/dovecot-lmtp"
     systemctl restart postfix
     echo "[✓] Postfix reloaded with LMTP transport."
+    if command -v postqueue &>/dev/null; then
+        postqueue -f 2>/dev/null || true
+        echo "[✓] Flushed Postfix mail queue for immediate message delivery."
+    fi
 fi
 
 echo "=========================================================="

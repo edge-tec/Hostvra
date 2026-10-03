@@ -63,7 +63,7 @@ func GenerateMailConf(opts ConfigOptions) string {
 
 	mailDirective := fmt.Sprintf("mail_location = maildir:%s/%%d/%%n", opts.MailDirBase)
 	if isDovecot24() {
-		mailDirective = fmt.Sprintf("mail_driver = maildir\nmail_path = %s/%%{user | domain}/%%{user | username}", opts.MailDirBase)
+		mailDirective = fmt.Sprintf("mail_driver = maildir\nmail_home = %s/%%%%{user | domain}/%%%%{user | username}\nmail_path = ~/", opts.MailDirBase)
 	}
 
 	return fmt.Sprintf(`# Hostvra Dovecot 10-mail.conf
@@ -121,12 +121,12 @@ func GenerateAuthPasswdFileConf(passwdPath string) string {
 		return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext (Dovecot 2.4+)
 passdb passwd-file {
   driver = passwd-file
-  passwd_file_path = %s
+  args = username_format=%%%%u %s
 }
 
 userdb passwd-file {
   driver = passwd-file
-  passwd_file_path = %s
+  args = username_format=%%%%u %s
 }
 `, passwdPath, passwdPath)
 	}
@@ -199,7 +199,7 @@ service pop3-login {
 
 service lmtp {
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
-    mode = 0600
+    mode = 0660
     user = postfix
     group = postfix
   }
@@ -212,8 +212,7 @@ service auth {
     group = postfix
   }
   unix_listener auth-userdb {
-    mode = 0600
-    user = vmail
+    mode = 0666
   }
 }
 

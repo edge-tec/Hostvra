@@ -465,6 +465,10 @@ if command -v systemctl &>/dev/null; then
     if systemctl list-unit-files | grep -q "postfix"; then
         echo "Restarting Postfix SMTP service..."
         systemctl restart postfix 2>/dev/null || true
+        if command -v postqueue &>/dev/null; then
+            postqueue -f 2>/dev/null || true
+            echo "Postfix mail queue flushed for immediate inbound delivery."
+        fi
     fi
 fi
 

@@ -2837,7 +2837,8 @@ func ReconcileAllEmailRouting(ctx context.Context, s store.Store) (*EmailReconci
 			if isDovecot24 {
 				mailConf := `# Hostvra Dovecot 2.4+ Mail Location
 mail_driver = maildir
-mail_path = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_home = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_path = ~/
 mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
@@ -2895,12 +2896,12 @@ first_valid_uid = 100
 				passwdConf := `# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
   driver = passwd-file
-  passwd_file_path = /etc/dovecot/users
+  args = username_format=%u /etc/dovecot/users
 }
 
 userdb passwd-file {
   driver = passwd-file
-  passwd_file_path = /etc/dovecot/users
+  args = username_format=%u /etc/dovecot/users
 }
 `
 				_ = os.WriteFile(passwdConfPath, []byte(passwdConf), 0644)

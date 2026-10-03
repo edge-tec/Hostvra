@@ -243,6 +243,18 @@ if [[ -n "$TARGET_EMAIL" ]]; then
         fi
     fi
 
+    # Doveadm userdb live probe
+    if command -v doveadm &>/dev/null; then
+        DOV_USER_PROBE=$(doveadm user "$TARGET_EMAIL" 2>&1 || true)
+        if echo "$DOV_USER_PROBE" | grep -qiE "(home|mail|uid)"; then
+            echo -e "  [${GREEN}OK${NC}] doveadm user lookup succeeded:"
+            echo "        $(echo "$DOV_USER_PROBE" | tr '\n' ' ')"
+        else
+            echo -e "  [${RED}FAIL${NC}] doveadm user lookup failed for ${TARGET_EMAIL}:"
+            echo "        $DOV_USER_PROBE"
+        fi
+    fi
+
     # Maildir directory existence and permissions
     MBOX_DIR="/var/mail/vhosts/${TARGET_DOMAIN}/${TARGET_USER}"
     if [[ -d "$MBOX_DIR" ]]; then
@@ -311,6 +323,11 @@ if command -v postqueue &>/dev/null; then
     else
         echo -e "  [${YELLOW}NOTICE${NC}] Messages in mail queue:"
         echo "$QUEUE_OUTPUT" | head -n 30
+        if echo "$QUEUE_OUTPUT" | grep -qiE "(Temporary internal error|dovecot-lmtp)"; then
+            echo ""
+            echo -e "  ${YELLOW}LMTP delivery error detected in mail queue. Recent Dovecot service logs:${NC}"
+            journalctl -u dovecot -n 12 --no-pager 2>/dev/null || true
+        fi
     fi
 elif command -v mailq &>/dev/null; then
     mailq 2>&1 | head -n 20 || true
