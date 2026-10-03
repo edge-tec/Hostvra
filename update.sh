@@ -446,6 +446,22 @@ echo "Reconciling all domain virtual hosts and SSL certificates..."
 sleep 2
 curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null || true
 
+# Reconcile all email routing, Postfix virtual maps, and Dovecot user database
+echo "Reconciling email routing, Postfix virtual maps, and Dovecot authentication..."
+curl -s -X POST http://127.0.0.1:8080/api/v1/email/reconcile 2>/dev/null || true
+
+# Ensure Postfix & Dovecot mail services are running and reloaded
+if command -v systemctl &>/dev/null; then
+    if systemctl list-unit-files | grep -q "dovecot"; then
+        echo "Restarting Dovecot IMAP/POP3 service..."
+        systemctl restart dovecot 2>/dev/null || true
+    fi
+    if systemctl list-unit-files | grep -q "postfix"; then
+        echo "Restarting Postfix SMTP service..."
+        systemctl restart postfix 2>/dev/null || true
+    fi
+fi
+
 if command -v pm2 &>/dev/null; then
     echo "Restarting any PM2 managed processes..."
     pm2 restart all 2>/dev/null || true
@@ -454,3 +470,4 @@ fi
 # Cancel error trap since all steps succeeded
 trap - ERR
 echo "=== UPDATE SUCCESS: Hostvra is successfully updated, verified, and active. ==="
+

@@ -49,10 +49,13 @@ mail_privileged_group = mail
 EOF
         fi
     else
-        if ! grep -q "mail_location" "$MAIL_CONF"; then
+        # Dovecot 2.3 Virtual Mailbox Location
+        if ! grep -q "^[[:space:]]*mail_location[[:space:]]*=[[:space:]]*maildir:/var/mail/vhosts/%d/%n" "$MAIL_CONF"; then
+            # Comment out any existing active mail_location
+            sed -i 's/^[[:space:]]*mail_location[[:space:]]*=/#mail_location =/' "$MAIL_CONF"
             cat >> "$MAIL_CONF" << 'EOF'
 
-# Dovecot 2.3 Virtual Mailbox Location
+# Hostvra Dovecot 2.3 Virtual Mailbox Location
 mail_location = maildir:/var/mail/vhosts/%d/%n
 mail_uid = 5000
 mail_gid = 5000

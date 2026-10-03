@@ -2679,147 +2679,303 @@ func (h *EmailHandler) DeleteForwarder(w http.ResponseWriter, r *http.Request) {
 // DOVECOT & POSTFIX MAP SYNCHRONIZATION HELPERS
 // ----------------------------------------------------------------------------
 
-func (h *EmailHandler) syncDovecotUserDB(ctx context.Context, serverID uuid.UUID) {
-	usersPath := os.Getenv("DOVECOT_USERS_FILE")
-	if usersPath == "" {
-		usersPath = "/etc/dovecot/users"
+type EmailReconciliationReport struct {
+	TotalDomains    int      `json:"total_domains"`
+	ActiveDomains   []string `json:"active_domains"`
+	TotalMailboxes  int      `json:"total_mailboxes"`
+	TotalAliases    int      `json:"total_aliases"`
+	TotalForwarders int      `json:"total_forwarders"`
+	PostfixOK       bool     `json:"postfix_ok"`
+	DovecotOK       bool     `json:"dovecot_ok"`
+	TransportUsed   string   `json:"transport_used"`
+	Errors          []string `json:"errors,omitempty"`
+}
+
+// ReconcileAllEmailRouting synchronizes all email domains, mailboxes, aliases, and forwarders
+// into Postfix virtual maps and Dovecot authentication, ensuring Maildir directory permissions.
+func ReconcileAllEmailRouting(ctx context.Context, s store.Store) (*EmailReconciliationReport, error) {
+	report := &EmailReconciliationReport{
+		ActiveDomains: []string{},
+		Errors:        []string{},
+		TransportUsed: "virtual",
 	}
 
-	dir := filepath.Dir(usersPath)
-	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return
-	}
-
-	mailboxes, _ := h.store.ListEmailMailboxesByServer(ctx, serverID)
-	if len(mailboxes) == 0 {
+	// 1. Fetch ALL email domains across all organizations
+	allDomains, err := s.ListEmailDomainsByOrg(ctx, uuid.Nil)
+	if err != nil || len(allDomains) == 0 {
 		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-		domains, _ := h.store.ListEmailDomainsByOrg(ctx, defaultOrgID)
-		for _, d := range domains {
-			if mbs, err := h.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
-				mailboxes = append(mailboxes, mbs...)
+		allDomains, _ = s.ListEmailDomainsByOrg(ctx, defaultOrgID)
+	}
+
+	var activeDomains []*store.EmailDomain
+	for _, d := range allDomains {
+		if d.DeletedAt == nil && (d.Status == "active" || d.Status == "") {
+			activeDomains = append(activeDomains, d)
+			report.ActiveDomains = append(report.ActiveDomains, d.Domain)
+		}
+	}
+	report.TotalDomains = len(activeDomains)
+
+	// 2. Fetch all mailboxes, aliases, and forwarders for all active domains
+	var allMailboxes []*store.EmailMailbox
+	var allAliases []*store.EmailAlias
+	var allForwarders []*store.EmailForwarder
+
+	for _, d := range activeDomains {
+		if mbs, err := s.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
+			for _, mb := range mbs {
+				if mb.DeletedAt == nil && mb.IsActive && !mb.IsSuspended {
+					allMailboxes = append(allMailboxes, mb)
+				}
+			}
+		}
+		if aliases, err := s.ListEmailAliasesByDomain(ctx, d.ID); err == nil {
+			for _, a := range aliases {
+				if a.IsActive {
+					allAliases = append(allAliases, a)
+				}
+			}
+		}
+		if forwarders, err := s.ListEmailForwardersByDomain(ctx, d.ID); err == nil {
+			for _, f := range forwarders {
+				if f.IsActive {
+					allForwarders = append(allForwarders, f)
+				}
 			}
 		}
 	}
+	report.TotalMailboxes = len(allMailboxes)
+	report.TotalAliases = len(allAliases)
+	report.TotalForwarders = len(allForwarders)
 
-	accounts := make([]dovecot.UserAccount, 0, len(mailboxes))
-	for _, mb := range mailboxes {
-		if !mb.IsActive || mb.IsSuspended {
-			continue
-		}
+	isLinuxRoot := runtime.GOOS == "linux" && os.Geteuid() == 0
+
+	// 3. Ensure system user 'vmail' (5000:5000) and /var/mail/vhosts storage directory
+	vmailBase := "/var/mail/vhosts"
+	if isLinuxRoot {
+		_ = exec.Command("groupadd", "-g", "5000", "vmail").Run()
+		_ = exec.Command("useradd", "-r", "-u", "5000", "-g", "5000", "-s", "/usr/sbin/nologin", "-d", vmailBase, "-m", "vmail").Run()
+		_ = os.MkdirAll(vmailBase, 0770)
+		_ = os.Chown(vmailBase, 5000, 5000)
+		_ = os.Chmod(vmailBase, 0770)
+	}
+
+	// 4. Ensure Maildir structure on disk for every active mailbox
+	for _, mb := range allMailboxes {
 		parts := strings.SplitN(mb.Email, "@", 2)
-		domain := ""
-		localPart := mb.LocalPart
 		if len(parts) == 2 {
-			domain = parts[1]
-			if localPart == "" {
-				localPart = parts[0]
-			}
+			domainName := strings.ToLower(strings.TrimSpace(parts[1]))
+			localPart := strings.ToLower(strings.TrimSpace(parts[0]))
+			_, _ = storage.EnsureMaildir(vmailBase, domainName, localPart, 5000, 5000)
 		}
-		accounts = append(accounts, dovecot.UserAccount{
-			Email:        mb.Email,
-			PasswordHash: mb.PasswordHash,
-			Domain:       domain,
-			LocalPart:    localPart,
-			QuotaBytes:   mb.QuotaBytes,
-		})
+	}
+
+	// 5. Synchronize Dovecot User Database (/etc/dovecot/users)
+	usersPath := os.Getenv("DOVECOT_USERS_FILE")
+	dovecotDir := os.Getenv("DOVECOT_CONFIG_DIR")
+	if usersPath != "" {
+		if dovecotDir == "" {
+			dovecotDir = filepath.Dir(usersPath)
+		}
+	} else {
+		if dovecotDir == "" {
+			dovecotDir = "/etc/dovecot"
+		}
+		usersPath = filepath.Join(dovecotDir, "users")
+	}
+
+	accounts := make([]dovecot.UserAccount, 0, len(allMailboxes))
+	for _, mb := range allMailboxes {
+		parts := strings.SplitN(mb.Email, "@", 2)
+		if len(parts) == 2 {
+			domainName := strings.ToLower(strings.TrimSpace(parts[1]))
+			localPart := strings.ToLower(strings.TrimSpace(parts[0]))
+			accounts = append(accounts, dovecot.UserAccount{
+				Email:        strings.ToLower(mb.Email),
+				PasswordHash: mb.PasswordHash,
+				Domain:       domainName,
+				LocalPart:    localPart,
+				QuotaBytes:   mb.QuotaBytes,
+			})
+		}
 	}
 
 	opts := dovecot.ConfigOptions{
-		MailDirBase: "/var/mail/vhosts",
+		MailDirBase: vmailBase,
 		VmailUID:    5000,
 		VmailGID:    5000,
+		ConfigDir:   dovecotDir,
 	}
 
-	if os.Getenv("DOVECOT_USERS_FILE") != "" || os.Getenv("DOVECOT_CONFIG_DIR") != "" || (runtime.GOOS == "linux" && os.Geteuid() == 0) {
-		_ = dovecot.ApplyDovecotConfig(dir, opts, accounts)
+	usersDir := filepath.Dir(usersPath)
+	if fi, err := os.Stat(usersDir); err == nil && fi.IsDir() {
+		usersContent := dovecot.GenerateUsersFile(accounts, opts)
+		if err := os.WriteFile(usersPath, []byte(usersContent), 0640); err == nil {
+			report.DovecotOK = true
+			if isLinuxRoot {
+				_ = os.Chown(usersPath, 0, 5000)
+			}
+		} else {
+			report.Errors = append(report.Errors, fmt.Sprintf("failed to write dovecot users: %v", err))
+		}
+
+		// Ensure 10-mail.conf and 10-master.conf have required settings
+		confD := filepath.Join(dovecotDir, "conf.d")
+		if cfi, err := os.Stat(confD); err == nil && cfi.IsDir() {
+			mailConfPath := filepath.Join(confD, "10-mail.conf")
+			if mData, err := os.ReadFile(mailConfPath); err == nil {
+				mStr := string(mData)
+				if !strings.Contains(mStr, "mail_location = maildir:/var/mail/vhosts/%d/%n") && !strings.Contains(mStr, "mail_driver = maildir") {
+					mStr = strings.ReplaceAll(mStr, "mail_location = mbox:~/mail:INBOX=/var/mail/%u", "mail_location = maildir:/var/mail/vhosts/%d/%n")
+					if !strings.Contains(mStr, "mail_location = maildir:") {
+						mStr += "\nmail_location = maildir:/var/mail/vhosts/%d/%n\nmail_uid = 5000\nmail_gid = 5000\nmail_privileged_group = mail\n"
+					}
+					_ = os.WriteFile(mailConfPath, []byte(mStr), 0644)
+				}
+			}
+
+			// Ensure service auth and service lmtp sockets exist in 10-master.conf
+			masterConfPath := filepath.Join(confD, "10-master.conf")
+			if mstData, err := os.ReadFile(masterConfPath); err == nil {
+				mstStr := string(mstData)
+				if !strings.Contains(mstStr, "/var/spool/postfix/private/auth") || !strings.Contains(mstStr, "/var/spool/postfix/private/dovecot-lmtp") {
+					extra := `
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+`
+					mstStr += extra
+					_ = os.WriteFile(masterConfPath, []byte(mstStr), 0644)
+				}
+			}
+
+			// Ensure auth-passwdfile.conf.ext is active in 10-auth.conf
+			authConfPath := filepath.Join(confD, "10-auth.conf")
+			if aData, err := os.ReadFile(authConfPath); err == nil {
+				aStr := string(aData)
+				aStr = strings.ReplaceAll(aStr, "!include auth-system.conf.ext", "#!include auth-system.conf.ext")
+				if !strings.Contains(aStr, "!include auth-passwdfile.conf.ext") {
+					aStr += "\n!include auth-passwdfile.conf.ext\n"
+				}
+				_ = os.WriteFile(authConfPath, []byte(aStr), 0644)
+			}
+		}
+
+		if isLinuxRoot {
+			_ = exec.Command("systemctl", "reload", "dovecot").Run()
+			_ = exec.Command("doveadm", "reload").Run()
+		}
 	}
+
+	// 6. Synchronize Postfix Maps
+	postfixDir := os.Getenv("POSTFIX_CONFIG_DIR")
+	if postfixDir == "" {
+		postfixDir = "/etc/postfix"
+	}
+
+	vDomains := make([]postfix.VirtualDomain, 0, len(activeDomains))
+	for _, d := range activeDomains {
+		vDomains = append(vDomains, postfix.VirtualDomain{Domain: strings.ToLower(d.Domain)})
+	}
+
+	vMailboxes := make([]postfix.VirtualMailbox, 0, len(allMailboxes))
+	for _, mb := range allMailboxes {
+		parts := strings.SplitN(mb.Email, "@", 2)
+		if len(parts) == 2 {
+			vMailboxes = append(vMailboxes, postfix.VirtualMailbox{
+				Email:    strings.ToLower(mb.Email),
+				MailPath: fmt.Sprintf("%s/%s/", strings.ToLower(parts[1]), strings.ToLower(parts[0])),
+			})
+		}
+	}
+
+	vAliases := make([]postfix.VirtualAlias, 0, len(allAliases)+len(allForwarders))
+	for _, a := range allAliases {
+		vAliases = append(vAliases, postfix.VirtualAlias{
+			SourceAddress:      strings.ToLower(a.SourceAddress),
+			DestinationAddress: strings.ToLower(a.DestinationAddress),
+		})
+	}
+	for _, f := range allForwarders {
+		dest := strings.ToLower(f.ForwardAddress)
+		if f.KeepCopy {
+			dest = dest + "," + strings.ToLower(f.SourceAddress)
+		}
+		vAliases = append(vAliases, postfix.VirtualAlias{
+			SourceAddress:      strings.ToLower(f.SourceAddress),
+			DestinationAddress: dest,
+		})
+	}
+
+	if fi, err := os.Stat(postfixDir); err == nil && fi.IsDir() {
+		if mapErr := postfix.ApplyMaps(postfixDir, vDomains, vMailboxes, vAliases); mapErr == nil {
+			report.PostfixOK = true
+		} else {
+			report.Errors = append(report.Errors, fmt.Sprintf("postfix apply maps error: %v", mapErr))
+		}
+
+		if isLinuxRoot {
+			if _, err := exec.LookPath("postconf"); err == nil {
+				_ = exec.Command("postconf", "-e", "mydestination = localhost.$mydomain, localhost").Run()
+				_ = exec.Command("postconf", "-e", "virtual_mailbox_domains = hash:/etc/postfix/vdomains").Run()
+				_ = exec.Command("postconf", "-e", "virtual_mailbox_maps = hash:/etc/postfix/vmailbox").Run()
+				_ = exec.Command("postconf", "-e", "virtual_alias_maps = hash:/etc/postfix/valias").Run()
+				_ = exec.Command("postconf", "-e", "virtual_mailbox_base = /var/mail/vhosts").Run()
+				_ = exec.Command("postconf", "-e", "virtual_uid_maps = static:5000").Run()
+				_ = exec.Command("postconf", "-e", "virtual_gid_maps = static:5000").Run()
+				_ = exec.Command("postconf", "-e", "virtual_minimum_uid = 100").Run()
+				_ = exec.Command("postconf", "-e", "smtpd_sasl_type = dovecot").Run()
+				_ = exec.Command("postconf", "-e", "smtpd_sasl_path = private/auth").Run()
+				_ = exec.Command("postconf", "-e", "smtpd_sasl_auth_enable = yes").Run()
+				_ = exec.Command("postconf", "-e", "smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient").Run()
+				_ = exec.Command("postconf", "-e", "smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination").Run()
+				_ = exec.Command("postconf", "-e", "inet_interfaces = all").Run()
+
+				// Select transport based on socket availability
+				lmtpSocket := "/var/spool/postfix/private/dovecot-lmtp"
+				if _, lmtpErr := os.Stat(lmtpSocket); lmtpErr == nil {
+					_ = exec.Command("postconf", "-e", "virtual_transport = lmtp:unix:private/dovecot-lmtp").Run()
+					report.TransportUsed = "lmtp:unix:private/dovecot-lmtp"
+				} else {
+					// Built-in virtual delivery agent directly delivers to /var/mail/vhosts/domain/user/
+					_ = exec.Command("postconf", "-e", "virtual_transport = virtual").Run()
+					report.TransportUsed = "virtual"
+				}
+
+				_ = exec.Command("postfix", "reload").Run()
+			}
+		}
+	}
+
+	return report, nil
+}
+
+func (h *EmailHandler) syncDovecotUserDB(ctx context.Context, serverID uuid.UUID) {
+	_, _ = ReconcileAllEmailRouting(ctx, h.store)
 }
 
 func (h *EmailHandler) syncPostfixMaps(ctx context.Context, serverID uuid.UUID) {
-	postfixDir := os.Getenv("POSTFIX_CONFIG_DIR")
-	if postfixDir == "" {
-		if runtime.GOOS != "linux" || os.Geteuid() != 0 {
-			return
-		}
-		postfixDir = "/etc/postfix"
-	}
-	if fi, err := os.Stat(postfixDir); err != nil || !fi.IsDir() {
+	_, _ = ReconcileAllEmailRouting(ctx, h.store)
+}
+
+func (h *EmailHandler) ReconcileEmailServices(w http.ResponseWriter, r *http.Request) {
+	report, err := ReconcileAllEmailRouting(r.Context(), h.store)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "RECONCILE_FAILED", err.Error(), nil, "")
 		return
 	}
-
-	domains, _ := h.store.ListEmailDomainsByServer(ctx, serverID)
-	mailboxes, _ := h.store.ListEmailMailboxesByServer(ctx, serverID)
-
-	if len(domains) == 0 {
-		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-		domains, _ = h.store.ListEmailDomainsByOrg(ctx, defaultOrgID)
-	}
-	if len(mailboxes) == 0 {
-		for _, d := range domains {
-			if mbs, err := h.store.ListEmailMailboxesByDomain(ctx, d.ID); err == nil {
-				mailboxes = append(mailboxes, mbs...)
-			}
-		}
-	}
-
-	vDomains := make([]postfix.VirtualDomain, 0, len(domains))
-	for _, d := range domains {
-		if d.Status == "active" {
-			vDomains = append(vDomains, postfix.VirtualDomain{Domain: d.Domain})
-		}
-	}
-
-	vMailboxes := make([]postfix.VirtualMailbox, 0, len(mailboxes))
-	for _, mb := range mailboxes {
-		if mb.IsActive && !mb.IsSuspended {
-			parts := strings.SplitN(mb.Email, "@", 2)
-			if len(parts) == 2 {
-				vMailboxes = append(vMailboxes, postfix.VirtualMailbox{
-					Email:    mb.Email,
-					MailPath: fmt.Sprintf("%s/%s/", parts[1], parts[0]),
-				})
-			}
-		}
-	}
-
-	vAliases := make([]postfix.VirtualAlias, 0)
-	for _, d := range domains {
-		aliases, _ := h.store.ListEmailAliasesByDomain(ctx, d.ID)
-		for _, a := range aliases {
-			if a.IsActive {
-				vAliases = append(vAliases, postfix.VirtualAlias{
-					SourceAddress:      a.SourceAddress,
-					DestinationAddress: a.DestinationAddress,
-				})
-			}
-		}
-		forwarders, _ := h.store.ListEmailForwardersByDomain(ctx, d.ID)
-		for _, f := range forwarders {
-			if f.IsActive {
-				dest := f.ForwardAddress
-				if f.KeepCopy {
-					dest = dest + "," + f.SourceAddress
-				}
-				vAliases = append(vAliases, postfix.VirtualAlias{
-					SourceAddress:      f.SourceAddress,
-					DestinationAddress: dest,
-				})
-			}
-		}
-	}
-
-	_ = postfix.ApplyMaps(postfixDir, vDomains, vMailboxes, vAliases)
-
-	// Ensure Postfix main.cf has virtual configuration and does NOT treat hosted domains as local Unix accounts
-	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
-		if _, err := exec.LookPath("postconf"); err == nil {
-			_ = exec.Command("postconf", "-e", "mydestination = localhost.$mydomain, localhost").Run()
-			_ = exec.Command("postconf", "-e", "virtual_mailbox_domains = hash:/etc/postfix/vdomains").Run()
-			_ = exec.Command("postconf", "-e", "virtual_mailbox_maps = hash:/etc/postfix/vmailbox").Run()
-			_ = exec.Command("postconf", "-e", "virtual_alias_maps = hash:/etc/postfix/valias").Run()
-			_ = exec.Command("postconf", "-e", "virtual_transport = lmtp:unix:private/dovecot-lmtp").Run()
-		}
-	}
+	response.JSON(w, http.StatusOK, report, nil)
 }
 
 // findDomainByName looks up the configured mail hostname for a domain

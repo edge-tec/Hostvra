@@ -86,6 +86,9 @@ func main() {
 	// This ensures domains keep working after updates/restarts
 	go syncAllNginxVhosts(context.Background(), dataStore, logger)
 
+	// Reconcile all email domains, Postfix maps, and Dovecot authentication on startup
+	go syncAllEmailServices(context.Background(), dataStore, logger)
+
 	// Initialize Audit Logger
 	auditLogger := audit.NewLogger(dataStore, logger)
 
@@ -866,6 +869,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/delivery-logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/reconcile", emailHandler.ReconcileEmailServices)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/smtp-settings", emailHandler.GetSMTPSettings)
 
 				// Mail Queue
@@ -1349,6 +1353,25 @@ func syncAllNginxVhosts(ctx context.Context, s store.Store, logger *slog.Logger)
 			"deployed_websites", report.DeployedWebsites,
 			"repaired_websites", report.RepairedWebsites,
 			"failed_websites", report.FailedWebsites)
+	}
+}
+
+// syncAllEmailServices runs the canonical email routing reconciler on startup.
+// It ensures all hosted email domains, mailboxes, aliases, Postfix maps, and Dovecot users
+// are in perfect synchronization and that incoming mail directories have correct permissions.
+func syncAllEmailServices(ctx context.Context, s store.Store, logger *slog.Logger) {
+	report, err := handlers.ReconcileAllEmailRouting(ctx, s)
+	if err != nil {
+		logger.Warn("Startup email routing reconciliation encountered errors", "error", err)
+	}
+	if report != nil {
+		logger.Info("Startup email routing reconciliation completed",
+			"total_domains", report.TotalDomains,
+			"active_domains", report.ActiveDomains,
+			"total_mailboxes", report.TotalMailboxes,
+			"postfix_ok", report.PostfixOK,
+			"dovecot_ok", report.DovecotOK,
+			"transport_used", report.TransportUsed)
 	}
 }
 

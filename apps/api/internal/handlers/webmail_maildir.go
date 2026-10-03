@@ -40,17 +40,29 @@ func findMailboxDir(email string) string {
 	if len(parts) != 2 {
 		return ""
 	}
-	domain := strings.TrimSpace(parts[1])
-	localPart := strings.TrimSpace(parts[0])
+	domain := strings.ToLower(strings.TrimSpace(parts[1]))
+	localPart := strings.ToLower(strings.TrimSpace(parts[0]))
+	rawDomain := strings.TrimSpace(parts[1])
+	rawLocalPart := strings.TrimSpace(parts[0])
 
 	for _, base := range getMaildirBasePaths() {
-		candidate := filepath.Join(base, domain, localPart)
-		if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
-			return candidate
+		for _, d := range []string{domain, rawDomain} {
+			for _, l := range []string{localPart, rawLocalPart} {
+				candidate := filepath.Join(base, d, l)
+				if fi, err := os.Stat(candidate); err == nil && fi.IsDir() {
+					return candidate
+				}
+				candidateMD := filepath.Join(base, d, l, "Maildir")
+				if fi, err := os.Stat(candidateMD); err == nil && fi.IsDir() {
+					return candidateMD
+				}
+			}
 		}
-		candidate2 := filepath.Join(base, email)
-		if fi, err := os.Stat(candidate2); err == nil && fi.IsDir() {
-			return candidate2
+		for _, em := range []string{strings.ToLower(email), email} {
+			candidate2 := filepath.Join(base, em)
+			if fi, err := os.Stat(candidate2); err == nil && fi.IsDir() {
+				return candidate2
+			}
 		}
 	}
 	return filepath.Join("/var/mail/vhosts", domain, localPart)
@@ -63,6 +75,8 @@ func getSubdirCandidates(mbDir, folder string) []string {
 		return []string{
 			filepath.Join(mbDir, "new"),
 			filepath.Join(mbDir, "cur"),
+			filepath.Join(mbDir, "Maildir", "new"),
+			filepath.Join(mbDir, "Maildir", "cur"),
 		}
 	case "sent":
 		return []string{
@@ -255,6 +269,10 @@ func parseRawMail(data []byte, defaultFolder, fileName string, isNewDir bool, mb
 	}
 
 	fromRaw := header.Get("From")
+	fromDecoded, decErr := dec.DecodeHeader(fromRaw)
+	if decErr == nil && fromDecoded != "" {
+		fromRaw = fromDecoded
+	}
 	fromName := ""
 	fromEmail := fromRaw
 	if addr, err := mail.ParseAddress(fromRaw); err == nil && addr != nil {
@@ -263,6 +281,10 @@ func parseRawMail(data []byte, defaultFolder, fileName string, isNewDir bool, mb
 	}
 
 	toRaw := header.Get("To")
+	toDecoded, decErr := dec.DecodeHeader(toRaw)
+	if decErr == nil && toDecoded != "" {
+		toRaw = toDecoded
+	}
 	toName := toRaw
 	toEmail := toRaw
 	if addrs, err := mail.ParseAddressList(toRaw); err == nil && len(addrs) > 0 {
