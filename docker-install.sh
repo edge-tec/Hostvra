@@ -276,6 +276,7 @@ deploy() {
 
     info "Starting Hostvra platform..."
     docker compose -f docker-compose.prod.yml up -d
+    docker compose -f docker-compose.prod.yml restart nginx
 
     # Wait for health checks
     info "Waiting for services to become healthy..."
@@ -334,6 +335,9 @@ set -euo pipefail
 INSTALL_DIR="/opt/hostvra"
 cd "$INSTALL_DIR"
 
+# Ensure git safe directory
+git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+
 # Ensure DNS is working
 if ! getent hosts github.com >/dev/null 2>&1; then
     echo "[WARN] DNS resolution issue detected, applying fallback DNS..."
@@ -347,6 +351,7 @@ echo "[INFO] Rebuilding Docker images..."
 docker compose -f docker-compose.prod.yml build
 echo "[INFO] Restarting services (zero-downtime)..."
 docker compose -f docker-compose.prod.yml up -d --remove-orphans
+docker compose -f docker-compose.prod.yml restart nginx
 echo "[INFO] Cleaning old images..."
 docker image prune -f
 echo "[SUCCESS] Hostvra updated successfully!"
