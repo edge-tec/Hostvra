@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -104,8 +107,38 @@ func main() {
 	// 4. Load Configuration for Daemon Mode
 	agentConfig, err := config.Load(*configFile)
 	if err != nil {
-		logger.Error("Unable to load agent configuration. Run with --token <token> first to enroll.", "error", err)
-		os.Exit(1)
+		targetPath := *configFile
+		if targetPath == "" {
+			targetPath = config.DefaultConfigPath()
+		}
+		if os.IsNotExist(err) || errors.Is(err, os.ErrNotExist) {
+			logger.Info("No existing agent configuration found. Auto-bootstrapping local node...", "path", targetPath)
+			randBytes := make([]byte, 16)
+			_, _ = rand.Read(randBytes)
+			randBytes[6] = (randBytes[6] & 0x0f) | 0x40 // RFC 4122 v4
+			randBytes[8] = (randBytes[8] & 0x3f) | 0x80
+			serverUUID := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", randBytes[0:4], randBytes[4:6], randBytes[6:8], randBytes[8:10], randBytes[10:16])
+
+			keyBytes := make([]byte, 16)
+			_, _ = rand.Read(keyBytes)
+			agentKey := "hv_agt_local_" + hex.EncodeToString(keyBytes)
+
+			agentConfig = &config.AgentConfig{
+				ServerID:             serverUUID,
+				AgentKey:             agentKey,
+				ControlPlaneURL:      *endpoint,
+				HeartbeatIntervalSec: 10,
+				ConfigFilePath:       targetPath,
+			}
+			if saveErr := agentConfig.Save(targetPath); saveErr != nil {
+				logger.Error("Failed to auto-save bootstrapped agent credentials", "error", saveErr, "path", targetPath)
+				os.Exit(1)
+			}
+			logger.Info("Local agent configuration bootstrapped and saved successfully", "server_id", serverUUID, "path", targetPath)
+		} else {
+			logger.Error("Unable to load agent configuration. Run with --token <token> first to enroll.", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	logger.Info("Starting Hostvra Agent Telemetry Daemon",

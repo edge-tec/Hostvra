@@ -180,7 +180,22 @@ if command -v systemctl &>/dev/null; then
         fi
     fi
 
-    # Restart agent and web services
+    # Ensure agent configuration exists for local node telemetry
+    if [[ ! -f "/etc/hostvra/agent.json" ]]; then
+        mkdir -p /etc/hostvra
+        AGENT_UUID=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || openssl rand -hex 16 2>/dev/null || echo "00000000-0000-0000-0000-000000000001")
+        AGENT_SECRET="hv_agt_local_$(openssl rand -hex 16 2>/dev/null || echo "master_key")"
+        cat > /etc/hostvra/agent.json << AGENT_EOF
+{
+  "server_id": "${AGENT_UUID}",
+  "agent_key": "${AGENT_SECRET}",
+  "control_plane_url": "http://127.0.0.1:8080",
+  "heartbeat_interval_sec": 10
+}
+AGENT_EOF
+        chmod 0600 /etc/hostvra/agent.json 2>/dev/null || true
+    fi
+
     echo "Restarting hostvra-agent..."
     systemctl restart hostvra-agent 2>/dev/null || true
 
