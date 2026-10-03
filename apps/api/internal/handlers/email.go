@@ -3082,6 +3082,7 @@ userdb passwd-file {
 				_ = exec.Command("postconf", "-e", "smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination, reject_non_fqdn_recipient").Run()
 				_ = exec.Command("postconf", "-e", "smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination").Run()
 				_ = exec.Command("postconf", "-e", "inet_interfaces = all").Run()
+				_ = exec.Command("postconf", "-e", "inet_protocols = ipv4").Run()
 
 				// Select transport based on socket availability
 				lmtpSocket := "/var/spool/postfix/private/dovecot-lmtp"

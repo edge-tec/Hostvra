@@ -424,6 +424,7 @@ if command -v postconf &>/dev/null; then
     postconf -e "smtpd_sasl_path = private/auth"
     postconf -e "smtpd_sasl_auth_enable = yes"
     postconf -e "virtual_transport = lmtp:unix:private/dovecot-lmtp"
+    postconf -e "inet_protocols = ipv4"
     systemctl restart postfix
     echo "[✓] Postfix reloaded with LMTP transport."
     if command -v postqueue &>/dev/null; then
