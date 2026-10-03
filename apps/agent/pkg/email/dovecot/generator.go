@@ -120,13 +120,11 @@ func GenerateAuthPasswdFileConf(passwdPath string) string {
 	if isDovecot24() {
 		return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext (Dovecot 2.4+)
 passdb passwd-file {
-  driver = passwd-file
-  args = username_format=%%%%u %s
+  passwd_file_path = %s
 }
 
 userdb passwd-file {
-  driver = passwd-file
-  args = username_format=%%%%u %s
+  passwd_file_path = %s
 }
 `, passwdPath, passwdPath)
 	}

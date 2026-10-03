@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { HardDrive, X, Folder, Trash2, Archive, PieChart, RefreshCw } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 
@@ -28,7 +28,7 @@ export const StorageInfoModal: React.FC<StorageInfoModalProps> = ({
   const [data, setData] = useState<StorageData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchStorage = async () => {
+  const fetchStorage = useCallback(async () => {
     try {
       setLoading(true);
       const res = await apiFetch<StorageData>(
@@ -42,11 +42,11 @@ export const StorageInfoModal: React.FC<StorageInfoModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPath, domain]);
 
   useEffect(() => {
     fetchStorage();
-  }, [currentPath, domain]);
+  }, [fetchStorage]);
 
   const formatBytes = (bytes: number) => {
     if (!bytes || bytes === 0) return '0 B';

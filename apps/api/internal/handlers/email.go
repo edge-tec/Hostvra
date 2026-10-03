@@ -2895,13 +2895,11 @@ first_valid_uid = 100
 			if isDovecot24 {
 				passwdConf := `# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
-  driver = passwd-file
-  args = username_format=%u /etc/dovecot/users
+  passwd_file_path = /etc/dovecot/users
 }
 
 userdb passwd-file {
-  driver = passwd-file
-  args = username_format=%u /etc/dovecot/users
+  passwd_file_path = /etc/dovecot/users
 }
 `
 				_ = os.WriteFile(passwdConfPath, []byte(passwdConf), 0644)

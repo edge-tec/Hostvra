@@ -8,9 +8,12 @@ echo "=========================================================="
 echo "  Repairing Dovecot IMAP/LMTP & Postfix Virtual Delivery  "
 echo "=========================================================="
 
-CONF_DIR="/etc/dovecot/conf.d"
-USERS_FILE="/etc/dovecot/users"
-DOVECOT_MAIN_CONF="/etc/dovecot/dovecot.conf"
+# Backup existing Dovecot configuration
+if [[ -d "/etc/dovecot" ]]; then
+    BACKUP_DOV="/etc/dovecot.backup.$(date +%Y%m%d-%H%M%S)"
+    cp -a /etc/dovecot "$BACKUP_DOV" 2>/dev/null || true
+    echo "[✓] Dovecot configuration backed up to $BACKUP_DOV."
+fi
 
 mkdir -p "$CONF_DIR" /etc/dovecot/private /var/mail/vhosts
 
@@ -144,13 +147,11 @@ if [[ "$DOV_VER" =~ ^2\.4 ]]; then
     cat > "$PASSWD_CONF" << 'EOF'
 # Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
-  driver = passwd-file
-  args = username_format=%u /etc/dovecot/users
+  passwd_file_path = /etc/dovecot/users
 }
 
 userdb passwd-file {
-  driver = passwd-file
-  args = username_format=%u /etc/dovecot/users
+  passwd_file_path = /etc/dovecot/users
 }
 EOF
 else
@@ -230,12 +231,13 @@ fi
 echo "[✓] Dovecot is active and running."
 
 # 12. Verify port listeners
-sleep 1
+sleep 2
 if ss -lntp 2>/dev/null | grep -qE ':143|:993'; then
     echo "[✓] IMAP listeners verified: port 143 and/or 993 active."
 else
-    echo "[WARN] Dovecot active but ports 143/993 not yet listening. Checking ss -lntp:"
+    echo "[ERROR] Dovecot active but neither port 143 nor 993 is listening!" >&2
     ss -lntp | grep dovecot || true
+    exit 1
 fi
 
 # 13. Ensure Postfix configuration points to LMTP socket

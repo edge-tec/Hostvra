@@ -303,7 +303,11 @@ func main() {
 				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error(), "report": report})
 				return
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "report": report})
+			success := report != nil && report.DovecotOK && report.PostfixOK && len(report.Errors) == 0
+			if !success {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": success, "report": report})
 		})
 
 		// Public Auth Endpoints

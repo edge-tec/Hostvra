@@ -449,12 +449,22 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null
 # Repair and ensure Dovecot IMAP/LMTP & Postfix SASL configuration
 if [[ -f "fix-dovecot-auth.sh" ]]; then
     echo "Running Dovecot configuration repair..."
-    bash fix-dovecot-auth.sh || true
+    if ! bash fix-dovecot-auth.sh; then
+        echo "[ERROR] Dovecot configuration repair failed!" >&2
+        echo "=== UPDATE FAILED: Dovecot configuration or service failure. ===" >&2
+        exit 1
+    fi
 fi
 
 # Reconcile all email routing, Postfix virtual maps, and Dovecot user database
 echo "Reconciling email routing, Postfix virtual maps, and Dovecot authentication..."
-curl -s -X POST http://127.0.0.1:8080/api/v1/internal/reconcile-email 2>/dev/null || true
+RECON_RES=$(curl -s -X POST http://127.0.0.1:8080/api/v1/internal/reconcile-email 2>/dev/null || echo '{"success":false,"error":"connection failed"}')
+echo "$RECON_RES"
+if echo "$RECON_RES" | grep -q '"dovecot_ok":false' || echo "$RECON_RES" | grep -q '"success":false'; then
+    echo "[ERROR] Email reconciliation reported failure or dovecot_ok: false!" >&2
+    echo "=== UPDATE FAILED: Email reconciliation validation failed. ===" >&2
+    exit 1
+fi
 
 # Ensure Postfix & Dovecot mail services are running and reloaded
 if command -v systemctl &>/dev/null; then
@@ -475,6 +485,102 @@ fi
 if command -v pm2 &>/dev/null; then
     echo "Restarting any PM2 managed processes..."
     pm2 restart all 2>/dev/null || true
+fi
+
+# ------------------------------------------------------------------------------
+# Critical Production Health Checks Verification
+# ------------------------------------------------------------------------------
+echo ""
+echo "=== [6/6] Verifying Critical Production Health Checks ==="
+CRITICAL_FAIL=0
+
+# 1. API check
+if curl -s -f http://127.0.0.1:8080/health >/dev/null; then
+    echo "  [PASS] API service healthy (http://127.0.0.1:8080/health)"
+else
+    echo "  [FAIL] API service is not responding to /health" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 2. Agent check
+if systemctl is-active --quiet hostvra-agent 2>/dev/null; then
+    echo "  [PASS] Agent service active (hostvra-agent)"
+else
+    echo "  [FAIL] Agent service is not active" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 3. Web check
+if curl -s -f http://127.0.0.1:3000 >/dev/null || systemctl is-active --quiet hostvra-web 2>/dev/null; then
+    echo "  [PASS] Web frontend healthy (hostvra-web)"
+else
+    echo "  [FAIL] Web frontend is not active or responding" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 4. Nginx reverse proxy check
+if nginx -t &>/dev/null && systemctl is-active --quiet nginx 2>/dev/null; then
+    echo "  [PASS] Nginx reverse proxy healthy"
+else
+    echo "  [FAIL] Nginx configuration or service failed" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 5. Dovecot configuration check (doveconf -n)
+if doveconf -n >/dev/null 2>&1; then
+    echo "  [PASS] Dovecot configuration valid (doveconf -n)"
+else
+    echo "  [FAIL] Dovecot configuration syntax error:" >&2
+    doveconf -n 2>&1 | head -n 10 >&2
+    CRITICAL_FAIL=1
+fi
+
+# 6. Dovecot service check
+if systemctl is-active --quiet dovecot 2>/dev/null; then
+    echo "  [PASS] Dovecot service active"
+else
+    echo "  [FAIL] Dovecot service is not running" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 7. IMAP listeners check (Ports 143 and 993)
+if ss -lntp 2>/dev/null | grep -qE ':143|:993'; then
+    echo "  [PASS] IMAP listeners active (143/993)"
+else
+    echo "  [FAIL] Neither port 143 nor port 993 is listening" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 8. Postfix service check
+if systemctl is-active --quiet postfix 2>/dev/null; then
+    echo "  [PASS] Postfix SMTP service active"
+else
+    echo "  [FAIL] Postfix service is not running" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 9. LMTP socket check
+if [[ -S "/var/spool/postfix/private/dovecot-lmtp" ]]; then
+    echo "  [PASS] LMTP socket exists and is active (/var/spool/postfix/private/dovecot-lmtp)"
+else
+    echo "  [FAIL] LMTP socket /var/spool/postfix/private/dovecot-lmtp missing" >&2
+    CRITICAL_FAIL=1
+fi
+
+# 10. Mailbox authentication database check
+if [[ -f "/etc/dovecot/users" ]]; then
+    echo "  [PASS] Mailbox authentication database present (/etc/dovecot/users)"
+else
+    echo "  [FAIL] /etc/dovecot/users missing" >&2
+    CRITICAL_FAIL=1
+fi
+
+if [[ "$CRITICAL_FAIL" -ne 0 ]]; then
+    echo "" >&2
+    echo "==================================================================" >&2
+    echo "=== UPDATE FAILED: Critical service verification checks failed. ===" >&2
+    echo "==================================================================" >&2
+    exit 1
 fi
 
 # Cancel error trap since all steps succeeded
