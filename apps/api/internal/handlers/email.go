@@ -2848,6 +2848,10 @@ mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
 first_valid_uid = 100
+
+namespace inbox {
+  inbox = yes
+}
 `
 				_ = os.WriteFile(mailConfPath, []byte(mailConf), 0644)
 			} else {
@@ -2857,6 +2861,10 @@ mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
 first_valid_uid = 100
+
+namespace inbox {
+  inbox = yes
+}
 `
 				_ = os.WriteFile(mailConfPath, []byte(mailConf), 0644)
 			}

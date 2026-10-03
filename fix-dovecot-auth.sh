@@ -142,6 +142,10 @@ mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
 first_valid_uid = 100
+
+namespace inbox {
+  inbox = yes
+}
 EOF
 else
     cat > "$MAIL_CONF" << 'EOF'
@@ -151,6 +155,10 @@ mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
 first_valid_uid = 100
+
+namespace inbox {
+  inbox = yes
+}
 EOF
 fi
 echo "[✓] $MAIL_CONF written for Dovecot $DOV_VER."
