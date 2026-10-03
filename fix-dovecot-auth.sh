@@ -8,14 +8,26 @@ echo "=========================================================="
 echo "  Repairing Dovecot IMAP/LMTP & Postfix Virtual Delivery  "
 echo "=========================================================="
 
+DOVECOT_DIR="/etc/dovecot"
+CONF_DIR="${DOVECOT_DIR}/conf.d"
+USERS_FILE="${DOVECOT_DIR}/users"
+DOVECOT_MAIN_CONF="${DOVECOT_DIR}/dovecot.conf"
+VMAIL_DIR="/var/mail/vhosts"
+
+: "${DOVECOT_DIR:?DOVECOT_DIR is required}"
+: "${CONF_DIR:?CONF_DIR is required}"
+: "${USERS_FILE:?USERS_FILE is required}"
+: "${DOVECOT_MAIN_CONF:?DOVECOT_MAIN_CONF is required}"
+: "${VMAIL_DIR:?VMAIL_DIR is required}"
+
 # Backup existing Dovecot configuration
-if [[ -d "/etc/dovecot" ]]; then
-    BACKUP_DOV="/etc/dovecot.backup.$(date +%Y%m%d-%H%M%S)"
-    cp -a /etc/dovecot "$BACKUP_DOV" 2>/dev/null || true
+if [[ -d "$DOVECOT_DIR" ]]; then
+    BACKUP_DOV="${DOVECOT_DIR}.backup.$(date +%Y%m%d-%H%M%S)"
+    cp -a "$DOVECOT_DIR" "$BACKUP_DOV" 2>/dev/null || true
     echo "[✓] Dovecot configuration backed up to $BACKUP_DOV."
 fi
 
-mkdir -p "$CONF_DIR" /etc/dovecot/private /var/mail/vhosts
+mkdir -p "$CONF_DIR" "${DOVECOT_DIR}/private" "$VMAIL_DIR"
 
 # 1. Ensure /etc/dovecot/users exists with correct permissions
 if [[ ! -f "$USERS_FILE" ]]; then
