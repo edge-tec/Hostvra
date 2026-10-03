@@ -446,6 +446,12 @@ echo "Reconciling all domain virtual hosts and SSL certificates..."
 sleep 2
 curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null || true
 
+# Repair and ensure Dovecot IMAP/LMTP & Postfix SASL configuration
+if [[ -f "fix-dovecot-auth.sh" ]]; then
+    echo "Running Dovecot configuration repair..."
+    bash fix-dovecot-auth.sh || true
+fi
+
 # Reconcile all email routing, Postfix virtual maps, and Dovecot user database
 echo "Reconciling email routing, Postfix virtual maps, and Dovecot authentication..."
 curl -s -X POST http://127.0.0.1:8080/api/v1/internal/reconcile-email 2>/dev/null || true

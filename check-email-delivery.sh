@@ -45,6 +45,12 @@ check_service() {
             echo -e "  [${GREEN}OK${NC}] Service $svc is active and running."
         else
             echo -e "  [${RED}FAIL${NC}] Service $svc is NOT running! (status: $(systemctl is-active "$svc" 2>/dev/null || echo "unknown"))"
+            if [[ "$svc" == "dovecot" ]] && command -v doveconf &>/dev/null; then
+                echo -e "  ${YELLOW}Testing Dovecot syntax (doveconf -n):${NC}"
+                doveconf -n 2>&1 | head -n 8 || true
+            fi
+            echo -e "  ${YELLOW}Last logs for $svc:${NC}"
+            journalctl -u "$svc" -n 8 --no-pager 2>/dev/null || true
         fi
     else
         echo -e "  [${YELLOW}WARN${NC}] systemctl not found; skipping service status check."

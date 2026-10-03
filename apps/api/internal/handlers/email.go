@@ -2819,57 +2819,47 @@ func ReconcileAllEmailRouting(ctx context.Context, s store.Store) (*EmailReconci
 			report.Errors = append(report.Errors, fmt.Sprintf("failed to write dovecot users: %v", err))
 		}
 
-		// Ensure 10-mail.conf and 10-master.conf have required settings
 		confD := filepath.Join(dovecotDir, "conf.d")
+		// Remove any conflicting override files
+		_ = os.Remove(filepath.Join(confD, "99-hostvra.conf"))
+
+		// Detect installed Dovecot version
+		isDovecot24 := false
+		if out, err := exec.Command("dovecot", "--version").Output(); err == nil {
+			if strings.HasPrefix(strings.TrimSpace(string(out)), "2.4") {
+				isDovecot24 = true
+			}
+		}
+
 		if cfi, err := os.Stat(confD); err == nil && cfi.IsDir() {
-			// Write authoritative 99-hostvra.conf to guarantee mail_location and vmail parameters
-			hostvraConfPath := filepath.Join(confD, "99-hostvra.conf")
-			hostvraConfContent := `# Hostvra Authoritative Dovecot Configuration
+			// 1. Configure 10-mail.conf based on detected version
+			mailConfPath := filepath.Join(confD, "10-mail.conf")
+			if isDovecot24 {
+				mailConf := `# Hostvra Dovecot 2.4+ Mail Location
+mail_driver = maildir
+mail_path = /var/mail/vhosts/%{user | domain}/%{user | username}
+mail_uid = 5000
+mail_gid = 5000
+mail_privileged_group = mail
+first_valid_uid = 100
+`
+				_ = os.WriteFile(mailConfPath, []byte(mailConf), 0644)
+			} else {
+				mailConf := `# Hostvra Dovecot 2.3 Mail Location
 mail_location = maildir:/var/mail/vhosts/%d/%n
 mail_uid = 5000
 mail_gid = 5000
 mail_privileged_group = mail
 first_valid_uid = 100
 `
-			_ = os.WriteFile(hostvraConfPath, []byte(hostvraConfContent), 0644)
-
-			mailConfPath := filepath.Join(confD, "10-mail.conf")
-			if mData, err := os.ReadFile(mailConfPath); err == nil {
-				mStr := string(mData)
-				if !strings.Contains(mStr, "mail_location = maildir:/var/mail/vhosts/%d/%n") && !strings.Contains(mStr, "mail_driver = maildir") {
-					mStr = strings.ReplaceAll(mStr, "mail_location = mbox:~/mail:INBOX=/var/mail/%u", "mail_location = maildir:/var/mail/vhosts/%d/%n")
-					mStr += "\n# Hostvra Mail Location Override\nmail_location = maildir:/var/mail/vhosts/%d/%n\nmail_uid = 5000\nmail_gid = 5000\nmail_privileged_group = mail\n"
-					_ = os.WriteFile(mailConfPath, []byte(mStr), 0644)
-				}
+				_ = os.WriteFile(mailConfPath, []byte(mailConf), 0644)
 			}
 
-			// Ensure service auth and service lmtp sockets exist in 10-master.conf
+			// 2. Configure 10-master.conf with clean IMAP listeners, LMTP, and Postfix SASL
 			masterConfPath := filepath.Join(confD, "10-master.conf")
-			if mstData, err := os.ReadFile(masterConfPath); err == nil {
-				mstStr := string(mstData)
-				if !strings.Contains(mstStr, "/var/spool/postfix/private/auth") || !strings.Contains(mstStr, "/var/spool/postfix/private/dovecot-lmtp") {
-					extra := `
-service auth {
-  unix_listener /var/spool/postfix/private/auth {
-    mode = 0660
-    user = postfix
-    group = postfix
-  }
-}
-service lmtp {
-  unix_listener /var/spool/postfix/private/dovecot-lmtp {
-    mode = 0660
-    user = postfix
-    group = postfix
-  }
-}
-`
-					mstStr += extra
-					_ = os.WriteFile(masterConfPath, []byte(mstStr), 0644)
-				}
-			}
+			_ = os.WriteFile(masterConfPath, []byte(dovecot.GenerateMasterConf()), 0644)
 
-			// Ensure auth-passwdfile.conf.ext is active in 10-auth.conf
+			// 3. Configure 10-auth.conf
 			authConfPath := filepath.Join(confD, "10-auth.conf")
 			if aData, err := os.ReadFile(authConfPath); err == nil {
 				aStr := string(aData)
@@ -2879,11 +2869,88 @@ service lmtp {
 				}
 				_ = os.WriteFile(authConfPath, []byte(aStr), 0644)
 			}
+
+			// 4. Configure auth-passwdfile.conf.ext
+			passwdConfPath := filepath.Join(confD, "auth-passwdfile.conf.ext")
+			if isDovecot24 {
+				passwdConf := `# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
+passdb passwd-file {
+  driver = passwd-file
+  passwd_file_path = /etc/dovecot/users
+}
+
+userdb passwd-file {
+  driver = passwd-file
+  passwd_file_path = /etc/dovecot/users
+}
+`
+				_ = os.WriteFile(passwdConfPath, []byte(passwdConf), 0644)
+			} else {
+				passwdConf := `# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.3)
+passdb passwd-file {
+  driver = passwd-file
+  args = scheme=SHA512-CRYPT username_format=%u /etc/dovecot/users
+}
+
+userdb passwd-file {
+  driver = passwd-file
+  args = username_format=%u /etc/dovecot/users
+}
+`
+				_ = os.WriteFile(passwdConfPath, []byte(passwdConf), 0644)
+			}
+
+			// 5. Ensure protocols in dovecot.conf
+			mainConfPath := filepath.Join(dovecotDir, "dovecot.conf")
+			if mData, err := os.ReadFile(mainConfPath); err == nil {
+				mStr := string(mData)
+				if !strings.Contains(mStr, "protocols =") && !strings.Contains(mStr, "protocols=") {
+					mStr = "protocols = imap lmtp pop3\n" + mStr
+					_ = os.WriteFile(mainConfPath, []byte(mStr), 0644)
+				}
+			}
+
+			// 6. Ensure fallback SSL certificate exists for IMAPS
+			sslCertPath := "/etc/dovecot/private/dovecot.pem"
+			sslKeyPath := "/etc/dovecot/private/dovecot.key"
+			if isLinuxRoot {
+				if _, err := os.Stat(sslCertPath); os.IsNotExist(err) {
+					_ = os.MkdirAll("/etc/dovecot/private", 0700)
+					_ = exec.Command("openssl", "req", "-new", "-x509", "-days", "3650", "-nodes",
+						"-out", sslCertPath, "-keyout", sslKeyPath,
+						"-subj", "/CN=mail.hostvra.internal").Run()
+					_ = os.Chmod(sslKeyPath, 0600)
+					_ = os.Chmod(sslCertPath, 0644)
+				}
+			}
 		}
 
+		// 7. Verify Dovecot syntax and active service health
 		if isLinuxRoot {
-			_ = exec.Command("systemctl", "reload", "dovecot").Run()
-			_ = exec.Command("doveadm", "reload").Run()
+			if errOut, dErr := exec.Command("doveconf", "-n").CombinedOutput(); dErr != nil {
+				report.Errors = append(report.Errors, fmt.Sprintf("dovecot syntax validation failed: %v: %s", dErr, string(errOut)))
+				report.DovecotOK = false
+			} else {
+				_ = exec.Command("systemctl", "enable", "dovecot").Run()
+				_ = exec.Command("systemctl", "restart", "dovecot").Run()
+				_ = exec.Command("doveadm", "reload").Run()
+
+				if isActErr := exec.Command("systemctl", "is-active", "--quiet", "dovecot").Run(); isActErr == nil {
+					ssOut, _ := exec.Command("ss", "-lntp").Output()
+					if strings.Contains(string(ssOut), ":143 ") || strings.Contains(string(ssOut), ":993 ") {
+						report.DovecotOK = true
+					} else {
+						report.Errors = append(report.Errors, "dovecot is active but neither port 143 nor 993 is listening")
+						report.DovecotOK = false
+					}
+				} else {
+					logOut, _ := exec.Command("journalctl", "-u", "dovecot", "-n", "10", "--no-pager").CombinedOutput()
+					report.Errors = append(report.Errors, fmt.Sprintf("dovecot service failed to start: %s", string(logOut)))
+					report.DovecotOK = false
+				}
+			}
+		} else {
+			report.DovecotOK = true
 		}
 	}
 
