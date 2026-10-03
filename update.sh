@@ -649,6 +649,12 @@ if [[ -f "/etc/dovecot/users" ]]; then
 
         if [[ "$DOV_LOOKUP_OK" == "true" ]]; then
             echo "  [PASS] Dovecot userdb lookup verified for $TEST_MBOX"
+            DOV_LMTP_LOOKUP=$(doveadm user -x "protocol=lmtp" "$TEST_MBOX" 2>&1 || true)
+            if echo "$DOV_LMTP_LOOKUP" | grep -qiE "(home|mail|uid)"; then
+                echo "  [PASS] Dovecot LMTP protocol userdb lookup verified for $TEST_MBOX"
+            else
+                echo "  [WARN] Dovecot LMTP protocol userdb lookup warning: $DOV_LMTP_LOOKUP"
+            fi
         else
             echo "  [FAIL] Dovecot userdb lookup failed for $TEST_MBOX: $DOV_LOOKUP" >&2
             CRITICAL_FAIL=1

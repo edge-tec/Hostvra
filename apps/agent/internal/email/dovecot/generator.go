@@ -104,7 +104,7 @@ func GenerateAuthConf() string {
 	usernameFormat := "auth_username_format = %u"
 	if isDovecot24() {
 		cleartextDirective = "auth_allow_cleartext = yes"
-		usernameFormat = "auth_username_format = %{user|lower}"
+		usernameFormat = "auth_username_format = %{user | lower}"
 	}
 	return fmt.Sprintf(`# Hostvra Dovecot 10-auth.conf
 %s
@@ -123,10 +123,12 @@ func GenerateAuthPasswdFileConf(passwdPath string) string {
 	if isDovecot24() {
 		return fmt.Sprintf(`# Hostvra Dovecot auth-passwdfile.conf.ext (Dovecot 2.4+)
 passdb passwd-file {
+  auth_username_format = %%{user | lower}
   passwd_file_path = %s
 }
 
 userdb passwd-file {
+  auth_username_format = %%{user | lower}
   passwd_file_path = %s
 }
 `, passwdPath, passwdPath)
@@ -199,6 +201,7 @@ service pop3-login {
 }
 
 service lmtp {
+  extra_groups = vmail
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
     mode = 0660
     user = postfix
@@ -223,6 +226,21 @@ service auth-worker {
   extra_groups = vmail
 }
 `
+}
+
+// GenerateLmtpConf creates 20-lmtp.conf
+func GenerateLmtpConf() string {
+	format := "auth_username_format = %u"
+	if isDovecot24() {
+		format = "auth_username_format = %{user | lower}"
+	}
+	return fmt.Sprintf(`# Hostvra Dovecot 20-lmtp.conf
+protocol lmtp {
+  postmaster_address = postmaster@localhost
+  %s
+  mail_plugins = $mail_plugins
+}
+`, format)
 }
 
 // GenerateUsersFile builds the Dovecot virtual passwd-file content.
@@ -344,6 +362,7 @@ func ApplyDovecotConfig(configDir string, opts ConfigOptions, accounts []UserAcc
 		filepath.Join(confD, "10-auth.conf"):                     GenerateAuthConf(),
 		filepath.Join(confD, "auth-passwdfile.conf.ext"):         GenerateAuthPasswdFileConf(filepath.Join(configDir, "users")),
 		filepath.Join(confD, "10-ssl.conf"):                      GenerateSSLConf(opts),
+		filepath.Join(confD, "20-lmtp.conf"):                     GenerateLmtpConf(),
 		filepath.Join(confD, "10-master.conf"):                   GenerateMasterConf(),
 		filepath.Join(configDir, "users"):                        GenerateUsersFile(accounts, opts),
 	}

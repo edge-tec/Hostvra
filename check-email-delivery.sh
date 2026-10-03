@@ -301,6 +301,14 @@ if [[ -n "$TARGET_EMAIL" ]]; then
             echo -e "  [${RED}FAIL${NC}] doveadm user lookup failed for ${TARGET_EMAIL}:"
             echo "        $DOV_USER_PROBE"
         fi
+
+        DOV_LMTP_PROBE=$(doveadm user -x "protocol=lmtp" "$TARGET_EMAIL" 2>&1 || true)
+        if echo "$DOV_LMTP_PROBE" | grep -qiE "(home|mail|uid)"; then
+            echo -e "  [${GREEN}OK${NC}] doveadm LMTP protocol lookup succeeded for ${TARGET_EMAIL}"
+        else
+            echo -e "  [${RED}FAIL${NC}] doveadm LMTP protocol lookup failed for ${TARGET_EMAIL}:"
+            echo "        $DOV_LMTP_PROBE"
+        fi
     fi
 
     # Maildir directory existence and permissions
@@ -346,6 +354,8 @@ EOF
             else
                 echo -e "  [${YELLOW}WAIT${NC}] Message queued or processing. Recent Postfix logs:"
                 journalctl -u postfix -n 8 --no-pager 2>/dev/null || true
+                echo -e "  Recent Dovecot logs:"
+                journalctl -u dovecot -n 12 --no-pager 2>/dev/null || true
             fi
         else
             echo -e "  [${YELLOW}WARN${NC}] sendmail binary not found; skipping automated delivery probe."

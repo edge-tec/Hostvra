@@ -2879,7 +2879,7 @@ first_valid_uid = 100
 						aStr += "\nauth_allow_cleartext = yes\n"
 					}
 					if !strings.Contains(aStr, "auth_username_format") {
-						aStr += "\nauth_username_format = %{user|lower}\n"
+						aStr += "\nauth_username_format = %{user | lower}\n"
 					}
 				} else {
 					aStr = strings.ReplaceAll(aStr, "disable_plaintext_auth = yes", "disable_plaintext_auth = no")
@@ -2906,10 +2906,12 @@ first_valid_uid = 100
 			if isDovecot24 {
 				passwdConf := `# Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
+  auth_username_format = %{user | lower}
   passwd_file_path = /etc/dovecot/users
 }
 
 userdb passwd-file {
+  auth_username_format = %{user | lower}
   passwd_file_path = /etc/dovecot/users
 }
 `
@@ -2928,6 +2930,21 @@ userdb passwd-file {
 `
 				_ = os.WriteFile(passwdConfPath, []byte(passwdConf), 0644)
 			}
+
+			// 4b. Configure 20-lmtp.conf
+			lmtpConfPath := filepath.Join(confD, "20-lmtp.conf")
+			lmtpFormat := "auth_username_format = %u"
+			if isDovecot24 {
+				lmtpFormat = "auth_username_format = %{user | lower}"
+			}
+			lmtpContent := fmt.Sprintf(`# Hostvra Dovecot 20-lmtp.conf
+protocol lmtp {
+  postmaster_address = postmaster@localhost
+  %s
+  mail_plugins = $mail_plugins
+}
+`, lmtpFormat)
+			_ = os.WriteFile(lmtpConfPath, []byte(lmtpContent), 0644)
 
 			// 5. Ensure protocols in dovecot.conf
 			mainConfPath := filepath.Join(dovecotDir, "dovecot.conf")

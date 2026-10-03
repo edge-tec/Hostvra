@@ -181,6 +181,7 @@ service pop3-login {
 }
 
 service lmtp {
+  extra_groups = vmail
   unix_listener /var/spool/postfix/private/dovecot-lmtp {
     mode = 0660
     user = postfix
@@ -223,9 +224,9 @@ if [[ -f "$AUTH_CONF" ]]; then
             echo "auth_allow_cleartext = yes" >> "$AUTH_CONF"
         fi
         if grep -q "auth_username_format" "$AUTH_CONF"; then
-            sed -i 's/^[[:space:]]*auth_username_format.*/auth_username_format = %{user|lower}/' "$AUTH_CONF"
+            sed -i 's/^[[:space:]]*auth_username_format.*/auth_username_format = %{user | lower}/' "$AUTH_CONF"
         else
-            echo "auth_username_format = %{user|lower}" >> "$AUTH_CONF"
+            echo "auth_username_format = %{user | lower}" >> "$AUTH_CONF"
         fi
     else
         sed -i 's/^[[:space:]]*#*disable_plaintext_auth.*/disable_plaintext_auth = no/' "$AUTH_CONF"
@@ -242,10 +243,12 @@ if [[ "$DOV_VER" =~ ^2\.4 ]]; then
     cat > "$PASSWD_CONF" << 'EOF'
 # Hostvra Virtual Mailbox Auth Configuration (Dovecot 2.4+)
 passdb passwd-file {
+  auth_username_format = %{user | lower}
   passwd_file_path = /etc/dovecot/users
 }
 
 userdb passwd-file {
+  auth_username_format = %{user | lower}
   passwd_file_path = /etc/dovecot/users
 }
 EOF
@@ -264,6 +267,39 @@ userdb passwd-file {
 EOF
 fi
 echo "[✓] $PASSWD_CONF written."
+
+# 7b. Configure 20-lmtp.conf
+LMTP_CONF="$CONF_DIR/20-lmtp.conf"
+if [[ "$DOV_VER" =~ ^2\.4 ]]; then
+    cat > "$LMTP_CONF" << 'EOF'
+# Hostvra Dovecot 20-lmtp.conf (Dovecot 2.4+)
+protocol lmtp {
+  postmaster_address = postmaster@localhost
+  auth_username_format = %{user | lower}
+  mail_plugins = $mail_plugins
+}
+EOF
+else
+    cat > "$LMTP_CONF" << 'EOF'
+# Hostvra Dovecot 20-lmtp.conf (Dovecot 2.3)
+protocol lmtp {
+  postmaster_address = postmaster@localhost
+  auth_username_format = %u
+  mail_plugins = $mail_plugins
+}
+EOF
+fi
+echo "[✓] $LMTP_CONF written (clean postmaster and auth_username_format for LMTP delivery)."
+
+# 7c. Configure 10-logging.conf with auth_debug
+LOG_CONF="$CONF_DIR/10-logging.conf"
+if [[ -f "$LOG_CONF" ]]; then
+    if grep -q "auth_debug" "$LOG_CONF"; then
+        sed -i 's/^[[:space:]]*#*[[:space:]]*auth_debug.*/auth_debug = yes/' "$LOG_CONF"
+    else
+        echo "auth_debug = yes" >> "$LOG_CONF"
+    fi
+fi
 
 # 8. Ensure SSL Certificate exists for IMAPS
 SSL_CONF="$CONF_DIR/10-ssl.conf"
@@ -406,6 +442,14 @@ if [[ -n "$TEST_USER" ]]; then
     if [[ "$USER_LOOKUP_SUCCESS" == "true" ]]; then
         echo "[✓] doveadm userdb lookup succeeded for $TEST_USER"
         echo "    $(echo "$USER_LOOKUP_OUT" | tr '\n' ' ')"
+        
+        LMTP_LOOKUP_OUT=$(doveadm user -x "protocol=lmtp" "$TEST_USER" 2>&1 || true)
+        if echo "$LMTP_LOOKUP_OUT" | grep -qiE "(home|mail|uid)"; then
+            echo "[✓] doveadm LMTP protocol lookup succeeded for $TEST_USER"
+        else
+            echo "[WARN] doveadm LMTP protocol lookup warning for $TEST_USER:"
+            echo "       $LMTP_LOOKUP_OUT"
+        fi
     else
         echo "[ERROR] doveadm userdb lookup failed for $TEST_USER!" >&2
         echo "$USER_LOOKUP_OUT" >&2
