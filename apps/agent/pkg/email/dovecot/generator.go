@@ -238,7 +238,6 @@ func GenerateLmtpConf() string {
 protocol lmtp {
   postmaster_address = postmaster@localhost
   %s
-  mail_plugins = $mail_plugins
 }
 `, format)
 }

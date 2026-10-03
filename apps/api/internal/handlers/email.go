@@ -2941,7 +2941,6 @@ userdb passwd-file {
 protocol lmtp {
   postmaster_address = postmaster@localhost
   %s
-  mail_plugins = $mail_plugins
 }
 `, lmtpFormat)
 			_ = os.WriteFile(lmtpConfPath, []byte(lmtpContent), 0644)

@@ -276,7 +276,6 @@ if [[ "$DOV_VER" =~ ^2\.4 ]]; then
 protocol lmtp {
   postmaster_address = postmaster@localhost
   auth_username_format = %{user | lower}
-  mail_plugins = $mail_plugins
 }
 EOF
 else
@@ -285,7 +284,6 @@ else
 protocol lmtp {
   postmaster_address = postmaster@localhost
   auth_username_format = %u
-  mail_plugins = $mail_plugins
 }
 EOF
 fi
