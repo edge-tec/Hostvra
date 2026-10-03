@@ -455,6 +455,9 @@ async function executeFetch<T>(
     endpoint.includes('databases');
   const timeoutMs = isLongRunning ? 900000 : 60000;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   const formattedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   let cleanBase = baseUrl ? (baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl) : '';
   if (cleanBase.endsWith('/api') && formattedEndpoint.startsWith('/api')) {
