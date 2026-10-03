@@ -10,14 +10,20 @@
 
 set -uo pipefail
 
-TARGET_EMAIL="${1:-}"
+SEND_TEST=false
+TARGET_EMAIL=""
 TARGET_DOMAIN=""
 TARGET_USER=""
 
-if [[ -n "$TARGET_EMAIL" && "$TARGET_EMAIL" =~ ^([^@]+)@([^@]+)$ ]]; then
-    TARGET_USER="${BASH_REMATCH[1]}"
-    TARGET_DOMAIN="${BASH_REMATCH[2]}"
-fi
+for arg in "$@"; do
+    if [[ "$arg" == "--send-test" || "$arg" == "-t" ]]; then
+        SEND_TEST=true
+    elif [[ -z "$TARGET_EMAIL" && "$arg" =~ ^([^@]+)@([^@]+)$ ]]; then
+        TARGET_EMAIL="$arg"
+        TARGET_USER="${BASH_REMATCH[1]}"
+        TARGET_DOMAIN="${BASH_REMATCH[2]}"
+    fi
+done
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -312,6 +318,38 @@ if [[ -n "$TARGET_EMAIL" ]]; then
     else
         echo -e "  [${YELLOW}WARN${NC}] Maildir directory ${MBOX_DIR} does not exist on disk yet."
         echo "         It will be created automatically upon first message delivery or reconciliation."
+    fi
+
+    # Live message delivery test
+    if [[ "$SEND_TEST" == "true" ]]; then
+        echo ""
+        echo -e "  ${YELLOW}[*] Testing Live Inbound Delivery to ${TARGET_EMAIL} via Postfix -> LMTP...${NC}"
+        TEST_MSG_ID="probe-$(date +%s)-$RANDOM"
+        if command -v sendmail &>/dev/null; then
+            sendmail -f "probe@${TARGET_DOMAIN}" "${TARGET_EMAIL}" << EOF
+From: probe@${TARGET_DOMAIN}
+To: ${TARGET_EMAIL}
+Subject: Hostvra Delivery Verification Probe [${TEST_MSG_ID}]
+Date: $(date -R)
+Message-ID: <${TEST_MSG_ID}@${TARGET_DOMAIN}>
+
+This is an automated delivery probe to verify Postfix LMTP transport into Dovecot.
+EOF
+            sleep 2
+            NEW_COUNT=$(ls -1 "${MBOX_DIR}/new" 2>/dev/null | wc -l)
+            if [[ "$NEW_COUNT" -gt 0 ]]; then
+                echo -e "  [${GREEN}OK${NC}] Live test email successfully delivered into ${MBOX_DIR}/new/ (${NEW_COUNT} messages present)"
+                LATEST_MSG=$(ls -t "${MBOX_DIR}/new" 2>/dev/null | head -n 1)
+                if [[ -n "$LATEST_MSG" ]]; then
+                    echo "        Delivered message file: ${MBOX_DIR}/new/${LATEST_MSG}"
+                fi
+            else
+                echo -e "  [${YELLOW}WAIT${NC}] Message queued or processing. Recent Postfix logs:"
+                journalctl -u postfix -n 8 --no-pager 2>/dev/null || true
+            fi
+        else
+            echo -e "  [${YELLOW}WARN${NC}] sendmail binary not found; skipping automated delivery probe."
+        fi
     fi
 
     # DNS verification for TARGET_DOMAIN
