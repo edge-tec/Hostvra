@@ -282,6 +282,30 @@ func main() {
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "report": report})
 		})
 
+		// Internal loopback email reconciliation endpoint for host administrators (strictly restricted to localhost/loopback)
+		r.Post("/internal/reconcile-email", func(w http.ResponseWriter, r *http.Request) {
+			host, _, _ := net.SplitHostPort(r.RemoteAddr)
+			if host == "" {
+				host = r.RemoteAddr
+			}
+			isLoopback := host == "127.0.0.1" || host == "::1" || host == "localhost" ||
+				strings.HasPrefix(r.RemoteAddr, "127.0.0.1") || strings.HasPrefix(r.RemoteAddr, "[::1]")
+			if !isLoopback {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": "Loopback access only"})
+				return
+			}
+			report, err := handlers.ReconcileAllEmailRouting(r.Context(), dataStore)
+			w.Header().Set("Content-Type", "application/json")
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": err.Error(), "report": report})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "report": report})
+		})
+
 		// Public Auth Endpoints
 		r.Route("/auth", func(r chi.Router) {
 			registerLimiter := auth.NewRateLimiter(3, 60*time.Second, "Too many registration attempts. Please try again later.")

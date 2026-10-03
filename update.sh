@@ -448,7 +448,7 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null
 
 # Reconcile all email routing, Postfix virtual maps, and Dovecot user database
 echo "Reconciling email routing, Postfix virtual maps, and Dovecot authentication..."
-curl -s -X POST http://127.0.0.1:8080/api/v1/email/reconcile 2>/dev/null || true
+curl -s -X POST http://127.0.0.1:8080/api/v1/internal/reconcile-email 2>/dev/null || true
 
 # Ensure Postfix & Dovecot mail services are running and reloaded
 if command -v systemctl &>/dev/null; then

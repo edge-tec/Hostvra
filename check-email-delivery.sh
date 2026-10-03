@@ -299,7 +299,7 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}                       AUDIT SUMMARY                            ${NC}"
 echo -e "${BLUE}================================================================${NC}"
 echo "To automatically reconcile all email virtual maps and Dovecot authentication:"
-echo "  curl -s -X POST http://127.0.0.1:8080/api/v1/email/reconcile | jq ."
+echo "  curl -s -X POST http://127.0.0.1:8080/api/v1/internal/reconcile-email | jq ."
 echo ""
 echo "To monitor incoming Postfix delivery logs in real time:"
 echo "  journalctl -u postfix -f -n 50"
