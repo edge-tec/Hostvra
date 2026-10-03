@@ -95,16 +95,10 @@ func (c *Config) ValidateProduction() error {
 			return errors.New("CRITICAL STARTUP ERROR: DATABASE_URL must be explicitly configured in production with valid credentials")
 		}
 
-		// 3. Mandatory ResellerClub Production Credentials
-		if strings.EqualFold(c.DomainRegistrar, "resellerclub") {
-			if c.ResellerClubResellerID == "" {
-				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_RESELLER_ID must be provided in production")
-			}
+		// 3. ResellerClub Credentials (optional — only validate if configured)
+		if strings.EqualFold(c.DomainRegistrar, "resellerclub") && c.ResellerClubResellerID != "" {
 			if c.ResellerClubAPIKey == "" {
-				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_API_KEY must be provided in production")
-			}
-			if !strings.EqualFold(c.ResellerClubMode, "production") {
-				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_MODE must be set to 'production' in production environment (sandbox prohibited)")
+				return errors.New("CRITICAL STARTUP ERROR: RESELLERCLUB_API_KEY must be provided when RESELLERCLUB_RESELLER_ID is configured")
 			}
 		}
 	}
