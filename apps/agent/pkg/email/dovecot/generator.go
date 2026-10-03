@@ -101,14 +101,17 @@ namespace inbox {
 // GenerateAuthConf creates 10-auth.conf
 func GenerateAuthConf() string {
 	cleartextDirective := "disable_plaintext_auth = yes"
+	usernameFormat := "auth_username_format = %u"
 	if isDovecot24() {
-		cleartextDirective = "auth_allow_cleartext = no"
+		cleartextDirective = "auth_allow_cleartext = yes"
+		usernameFormat = "auth_username_format = %{user|lower}"
 	}
 	return fmt.Sprintf(`# Hostvra Dovecot 10-auth.conf
 %s
+%s
 auth_mechanisms = plain login
 !include auth-passwdfile.conf.ext
-`, cleartextDirective)
+`, cleartextDirective, usernameFormat)
 }
 
 // GenerateAuthPasswdFileConf creates auth-passwdfile.conf.ext
@@ -204,6 +207,7 @@ service lmtp {
 }
 
 service auth {
+  extra_groups = vmail
   unix_listener /var/spool/postfix/private/auth {
     mode = 0660
     user = postfix
@@ -216,6 +220,7 @@ service auth {
 
 service auth-worker {
   user = root
+  extra_groups = vmail
 }
 `
 }

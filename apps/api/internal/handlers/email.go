@@ -2814,6 +2814,11 @@ func ReconcileAllEmailRouting(ctx context.Context, s store.Store) (*EmailReconci
 			report.DovecotOK = true
 			if isLinuxRoot {
 				_ = os.Chown(usersPath, 0, 5000)
+				_ = exec.Command("usermod", "-a", "-G", "vmail", "dovecot").Run()
+				if _, sErr := exec.LookPath("setfacl"); sErr == nil {
+					_ = exec.Command("setfacl", "-m", "u:dovecot:r", usersPath).Run()
+					_ = exec.Command("setfacl", "-m", "g:vmail:r", usersPath).Run()
+				}
 			}
 		} else {
 			report.Errors = append(report.Errors, fmt.Sprintf("failed to write dovecot users: %v", err))
@@ -2873,10 +2878,16 @@ first_valid_uid = 100
 					if !strings.Contains(aStr, "auth_allow_cleartext") {
 						aStr += "\nauth_allow_cleartext = yes\n"
 					}
+					if !strings.Contains(aStr, "auth_username_format") {
+						aStr += "\nauth_username_format = %{user|lower}\n"
+					}
 				} else {
 					aStr = strings.ReplaceAll(aStr, "disable_plaintext_auth = yes", "disable_plaintext_auth = no")
 					if !strings.Contains(aStr, "disable_plaintext_auth") {
 						aStr += "\ndisable_plaintext_auth = no\n"
+					}
+					if !strings.Contains(aStr, "auth_username_format") {
+						aStr += "\nauth_username_format = %u\n"
 					}
 				}
 				_ = os.WriteFile(authConfPath, []byte(aStr), 0644)
@@ -2986,6 +2997,13 @@ userdb passwd-file {
 
 					if port143Open || port993Open {
 						report.DovecotOK = true
+						if len(accounts) > 0 {
+							testUser := accounts[0].Email
+							if uOut, uErr := exec.Command("doveadm", "user", testUser).CombinedOutput(); uErr != nil || (!strings.Contains(string(uOut), "home") && !strings.Contains(string(uOut), "uid")) {
+								report.Errors = append(report.Errors, fmt.Sprintf("dovecot userdb lookup failed for %s: %s", testUser, string(uOut)))
+								report.DovecotOK = false
+							}
+						}
 					} else {
 						report.Errors = append(report.Errors, "dovecot is active but neither port 143 nor 993 is listening")
 						report.DovecotOK = false
@@ -3095,6 +3113,9 @@ smtps     inet  n       -       y       -       -       smtpd
 				}
 
 				_ = exec.Command("postfix", "reload").Run()
+				if report.PostfixOK && report.DovecotOK {
+					_ = exec.Command("postqueue", "-f").Run()
+				}
 			}
 		}
 	}

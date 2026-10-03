@@ -77,13 +77,36 @@ is_port_listening() {
     return 1
 }
 
-# 1. Ensure /etc/dovecot/users exists with correct permissions
+# 1. Ensure /etc/dovecot directory and users file exist with correct permissions
+chmod 0755 "$DOVECOT_DIR" "$CONF_DIR" 2>/dev/null || true
+
+# Ensure vmail group exists and dovecot belongs to vmail group
+if ! getent group vmail &>/dev/null; then
+    groupadd -g 5000 vmail 2>/dev/null || true
+fi
+if id "dovecot" &>/dev/null; then
+    usermod -a -G vmail dovecot 2>/dev/null || true
+fi
+if id "vmail" &>/dev/null && getent group dovecot &>/dev/null; then
+    usermod -a -G dovecot vmail 2>/dev/null || true
+fi
+
 if [[ ! -f "$USERS_FILE" ]]; then
     touch "$USERS_FILE"
 fi
+
+# Sanitize users file: strip Windows CRLF carriage returns, trim whitespace, remove blank lines
+sed -i 's/\r$//' "$USERS_FILE" 2>/dev/null || true
+sed -i 's/^[[:space:]]*//;s/[[:space:]]*$//' "$USERS_FILE" 2>/dev/null || true
+sed -i '/^[[:space:]]*$/d' "$USERS_FILE" 2>/dev/null || true
+
 chmod 0640 "$USERS_FILE" 2>/dev/null || true
 chown 0:5000 "$USERS_FILE" 2>/dev/null || true
-echo "[✓] Dovecot users file permissions verified."
+if command -v setfacl &>/dev/null; then
+    setfacl -m u:dovecot:r "$USERS_FILE" 2>/dev/null || true
+    setfacl -m g:vmail:r "$USERS_FILE" 2>/dev/null || true
+fi
+echo "[✓] Dovecot users file permissions and group access verified."
 
 # 2. Detect Dovecot Version
 DOV_VER=$(dovecot --version 2>/dev/null | awk '{print $1}' || echo "2.3")
@@ -166,6 +189,7 @@ service lmtp {
 }
 
 service auth {
+  extra_groups = vmail
   unix_listener /var/spool/postfix/private/auth {
     mode = 0660
     user = postfix
@@ -178,6 +202,7 @@ service auth {
 
 service auth-worker {
   user = root
+  extra_groups = vmail
 }
 EOF
 echo "[✓] $MASTER_CONF written (clean listeners for 143, 993, LMTP, SASL)."
@@ -197,8 +222,18 @@ if [[ -f "$AUTH_CONF" ]]; then
         else
             echo "auth_allow_cleartext = yes" >> "$AUTH_CONF"
         fi
+        if grep -q "auth_username_format" "$AUTH_CONF"; then
+            sed -i 's/^[[:space:]]*auth_username_format.*/auth_username_format = %{user|lower}/' "$AUTH_CONF"
+        else
+            echo "auth_username_format = %{user|lower}" >> "$AUTH_CONF"
+        fi
     else
         sed -i 's/^[[:space:]]*#*disable_plaintext_auth.*/disable_plaintext_auth = no/' "$AUTH_CONF"
+        if grep -q "auth_username_format" "$AUTH_CONF"; then
+            sed -i 's/^[[:space:]]*auth_username_format.*/auth_username_format = %u/' "$AUTH_CONF"
+        else
+            echo "auth_username_format = %u" >> "$AUTH_CONF"
+        fi
     fi
 fi
 
@@ -266,7 +301,18 @@ fi
 mkdir -p /var/mail/vhosts
 chown -R 5000:5000 /var/mail/vhosts 2>/dev/null || true
 chmod 0770 /var/mail/vhosts
-echo "[✓] Storage permissions set on /var/mail/vhosts."
+
+# Ensure individual Maildir subdirectories exist for all configured accounts
+if [[ -f "$USERS_FILE" ]]; then
+    while IFS=: read -r muser _ _ _ _ mhome _; do
+        if [[ -n "$mhome" && "$mhome" =~ ^/var/mail/vhosts/ ]]; then
+            mkdir -p "$mhome/cur" "$mhome/new" "$mhome/tmp" 2>/dev/null || true
+            chown -R 5000:5000 "$mhome" 2>/dev/null || true
+            chmod 0700 "$mhome" "$mhome/cur" "$mhome/new" "$mhome/tmp" 2>/dev/null || true
+        fi
+    done < "$USERS_FILE"
+fi
+echo "[✓] Storage permissions and maildirs set on /var/mail/vhosts."
 
 # 10. Verify Dovecot Configuration Syntax with doveconf -n
 echo "[*] Testing Dovecot configuration syntax..."
@@ -341,7 +387,38 @@ else
     exit 1
 fi
 
-# 13. Ensure Postfix configuration points to LMTP socket
+# 13. Verify Dovecot UserDB Lookup
+echo "[*] Testing Dovecot userdb lookup via doveadm..."
+TEST_USER=$(grep -vE '^(#|$)' "$USERS_FILE" | head -n 1 | cut -d: -f1 || true)
+if [[ -n "$TEST_USER" ]]; then
+    echo "  Testing userdb lookup for: $TEST_USER"
+    USER_LOOKUP_OUT=""
+    USER_LOOKUP_SUCCESS=false
+    for attempt in {1..5}; do
+        USER_LOOKUP_OUT=$(doveadm user "$TEST_USER" 2>&1 || true)
+        if echo "$USER_LOOKUP_OUT" | grep -qiE "(home|mail|uid)"; then
+            USER_LOOKUP_SUCCESS=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ "$USER_LOOKUP_SUCCESS" == "true" ]]; then
+        echo "[✓] doveadm userdb lookup succeeded for $TEST_USER"
+        echo "    $(echo "$USER_LOOKUP_OUT" | tr '\n' ' ')"
+    else
+        echo "[ERROR] doveadm userdb lookup failed for $TEST_USER!" >&2
+        echo "$USER_LOOKUP_OUT" >&2
+        echo "" >&2
+        echo "Dovecot recent auth logs:" >&2
+        journalctl -u dovecot -n 30 --no-pager >&2 || true
+        exit 1
+    fi
+else
+    echo "[*] No mail accounts configured in $USERS_FILE yet."
+fi
+
+# 14. Ensure Postfix configuration points to LMTP socket
 if command -v postconf &>/dev/null; then
     postconf -e "smtpd_sasl_type = dovecot"
     postconf -e "smtpd_sasl_path = private/auth"

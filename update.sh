@@ -631,9 +631,29 @@ else
     CRITICAL_FAIL=1
 fi
 
-# 10. Mailbox authentication database check
+# 10. Mailbox authentication database & live userdb lookup verification
 if [[ -f "/etc/dovecot/users" ]]; then
     echo "  [PASS] Mailbox authentication database present (/etc/dovecot/users)"
+    TEST_MBOX=$(grep -vE '^(#|$)' "/etc/dovecot/users" 2>/dev/null | head -n 1 | cut -d: -f1 || true)
+    if [[ -n "$TEST_MBOX" ]] && command -v doveadm &>/dev/null; then
+        DOV_LOOKUP=""
+        DOV_LOOKUP_OK=false
+        for attempt in {1..5}; do
+            DOV_LOOKUP=$(doveadm user "$TEST_MBOX" 2>&1 || true)
+            if echo "$DOV_LOOKUP" | grep -qiE "(home|mail|uid)"; then
+                DOV_LOOKUP_OK=true
+                break
+            fi
+            sleep 1
+        done
+
+        if [[ "$DOV_LOOKUP_OK" == "true" ]]; then
+            echo "  [PASS] Dovecot userdb lookup verified for $TEST_MBOX"
+        else
+            echo "  [FAIL] Dovecot userdb lookup failed for $TEST_MBOX: $DOV_LOOKUP" >&2
+            CRITICAL_FAIL=1
+        fi
+    fi
 else
     echo "  [FAIL] /etc/dovecot/users missing" >&2
     CRITICAL_FAIL=1
