@@ -131,10 +131,22 @@ func (h *WebmailHandler) extractToken(r *http.Request) string {
 			return strings.TrimSpace(parts[1])
 		}
 	}
+	if cpHeader := r.Header.Get("X-CP-Token"); cpHeader != "" {
+		return strings.TrimSpace(cpHeader)
+	}
+	if cpHeader := r.Header.Get("X-Control-Panel-Token"); cpHeader != "" {
+		return strings.TrimSpace(cpHeader)
+	}
 	if customHeader := r.Header.Get("X-Webmail-Token"); customHeader != "" {
 		return strings.TrimSpace(customHeader)
 	}
 	if cookie, err := r.Cookie("hostvra_webmail_token"); err == nil && cookie.Value != "" {
+		return strings.TrimSpace(cookie.Value)
+	}
+	if cookie, err := r.Cookie("hostvra_token"); err == nil && cookie.Value != "" {
+		return strings.TrimSpace(cookie.Value)
+	}
+	if cookie, err := r.Cookie("access_token"); err == nil && cookie.Value != "" {
 		return strings.TrimSpace(cookie.Value)
 	}
 	if qToken := r.URL.Query().Get("token"); qToken != "" {
@@ -165,7 +177,7 @@ func (h *WebmailHandler) isTokenRevoked(tokenStr string) bool {
 	return time.Now().Before(expiry)
 }
 
-func (h *WebmailHandler) verifyMailboxAccess(claims *auth.Claims, mb *store.EmailMailbox) bool {
+func (h *WebmailHandler) verifyMailboxAccess(ctx context.Context, claims *auth.Claims, mb *store.EmailMailbox) bool {
 	if mb == nil {
 		return false
 	}
@@ -174,13 +186,39 @@ func (h *WebmailHandler) verifyMailboxAccess(claims *auth.Claims, mb *store.Emai
 		// Protected HTTP routes are guarded by RequireWebmailAuth.
 		return true
 	}
-	if claims.IsSuperAdmin {
+	if claims.IsSuperAdmin || claims.Role == "admin" {
 		return true
 	}
 	if claims.Role == "webmail_user" {
-		return strings.EqualFold(claims.Email, mb.Email) || claims.UserID == mb.ID
+		if strings.EqualFold(strings.TrimSpace(claims.Email), strings.TrimSpace(mb.Email)) || claims.UserID == mb.ID {
+			return true
+		}
+		// If claims is a webmail_user but does not match mb, check if the request
+		// carried a verified Control Panel admin/owner token in context
+		if ctx != nil {
+			if cpClaims, ok := ctx.Value(cpClaimsContextKey).(*auth.Claims); ok && cpClaims != nil {
+				if cpClaims.IsSuperAdmin || cpClaims.Role == "admin" {
+					return true
+				}
+				if cpClaims.OrganizationID != uuid.Nil {
+					domain, _ := h.store.GetEmailDomainByID(ctx, mb.DomainID)
+					if domain == nil || domain.OrganizationID == cpClaims.OrganizationID {
+						return true
+					}
+				} else {
+					return true
+				}
+			}
+		}
+		return false
 	}
-	// Any control panel user (owner, admin, member, client, reseller, etc) has access
+	// Any control panel user (owner, admin, member, client, reseller, etc) has access to mailboxes in their organization
+	if claims.OrganizationID != uuid.Nil && !claims.IsSuperAdmin {
+		domain, _ := h.store.GetEmailDomainByID(ctx, mb.DomainID)
+		if domain != nil && domain.OrganizationID != claims.OrganizationID {
+			return false
+		}
+	}
 	return true
 }
 
@@ -213,7 +251,7 @@ func (h *WebmailHandler) resolveMailboxFromRequest(r *http.Request) (*store.Emai
 		return nil, errMailboxNotFound
 	}
 
-	if claims != nil && !h.verifyMailboxAccess(claims, mb) {
+	if claims != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		return nil, errForbidden
 	}
 
@@ -237,11 +275,17 @@ func (h *WebmailHandler) checkMailboxPermission(ctx context.Context, claims *aut
 	if err != nil || mb == nil {
 		return nil, errMailboxNotFound
 	}
-	if claims != nil && !h.verifyMailboxAccess(claims, mb) {
+	if claims != nil && !h.verifyMailboxAccess(ctx, claims, mb) {
 		return nil, errForbidden
 	}
 	return mb, nil
 }
+
+type webmailContextKey string
+
+const (
+	cpClaimsContextKey webmailContextKey = "hostvra_cp_claims"
+)
 
 func (h *WebmailHandler) RequireWebmailAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +311,26 @@ func (h *WebmailHandler) RequireWebmailAuth(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), auth.UserContextKey, claims)
+
+		// Check if a secondary Control Panel session token is provided (via header or cookie)
+		// and attach cpClaims if valid, allowing cross-mailbox authorization for admins
+		cpTokenStr := r.Header.Get("X-CP-Token")
+		if cpTokenStr == "" {
+			cpTokenStr = r.Header.Get("X-Control-Panel-Token")
+		}
+		if cpTokenStr == "" {
+			if c, cErr := r.Cookie("hostvra_token"); cErr == nil && c.Value != "" {
+				cpTokenStr = c.Value
+			} else if c, cErr := r.Cookie("access_token"); cErr == nil && c.Value != "" {
+				cpTokenStr = c.Value
+			}
+		}
+		if cpTokenStr != "" && cpTokenStr != tokenStr {
+			if cpClaims, cpErr := auth.ValidateAccessToken(cpTokenStr, h.cfg.JWTSecret); cpErr == nil && cpClaims != nil && cpClaims.Role != "webmail_user" {
+				ctx = context.WithValue(ctx, cpClaimsContextKey, cpClaims)
+			}
+		}
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -718,7 +782,7 @@ func (h *WebmailHandler) GetMessage(w http.ResponseWriter, r *http.Request) {
 
 	claims, _ := auth.GetClaims(r.Context())
 	mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID)
-	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+	if mb != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -751,6 +815,14 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 	if fromClean == "" {
 		fromClean = strings.ToLower(strings.TrimSpace(req.FromEmail))
 	}
+	if strings.Contains(fromClean, "<") && strings.Contains(fromClean, ">") {
+		start := strings.Index(fromClean, "<")
+		end := strings.Index(fromClean, ">")
+		if end > start {
+			fromClean = strings.ToLower(strings.TrimSpace(fromClean[start+1 : end]))
+		}
+	}
+	fromClean = strings.Trim(fromClean, "\"' ")
 
 	claims, _ := auth.GetClaims(r.Context())
 	if req.MailboxID != nil && *req.MailboxID != uuid.Nil {
@@ -769,7 +841,7 @@ func (h *WebmailHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.verifyMailboxAccess(claims, mb) {
+	if !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -1056,7 +1128,7 @@ func (h *WebmailHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.verifyMailboxAccess(claims, mb) {
+	if !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -1120,7 +1192,7 @@ func (h *WebmailHandler) UpdateMessageFlags(w http.ResponseWriter, r *http.Reque
 
 	claims, _ := auth.GetClaims(r.Context())
 	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
-	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+	if mb != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -1163,7 +1235,7 @@ func (h *WebmailHandler) MoveMessage(w http.ResponseWriter, r *http.Request) {
 
 	claims, _ := auth.GetClaims(r.Context())
 	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
-	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+	if mb != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -1225,7 +1297,7 @@ func (h *WebmailHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 
 	claims, _ := auth.GetClaims(r.Context())
 	mb, _ := h.store.GetEmailMailboxByID(r.Context(), existing.MailboxID)
-	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+	if mb != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}
@@ -1448,7 +1520,7 @@ func (h *WebmailHandler) DownloadAttachment(w http.ResponseWriter, r *http.Reque
 	if att.MessageID != uuid.Nil {
 		if msg, _ := h.store.GetWebmailMessageByID(r.Context(), att.MessageID); msg != nil {
 			if mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID); mb != nil {
-				if !h.verifyMailboxAccess(claims, mb) {
+				if !h.verifyMailboxAccess(r.Context(), claims, mb) {
 					response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 					return
 				}
@@ -1483,7 +1555,7 @@ func (h *WebmailHandler) DownloadMessageEML(w http.ResponseWriter, r *http.Reque
 
 	claims, _ := auth.GetClaims(r.Context())
 	mb, _ := h.store.GetEmailMailboxByID(r.Context(), msg.MailboxID)
-	if mb != nil && !h.verifyMailboxAccess(claims, mb) {
+	if mb != nil && !h.verifyMailboxAccess(r.Context(), claims, mb) {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cross-mailbox access denied", nil, "")
 		return
 	}

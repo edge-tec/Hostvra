@@ -640,3 +640,65 @@ func TestSecurity_Test11_CrossMailboxAuthorizationEnforcement(t *testing.T) {
 		t.Fatalf("TEST 11 FAILED: Expected 403 Forbidden when Alice attempts to send mail as Bob, got %d. Body: %s", crossW3.Code, crossW3.Body.String())
 	}
 }
+
+// TEST 12: Control panel administrator / owner can send mail and manage any mailbox in their organization
+func TestSecurity_Test12_ControlPanelUserCanAccessAndSendFromAnyMailbox(t *testing.T) {
+	env := setupWebmailSecurityEnv(t)
+
+	// Step 1: CP User sends email as Bob using CP token in Authorization
+	sendPayload1, _ := json.Marshal(map[string]interface{}{
+		"account_email": env.mailboxB.Email,
+		"from_email":    env.mailboxB.Email,
+		"to_email":      "client@external.com",
+		"subject":       "Official message from Bob",
+		"body_text":     "Sent by administrator on behalf of Bob",
+	})
+	req1 := httptest.NewRequest("POST", "/api/v1/webmail/send", bytes.NewReader(sendPayload1))
+	req1.Header.Set("Authorization", "Bearer "+env.cpToken)
+	req1.Header.Set("Content-Type", "application/json")
+	w1 := httptest.NewRecorder()
+	env.router.ServeHTTP(w1, req1)
+
+	if w1.Code != http.StatusOK {
+		t.Fatalf("TEST 12 FAILED: Expected 200 OK when Control Panel owner sends mail for Bob, got %d. Body: %s", w1.Code, w1.Body.String())
+	}
+
+	// Step 2: Login as Alice to get a webmail token
+	loginBody, _ := json.Marshal(map[string]string{
+		"email":    env.mailboxA.Email,
+		"password": env.mailboxAPwd,
+	})
+	authReq := httptest.NewRequest("POST", "/api/v1/webmail/auth", bytes.NewReader(loginBody))
+	authW := httptest.NewRecorder()
+	env.router.ServeHTTP(authW, authReq)
+
+	var loginRes struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(authW.Body.Bytes(), &loginRes)
+	aliceToken := loginRes.Data.Token
+
+	// Step 3: Request carrying a stale/different webmail token (Alice) in Authorization,
+	// but accompanied by the Control Panel owner token in X-CP-Token.
+	// Sending as Bob must SUCCEED because the user is verified as the Control Panel owner.
+	sendPayload2, _ := json.Marshal(map[string]interface{}{
+		"account_email": env.mailboxB.Email,
+		"from_email":    env.mailboxB.Email,
+		"to_email":      "client2@external.com",
+		"subject":       "Another message from Bob",
+		"body_text":     "Sent via Webmail Client in Control Panel",
+	})
+	req2 := httptest.NewRequest("POST", "/api/v1/webmail/send", bytes.NewReader(sendPayload2))
+	req2.Header.Set("Authorization", "Bearer "+aliceToken)
+	req2.Header.Set("X-CP-Token", env.cpToken)
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	env.router.ServeHTTP(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("TEST 12 FAILED: Expected 200 OK when request has X-CP-Token for admin sending as Bob, got %d. Body: %s", w2.Code, w2.Body.String())
+	}
+}
+

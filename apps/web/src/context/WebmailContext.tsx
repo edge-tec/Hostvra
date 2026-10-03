@@ -259,7 +259,14 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
           usedBytes: mb.used_bytes,
         };
         setActiveAccount(acc);
-        setAccounts([acc]);
+        let existingAccounts: WebmailAccount[] = [];
+        try {
+          const raw = localStorage.getItem(STORAGE_ACCOUNTS_KEY);
+          if (raw) existingAccounts = JSON.parse(raw);
+        } catch {}
+        const merged = [acc, ...existingAccounts.filter(a => a.email.toLowerCase() !== acc.email.toLowerCase())];
+        setAccounts(merged);
+        localStorage.setItem(STORAGE_ACCOUNTS_KEY, JSON.stringify(merged));
         setIsAuthenticated(true);
         return true;
       } else {
@@ -406,6 +413,9 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
   const switchAccount = useCallback((email: string) => {
     const target = accounts.find(a => a.email.toLowerCase() === email.toLowerCase());
     if (target) {
+      if (target.token) {
+        setStoredWebmailToken(target.token);
+      }
       setActiveAccount(target);
       localStorage.setItem(STORAGE_ACTIVE_KEY, target.email);
       prevUnreadRef.current = -1;
@@ -421,6 +431,9 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
       return updated;
     });
     setActiveAccount(newAcc);
+    if (newAcc.token) {
+      setStoredWebmailToken(newAcc.token);
+    }
     localStorage.setItem(STORAGE_ACTIVE_KEY, newAcc.email);
     setIsAddAccountOpen(false);
   }, []);
@@ -473,8 +486,12 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
         setActiveAccount(next);
         if (next) {
           localStorage.setItem(STORAGE_ACTIVE_KEY, next.email);
+          if (next.token) {
+            setStoredWebmailToken(next.token);
+          }
         } else {
           localStorage.removeItem(STORAGE_ACTIVE_KEY);
+          clearStoredWebmailAuth();
         }
       }
       return updated;

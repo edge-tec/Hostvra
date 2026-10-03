@@ -347,13 +347,21 @@ export function WebmailMailboxView({ folder }: WebmailMailboxViewProps) {
         body_text: quickReplyText,
         body_html: `<p>${quickReplyText.replace(/\n/g, '<br/>')}</p>`,
       };
-      await apiFetch('/api/v1/webmail/send', {
+      const res = await apiFetch<any>('/api/v1/webmail/send', {
         method: 'POST',
+        headers: activeAccount?.token ? {
+          'Authorization': `Bearer ${activeAccount.token}`,
+          'X-Webmail-Token': activeAccount.token,
+        } : {},
         body: JSON.stringify(payload),
       });
-      setQuickReplyText('');
-      refreshFolderCounts();
-      alert('Quick reply sent successfully.');
+      if (res.success) {
+        setQuickReplyText('');
+        refreshFolderCounts();
+        alert('Quick reply sent successfully.');
+      } else {
+        alert(`Failed to send quick reply: ${res.error?.message || 'Delivery rejected'}`);
+      }
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : 'Failed to send quick reply');
     } finally {

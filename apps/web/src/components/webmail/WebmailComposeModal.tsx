@@ -196,6 +196,10 @@ export function WebmailComposeModal() {
       }
       const res = await apiFetch<{ id: string }>('/api/v1/webmail/draft', {
         method: 'POST',
+        headers: currentAcc?.token ? {
+          'Authorization': `Bearer ${currentAcc.token}`,
+          'X-Webmail-Token': currentAcc.token,
+        } : {},
         body: JSON.stringify(payload),
       });
       if (res.data?.id) {
@@ -304,6 +308,10 @@ export function WebmailComposeModal() {
     try {
       const res = await apiFetch<any>('/api/v1/webmail/send', {
         method: 'POST',
+        headers: currentAcc?.token ? {
+          'Authorization': `Bearer ${currentAcc.token}`,
+          'X-Webmail-Token': currentAcc.token,
+        } : {},
         body: JSON.stringify(payload),
       });
 
@@ -315,7 +323,7 @@ export function WebmailComposeModal() {
         await refreshFolderCounts();
         closeCompose();
       } else {
-        setErrorMessage('Failed to send email. Please check server mail logs.');
+        setErrorMessage(res.error?.message || 'Failed to send email. Please check server mail logs.');
       }
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Failed to send message via mail server');

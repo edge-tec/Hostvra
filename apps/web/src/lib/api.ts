@@ -544,13 +544,23 @@ async function executeFetch<T>(
 }
 
 export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const isWebmail = endpoint.includes('/webmail') || (typeof window !== 'undefined' && window.location.pathname.startsWith('/webmail'));
+  const isStandaloneWebmailRoute =
+    typeof window !== 'undefined' && window.location.pathname.startsWith('/webmail');
   const webmailToken = getStoredWebmailToken();
   const cpToken = getStoredToken();
-  const token = (isWebmail && webmailToken) ? webmailToken : (cpToken || webmailToken);
+
+  // If on standalone /webmail, webmailToken is preferred if available.
+  // Everywhere else (Control Panel, e.g. /email, /websites, /dashboard),
+  // cpToken is ALWAYS preferred because the user is an authenticated CP administrator/user.
+  let token: string | null = null;
+  if (isStandaloneWebmailRoute) {
+    token = webmailToken || cpToken;
+  } else {
+    token = cpToken || webmailToken;
+  }
 
   const headers: Record<string, string> = {
-    ...(options.headers as Record<string, string> || {}),
+    ...((options.headers as Record<string, string>) || {}),
   };
 
   if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
@@ -562,7 +572,15 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  if (webmailToken && !headers['X-Webmail-Token']) {
+
+  // Always propagate the Control Panel token via X-CP-Token whenever available,
+  // providing backend handlers proof of admin/owner identity
+  if (cpToken && !headers['X-CP-Token']) {
+    headers['X-CP-Token'] = cpToken;
+  }
+
+  // Attach X-Webmail-Token only when on standalone webmail or when webmailToken is explicitly active
+  if (isStandaloneWebmailRoute && webmailToken && !headers['X-Webmail-Token']) {
     headers['X-Webmail-Token'] = webmailToken;
   }
 
