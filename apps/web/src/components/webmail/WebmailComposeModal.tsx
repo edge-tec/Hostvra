@@ -196,9 +196,9 @@ export function WebmailComposeModal() {
       }
       const res = await apiFetch<{ id: string }>('/api/v1/webmail/draft', {
         method: 'POST',
-        headers: currentAcc?.token ? {
-          'Authorization': `Bearer ${currentAcc.token}`,
-          'X-Webmail-Token': currentAcc.token,
+        headers: activeAccount?.token ? {
+          'Authorization': `Bearer ${activeAccount.token}`,
+          'X-Webmail-Token': activeAccount.token,
         } : {},
         body: JSON.stringify(payload),
       });
