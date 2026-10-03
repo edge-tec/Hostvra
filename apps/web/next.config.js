@@ -4,6 +4,7 @@ const path = require('path');
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  output: 'standalone',
   outputFileTracingRoot: path.join(__dirname, '../../'),
 };
 
