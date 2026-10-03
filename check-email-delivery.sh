@@ -66,23 +66,65 @@ check_service "dovecot"
 echo ""
 echo -e "${YELLOW}=== [2/8] Checking Port Listeners ===${NC}"
 
+is_port_listening() {
+    local port="$1"
+    local hex_port
+    hex_port=$(printf "%04X" "$port" 2>/dev/null || echo "")
+
+    # 1. Linux Kernel /proc/net/tcp and /proc/net/tcp6 tables (State 0A is TCP_LISTEN)
+    if [[ -n "$hex_port" ]]; then
+        if [[ -r /proc/net/tcp ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp 2>/dev/null; then
+            return 0
+        fi
+        if [[ -r /proc/net/tcp6 ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp6 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 2. ss (socket statistics)
+    if command -v ss &>/dev/null; then
+        if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+        if ss -lntp 2>/dev/null | grep -qE "(:|\]:)${port}([[:space:]]|$)"; then
+            return 0
+        fi
+    fi
+
+    # 3. lsof check
+    if command -v lsof &>/dev/null; then
+        if lsof -iTCP:"${port}" -sTCP:LISTEN -n -P &>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 4. netstat check
+    if command -v netstat &>/dev/null; then
+        if netstat -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+    fi
+
+    # 5. Direct TCP socket connection probe via /dev/tcp
+    if (exec 3<>/dev/tcp/127.0.0.1/"${port}") 2>/dev/null; then
+        exec 3>&- 2>/dev/null || true
+        return 0
+    fi
+
+    return 1
+}
+
 check_port() {
     local port="$1"
     local desc="$2"
-    if command -v ss &>/dev/null; then
-        if ss -lntp 2>/dev/null | grep -q ":${port} "; then
-            local proc
-            proc=$(ss -lntp 2>/dev/null | grep ":${port} " | head -n 1 | awk '{print $NF}')
-            echo -e "  [${GREEN}OK${NC}] Port ${port} (${desc}) is LISTENING (${proc})"
-        else
-            echo -e "  [${RED}FAIL${NC}] Port ${port} (${desc}) is NOT listening!"
+    if is_port_listening "$port"; then
+        local proc=""
+        if command -v ss &>/dev/null; then
+            proc=$(ss -lntp 2>/dev/null | grep -E "(:|\]:)${port}([[:space:]]|$)" | head -n 1 | awk '{print $NF}' || true)
         fi
-    elif command -v netstat &>/dev/null; then
-        if netstat -lntp 2>/dev/null | grep -q ":${port} "; then
-            echo -e "  [${GREEN}OK${NC}] Port ${port} (${desc}) is LISTENING"
-        else
-            echo -e "  [${RED}FAIL${NC}] Port ${port} (${desc}) is NOT listening!"
-        fi
+        echo -e "  [${GREEN}OK${NC}] Port ${port} (${desc}) is LISTENING ${proc:+($proc)}"
+    else
+        echo -e "  [${RED}FAIL${NC}] Port ${port} (${desc}) is NOT listening!"
     fi
 }
 

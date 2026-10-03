@@ -2954,8 +2954,37 @@ userdb passwd-file {
 				_ = exec.Command("doveadm", "reload").Run()
 
 				if isActErr := exec.Command("systemctl", "is-active", "--quiet", "dovecot").Run(); isActErr == nil {
-					ssOut, _ := exec.Command("ss", "-lntp").Output()
-					if strings.Contains(string(ssOut), ":143 ") || strings.Contains(string(ssOut), ":993 ") {
+					port143Open := false
+					port993Open := false
+					for attempt := 0; attempt < 10; attempt++ {
+						if conn, err := net.DialTimeout("tcp", "127.0.0.1:143", 300*time.Millisecond); err == nil {
+							_ = conn.Close()
+							port143Open = true
+						}
+						if conn, err := net.DialTimeout("tcp", "127.0.0.1:993", 300*time.Millisecond); err == nil {
+							_ = conn.Close()
+							port993Open = true
+						}
+						if port143Open && port993Open {
+							break
+						}
+						if port143Open || port993Open {
+							time.Sleep(300 * time.Millisecond)
+							continue
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+					// Secondary fallback check via ss
+					if !port143Open && !port993Open {
+						if ssOut, err := exec.Command("ss", "-lntp").Output(); err == nil {
+							ssStr := string(ssOut)
+							if strings.Contains(ssStr, ":143") || strings.Contains(ssStr, ":993") {
+								port143Open = true
+							}
+						}
+					}
+
+					if port143Open || port993Open {
 						report.DovecotOK = true
 					} else {
 						report.Errors = append(report.Errors, "dovecot is active but neither port 143 nor 993 is listening")

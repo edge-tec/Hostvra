@@ -29,6 +29,54 @@ fi
 
 mkdir -p "$CONF_DIR" "${DOVECOT_DIR}/private" "$VMAIL_DIR"
 
+is_port_listening() {
+    local port="$1"
+    local hex_port
+    hex_port=$(printf "%04X" "$port" 2>/dev/null || echo "")
+
+    # 1. Linux Kernel /proc/net/tcp and /proc/net/tcp6 tables (State 0A is TCP_LISTEN)
+    if [[ -n "$hex_port" ]]; then
+        if [[ -r /proc/net/tcp ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp 2>/dev/null; then
+            return 0
+        fi
+        if [[ -r /proc/net/tcp6 ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp6 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 2. ss (socket statistics) - robust local port matching
+    if command -v ss &>/dev/null; then
+        if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+        if ss -lntp 2>/dev/null | grep -qE "(:|\]:)${port}([[:space:]]|$)"; then
+            return 0
+        fi
+    fi
+
+    # 3. lsof check
+    if command -v lsof &>/dev/null; then
+        if lsof -iTCP:"${port}" -sTCP:LISTEN -n -P &>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 4. netstat check
+    if command -v netstat &>/dev/null; then
+        if netstat -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+    fi
+
+    # 5. Direct TCP socket connection probe via /dev/tcp
+    if (exec 3<>/dev/tcp/127.0.0.1/"${port}") 2>/dev/null; then
+        exec 3>&- 2>/dev/null || true
+        return 0
+    fi
+
+    return 1
+}
+
 # 1. Ensure /etc/dovecot/users exists with correct permissions
 if [[ ! -f "$USERS_FILE" ]]; then
     touch "$USERS_FILE"
@@ -242,13 +290,54 @@ if ! systemctl is-active --quiet dovecot; then
 fi
 echo "[✓] Dovecot is active and running."
 
-# 12. Verify port listeners
-sleep 2
-if ss -lntp 2>/dev/null | grep -qE ':143|:993'; then
-    echo "[✓] IMAP listeners verified: port 143 and/or 993 active."
+# 12. Verify port listeners with retry polling
+echo "[*] Verifying Dovecot IMAP/IMAPS listener sockets..."
+IMAP_143_LISTENING=false
+IMAPS_993_LISTENING=false
+
+# Poll every 1s for up to 10s to allow socket binding to complete after service restart
+for attempt in {1..10}; do
+    if is_port_listening 143; then
+        IMAP_143_LISTENING=true
+    fi
+    if is_port_listening 993; then
+        IMAPS_993_LISTENING=true
+    fi
+    if [[ "$IMAP_143_LISTENING" == "true" && "$IMAPS_993_LISTENING" == "true" ]]; then
+        break
+    fi
+    sleep 1
+done
+
+if [[ "$IMAP_143_LISTENING" == "true" ]]; then
+    echo "[✓] IMAP listener detected on port 143"
 else
-    echo "[ERROR] Dovecot active but neither port 143 nor 993 is listening!" >&2
-    ss -lntp | grep dovecot || true
+    echo "[ERROR] IMAP listener on port 143 is missing" >&2
+fi
+
+if [[ "$IMAPS_993_LISTENING" == "true" ]]; then
+    echo "[✓] IMAPS listener detected on port 993"
+else
+    echo "[ERROR] IMAPS listener on port 993 is missing" >&2
+fi
+
+if [[ "$IMAP_143_LISTENING" == "true" || "$IMAPS_993_LISTENING" == "true" ]]; then
+    echo "[✓] Dovecot listeners verified."
+else
+    echo "" >&2
+    echo "[ERROR] Required Dovecot listeners are missing." >&2
+    echo "" >&2
+    echo "Detected listeners:" >&2
+    echo "  143: $IMAP_143_LISTENING" >&2
+    echo "  993: $IMAPS_993_LISTENING" >&2
+    echo "" >&2
+    echo "Dovecot service status:" >&2
+    systemctl status dovecot --no-pager -l >&2 || true
+    echo "" >&2
+    echo "Relevant socket output:" >&2
+    ss -lntp 2>/dev/null | grep -E "(dovecot|143|993)" >&2 || true
+    echo "" >&2
+    echo "Aborting Dovecot repair safely." >&2
     exit 1
 fi
 

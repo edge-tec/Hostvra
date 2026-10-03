@@ -490,6 +490,54 @@ fi
 # ------------------------------------------------------------------------------
 # Critical Production Health Checks Verification
 # ------------------------------------------------------------------------------
+is_port_listening() {
+    local port="$1"
+    local hex_port
+    hex_port=$(printf "%04X" "$port" 2>/dev/null || echo "")
+
+    # 1. Linux Kernel /proc/net/tcp and /proc/net/tcp6 tables (State 0A is TCP_LISTEN)
+    if [[ -n "$hex_port" ]]; then
+        if [[ -r /proc/net/tcp ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp 2>/dev/null; then
+            return 0
+        fi
+        if [[ -r /proc/net/tcp6 ]] && grep -qE ":${hex_port}\s+[0-9A-Fa-f:]+\s+0A" /proc/net/tcp6 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 2. ss (socket statistics) - robust local port matching
+    if command -v ss &>/dev/null; then
+        if ss -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+        if ss -lntp 2>/dev/null | grep -qE "(:|\]:)${port}([[:space:]]|$)"; then
+            return 0
+        fi
+    fi
+
+    # 3. lsof check
+    if command -v lsof &>/dev/null; then
+        if lsof -iTCP:"${port}" -sTCP:LISTEN -n -P &>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # 4. netstat check
+    if command -v netstat &>/dev/null; then
+        if netstat -tln 2>/dev/null | awk '{print $4}' | grep -qE "(^|:)${port}$"; then
+            return 0
+        fi
+    fi
+
+    # 5. Direct TCP socket connection probe via /dev/tcp
+    if (exec 3<>/dev/tcp/127.0.0.1/"${port}") 2>/dev/null; then
+        exec 3>&- 2>/dev/null || true
+        return 0
+    fi
+
+    return 1
+}
+
 echo ""
 echo "=== [6/6] Verifying Critical Production Health Checks ==="
 CRITICAL_FAIL=0
@@ -544,10 +592,26 @@ else
 fi
 
 # 7. IMAP listeners check (Ports 143 and 993)
-if ss -lntp 2>/dev/null | grep -qE ':143|:993'; then
-    echo "  [PASS] IMAP listeners active (143/993)"
+IMAP_143_OK=false
+IMAPS_993_OK=false
+for attempt in {1..10}; do
+    if is_port_listening 143; then IMAP_143_OK=true; fi
+    if is_port_listening 993; then IMAPS_993_OK=true; fi
+    if [[ "$IMAP_143_OK" == "true" && "$IMAPS_993_OK" == "true" ]]; then break; fi
+    sleep 1
+done
+
+if [[ "$IMAP_143_OK" == "true" ]]; then
+    echo "  [PASS] IMAP listener detected on port 143"
+fi
+if [[ "$IMAPS_993_OK" == "true" ]]; then
+    echo "  [PASS] IMAPS listener detected on port 993"
+fi
+
+if [[ "$IMAP_143_OK" == "true" || "$IMAPS_993_OK" == "true" ]]; then
+    echo "  [PASS] Dovecot IMAP/IMAPS listeners active (143: $IMAP_143_OK, 993: $IMAPS_993_OK)"
 else
-    echo "  [FAIL] Neither port 143 nor port 993 is listening" >&2
+    echo "  [FAIL] Required Dovecot listeners missing (143: NO, 993: NO)" >&2
     CRITICAL_FAIL=1
 fi
 
