@@ -97,7 +97,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost/api}
+        NEXT_PUBLIC_API_URL: ""
     container_name: hostvra-web
     restart: unless-stopped
     depends_on:
@@ -107,7 +107,7 @@ services:
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
       INTERNAL_API_URL: http://api:8080
-      NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost/api}
+      NEXT_PUBLIC_API_URL: ""
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000', (r) => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
