@@ -129,11 +129,13 @@ if [[ -f "$AUTH_CONF" ]]; then
     fi
     if [[ "$DOV_VER" =~ ^2\.4 ]]; then
         sed -i 's/^[[:space:]]*disable_plaintext_auth/#disable_plaintext_auth/' "$AUTH_CONF"
-        if ! grep -q "auth_allow_cleartext" "$AUTH_CONF"; then
-            echo "auth_allow_cleartext = no" >> "$AUTH_CONF"
+        if grep -q "auth_allow_cleartext" "$AUTH_CONF"; then
+            sed -i 's/^[[:space:]]*auth_allow_cleartext.*/auth_allow_cleartext = yes/' "$AUTH_CONF"
+        else
+            echo "auth_allow_cleartext = yes" >> "$AUTH_CONF"
         fi
     else
-        sed -i 's/^[[:space:]]*#*disable_plaintext_auth.*/disable_plaintext_auth = yes/' "$AUTH_CONF"
+        sed -i 's/^[[:space:]]*#*disable_plaintext_auth.*/disable_plaintext_auth = no/' "$AUTH_CONF"
     fi
 fi
 
@@ -184,6 +186,7 @@ if [[ ! -f "$DOV_CERT" || ! -f "$DOV_KEY" ]]; then
 fi
 
 if [[ -f "$SSL_CONF" ]]; then
+    sed -i 's/^[[:space:]]*ssl[[:space:]]*=.*/ssl = yes/' "$SSL_CONF"
     if [[ "$DOV_VER" =~ ^2\.4 ]]; then
         sed -i "s|^[[:space:]]*#*[[:space:]]*ssl_server_cert_file.*|ssl_server_cert_file = $DOV_CERT|" "$SSL_CONF"
         sed -i "s|^[[:space:]]*#*[[:space:]]*ssl_server_key_file.*|ssl_server_key_file = $DOV_KEY|" "$SSL_CONF"

@@ -2867,7 +2867,26 @@ first_valid_uid = 100
 				if !strings.Contains(aStr, "!include auth-passwdfile.conf.ext") {
 					aStr += "\n!include auth-passwdfile.conf.ext\n"
 				}
+				if isDovecot24 {
+					aStr = strings.ReplaceAll(aStr, "auth_allow_cleartext = no", "auth_allow_cleartext = yes")
+					if !strings.Contains(aStr, "auth_allow_cleartext") {
+						aStr += "\nauth_allow_cleartext = yes\n"
+					}
+				} else {
+					aStr = strings.ReplaceAll(aStr, "disable_plaintext_auth = yes", "disable_plaintext_auth = no")
+					if !strings.Contains(aStr, "disable_plaintext_auth") {
+						aStr += "\ndisable_plaintext_auth = no\n"
+					}
+				}
 				_ = os.WriteFile(authConfPath, []byte(aStr), 0644)
+			}
+
+			// Ensure ssl = yes in 10-ssl.conf so unencrypted port 143 can listen
+			sslConfPath := filepath.Join(confD, "10-ssl.conf")
+			if sData, err := os.ReadFile(sslConfPath); err == nil {
+				sStr := string(sData)
+				sStr = strings.ReplaceAll(sStr, "ssl = required", "ssl = yes")
+				_ = os.WriteFile(sslConfPath, []byte(sStr), 0644)
 			}
 
 			// 4. Configure auth-passwdfile.conf.ext
