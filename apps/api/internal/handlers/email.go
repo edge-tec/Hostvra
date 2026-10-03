@@ -2822,14 +2822,23 @@ func ReconcileAllEmailRouting(ctx context.Context, s store.Store) (*EmailReconci
 		// Ensure 10-mail.conf and 10-master.conf have required settings
 		confD := filepath.Join(dovecotDir, "conf.d")
 		if cfi, err := os.Stat(confD); err == nil && cfi.IsDir() {
+			// Write authoritative 99-hostvra.conf to guarantee mail_location and vmail parameters
+			hostvraConfPath := filepath.Join(confD, "99-hostvra.conf")
+			hostvraConfContent := `# Hostvra Authoritative Dovecot Configuration
+mail_location = maildir:/var/mail/vhosts/%d/%n
+mail_uid = 5000
+mail_gid = 5000
+mail_privileged_group = mail
+first_valid_uid = 100
+`
+			_ = os.WriteFile(hostvraConfPath, []byte(hostvraConfContent), 0644)
+
 			mailConfPath := filepath.Join(confD, "10-mail.conf")
 			if mData, err := os.ReadFile(mailConfPath); err == nil {
 				mStr := string(mData)
 				if !strings.Contains(mStr, "mail_location = maildir:/var/mail/vhosts/%d/%n") && !strings.Contains(mStr, "mail_driver = maildir") {
 					mStr = strings.ReplaceAll(mStr, "mail_location = mbox:~/mail:INBOX=/var/mail/%u", "mail_location = maildir:/var/mail/vhosts/%d/%n")
-					if !strings.Contains(mStr, "mail_location = maildir:") {
-						mStr += "\nmail_location = maildir:/var/mail/vhosts/%d/%n\nmail_uid = 5000\nmail_gid = 5000\nmail_privileged_group = mail\n"
-					}
+					mStr += "\n# Hostvra Mail Location Override\nmail_location = maildir:/var/mail/vhosts/%d/%n\nmail_uid = 5000\nmail_gid = 5000\nmail_privileged_group = mail\n"
 					_ = os.WriteFile(mailConfPath, []byte(mStr), 0644)
 				}
 			}
@@ -2951,6 +2960,24 @@ service lmtp {
 					// Built-in virtual delivery agent directly delivers to /var/mail/vhosts/domain/user/
 					_ = exec.Command("postconf", "-e", "virtual_transport = virtual").Run()
 					report.TransportUsed = "virtual"
+				}
+
+				// Enable SMTPS port 465 in master.cf if not enabled
+				masterCfPath := filepath.Join(postfixDir, "master.cf")
+				if mstData, err := os.ReadFile(masterCfPath); err == nil {
+					mstStr := string(mstData)
+					if !strings.Contains(mstStr, "\nsmtps ") && !strings.Contains(mstStr, "\nsubmissions ") {
+						smtpsBlock := `
+# Hostvra SMTPS (Port 465)
+smtps     inet  n       -       y       -       -       smtpd
+  -o syslog_name=postfix/smtps
+  -o smtpd_tls_wrappermode=yes
+  -o smtpd_sasl_auth_enable=yes
+  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
+`
+						mstStr += smtpsBlock
+						_ = os.WriteFile(masterCfPath, []byte(mstStr), 0644)
+					}
 				}
 
 				_ = exec.Command("postfix", "reload").Run()

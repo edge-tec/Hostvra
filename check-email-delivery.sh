@@ -165,9 +165,12 @@ echo ""
 echo -e "${YELLOW}=== [5/8] Checking Dovecot Configuration ===${NC}"
 
 if command -v doveconf &>/dev/null; then
-    MAIL_LOC=$(doveconf -h mail_location 2>/dev/null || doveconf -h mail_driver 2>/dev/null || echo "")
+    MAIL_LOC=$(doveconf -n 2>/dev/null | grep -E "^\s*(mail_location|mail_driver)\s*=" | head -n 1 || doveconf mail_location 2>/dev/null || echo "")
+    if [[ -z "$MAIL_LOC" && -f "/etc/dovecot/conf.d/99-hostvra.conf" ]]; then
+        MAIL_LOC=$(grep -E "^\s*(mail_location|mail_driver)\s*=" /etc/dovecot/conf.d/99-hostvra.conf | head -n 1 || echo "")
+    fi
     echo "  Dovecot mail location: ${MAIL_LOC}"
-    if echo "$MAIL_LOC" | grep -q "vhosts"; then
+    if echo "$MAIL_LOC" | grep -qE "(vhosts|maildir)"; then
         echo -e "  [${GREEN}OK${NC}] Dovecot mail_location points to virtual maildir (/var/mail/vhosts/...)"
     else
         echo -e "  [${RED}CRITICAL${NC}] Dovecot mail_location is NOT pointing to /var/mail/vhosts!"
@@ -185,11 +188,33 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# 6. Specific Target Mailbox Diagnosis (if supplied or found)
+# 6. Specific Target Mailbox Diagnosis
 # ------------------------------------------------------------------------------
+AVAILABLE_MBOXES=()
+if [[ -f "/etc/postfix/vmailbox" ]]; then
+    while read -r em _; do
+        if [[ -n "$em" && ! "$em" =~ ^# ]]; then
+            AVAILABLE_MBOXES+=("$em")
+        fi
+    done < "/etc/postfix/vmailbox"
+fi
+
+if [[ -z "$TARGET_EMAIL" || "$TARGET_EMAIL" =~ "আপনার" || "$TARGET_EMAIL" =~ "your_email" ]]; then
+    if [[ ${#AVAILABLE_MBOXES[@]} -gt 0 ]]; then
+        TARGET_EMAIL="${AVAILABLE_MBOXES[0]}"
+        if [[ "$TARGET_EMAIL" =~ ^([^@]+)@([^@]+)$ ]]; then
+            TARGET_USER="${BASH_REMATCH[1]}"
+            TARGET_DOMAIN="${BASH_REMATCH[2]}"
+        fi
+    fi
+fi
+
 if [[ -n "$TARGET_EMAIL" ]]; then
     echo ""
     echo -e "${YELLOW}=== [6/8] Auditing Target Mailbox: ${TARGET_EMAIL} ===${NC}"
+    if [[ ${#AVAILABLE_MBOXES[@]} -gt 0 ]]; then
+        echo "  Configured active mailboxes on server: ${AVAILABLE_MBOXES[*]}"
+    fi
 
     # Recipient validation lookup in Postfix
     if [[ -f "/etc/postfix/vmailbox" ]]; then
