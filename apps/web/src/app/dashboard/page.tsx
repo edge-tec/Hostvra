@@ -40,6 +40,30 @@ import { AppControlModal } from '@/components/AppControlModal';
 import { getPinnedAppIds, togglePinApp } from '@/lib/appstore-utils';
 import { CustomerDashboard } from '@/components/CustomerDashboard';
 
+function formatSpeed(kbps: number): string {
+  if (kbps >= 1024 * 1024) {
+    return `${(kbps / (1024 * 1024)).toFixed(1)} GB/s`;
+  }
+  if (kbps >= 1024) {
+    const mb = kbps / 1024;
+    return `${mb >= 10 ? Math.round(mb) : mb.toFixed(1)} MB/s`;
+  }
+  return `${Math.round(kbps)} KB/s`;
+}
+
+function getNiceCeiling(val: number, minCeil = 100): number {
+  if (val <= minCeil) return minCeil;
+  const target = val * 1.25;
+  const pow = Math.pow(10, Math.floor(Math.log10(target)));
+  const fraction = target / pow;
+  let niceFactor = 10;
+  if (fraction <= 1) niceFactor = 1;
+  else if (fraction <= 2) niceFactor = 2;
+  else if (fraction <= 2.5) niceFactor = 2.5;
+  else if (fraction <= 5) niceFactor = 5;
+  return Math.ceil(niceFactor * pow);
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [userRole, setUserRole] = useState<'customer' | 'admin'>('customer');
@@ -61,6 +85,8 @@ export default function DashboardPage() {
   // Monitor Chart State (Traffic vs Disk IO)
   const [chartTab, setChartTab] = useState<'traffic' | 'disk'>('traffic');
   const [networkInterface, setNetworkInterface] = useState('All');
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [modalHoverIdx, setModalHoverIdx] = useState<number | null>(null);
   const [chartHistory, setChartHistory] = useState<
     Array<{ time: string; up: number; down: number; read: number; write: number }>
   >([]);
@@ -261,43 +287,100 @@ export default function DashboardPage() {
     return '#20a53a';
   };
 
-  // SVG Chart path calculation
+  // SVG Chart path calculation with dynamic auto-scaling, monotonic smoothing & hard clamping
   const chartSvgPaths = useMemo(() => {
-    if (chartHistory.length === 0) return { line1: '', line2: '', area1: '', area2: '', pts1: [], pts2: [] };
+    if (chartHistory.length === 0) {
+      return {
+        line1: '',
+        line2: '',
+        area1: '',
+        area2: '',
+        pts1: [] as Array<{ x: number; y: number; val: number }>,
+        pts2: [] as Array<{ x: number; y: number; val: number }>,
+        maxY: 100,
+        maxPeak: 0,
+        gridLabels: ['100 KB/s', '75 KB/s', '50 KB/s', '25 KB/s', '0 KB/s'],
+      };
+    }
 
     const width = 600;
     const height = 180;
-    const maxY = 3500;
-    const stepX = width / (chartHistory.length - 1);
+    const paddingTop = 16;
+    const paddingBottom = 6;
+    const chartHeight = height - paddingTop - paddingBottom;
+    const baselineY = height - paddingBottom;
+
+    // Series mapping:
+    // Traffic: line1 = Upstream (green), line2 = Downstream (amber)
+    // Disk:    line1 = Read (green),     line2 = Write (amber)
+    const activeValues =
+      chartTab === 'traffic'
+        ? chartHistory.flatMap((pt) => [pt.up, pt.down])
+        : chartHistory.flatMap((pt) => [pt.read, pt.write]);
+
+    const maxPeak = Math.max(0, ...activeValues);
+    const maxY = getNiceCeiling(maxPeak, 100);
+
+    const stepX = width / Math.max(1, chartHistory.length - 1);
 
     const getPoints = (key: 'up' | 'down' | 'read' | 'write') => {
       return chartHistory.map((pt, idx) => {
         const x = idx * stepX;
-        const val = pt[key];
-        const y = height - (val / maxY) * height;
-        return { x, y };
+        const val = Math.max(0, pt[key] || 0);
+        // Strictly clamp ratio between 0 and 1 so points never escape chart bounds
+        const ratio = Math.max(0, Math.min(1, val / maxY));
+        const y = baselineY - ratio * chartHeight;
+        return { x, y, val };
       });
     };
 
-    const pts1 = getPoints(chartTab === 'traffic' ? 'up' : 'write');
-    const pts2 = getPoints(chartTab === 'traffic' ? 'down' : 'read');
+    const pts1 = getPoints(chartTab === 'traffic' ? 'up' : 'read');
+    const pts2 = getPoints(chartTab === 'traffic' ? 'down' : 'write');
 
-    // Build smooth cubic bezier curve
+    // Smooth cubic bezier curve with monotonic slope clamping to prevent overshoot/undershoot
     const buildPath = (pts: Array<{ x: number; y: number }>) => {
-      if (pts.length < 2) return '';
-      let d = `M ${pts[0].x} ${pts[0].y}`;
+      if (pts.length === 0) return '';
+      if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+      let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
       for (let i = 0; i < pts.length - 1; i++) {
         const p0 = pts[i === 0 ? 0 : i - 1];
         const p1 = pts[i];
         const p2 = pts[i + 1];
         const p3 = pts[i + 2] || p2;
 
-        const cp1x = p1.x + (p2.x - p0.x) / 6;
-        const cp1y = p1.y + (p2.y - p0.y) / 6;
-        const cp2x = p2.x - (p3.x - p1.x) / 6;
-        const cp2y = p2.y - (p3.y - p1.y) / 6;
+        const dx = p2.x - p1.x;
+        const dxPrev = p2.x - p0.x || 1;
+        const dxNext = p3.x - p1.x || 1;
 
-        d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+        let m1 = (p2.y - p0.y) / dxPrev;
+        let m2 = (p3.y - p1.y) / dxNext;
+        const s = (p2.y - p1.y) / (dx || 1);
+
+        // If segment is flat, slopes at ends must be zero (prevents dipping below baseline)
+        if (Math.abs(s) < 0.0001) {
+          m1 = 0;
+          m2 = 0;
+        } else {
+          // If tangents have opposite sign from segment slope, zero them to avoid loops
+          if (m1 * s < 0) m1 = 0;
+          if (m2 * s < 0) m2 = 0;
+          // Clamp slope to prevent extreme curvature
+          if (Math.abs(m1) > 2.5 * Math.abs(s)) m1 = 2.5 * s;
+          if (Math.abs(m2) > 2.5 * Math.abs(s)) m2 = 2.5 * s;
+        }
+
+        const cp1x = p1.x + dx / 3;
+        let cp1y = p1.y + (m1 * dx) / 3;
+        const cp2x = p2.x - dx / 3;
+        let cp2y = p2.y - (m2 * dx) / 3;
+
+        // Strict boundary clamping within segment range and SVG viewport
+        const segMinY = Math.min(p1.y, p2.y);
+        const segMaxY = Math.max(p1.y, p2.y);
+        cp1y = Math.max(paddingTop, Math.min(baselineY, Math.max(segMinY, Math.min(segMaxY, cp1y))));
+        cp2y = Math.max(paddingTop, Math.min(baselineY, Math.max(segMinY, Math.min(segMaxY, cp2y))));
+
+        d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
       }
       return d;
     };
@@ -305,10 +388,18 @@ export default function DashboardPage() {
     const line1 = buildPath(pts1);
     const line2 = buildPath(pts2);
 
-    const area1 = `${line1} L ${width} ${height} L 0 ${height} Z`;
-    const area2 = `${line2} L ${width} ${height} L 0 ${height} Z`;
+    const area1 = pts1.length >= 2 ? `${line1} L ${width} ${baselineY} L 0 ${baselineY} Z` : '';
+    const area2 = pts2.length >= 2 ? `${line2} L ${width} ${baselineY} L 0 ${baselineY} Z` : '';
 
-    return { line1, line2, area1, area2, pts1, pts2 };
+    const gridLabels = [
+      formatSpeed(maxY),
+      formatSpeed(maxY * 0.75),
+      formatSpeed(maxY * 0.5),
+      formatSpeed(maxY * 0.25),
+      '0 KB/s',
+    ];
+
+    return { line1, line2, area1, area2, pts1, pts2, maxY, maxPeak, gridLabels };
   }, [chartHistory, chartTab]);
 
   if (viewMode === 'customer') {
@@ -940,9 +1031,14 @@ export default function DashboardPage() {
               </button>
             </div>
 
-            {/* Net Interface Dropdown */}
-            <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-surface-700 px-2 py-0.5 rounded-md">
-              <span>Net: {networkInterface}</span>
+            {/* Net Interface Dropdown & Peak Indicator */}
+            <div className="flex items-center gap-2">
+              <span className="hidden sm:inline-block text-[11px] font-mono text-slate-400 dark:text-slate-500">
+                Peak: {formatSpeed(chartSvgPaths.maxPeak)}
+              </span>
+              <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-surface-700 px-2 py-0.5 rounded-md">
+                <span>Net: {networkInterface}</span>
+              </div>
             </div>
           </div>
 
@@ -1010,9 +1106,29 @@ export default function DashboardPage() {
           </div>
 
           {/* Realtime Smooth SVG Area Chart */}
-          <div className="relative w-full h-44 sm:h-48 pt-2">
-            <svg className="w-full h-36 sm:h-40 overflow-visible" viewBox="0 0 600 180" preserveAspectRatio="none">
+          <div
+            className="relative w-full h-44 sm:h-48 pt-2 overflow-hidden select-none"
+            onMouseMove={(e) => {
+              if (chartHistory.length < 2) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const relX = (e.clientX - rect.left) / rect.width;
+              const idx = Math.min(
+                chartHistory.length - 1,
+                Math.max(0, Math.round(relX * (chartHistory.length - 1)))
+              );
+              setHoverIdx(idx);
+            }}
+            onMouseLeave={() => setHoverIdx(null)}
+          >
+            <svg
+              className="w-full h-36 sm:h-40 overflow-hidden block"
+              viewBox="0 0 600 180"
+              preserveAspectRatio="none"
+            >
               <defs>
+                <clipPath id="chartAreaClip">
+                  <rect x="0" y="0" width="600" height="180" rx="4" />
+                </clipPath>
                 <linearGradient id="trafficGreenGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#20a53a" stopOpacity="0.35" />
                   <stop offset="100%" stopColor="#20a53a" stopOpacity="0.02" />
@@ -1023,57 +1139,160 @@ export default function DashboardPage() {
                 </linearGradient>
               </defs>
 
-              {/* Gridlines */}
+              {/* Gridlines with dynamic scale labels */}
               {[0, 45, 90, 135, 180].map((y, i) => (
-                <line
-                  key={i}
-                  x1="0"
-                  y1={y}
-                  x2="600"
-                  y2={y}
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  className="text-slate-200 dark:text-surface-800"
-                  strokeWidth="1"
+                <g key={i}>
+                  <line
+                    x1="0"
+                    y1={y}
+                    x2="600"
+                    y2={y}
+                    stroke="currentColor"
+                    strokeDasharray="4 4"
+                    className="text-slate-200 dark:text-surface-800"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {(i === 0 || i === 2 || i === 4) && (
+                    <text
+                      x="6"
+                      y={i === 0 ? 12 : i === 4 ? 172 : y - 3}
+                      className="text-[9px] font-mono fill-slate-400 dark:fill-slate-500 opacity-60 select-none"
+                    >
+                      {chartSvgPaths.gridLabels[i]}
+                    </text>
+                  )}
+                </g>
+              ))}
+
+              {/* Smooth Area Fills & Lines inside clipPath */}
+              <g clipPath="url(#chartAreaClip)">
+                <path d={chartSvgPaths.area1} fill="url(#trafficGreenGrad)" />
+                <path d={chartSvgPaths.area2} fill="url(#trafficOrangeGrad)" />
+
+                <path
+                  d={chartSvgPaths.line1}
+                  fill="none"
+                  stroke="#20a53a"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+                <path
+                  d={chartSvgPaths.line2}
+                  fill="none"
+                  stroke="#f59e0b"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
+            </svg>
+
+            {/* HTML Overlay for Data Points & Tooltip - perfectly circular across all aspect ratios */}
+            <div className="absolute inset-x-0 top-2 h-36 sm:h-40 pointer-events-none">
+              {chartSvgPaths.pts1?.map((p, idx) => (
+                <div
+                  key={`pt1-${idx}`}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#20a53a] border border-white dark:border-surface-900 shadow-xs transition-transform duration-150"
+                  style={{
+                    left: `${(p.x / 600) * 100}%`,
+                    top: `${(p.y / 180) * 100}%`,
+                    transform:
+                      hoverIdx === idx
+                        ? 'translate(-50%, -50%) scale(1.6)'
+                        : 'translate(-50%, -50%) scale(1)',
+                  }}
+                />
+              ))}
+              {chartSvgPaths.pts2?.map((p, idx) => (
+                <div
+                  key={`pt2-${idx}`}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-[#f59e0b] border border-white dark:border-surface-900 shadow-xs transition-transform duration-150"
+                  style={{
+                    left: `${(p.x / 600) * 100}%`,
+                    top: `${(p.y / 180) * 100}%`,
+                    transform:
+                      hoverIdx === idx
+                        ? 'translate(-50%, -50%) scale(1.6)'
+                        : 'translate(-50%, -50%) scale(1)',
+                  }}
                 />
               ))}
 
-              {/* Smooth Area Fills */}
-              <path d={chartSvgPaths.area1} fill="url(#trafficGreenGrad)" />
-              <path d={chartSvgPaths.area2} fill="url(#trafficOrangeGrad)" />
-
-              {/* Lines */}
-              <path
-                d={chartSvgPaths.line1}
-                fill="none"
-                stroke="#20a53a"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-              <path
-                d={chartSvgPaths.line2}
-                fill="none"
-                stroke="#f59e0b"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              />
-
-              {/* Data Points */}
-              {chartSvgPaths.pts1?.map((p, idx) => (
-                <circle key={`pt1-${idx}`} cx={p.x} cy={p.y} r="3" fill="#20a53a" />
-              ))}
-              {chartSvgPaths.pts2?.map((p, idx) => (
-                <circle key={`pt2-${idx}`} cx={p.x} cy={p.y} r="3" fill="#f59e0b" />
-              ))}
-            </svg>
-
-            {/* X-axis Timestamps */}
-            <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-1 pt-1 border-t border-slate-100 dark:border-surface-800 overflow-hidden">
-              {chartHistory.map((pt, idx) => (
-                <span key={idx} className={idx % 2 !== 0 ? 'hidden sm:inline' : 'inline'}>
-                  {pt.time}
+              {/* Realtime Live Pulse Ping Indicator on latest data point */}
+              {chartSvgPaths.pts1.length > 0 && (
+                <span
+                  className="absolute flex h-3 w-3 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10"
+                  style={{
+                    left: `${(chartSvgPaths.pts1[chartSvgPaths.pts1.length - 1].x / 600) * 100}%`,
+                    top: `${(chartSvgPaths.pts1[chartSvgPaths.pts1.length - 1].y / 180) * 100}%`,
+                  }}
+                >
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border border-white dark:border-surface-900"></span>
                 </span>
-              ))}
+              )}
+
+              {/* Active Hover Crosshair Line and Tooltip */}
+              {hoverIdx !== null && chartHistory[hoverIdx] && (
+                <>
+                  <div
+                    className="absolute top-0 bottom-0 w-px border-l border-dashed border-slate-400 dark:border-slate-500 pointer-events-none z-20"
+                    style={{ left: `${(hoverIdx / (chartHistory.length - 1)) * 100}%` }}
+                  />
+                  <div
+                    className="absolute -top-1 -translate-y-full -translate-x-1/2 pointer-events-none z-30 px-2.5 py-1 rounded-lg bg-slate-900/95 dark:bg-surface-900/95 text-white text-[10px] shadow-xl backdrop-blur-md flex items-center gap-2.5 border border-slate-700/50"
+                    style={{
+                      left: `${Math.max(14, Math.min(86, (hoverIdx / (chartHistory.length - 1)) * 100))}%`,
+                    }}
+                  >
+                    <span className="font-mono text-slate-300 font-medium">
+                      {chartHistory[hoverIdx].time}
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-emerald-400 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      {chartTab === 'traffic'
+                        ? `↑ ${formatSpeed(chartHistory[hoverIdx].up)}`
+                        : `R: ${formatSpeed(chartHistory[hoverIdx].read)}`}
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-amber-400 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      {chartTab === 'traffic'
+                        ? `↓ ${formatSpeed(chartHistory[hoverIdx].down)}`
+                        : `W: ${formatSpeed(chartHistory[hoverIdx].write)}`}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* X-axis Timestamps - responsive and aligned to exact points */}
+            <div className="relative w-full h-5 text-[10px] font-mono text-slate-400 mt-1 pt-1 border-t border-slate-100 dark:border-surface-800">
+              {chartHistory.map((pt, idx) => {
+                const isFirst = idx === 0;
+                const isLast = idx === chartHistory.length - 1;
+                const isMid = idx === Math.floor(chartHistory.length / 2);
+                const pct = (idx / (chartHistory.length - 1)) * 100;
+
+                return (
+                  <span
+                    key={idx}
+                    className={`absolute top-1 select-none ${
+                      isFirst || isLast || isMid ? 'inline' : 'hidden sm:inline'
+                    } ${
+                      isFirst
+                        ? 'left-0 text-left'
+                        : isLast
+                          ? 'right-0 text-right'
+                          : '-translate-x-1/2 text-center'
+                    }`}
+                    style={!isFirst && !isLast ? { left: `${pct}%` } : undefined}
+                  >
+                    {pt.time}
+                  </span>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1130,9 +1349,29 @@ export default function DashboardPage() {
               <span className="font-mono text-slate-500">Live Rate: {chartTab === 'traffic' ? telemetry.upstreamMb : telemetry.writeMb + '/s'}</span>
             </div>
 
-            <div className="relative w-full h-64 pt-2">
-              <svg className="w-full h-56 overflow-visible" viewBox="0 0 600 180" preserveAspectRatio="none">
+            <div
+              className="relative w-full h-64 pt-2 overflow-hidden select-none"
+              onMouseMove={(e) => {
+                if (chartHistory.length < 2) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const relX = (e.clientX - rect.left) / rect.width;
+                const idx = Math.min(
+                  chartHistory.length - 1,
+                  Math.max(0, Math.round(relX * (chartHistory.length - 1)))
+                );
+                setModalHoverIdx(idx);
+              }}
+              onMouseLeave={() => setModalHoverIdx(null)}
+            >
+              <svg
+                className="w-full h-56 overflow-hidden block"
+                viewBox="0 0 600 180"
+                preserveAspectRatio="none"
+              >
                 <defs>
+                  <clipPath id="modalChartAreaClip">
+                    <rect x="0" y="0" width="600" height="180" rx="4" />
+                  </clipPath>
                   <linearGradient id="modalGreenGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#20a53a" stopOpacity="0.35" />
                     <stop offset="100%" stopColor="#20a53a" stopOpacity="0.02" />
@@ -1144,37 +1383,151 @@ export default function DashboardPage() {
                 </defs>
 
                 {[0, 45, 90, 135, 180].map((y, i) => (
-                  <line
-                    key={i}
-                    x1="0"
-                    y1={y}
-                    x2="600"
-                    y2={y}
-                    stroke="currentColor"
-                    strokeDasharray="4 4"
-                    className="text-slate-200 dark:text-surface-800"
-                    strokeWidth="1"
+                  <g key={i}>
+                    <line
+                      x1="0"
+                      y1={y}
+                      x2="600"
+                      y2={y}
+                      stroke="currentColor"
+                      strokeDasharray="4 4"
+                      className="text-slate-200 dark:text-surface-800"
+                      strokeWidth="1"
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    {(i === 0 || i === 2 || i === 4) && (
+                      <text
+                        x="6"
+                        y={i === 0 ? 12 : i === 4 ? 172 : y - 3}
+                        className="text-[9px] font-mono fill-slate-400 dark:fill-slate-500 opacity-60 select-none"
+                      >
+                        {chartSvgPaths.gridLabels[i]}
+                      </text>
+                    )}
+                  </g>
+                ))}
+
+                <g clipPath="url(#modalChartAreaClip)">
+                  <path d={chartSvgPaths.area1} fill="url(#modalGreenGrad)" />
+                  <path d={chartSvgPaths.area2} fill="url(#modalOrangeGrad)" />
+
+                  <path
+                    d={chartSvgPaths.line1}
+                    fill="none"
+                    stroke="#20a53a"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <path
+                    d={chartSvgPaths.line2}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              </svg>
+
+              {/* Modal HTML Overlay for Data Points & Tooltip */}
+              <div className="absolute inset-x-0 top-2 h-56 pointer-events-none">
+                {chartSvgPaths.pts1?.map((p, idx) => (
+                  <div
+                    key={`mpt1-${idx}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#20a53a] border border-white dark:border-surface-900 shadow-xs transition-transform duration-150"
+                    style={{
+                      left: `${(p.x / 600) * 100}%`,
+                      top: `${(p.y / 180) * 100}%`,
+                      transform:
+                        modalHoverIdx === idx
+                          ? 'translate(-50%, -50%) scale(1.6)'
+                          : 'translate(-50%, -50%) scale(1)',
+                    }}
+                  />
+                ))}
+                {chartSvgPaths.pts2?.map((p, idx) => (
+                  <div
+                    key={`mpt2-${idx}`}
+                    className="absolute -translate-x-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#f59e0b] border border-white dark:border-surface-900 shadow-xs transition-transform duration-150"
+                    style={{
+                      left: `${(p.x / 600) * 100}%`,
+                      top: `${(p.y / 180) * 100}%`,
+                      transform:
+                        modalHoverIdx === idx
+                          ? 'translate(-50%, -50%) scale(1.6)'
+                          : 'translate(-50%, -50%) scale(1)',
+                    }}
                   />
                 ))}
 
-                <path d={chartSvgPaths.area1} fill="url(#modalGreenGrad)" />
-                <path d={chartSvgPaths.area2} fill="url(#modalOrangeGrad)" />
+                {chartSvgPaths.pts1.length > 0 && (
+                  <span
+                    className="absolute flex h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-10"
+                    style={{
+                      left: `${(chartSvgPaths.pts1[chartSvgPaths.pts1.length - 1].x / 600) * 100}%`,
+                      top: `${(chartSvgPaths.pts1[chartSvgPaths.pts1.length - 1].y / 180) * 100}%`,
+                    }}
+                  >
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border border-white dark:border-surface-900"></span>
+                  </span>
+                )}
 
-                <path d={chartSvgPaths.line1} fill="none" stroke="#20a53a" strokeWidth="2.5" strokeLinecap="round" />
-                <path d={chartSvgPaths.line2} fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" />
+                {modalHoverIdx !== null && chartHistory[modalHoverIdx] && (
+                  <>
+                    <div
+                      className="absolute top-0 bottom-0 w-px border-l border-dashed border-slate-400 dark:border-slate-500 pointer-events-none z-20"
+                      style={{ left: `${(modalHoverIdx / (chartHistory.length - 1)) * 100}%` }}
+                    />
+                    <div
+                      className="absolute -top-1 -translate-y-full -translate-x-1/2 pointer-events-none z-30 px-3 py-1.5 rounded-lg bg-slate-900/95 dark:bg-surface-900/95 text-white text-xs shadow-xl backdrop-blur-md flex items-center gap-3 border border-slate-700/50"
+                      style={{
+                        left: `${Math.max(14, Math.min(86, (modalHoverIdx / (chartHistory.length - 1)) * 100))}%`,
+                      }}
+                    >
+                      <span className="font-mono text-slate-300 font-medium">
+                        {chartHistory[modalHoverIdx].time}
+                      </span>
+                      <span className="flex items-center gap-1 font-mono text-emerald-400 font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        {chartTab === 'traffic'
+                          ? `↑ ${formatSpeed(chartHistory[modalHoverIdx].up)}`
+                          : `R: ${formatSpeed(chartHistory[modalHoverIdx].read)}`}
+                      </span>
+                      <span className="flex items-center gap-1 font-mono text-amber-400 font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        {chartTab === 'traffic'
+                          ? `↓ ${formatSpeed(chartHistory[modalHoverIdx].down)}`
+                          : `W: ${formatSpeed(chartHistory[modalHoverIdx].write)}`}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
 
-                {chartSvgPaths.pts1?.map((p, idx) => (
-                  <circle key={`mpt1-${idx}`} cx={p.x} cy={p.y} r="3.5" fill="#20a53a" />
-                ))}
-                {chartSvgPaths.pts2?.map((p, idx) => (
-                  <circle key={`mpt2-${idx}`} cx={p.x} cy={p.y} r="3.5" fill="#f59e0b" />
-                ))}
-              </svg>
-
-              <div className="flex justify-between items-center text-[10px] font-mono text-slate-400 mt-2 pt-1 border-t border-slate-100 dark:border-surface-800">
-                {chartHistory.map((pt, idx) => (
-                  <span key={idx}>{pt.time}</span>
-                ))}
+              {/* Modal X-axis Timestamps */}
+              <div className="relative w-full h-5 text-[10px] font-mono text-slate-400 mt-2 pt-1 border-t border-slate-100 dark:border-surface-800">
+                {chartHistory.map((pt, idx) => {
+                  const isFirst = idx === 0;
+                  const isLast = idx === chartHistory.length - 1;
+                  const pct = (idx / (chartHistory.length - 1)) * 100;
+                  return (
+                    <span
+                      key={idx}
+                      className={`absolute top-1 select-none ${
+                        isFirst
+                          ? 'left-0 text-left'
+                          : isLast
+                            ? 'right-0 text-right'
+                            : '-translate-x-1/2 text-center'
+                      }`}
+                      style={!isFirst && !isLast ? { left: `${pct}%` } : undefined}
+                    >
+                      {pt.time}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
