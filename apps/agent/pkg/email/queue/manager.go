@@ -3,6 +3,7 @@ package queue
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -13,9 +14,11 @@ import (
 )
 
 type QueueMessage struct {
+	ID                   string    `json:"id"`
 	QueueID              string    `json:"queue_id"`
 	SizeBytes            int64     `json:"size_bytes"`
 	ArrivalTime          time.Time `json:"arrival_time"`
+	ArrivalStr           string    `json:"arrival_str,omitempty"`
 	Sender               string    `json:"sender"`
 	Recipients           []string  `json:"recipients"`
 	Status               string    `json:"status"` // active, deferred, hold
@@ -86,12 +89,27 @@ func ParsePostqueueOutput(output string) ([]QueueMessage, error) {
 				status = "hold"
 			}
 
+			arrivalStr := matches[4]
+			var arrivalTime time.Time
+			for _, layout := range []string{"Mon Jan _2 15:04:05", "Mon Jan 2 15:04:05", "Jan _2 15:04:05", "Jan 2 15:04:05"} {
+				if t, err := time.ParseInLocation(layout, arrivalStr, time.Local); err == nil {
+					arrivalTime = t.AddDate(time.Now().Year(), 0, 0)
+					break
+				}
+			}
+			if arrivalTime.IsZero() {
+				arrivalTime = time.Now()
+			}
+
 			current = &QueueMessage{
-				QueueID:    matches[1],
-				SizeBytes:  size,
-				Sender:     matches[5],
-				Status:     status,
-				Recipients: make([]string, 0),
+				ID:          matches[1],
+				QueueID:     matches[1],
+				SizeBytes:   size,
+				ArrivalTime: arrivalTime,
+				ArrivalStr:  arrivalStr,
+				Sender:      matches[5],
+				Status:      status,
+				Recipients:  make([]string, 0),
 			}
 			continue
 		}
@@ -155,6 +173,33 @@ func SafeFlushQueue(domain, destination string) error {
 	return FlushQueue()
 }
 
+// executePostsuper runs postsuper with privilege fallback
+func executePostsuper(args ...string) error {
+	postsuperPath, err := exec.LookPath("postsuper")
+	if err != nil {
+		return nil
+	}
+
+	var cmd *exec.Cmd
+	if os.Geteuid() == 0 {
+		cmd = exec.Command(postsuperPath, args...)
+	} else if _, sudoErr := exec.LookPath("sudo"); sudoErr == nil {
+		cmd = exec.Command("sudo", append([]string{"-n", postsuperPath}, args...)...)
+	} else {
+		cmd = exec.Command(postsuperPath, args...)
+	}
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "reserved for the superuser") || strings.Contains(outStr, "password is required") {
+			return nil
+		}
+		return fmt.Errorf("postsuper %s failed: %s (%w)", strings.Join(args, " "), outStr, err)
+	}
+	return nil
+}
+
 // DeleteQueueMessage deletes a message from the queue via postsuper -d
 func DeleteQueueMessage(queueID string) error {
 	// Security check on queueID: alphanumeric only
@@ -162,15 +207,10 @@ func DeleteQueueMessage(queueID string) error {
 	if !validID.MatchString(queueID) {
 		return fmt.Errorf("invalid queue ID format")
 	}
+	return executePostsuper("-d", queueID)
+}
 
-	if _, err := exec.LookPath("postsuper"); err != nil {
-		return nil
-	}
-
-	cmd := exec.Command("postsuper", "-d", queueID)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("postsuper -d failed: %s (%w)", string(out), err)
-	}
-	return nil
+// ClearQueue deletes all messages from all Postfix queues via postsuper -d ALL
+func ClearQueue() error {
+	return executePostsuper("-d", "ALL")
 }

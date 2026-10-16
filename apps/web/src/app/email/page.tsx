@@ -73,10 +73,12 @@ interface EmailMailbox {
 }
 
 interface QueueItem {
-  id: string;
+  id?: string;
+  queue_id?: string;
   size_bytes?: number;
   size?: number;
   arrival_time?: string;
+  arrival_str?: string;
   arrival?: string;
   sender: string;
   sender_domain?: string;
@@ -362,6 +364,8 @@ export default function EmailHostingPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [flushingQueue, setFlushingQueue] = useState(false);
+  const [clearingQueue, setClearingQueue] = useState(false);
+  const [deletingQueueId, setDeletingQueueId] = useState<string | null>(null);
   const [rateControlOverview, setRateControlOverview] = useState<RateControlOverview | null>(null);
   const [rateControlLoading, setRateControlLoading] = useState(false);
   const [resettingCooldown, setResettingCooldown] = useState(false);
@@ -709,15 +713,48 @@ export default function EmailHostingPage() {
   };
 
   // Delete single queue item
-  const handleDeleteQueueItem = async (id: string) => {
-    if (!confirm(`Purge queued message ${id} from Postfix queue?`)) return;
+  const handleDeleteQueueItem = async (rawId?: string) => {
+    const id = rawId?.trim();
+    if (!id || id === 'undefined' || id === 'N/A') {
+      alert('Unable to identify valid Queue ID for this message.');
+      return;
+    }
+    if (!confirm(`Purge queued message ${id} from Postfix queue (postsuper -d ${id})?`)) return;
     try {
-      const res = await apiFetch(`/api/v1/email/queue/${id}`, { method: 'DELETE' });
+      setDeletingQueueId(id);
+      const res = await apiFetch<any>(`/api/v1/email/queue/${id}`, { method: 'DELETE' });
       if (res.success) {
-        setQueueItems((prev) => prev.filter((item) => item.id !== id));
+        setQueueItems((prev) => prev.filter((item) => (item.id || item.queue_id) !== id));
+        alert(res.data?.message || `Queue item ${id} purged successfully.`);
+      } else {
+        alert(res.error?.message || `Failed to delete queue item ${id}.`);
       }
     } catch (err: any) {
       alert(`Failed to delete queue item: ${err.message || 'Error'}`);
+    } finally {
+      setDeletingQueueId(null);
+    }
+  };
+
+  // Clear all messages from Postfix queue
+  const handleClearQueue = async () => {
+    if (!confirm('Are you sure you want to PURGE ALL messages from the Postfix mail queue?\n\nCommand: postsuper -d ALL\n\nWarning: This will permanently delete all active, deferred, and incoming queued messages.')) {
+      return;
+    }
+    try {
+      setClearingQueue(true);
+      const res = await apiFetch<any>('/api/v1/email/queue', { method: 'DELETE' });
+      if (res.success) {
+        setQueueItems([]);
+        alert(res.data?.message || 'All queued messages have been purged from the Postfix mail queue (postsuper -d ALL).');
+        fetchQueue();
+      } else {
+        alert(res.error?.message || 'Failed to clear mail queue.');
+      }
+    } catch (err: any) {
+      alert(`Failed to clear queue: ${err.message || 'Error'}`);
+    } finally {
+      setClearingQueue(false);
     }
   };
 
@@ -2675,6 +2712,16 @@ export default function EmailHostingPage() {
                   <RotateCw className={`w-3.5 h-3.5 ${flushingQueue ? 'animate-spin' : ''}`} />
                   <span>{flushingQueue ? 'Flushing Postfix...' : 'Safe Flush (postqueue -f)'}</span>
                 </button>
+
+                <button
+                  onClick={handleClearQueue}
+                  disabled={clearingQueue || queueItems.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 shadow-xs transition disabled:opacity-50"
+                  title="Purge all deferred and queued messages from Postfix spool (postsuper -d ALL)"
+                >
+                  <Trash2 className={`w-3.5 h-3.5 ${clearingQueue ? 'animate-spin' : ''}`} />
+                  <span>{clearingQueue ? 'Purging All...' : 'Clear All Queue'}</span>
+                </button>
               </div>
             </div>
 
@@ -2701,44 +2748,56 @@ export default function EmailHostingPage() {
                   <table className="w-full text-left text-sm border-collapse">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
-                        <th className="px-6 py-4">Queue ID</th>
-                        <th className="px-6 py-4">Sender</th>
-                        <th className="px-6 py-4">Recipients</th>
-                        <th className="px-6 py-4">Arrival Time</th>
-                        <th className="px-6 py-4">Reason / Deferral</th>
-                        <th className="px-6 py-4 text-right">Action</th>
+                        <th className="px-5 py-4 w-44">Queue ID</th>
+                        <th className="px-5 py-4 w-52">Sender</th>
+                        <th className="px-5 py-4 w-56">Recipients</th>
+                        <th className="px-5 py-4 w-44">Arrival Time</th>
+                        <th className="px-5 py-4 min-w-[280px]">Reason / Deferral</th>
+                        <th className="px-5 py-4 w-28 text-right sticky right-0 bg-slate-50 dark:bg-surface-950 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-surface-800/80 font-mono text-xs">
-                      {queueItems.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-surface-800/40">
-                          <td className="px-6 py-4 font-bold text-indigo-600 dark:text-indigo-400">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span>{item.id}</span>
-                              {item.is_spf_domain_rate_lim && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                                  Gmail 421 Rate-Limited
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-slate-900 dark:text-white">{item.sender}</td>
-                          <td className="px-6 py-4 text-slate-700 dark:text-slate-300">{item.recipients.join(', ')}</td>
-                          <td className="px-6 py-4 text-slate-500">{item.arrival_time || item.arrival}</td>
-                          <td className="px-6 py-4 text-amber-600 dark:text-amber-400">
-                            {item.reason || 'Deferred'}
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button
-                              onClick={() => handleDeleteQueueItem(item.id)}
-                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 transition"
-                              title="Delete from Queue (postsuper -d)"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      {queueItems.map((item, idx) => {
+                        const queueId = (item.id || item.queue_id || '').trim();
+                        const isDeleting = deletingQueueId === queueId;
+                        return (
+                          <tr key={queueId || idx} className="hover:bg-slate-50 dark:hover:bg-surface-800/40 transition">
+                            <td className="px-5 py-4 font-bold text-indigo-600 dark:text-indigo-400">
+                              <div className="flex flex-col gap-1">
+                                <span className="font-mono text-xs">{queueId || 'N/A'}</span>
+                                {(item.is_spf_domain_rate_lim || item.reason?.includes('421')) && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700 w-fit">
+                                    Gmail 421 Rate-Limited
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-5 py-4 text-slate-900 dark:text-white truncate max-w-[200px]" title={item.sender}>
+                              {item.sender}
+                            </td>
+                            <td className="px-5 py-4 text-slate-700 dark:text-slate-300 truncate max-w-[220px]" title={item.recipients?.join(', ')}>
+                              {item.recipients?.join(', ') || 'N/A'}
+                            </td>
+                            <td className="px-5 py-4 text-slate-500 text-xs">
+                              {item.arrival_str || (item.arrival_time && !item.arrival_time.startsWith('0001') ? new Date(item.arrival_time).toLocaleString() : item.arrival_time || 'Recent')}
+                            </td>
+                            <td className="px-5 py-4 text-amber-700 dark:text-amber-300/90 text-xs font-mono break-words max-w-md">
+                              {item.reason || 'Deferred'}
+                            </td>
+                            <td className="px-5 py-4 text-right sticky right-0 bg-white dark:bg-surface-900 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.05)]">
+                              <button
+                                onClick={() => handleDeleteQueueItem(queueId)}
+                                disabled={!queueId || isDeleting}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition disabled:opacity-40"
+                                title="Delete message from Postfix Queue (postsuper -d)"
+                              >
+                                <Trash2 className={`w-3.5 h-3.5 ${isDeleting ? 'animate-spin' : ''}`} />
+                                <span>{isDeleting ? 'Deleting...' : 'Delete'}</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

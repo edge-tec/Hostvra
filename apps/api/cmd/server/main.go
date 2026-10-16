@@ -903,6 +903,8 @@ func main() {
 				// Mail Queue & Outbound Rate Control
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/queue", emailHandler.ListQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/flush", emailHandler.FlushQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue", emailHandler.ClearQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/clear", emailHandler.ClearQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)
@@ -967,6 +969,8 @@ func main() {
 				// Queue & Logs & Diagnostics & Spam
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/queue", emailHandler.ListQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/flush", emailHandler.FlushQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue", emailHandler.ClearQueue)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/clear", emailHandler.ClearQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)

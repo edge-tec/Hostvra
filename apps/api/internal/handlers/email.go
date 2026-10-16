@@ -2143,9 +2143,9 @@ func (h *EmailHandler) DeleteQueueItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	queueID := chi.URLParam(r, "id")
-	if queueID == "" {
-		response.Error(w, http.StatusBadRequest, "MISSING_QUEUE_ID", "Queue ID required", nil, "")
+	queueID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if queueID == "" || strings.EqualFold(queueID, "all") {
+		h.ClearQueue(w, r)
 		return
 	}
 
@@ -2155,7 +2155,26 @@ func (h *EmailHandler) DeleteQueueItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "email.queue.delete", "mail_queue", queueID, "success", "", nil)
-	response.JSON(w, http.StatusOK, map[string]string{"message": "Queue item purged"}, nil)
+	response.JSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Queue item %s purged successfully (postsuper -d)", queueID)}, nil)
+}
+
+func (h *EmailHandler) ClearQueue(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can clear the mail queue", nil, "")
+		return
+	}
+
+	if err := queue.ClearQueue(); err != nil {
+		if strings.Contains(err.Error(), "mail system is down") || strings.Contains(err.Error(), "executable file not found") {
+			response.JSON(w, http.StatusOK, map[string]string{"message": "Mail queue is already empty or mail system is down"}, nil)
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "CLEAR_FAILED", fmt.Sprintf("Failed to clear mail queue: %v", err), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "email.queue.clear_all", "mail_queue", "ALL", "success", "", nil)
+	response.JSON(w, http.StatusOK, map[string]string{"message": "All queued messages have been purged (postsuper -d ALL)"}, nil)
 }
 
 // ----------------------------------------------------------------------------

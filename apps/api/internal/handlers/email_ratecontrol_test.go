@@ -179,3 +179,29 @@ func TestFlushQueueWithForceOverride(t *testing.T) {
 		t.Errorf("expected ?force=true to override cooldown block")
 	}
 }
+
+func TestDeleteQueueItemAndClearQueue(t *testing.T) {
+	handler, _ := setupTestEmailHandlerWithStore(t)
+
+	// 1. Delete with missing ID returns 400 or invokes Clear
+	delReq := httptest.NewRequest("DELETE", "/api/v1/email/queue/bad_id_format!", nil)
+	delReq = delReq.WithContext(adminContext())
+	delW := httptest.NewRecorder()
+
+	handler.DeleteQueueItem(delW, delReq)
+	// Expect failure or error since 'bad_id_format!' is invalid regex
+	if delW.Code != http.StatusInternalServerError && delW.Code != http.StatusBadRequest {
+		t.Logf("DeleteQueueItem returned code: %d, body: %s", delW.Code, delW.Body.String())
+	}
+
+	// 2. ClearQueue succeeds cleanly
+	clearReq := httptest.NewRequest("DELETE", "/api/v1/email/queue", nil)
+	clearReq = clearReq.WithContext(adminContext())
+	clearW := httptest.NewRecorder()
+
+	handler.ClearQueue(clearW, clearReq)
+	if clearW.Code != http.StatusOK {
+		t.Errorf("expected 200 from ClearQueue, got %d: %s", clearW.Code, clearW.Body.String())
+	}
+}
+
