@@ -164,6 +164,22 @@ func (s *Service) GetZone(ctx context.Context, zoneID uuid.UUID) (*Zone, error) 
 	return z, nil
 }
 
+// GetZoneByDomain finds a zone by domain name and orgID
+func (s *Service) GetZoneByDomain(ctx context.Context, orgID uuid.UUID, domain string) (*Zone, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	for _, z := range s.zones {
+		if (z.OrganizationID == orgID || orgID == uuid.Nil) && strings.EqualFold(z.Domain, domain) {
+			cp := *z
+			cp.RecordCount = len(s.records[z.ID])
+			return &cp, nil
+		}
+	}
+	return nil, ErrZoneNotFound
+}
+
 // DeleteZone deletes a DNS zone and its associated records
 func (s *Service) DeleteZone(ctx context.Context, zoneID uuid.UUID) error {
 	s.mu.Lock()

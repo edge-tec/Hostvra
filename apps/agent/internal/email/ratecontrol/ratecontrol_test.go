@@ -214,3 +214,68 @@ func TestSafeFlushQueueBlockedDuringCooldown(t *testing.T) {
 		t.Errorf("Expected flush blocked error message, got: %v", err)
 	}
 }
+
+func TestMailboxRateLimiter(t *testing.T) {
+	limiter := NewMailboxRateLimiter()
+	email := "user@onlyflrt.net"
+
+	// 1. Initial State: Can send
+	allowed, hSent, dSent, retry, reason := limiter.CanMailboxSend(email, 5, 20)
+	if !allowed || hSent != 0 || dSent != 0 || retry != 0 || reason != "" {
+		t.Fatalf("Expected initial send to be allowed, got allowed=%v, hSent=%d, reason=%s", allowed, hSent, reason)
+	}
+
+	// 2. Record 4 sends
+	for i := 0; i < 4; i++ {
+		limiter.RecordMailboxSent(email)
+	}
+
+	allowed, hSent, dSent, _, _ = limiter.CanMailboxSend(email, 5, 20)
+	if !allowed || hSent != 4 || dSent != 4 {
+		t.Fatalf("Expected 4 sends recorded, got allowed=%v, hSent=%d, dSent=%d", allowed, hSent, dSent)
+	}
+
+	// 3. 5th send reaches hourly limit
+	limiter.RecordMailboxSent(email)
+	allowed, hSent, dSent, retry, reason = limiter.CanMailboxSend(email, 5, 20)
+	if allowed {
+		t.Fatalf("Expected send to be blocked after 5 sends with limit 5")
+	}
+	if retry <= 0 || !strings.Contains(reason, "Hourly outbound rate limit exceeded") {
+		t.Errorf("Expected hourly limit reason and retry duration, got retry=%d, reason=%s", retry, reason)
+	}
+
+	// 4. Verify GetMailboxUsage
+	usage := limiter.GetMailboxUsage(email, 5, 20)
+	if !usage.IsRateLimited {
+		t.Errorf("Expected IsRateLimited to be true")
+	}
+	if usage.HourSent != 5 || usage.HourRemaining != 0 {
+		t.Errorf("Expected HourSent=5, HourRemaining=0, got %d, %d", usage.HourSent, usage.HourRemaining)
+	}
+	if usage.DayRemaining != 15 {
+		t.Errorf("Expected DayRemaining=15, got %d", usage.DayRemaining)
+	}
+
+	// 5. Reset limit
+	limiter.ResetMailboxLimit(email)
+	allowedAfterReset, hAfter, _, _, _ := limiter.CanMailboxSend(email, 5, 20)
+	if !allowedAfterReset || hAfter != 0 {
+		t.Errorf("Expected send to be allowed after reset, got allowed=%v, hSent=%d", allowedAfterReset, hAfter)
+	}
+
+	// 6. Test Daily Limit
+	limiter.ResetMailboxLimit(email)
+	for i := 0; i < 10; i++ {
+		limiter.RecordMailboxSent(email)
+	}
+	// Limit: hour 50, day 10
+	allowedDaily, _, dCount, retryDaily, reasonDaily := limiter.CanMailboxSend(email, 50, 10)
+	if allowedDaily {
+		t.Errorf("Expected daily limit to block send when DaySent=10 and DayLimit=10")
+	}
+	if dCount != 10 || retryDaily <= 0 || !strings.Contains(reasonDaily, "Daily outbound rate limit exceeded") {
+		t.Errorf("Expected daily rate limit error, got dCount=%d, retry=%d, reason=%s", dCount, retryDaily, reasonDaily)
+	}
+}
+

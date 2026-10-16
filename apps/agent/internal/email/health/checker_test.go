@@ -99,3 +99,30 @@ func TestTestRelayRejection_OpenRelayDetection(t *testing.T) {
 		t.Errorf("expected open relay to be detected and return critical error, got rejected=%v, err=%v", rejected, err)
 	}
 }
+
+func TestCheckIPBlacklist_LocalAndTestIP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// 1. Loopback IP
+	resLoopback := CheckIPBlacklist(ctx, "127.0.0.1")
+	if resLoopback.Status != "clean" || resLoopback.ListedCount != 0 {
+		t.Errorf("expected loopback IP to be clean, got status=%s, listed=%d", resLoopback.Status, resLoopback.ListedCount)
+	}
+	if len(resLoopback.Entries) != len(StandardRBLs) {
+		t.Errorf("expected %d entries, got %d", len(StandardRBLs), len(resLoopback.Entries))
+	}
+
+	// 2. Private IP
+	resPrivate := CheckIPBlacklist(ctx, "192.168.1.50")
+	if resPrivate.Status != "clean" || resPrivate.CleanCount != len(StandardRBLs) {
+		t.Errorf("expected private IP to be clean, got status=%s", resPrivate.Status)
+	}
+
+	// 3. RFC 5737 Test IP
+	resTest := CheckIPBlacklist(ctx, "192.0.2.1")
+	if resTest.Status != "clean" || resTest.ListedCount != 0 {
+		t.Errorf("expected RFC 5737 test IP to be clean, got status=%s", resTest.Status)
+	}
+}
+

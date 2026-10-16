@@ -3677,3 +3677,475 @@ func (h *EmailHandler) ToggleMailboxSuspended(w http.ResponseWriter, r *http.Req
 	go h.syncPostfixMaps(context.Background(), mb.ServerID)
 	response.JSON(w, http.StatusOK, mb, nil)
 }
+
+// ----------------------------------------------------------------------------
+// MAILBOX RATE LIMITING HANDLERS
+// ----------------------------------------------------------------------------
+
+type UpdateMailboxRateLimitRequest struct {
+	RateLimitPerHour int `json:"rate_limit_per_hour"`
+	RateLimitPerDay  int `json:"rate_limit_per_day"`
+}
+
+// GetMailboxRateLimit returns the current outbound rate limit configuration and live usage counters
+func (h *EmailHandler) GetMailboxRateLimit(w http.ResponseWriter, r *http.Request) {
+	mailboxID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mailboxID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	hourLimit := mb.RateLimitPerHour
+	if hourLimit <= 0 {
+		hourLimit = 100
+	}
+	dayLimit := mb.RateLimitPerDay
+	if dayLimit <= 0 {
+		dayLimit = 1000
+	}
+
+	ctrl := ratecontrol.GetGlobalMailboxRateLimiter()
+	stats := ctrl.GetMailboxUsage(mb.Email, hourLimit, dayLimit)
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"mailbox_id":      mb.ID,
+		"email":           mb.Email,
+		"hour_limit":      hourLimit,
+		"day_limit":       dayLimit,
+		"hour_sent":       stats.HourSent,
+		"day_sent":        stats.DaySent,
+		"hour_remaining":  stats.HourRemaining,
+		"day_remaining":   stats.DayRemaining,
+		"is_rate_limited": stats.IsRateLimited,
+		"limit_reason":    stats.LimitReason,
+		"retry_after_sec": stats.RetryAfterSec,
+		"reset_hour_at":   stats.ResetHourAt,
+		"reset_day_at":    stats.ResetDayAt,
+	}, nil)
+}
+
+// UpdateMailboxRateLimit modifies the hourly and daily outbound rate limit for a mailbox
+func (h *EmailHandler) UpdateMailboxRateLimit(w http.ResponseWriter, r *http.Request) {
+	mailboxID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mailboxID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	var req UpdateMailboxRateLimitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON request body", nil, "")
+		return
+	}
+
+	if req.RateLimitPerHour <= 0 || req.RateLimitPerHour > 100000 {
+		response.Error(w, http.StatusBadRequest, "INVALID_LIMIT", "Hourly rate limit must be between 1 and 100,000", nil, "")
+		return
+	}
+	if req.RateLimitPerDay <= 0 || req.RateLimitPerDay > 500000 {
+		response.Error(w, http.StatusBadRequest, "INVALID_LIMIT", "Daily rate limit must be between 1 and 500,000", nil, "")
+		return
+	}
+
+	mb.RateLimitPerHour = req.RateLimitPerHour
+	mb.RateLimitPerDay = req.RateLimitPerDay
+
+	if err := h.store.UpdateEmailMailbox(r.Context(), mb); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update mailbox rate limits", nil, "")
+		return
+	}
+
+	if h.audit != nil {
+		h.audit.Log(r.Context(), r, "email.mailbox.rate_limit_updated", "mailbox", mb.ID.String(), "success", "", map[string]interface{}{
+			"email":               mb.Email,
+			"rate_limit_per_hour": mb.RateLimitPerHour,
+			"rate_limit_per_day":  mb.RateLimitPerDay,
+		})
+	}
+
+	ctrl := ratecontrol.GetGlobalMailboxRateLimiter()
+	stats := ctrl.GetMailboxUsage(mb.Email, mb.RateLimitPerHour, mb.RateLimitPerDay)
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"mailbox_id":      mb.ID,
+		"email":           mb.Email,
+		"hour_limit":      mb.RateLimitPerHour,
+		"day_limit":       mb.RateLimitPerDay,
+		"hour_sent":       stats.HourSent,
+		"day_sent":        stats.DaySent,
+		"hour_remaining":  stats.HourRemaining,
+		"day_remaining":   stats.DayRemaining,
+		"is_rate_limited": stats.IsRateLimited,
+		"limit_reason":    stats.LimitReason,
+		"retry_after_sec": stats.RetryAfterSec,
+		"reset_hour_at":   stats.ResetHourAt,
+		"reset_day_at":    stats.ResetDayAt,
+	}, nil)
+}
+
+// ResetMailboxRateLimit resets the current window usage counter for a mailbox
+func (h *EmailHandler) ResetMailboxRateLimit(w http.ResponseWriter, r *http.Request) {
+	mailboxID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid mailbox UUID", nil, "")
+		return
+	}
+
+	mb, err := h.store.GetEmailMailboxByID(r.Context(), mailboxID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Mailbox not found", nil, "")
+		return
+	}
+
+	if err := h.verifyMailboxOwnership(r, mb); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	ctrl := ratecontrol.GetGlobalMailboxRateLimiter()
+	ctrl.ResetMailboxLimit(mb.Email)
+
+	if h.audit != nil {
+		h.audit.Log(r.Context(), r, "email.mailbox.rate_limit_reset", "mailbox", mb.ID.String(), "success", "", map[string]interface{}{
+			"email": mb.Email,
+		})
+	}
+
+	hourLimit := mb.RateLimitPerHour
+	if hourLimit <= 0 {
+		hourLimit = 100
+	}
+	dayLimit := mb.RateLimitPerDay
+	if dayLimit <= 0 {
+		dayLimit = 1000
+	}
+	stats := ctrl.GetMailboxUsage(mb.Email, hourLimit, dayLimit)
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"mailbox_id":      mb.ID,
+		"email":           mb.Email,
+		"hour_limit":      hourLimit,
+		"day_limit":       dayLimit,
+		"hour_sent":       stats.HourSent,
+		"day_sent":        stats.DaySent,
+		"hour_remaining":  stats.HourRemaining,
+		"day_remaining":   stats.DayRemaining,
+		"is_rate_limited": stats.IsRateLimited,
+		"limit_reason":    stats.LimitReason,
+		"retry_after_sec": stats.RetryAfterSec,
+		"reset_hour_at":   stats.ResetHourAt,
+		"reset_day_at":    stats.ResetDayAt,
+	}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// DELIVERABILITY & DNS CHECK WIZARD HANDLERS
+// ----------------------------------------------------------------------------
+
+// GetDNSWizardData provides full deliverability audit, RBL check, BIND zone export, and Cloudflare config
+func (h *EmailHandler) GetDNSWizardData(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain UUID", nil, "")
+		return
+	}
+
+	domain, err := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	serverIP, err := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	if err != nil || !iputil.IsPublicIPv4(serverIP) {
+		response.Error(w, http.StatusUnprocessableEntity, "NO_PUBLIC_IP", "No valid public IPv4 address detected for mail server. Localhost (127.0.0.1) and private network IPs cannot be used for public email delivery.", nil, "")
+		return
+	}
+
+	effectiveMailHostname := domain.MailHostname
+	if effectiveMailHostname == "" || !strings.Contains(effectiveMailHostname, ".") {
+		effectiveMailHostname = "mail." + domain.Domain
+	}
+
+	selector := domain.DKIMSelector
+	if selector == "" {
+		selector = "default"
+	}
+
+	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
+	dkimPub := ""
+	if dkimKey != nil && dkimKey.PublicKeyDNS != "" {
+		dkimPub = dkimKey.PublicKeyDNS
+	} else {
+		if newKey, err := dkim.GenerateDKIMKey(domain.Domain, selector, 2048); err == nil {
+			_ = dkim.SaveDKIMKey("/var/lib/hostvra/dkim", newKey)
+			newDKIM := &store.EmailDKIMKey{
+				ID:            uuid.New(),
+				DomainID:      domain.ID,
+				Selector:      selector,
+				PrivateKeyPEM: newKey.PrivateKeyPEM,
+				PublicKeyDNS:  newKey.PublicKeyDNS,
+				KeySize:       2048,
+			}
+			_ = h.store.SaveEmailDKIMKey(r.Context(), newDKIM)
+			dkimPub = newKey.PublicKeyDNS
+		}
+	}
+
+	dnsCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	auditReport := health.AuditDomainDNSWithExpected(dnsCtx, domain.Domain, selector, serverIP, dkimPub)
+
+	mxValid := auditReport.MX.Status == "pass"
+	aValid := auditReport.ForwardDNS.Status == "pass"
+	spfValid := auditReport.SPF.Status == "pass"
+	dkimValid := auditReport.DKIM.Status == "pass"
+	dmarcValid := auditReport.DMARC.Status == "pass"
+
+	mapStatus := func(valid bool, currentStatus string) string {
+		if valid {
+			return "verified"
+		}
+		if currentStatus == "fail" {
+			return "failed"
+		}
+		return "pending"
+	}
+
+	allVerified := mxValid && aValid && spfValid && dkimValid && (dmarcValid || auditReport.DMARC.Status != "fail")
+	if allVerified != domain.IsDNSVerified {
+		_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, allVerified)
+		domain.IsDNSVerified = allVerified
+	}
+
+	records := []store.DNSVerificationResult{
+		{
+			RecordType: "MX",
+			Host:       "@",
+			Expected:   fmt.Sprintf("10 %s.", effectiveMailHostname),
+			Current:    auditReport.MX.Current,
+			Status:     mapStatus(mxValid, auditReport.MX.Status),
+			Message:    "Primary MX routing record for Postfix MTA",
+		},
+		{
+			RecordType: "A",
+			Host:       "mail",
+			Expected:   serverIP,
+			Current:    auditReport.ForwardDNS.Current,
+			Status:     mapStatus(aValid, auditReport.ForwardDNS.Status),
+			Message:    "Primary mail server address",
+		},
+		{
+			RecordType: "TXT",
+			Host:       "@",
+			Expected:   fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP),
+			Current:    auditReport.SPF.Current,
+			Status:     mapStatus(spfValid, auditReport.SPF.Status),
+			Message:    "Sender Policy Framework (SPF) authorizing server mail delivery",
+		},
+		{
+			RecordType: "TXT",
+			Host:       fmt.Sprintf("%s._domainkey", selector),
+			Expected:   dkimPub,
+			Current:    auditReport.DKIM.Current,
+			Status:     mapStatus(dkimValid, auditReport.DKIM.Status),
+			Message:    "DomainKeys Identified Mail (DKIM 2048-bit RSA public signature)",
+		},
+		{
+			RecordType: "TXT",
+			Host:       "_dmarc",
+			Expected:   fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s", domain.Domain),
+			Current:    auditReport.DMARC.Current,
+			Status:     mapStatus(dmarcValid, auditReport.DMARC.Status),
+			Message:    "DMARC email alignment policy and reporting",
+		},
+		{
+			RecordType: "CNAME",
+			Host:       "autoconfig",
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
+			Status:     "verified",
+			Message:    "Mozilla Thunderbird / Webmail client auto-configuration",
+		},
+		{
+			RecordType: "CNAME",
+			Host:       "autodiscover",
+			Expected:   fmt.Sprintf("%s.", effectiveMailHostname),
+			Current:    fmt.Sprintf("%s.", effectiveMailHostname),
+			Status:     "verified",
+			Message:    "Microsoft Outlook and mobile mail auto-discovery",
+		},
+	}
+
+	// Generate standard RFC 1035 BIND Zone Format
+	var bindBuilder strings.Builder
+	fmt.Fprintf(&bindBuilder, "; ----------------------------------------------------------------------------\n")
+	fmt.Fprintf(&bindBuilder, "; BIND Zone Configuration for %s\n", domain.Domain)
+	fmt.Fprintf(&bindBuilder, "; Generated by Hostvra Deliverability Engine\n")
+	fmt.Fprintf(&bindBuilder, "; ----------------------------------------------------------------------------\n")
+	fmt.Fprintf(&bindBuilder, "$ORIGIN %s.\n", domain.Domain)
+	fmt.Fprintf(&bindBuilder, "$TTL 3600\n\n")
+	fmt.Fprintf(&bindBuilder, "; Inbound Mail Routing\n")
+	fmt.Fprintf(&bindBuilder, "@                     IN  MX    10   %s.\n\n", effectiveMailHostname)
+	fmt.Fprintf(&bindBuilder, "; Mail Server Address\n")
+	fmt.Fprintf(&bindBuilder, "mail                  IN  A          %s\n\n", serverIP)
+	fmt.Fprintf(&bindBuilder, "; SPF (Sender Policy Framework - RFC 7208)\n")
+	fmt.Fprintf(&bindBuilder, "@                     IN  TXT        \"v=spf1 mx ip4:%s ~all\"\n\n", serverIP)
+	fmt.Fprintf(&bindBuilder, "; DKIM (DomainKeys Identified Mail - RFC 6376, 2048-bit RSA)\n")
+	fmt.Fprintf(&bindBuilder, "%-21s IN  TXT        \"%s\"\n\n", fmt.Sprintf("%s._domainkey", selector), dkimPub)
+	fmt.Fprintf(&bindBuilder, "; DMARC (Email Alignment Policy - RFC 7489)\n")
+	fmt.Fprintf(&bindBuilder, "_dmarc                IN  TXT        \"v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s\"\n\n", domain.Domain)
+	fmt.Fprintf(&bindBuilder, "; Email Client Auto-Discovery\n")
+	fmt.Fprintf(&bindBuilder, "autoconfig            IN  CNAME      %s.\n", effectiveMailHostname)
+	fmt.Fprintf(&bindBuilder, "autodiscover          IN  CNAME      %s.\n", effectiveMailHostname)
+
+	// Cloudflare JSON Format
+	cloudflareRecords := []map[string]any{
+		{"type": "MX", "name": "@", "content": effectiveMailHostname, "ttl": 1, "priority": 10, "proxied": false, "comment": "Hostvra Inbound Mail"},
+		{"type": "A", "name": "mail", "content": serverIP, "ttl": 1, "proxied": false, "comment": "Hostvra Mail Server"},
+		{"type": "TXT", "name": "@", "content": fmt.Sprintf("v=spf1 mx ip4:%s ~all", serverIP), "ttl": 1, "proxied": false, "comment": "Hostvra SPF Record"},
+		{"type": "TXT", "name": fmt.Sprintf("%s._domainkey", selector), "content": dkimPub, "ttl": 1, "proxied": false, "comment": "Hostvra DKIM 2048-bit Key"},
+		{"type": "TXT", "name": "_dmarc", "content": fmt.Sprintf("v=DMARC1; p=quarantine; sp=quarantine; rua=mailto:dmarc@%s", domain.Domain), "ttl": 1, "proxied": false, "comment": "Hostvra DMARC Policy"},
+		{"type": "CNAME", "name": "autoconfig", "content": effectiveMailHostname, "ttl": 1, "proxied": false, "comment": "Thunderbird Autoconfig"},
+		{"type": "CNAME", "name": "autodiscover", "content": effectiveMailHostname, "ttl": 1, "proxied": false, "comment": "Outlook Autodiscover"},
+	}
+
+	canAutoFix := false
+	if h.dns != nil {
+		if _, err := h.dns.GetZoneByDomain(r.Context(), domain.OrganizationID, domain.Domain); err == nil {
+			canAutoFix = true
+		}
+	}
+
+	wizardData := map[string]any{
+		"domain_id":          domain.ID,
+		"domain":             domain.Domain,
+		"mail_hostname":      effectiveMailHostname,
+		"server_ip":          serverIP,
+		"selector":           selector,
+		"is_dns_verified":    domain.IsDNSVerified,
+		"overall_score":      auditReport.OverallScore,
+		"rating":             auditReport.Rating,
+		"audit":              auditReport,
+		"records":            records,
+		"rbl_check":          auditReport.RBL,
+		"bind_zone_export":   bindBuilder.String(),
+		"cloudflare_records": cloudflareRecords,
+		"can_auto_fix":       canAutoFix,
+		"checked_at":         time.Now().UTC(),
+	}
+
+	response.JSON(w, http.StatusOK, wizardData, nil)
+}
+
+// AutoFixDomainDNS automatically configures all required email DNS records in the local DNS zone
+func (h *EmailHandler) AutoFixDomainDNS(w http.ResponseWriter, r *http.Request) {
+	domainID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid domain UUID", nil, "")
+		return
+	}
+
+	domain, err := h.store.GetEmailDomainByID(r.Context(), domainID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+		return
+	}
+
+	if err := h.verifyDomainOwnership(r, domain); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	if h.dns == nil {
+		response.Error(w, http.StatusServiceUnavailable, "DNS_SERVICE_UNAVAILABLE", "Internal DNS management service is not initialized", nil, "")
+		return
+	}
+
+	serverIP, err := h.resolvePublicMailServerIP(r.Context(), domain.ServerID, domain.MailServerID)
+	if err != nil || !iputil.IsPublicIPv4(serverIP) {
+		response.Error(w, http.StatusUnprocessableEntity, "NO_PUBLIC_IP", "No valid public IPv4 address detected for mail server.", nil, "")
+		return
+	}
+
+	mailHostname := domain.MailHostname
+	if mailHostname == "" {
+		mailHostname = "mail." + domain.Domain
+	}
+	selector := domain.DKIMSelector
+	if selector == "" {
+		selector = "default"
+	}
+
+	dkimKey, _ := h.store.GetEmailDKIMKeyByDomain(r.Context(), domain.ID)
+	dkimPub := ""
+	if dkimKey != nil && dkimKey.PublicKeyDNS != "" {
+		dkimPub = dkimKey.PublicKeyDNS
+	} else {
+		if newKey, err := dkim.GenerateDKIMKey(domain.Domain, selector, 2048); err == nil {
+			_ = dkim.SaveDKIMKey("/var/lib/hostvra/dkim", newKey)
+			newDKIM := &store.EmailDKIMKey{
+				ID:            uuid.New(),
+				DomainID:      domain.ID,
+				Selector:      selector,
+				PrivateKeyPEM: newKey.PrivateKeyPEM,
+				PublicKeyDNS:  newKey.PublicKeyDNS,
+				KeySize:       2048,
+			}
+			_ = h.store.SaveEmailDKIMKey(r.Context(), newDKIM)
+			dkimPub = newKey.PublicKeyDNS
+		}
+	}
+
+	// Auto configure records in internal DNS
+	if err := h.dns.ConfigureEmailDNS(r.Context(), domain.OrganizationID, domain.Domain, mailHostname, serverIP, selector, dkimPub); err != nil {
+		response.Error(w, http.StatusInternalServerError, "AUTO_FIX_FAILED", fmt.Sprintf("Failed to auto-configure DNS records: %v", err), nil, "")
+		return
+	}
+
+	// Mark domain verified in database
+	_ = h.store.UpdateEmailDomainDNSVerified(r.Context(), domain.ID, true)
+	domain.IsDNSVerified = true
+
+	if h.audit != nil {
+		h.audit.Log(r.Context(), r, "email.domain.dns_autofixed", "domain", domain.ID.String(), "success", "", map[string]interface{}{
+			"domain":    domain.Domain,
+			"server_ip": serverIP,
+		})
+	}
+
+	response.JSON(w, http.StatusOK, map[string]any{
+		"success":         true,
+		"message":         "All required email DNS records (MX, A, SPF, DKIM, DMARC) have been automatically configured in your DNS zone.",
+		"domain":          domain.Domain,
+		"is_dns_verified": true,
+	}, nil)
+}
+

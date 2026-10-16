@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,33 +35,52 @@ type Deduction struct {
 	Remediation string `json:"remediation"`
 }
 
+type RBLCheckEntry struct {
+	RBLName     string `json:"rbl_name"`
+	Host        string `json:"host"`
+	Listed      bool   `json:"listed"`
+	Response    string `json:"response,omitempty"`
+	Description string `json:"description"`
+}
+
+type RBLCheckResult struct {
+	IP           string          `json:"ip"`
+	Status       string          `json:"status"` // clean, warning, listed
+	TotalChecked int             `json:"total_checked"`
+	CleanCount   int             `json:"clean_count"`
+	ListedCount  int             `json:"listed_count"`
+	Entries      []RBLCheckEntry `json:"entries"`
+	CheckedAt    time.Time       `json:"checked_at"`
+}
+
 type HealthAudit struct {
-	Score             int         `json:"score"`
-	OverallScore      int         `json:"overall_score"`
-	Rating            string      `json:"rating"`
-	Domain            string      `json:"domain"`
-	MailHostname      string      `json:"mail_hostname"`
-	ServerIP          string      `json:"server_ip"`
-	MXValid           bool        `json:"mx_valid"`
-	SPFValid          bool        `json:"spf_valid"`
-	DKIMValid         bool        `json:"dkim_valid"`
-	DMARCValid        bool        `json:"dmarc_valid"`
-	PTRValid          bool        `json:"ptr_valid"`
-	FCrDNSValid       bool        `json:"fcrdns_valid"`
-	TLSValid          bool        `json:"tls_valid"`
-	OpenRelayRejected bool        `json:"open_relay_rejected"`
-	MX                CheckResult `json:"mx"`
-	SPF               CheckResult `json:"spf"`
-	DKIM              CheckResult `json:"dkim"`
-	DMARC             CheckResult `json:"dmarc"`
-	ForwardDNS        CheckResult `json:"forward_dns"`
-	ReverseDNS        CheckResult `json:"reverse_dns"`
-	TLS               CheckResult `json:"tls"`
-	OpenRelay         CheckResult `json:"open_relay"`
-	Checks            []CheckItem `json:"checks"`
-	Deductions        []Deduction `json:"deductions"`
-	Recommendations   []string    `json:"recommendations"`
-	AuditedAt         time.Time   `json:"audited_at"`
+	Score             int             `json:"score"`
+	OverallScore      int             `json:"overall_score"`
+	Rating            string          `json:"rating"`
+	Domain            string          `json:"domain"`
+	MailHostname      string          `json:"mail_hostname"`
+	ServerIP          string          `json:"server_ip"`
+	MXValid           bool            `json:"mx_valid"`
+	SPFValid          bool            `json:"spf_valid"`
+	DKIMValid         bool            `json:"dkim_valid"`
+	DMARCValid        bool            `json:"dmarc_valid"`
+	PTRValid          bool            `json:"ptr_valid"`
+	FCrDNSValid       bool            `json:"fcrdns_valid"`
+	TLSValid          bool            `json:"tls_valid"`
+	OpenRelayRejected bool            `json:"open_relay_rejected"`
+	MX                CheckResult     `json:"mx"`
+	SPF               CheckResult     `json:"spf"`
+	DKIM              CheckResult     `json:"dkim"`
+	DMARC             CheckResult     `json:"dmarc"`
+	ForwardDNS        CheckResult     `json:"forward_dns"`
+	ReverseDNS        CheckResult     `json:"reverse_dns"`
+	TLS               CheckResult     `json:"tls"`
+	OpenRelay         CheckResult     `json:"open_relay"`
+	RBL               *RBLCheckResult `json:"rbl,omitempty"`
+	Checks            []CheckItem     `json:"checks"`
+	Deductions        []Deduction     `json:"deductions"`
+	Recommendations   []string        `json:"recommendations"`
+	AuditedAt         time.Time       `json:"audited_at"`
 }
 
 // AuditDomain checks live DNS and MTA configuration for email deliverability
@@ -411,6 +431,7 @@ func AuditDomain(ctx context.Context, domain, selector, serverIP string) *Health
 		})
 	}
 
+	audit.RBL = CheckIPBlacklist(ctx, serverIP)
 	populateSummaryAndChecks(audit, domain, mailHostname, serverIP, selector)
 	return audit
 }
@@ -786,6 +807,7 @@ func AuditDomainDNSWithExpected(ctx context.Context, domain, selector, serverIP,
 		}
 	}
 
+	audit.RBL = CheckIPBlacklist(ctx, serverIP)
 	populateSummaryAndChecks(audit, domain, mailHostname, serverIP, selector)
 	return audit
 }
@@ -796,6 +818,21 @@ func AuditDomainDNSOnly(ctx context.Context, domain, selector, serverIP string) 
 }
 
 func populateSummaryAndChecks(audit *HealthAudit, domain, mailHostname, serverIP, selector string) {
+	if audit.RBL != nil && audit.RBL.ListedCount > 0 {
+		points := audit.RBL.ListedCount * 15
+		if points > 40 {
+			points = 40
+		}
+		audit.Deductions = append(audit.Deductions, Deduction{
+			Item:        "RBL IP Blacklist Listing",
+			Points:      points,
+			Reason:      fmt.Sprintf("Server IP %s is actively listed on %d email blacklist(s). Outbound emails will likely be refused or quarantined.", serverIP, audit.RBL.ListedCount),
+			FixHint:     "Check mail queue for compromised mailboxes, halt unauthorized traffic, and request delisting.",
+			Remediation: "Delist from RBLs and enforce mailbox rate limits.",
+		})
+		audit.Recommendations = append(audit.Recommendations, fmt.Sprintf("Request delisting for server IP %s from blacklists: check queue for spam.", serverIP))
+	}
+
 	deductionTotal := 0
 	for _, d := range audit.Deductions {
 		deductionTotal += d.Points
@@ -827,6 +864,12 @@ func populateSummaryAndChecks(audit *HealthAudit, domain, mailHostname, serverIP
 		if audit.Deductions[i].Remediation == "" {
 			audit.Deductions[i].Remediation = audit.Deductions[i].FixHint
 		}
+	}
+
+	rblPassed := audit.RBL == nil || audit.RBL.ListedCount == 0
+	rblDetail := "Clean on major DNSBL blacklists."
+	if audit.RBL != nil {
+		rblDetail = fmt.Sprintf("%d/%d RBL providers clean. Status: %s", audit.RBL.CleanCount, audit.RBL.TotalChecked, audit.RBL.Status)
 	}
 
 	audit.Checks = []CheckItem{
@@ -878,5 +921,169 @@ func populateSummaryAndChecks(audit *HealthAudit, domain, mailHostname, serverIP
 			Detail:      audit.OpenRelay.Details,
 			Remediation: "Enforce smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination in main.cf",
 		},
+		{
+			Name:        "Real-Time RBL IP Blacklist Guard",
+			Passed:      rblPassed,
+			Detail:      rblDetail,
+			Remediation: "Monitor outbound traffic volume and enforce per-mailbox rate limits to prevent IP blacklisting.",
+		},
 	}
 }
+
+// ----------------------------------------------------------------------------
+// REALTIME BLACKHOLE LIST (RBL) DNSBL AUDITOR
+// ----------------------------------------------------------------------------
+
+var StandardRBLs = []struct {
+	Name        string
+	Host        string
+	Description string
+}{
+	{
+		Name:        "Spamhaus ZEN",
+		Host:        "zen.spamhaus.org",
+		Description: "Composite SBL, CSS, XBL, and PBL blocklist",
+	},
+	{
+		Name:        "SpamCop",
+		Host:        "bl.spamcop.net",
+		Description: "SpamCop Blocking List (SCBL) tracking spam source IPs",
+	},
+	{
+		Name:        "Barracuda BRBL",
+		Host:        "b.barracudacentral.org",
+		Description: "Barracuda Reputation Network real-time blacklist",
+	},
+	{
+		Name:        "SORBS DNSBL",
+		Host:        "dnsbl.sorbs.net",
+		Description: "Spam and Open Relay Blocking System aggregate list",
+	},
+	{
+		Name:        "Mailspike",
+		Host:        "bl.mailspike.net",
+		Description: "Mailspike real-time IP reputation and spam detection",
+	},
+}
+
+func isPublicRBLTestable(ip net.IP) bool {
+	if ip == nil || ip.To4() == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+		return false
+	}
+	// Exclude RFC 5737 and RFC 6598 test / documentation / carrier-grade ranges
+	ip4 := ip.To4()
+	if ip4[0] == 192 && ip4[1] == 0 && ip4[2] == 2 {
+		return false
+	}
+	if ip4[0] == 198 && ip4[1] == 51 && ip4[2] == 100 {
+		return false
+	}
+	if ip4[0] == 203 && ip4[1] == 0 && ip4[2] == 113 {
+		return false
+	}
+	if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+		return false
+	}
+	return true
+}
+
+// CheckIPBlacklist checks if an IPv4 address is listed on major RBL blacklists
+func CheckIPBlacklist(ctx context.Context, ip string) *RBLCheckResult {
+	ip = strings.TrimSpace(ip)
+	result := &RBLCheckResult{
+		IP:           ip,
+		Status:       "clean",
+		TotalChecked: len(StandardRBLs),
+		CleanCount:   len(StandardRBLs),
+		ListedCount:  0,
+		Entries:      make([]RBLCheckEntry, 0, len(StandardRBLs)),
+		CheckedAt:    time.Now().UTC(),
+	}
+
+	parsedIP := net.ParseIP(ip)
+	if !isPublicRBLTestable(parsedIP) {
+		for _, rbl := range StandardRBLs {
+			result.Entries = append(result.Entries, RBLCheckEntry{
+				RBLName:     rbl.Name,
+				Host:        rbl.Host,
+				Listed:      false,
+				Response:    "Clean (Local/Private/Test IP)",
+				Description: rbl.Description,
+			})
+		}
+		return result
+	}
+
+	parts := strings.Split(ip, ".")
+	if len(parts) != 4 {
+		return result
+	}
+	reversedIP := fmt.Sprintf("%s.%s.%s.%s", parts[3], parts[2], parts[1], parts[0])
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	result.Entries = make([]RBLCheckEntry, len(StandardRBLs))
+
+	for i, rbl := range StandardRBLs {
+		wg.Add(1)
+		go func(idx int, rblDef struct{ Name, Host, Description string }) {
+			defer wg.Done()
+
+			queryHost := fmt.Sprintf("%s.%s", reversedIP, rblDef.Host)
+			queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+
+			resolver := net.DefaultResolver
+			addrs, err := resolver.LookupHost(queryCtx, queryHost)
+
+			entry := RBLCheckEntry{
+				RBLName:     rblDef.Name,
+				Host:        rblDef.Host,
+				Listed:      false,
+				Description: rblDef.Description,
+			}
+
+			if err == nil && len(addrs) > 0 {
+				isListed := false
+				for _, addr := range addrs {
+					if strings.HasPrefix(addr, "127.0.0.") {
+						isListed = true
+						entry.Response = addr
+						break
+					}
+				}
+				if isListed {
+					entry.Listed = true
+				} else {
+					entry.Response = "Clean"
+				}
+			} else {
+				entry.Response = "Clean (NXDOMAIN)"
+			}
+
+			mu.Lock()
+			result.Entries[idx] = entry
+			if entry.Listed {
+				result.ListedCount++
+				result.CleanCount--
+			}
+			mu.Unlock()
+		}(i, rbl)
+	}
+
+	wg.Wait()
+
+	if result.ListedCount == 0 {
+		result.Status = "clean"
+	} else if result.ListedCount == 1 {
+		result.Status = "warning"
+	} else {
+		result.Status = "listed"
+	}
+
+	return result
+}
+

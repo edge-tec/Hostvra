@@ -351,3 +351,256 @@ func (c *DeliveryController) updateRemaining(s *DomainRateState, now time.Time) 
 		s.RemainingSeconds = 0
 	}
 }
+
+// ----------------------------------------------------------------------------
+// MAILBOX-LEVEL OUTBOUND RATE LIMITER
+// ----------------------------------------------------------------------------
+
+// MailboxUsage tracks outbound counters for a single mailbox
+type MailboxUsage struct {
+	Mailbox         string    `json:"mailbox"`
+	HourWindowStart time.Time `json:"hour_window_start"`
+	DayWindowStart  time.Time `json:"day_window_start"`
+	HourSent        int       `json:"hour_sent"`
+	DaySent         int       `json:"day_sent"`
+	LastSentAt      time.Time `json:"last_sent_at"`
+}
+
+// MailboxUsageStats provides calculated limits and remaining capacity
+type MailboxUsageStats struct {
+	Mailbox       string    `json:"mailbox"`
+	HourSent      int       `json:"hour_sent"`
+	DaySent       int       `json:"day_sent"`
+	HourLimit     int       `json:"hour_limit"`
+	DayLimit      int       `json:"day_limit"`
+	HourRemaining int       `json:"hour_remaining"`
+	DayRemaining  int       `json:"day_remaining"`
+	IsRateLimited bool      `json:"is_rate_limited"`
+	LimitReason   string    `json:"limit_reason,omitempty"`
+	RetryAfterSec int       `json:"retry_after_sec"`
+	ResetHourAt   time.Time `json:"reset_hour_at"`
+	ResetDayAt    time.Time `json:"reset_day_at"`
+}
+
+// MailboxRateLimiter controls outbound sending volumes per mailbox
+type MailboxRateLimiter struct {
+	mu    sync.RWMutex
+	usage map[string]*MailboxUsage
+}
+
+var (
+	globalMailboxLimiter     *MailboxRateLimiter
+	globalMailboxLimiterOnce sync.Once
+)
+
+// GetGlobalMailboxRateLimiter returns the process singleton mailbox rate limiter
+func GetGlobalMailboxRateLimiter() *MailboxRateLimiter {
+	globalMailboxLimiterOnce.Do(func() {
+		globalMailboxLimiter = NewMailboxRateLimiter()
+	})
+	return globalMailboxLimiter
+}
+
+// NewMailboxRateLimiter creates a new thread-safe mailbox rate limiter
+func NewMailboxRateLimiter() *MailboxRateLimiter {
+	return &MailboxRateLimiter{
+		usage: make(map[string]*MailboxUsage),
+	}
+}
+
+// CanMailboxSend checks whether a mailbox is within its hourly and daily quotas
+func (m *MailboxRateLimiter) CanMailboxSend(mailbox string, limitHour, limitDay int) (allowed bool, currentHour int, currentDay int, retryAfterSec int, reason string) {
+	if limitHour <= 0 {
+		limitHour = 100
+	}
+	if limitDay <= 0 {
+		limitDay = 1000
+	}
+
+	key := strings.ToLower(strings.TrimSpace(mailbox))
+	if key == "" {
+		return true, 0, 0, 0, ""
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	u, exists := m.usage[key]
+	if !exists {
+		m.usage[key] = &MailboxUsage{
+			Mailbox:         key,
+			HourWindowStart: now,
+			DayWindowStart:  now,
+			HourSent:        0,
+			DaySent:         0,
+			LastSentAt:      now,
+		}
+		return true, 0, 0, 0, ""
+	}
+
+	m.rollWindows(u, now)
+
+	resetHourAt := u.HourWindowStart.Add(time.Hour)
+	resetDayAt := u.DayWindowStart.Add(24 * time.Hour)
+
+	if u.HourSent >= limitHour {
+		remSec := int(resetHourAt.Sub(now).Seconds())
+		if remSec < 1 {
+			remSec = 1
+		}
+		return false, u.HourSent, u.DaySent, remSec, fmt.Sprintf("Hourly outbound rate limit exceeded (%d/%d sent). Reset in %ds", u.HourSent, limitHour, remSec)
+	}
+
+	if u.DaySent >= limitDay {
+		remSec := int(resetDayAt.Sub(now).Seconds())
+		if remSec < 1 {
+			remSec = 1
+		}
+		return false, u.HourSent, u.DaySent, remSec, fmt.Sprintf("Daily outbound rate limit exceeded (%d/%d sent). Reset in %ds", u.DaySent, limitDay, remSec)
+	}
+
+	return true, u.HourSent, u.DaySent, 0, ""
+}
+
+// RecordMailboxSent records an outbound email sent by a mailbox
+func (m *MailboxRateLimiter) RecordMailboxSent(mailbox string) {
+	key := strings.ToLower(strings.TrimSpace(mailbox))
+	if key == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	u, exists := m.usage[key]
+	if !exists {
+		u = &MailboxUsage{
+			Mailbox:         key,
+			HourWindowStart: now,
+			DayWindowStart:  now,
+			HourSent:        1,
+			DaySent:         1,
+			LastSentAt:      now,
+		}
+		m.usage[key] = u
+		return
+	}
+
+	m.rollWindows(u, now)
+	u.HourSent++
+	u.DaySent++
+	u.LastSentAt = now
+}
+
+// GetMailboxUsage returns current usage counters and calculated limits
+func (m *MailboxRateLimiter) GetMailboxUsage(mailbox string, limitHour, limitDay int) *MailboxUsageStats {
+	if limitHour <= 0 {
+		limitHour = 100
+	}
+	if limitDay <= 0 {
+		limitDay = 1000
+	}
+
+	key := strings.ToLower(strings.TrimSpace(mailbox))
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	u, exists := m.usage[key]
+	if !exists {
+		u = &MailboxUsage{
+			Mailbox:         key,
+			HourWindowStart: now,
+			DayWindowStart:  now,
+			HourSent:        0,
+			DaySent:         0,
+			LastSentAt:      now,
+		}
+		m.usage[key] = u
+	} else {
+		m.rollWindows(u, now)
+	}
+
+	resetHourAt := u.HourWindowStart.Add(time.Hour)
+	resetDayAt := u.DayWindowStart.Add(24 * time.Hour)
+
+	hourRem := limitHour - u.HourSent
+	if hourRem < 0 {
+		hourRem = 0
+	}
+	dayRem := limitDay - u.DaySent
+	if dayRem < 0 {
+		dayRem = 0
+	}
+
+	isLimited := false
+	reason := ""
+	retryAfter := 0
+
+	if u.HourSent >= limitHour {
+		isLimited = true
+		retryAfter = int(resetHourAt.Sub(now).Seconds())
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		reason = fmt.Sprintf("Hourly outbound rate limit exceeded (%d/%d sent)", u.HourSent, limitHour)
+	} else if u.DaySent >= limitDay {
+		isLimited = true
+		retryAfter = int(resetDayAt.Sub(now).Seconds())
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		reason = fmt.Sprintf("Daily outbound rate limit exceeded (%d/%d sent)", u.DaySent, limitDay)
+	}
+
+	return &MailboxUsageStats{
+		Mailbox:       key,
+		HourSent:      u.HourSent,
+		DaySent:       u.DaySent,
+		HourLimit:     limitHour,
+		DayLimit:      limitDay,
+		HourRemaining: hourRem,
+		DayRemaining:  dayRem,
+		IsRateLimited: isLimited,
+		LimitReason:   reason,
+		RetryAfterSec: retryAfter,
+		ResetHourAt:   resetHourAt,
+		ResetDayAt:    resetDayAt,
+	}
+}
+
+// ResetMailboxLimit resets usage counters for a specific mailbox
+func (m *MailboxRateLimiter) ResetMailboxLimit(mailbox string) {
+	key := strings.ToLower(strings.TrimSpace(mailbox))
+	if key == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now().UTC()
+	m.usage[key] = &MailboxUsage{
+		Mailbox:         key,
+		HourWindowStart: now,
+		DayWindowStart:  now,
+		HourSent:        0,
+		DaySent:         0,
+		LastSentAt:      now,
+	}
+}
+
+func (m *MailboxRateLimiter) rollWindows(u *MailboxUsage, now time.Time) {
+	if now.Sub(u.HourWindowStart) >= time.Hour {
+		u.HourWindowStart = now
+		u.HourSent = 0
+	}
+	if now.Sub(u.DayWindowStart) >= 24*time.Hour {
+		u.DayWindowStart = now
+		u.DaySent = 0
+	}
+}
+

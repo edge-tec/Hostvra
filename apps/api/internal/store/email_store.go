@@ -365,6 +365,12 @@ func (m *MemoryStore) CreateEmailMailbox(ctx context.Context, mb *EmailMailbox) 
 	if mb.QuotaBytes == 0 {
 		mb.QuotaBytes = 5368709120 // 5GB default
 	}
+	if mb.RateLimitPerHour == 0 {
+		mb.RateLimitPerHour = 100
+	}
+	if mb.RateLimitPerDay == 0 {
+		mb.RateLimitPerDay = 1000
+	}
 
 	m.emailMailboxes[mb.ID] = mb
 	m.saveToDiskLocked()
@@ -432,6 +438,18 @@ func (m *MemoryStore) UpdateEmailMailbox(ctx context.Context, mb *EmailMailbox) 
 	// Preserve password hash if empty in update
 	if mb.PasswordHash == "" {
 		mb.PasswordHash = existing.PasswordHash
+	}
+	if mb.RateLimitPerHour <= 0 {
+		mb.RateLimitPerHour = existing.RateLimitPerHour
+	}
+	if mb.RateLimitPerHour <= 0 {
+		mb.RateLimitPerHour = 100
+	}
+	if mb.RateLimitPerDay <= 0 {
+		mb.RateLimitPerDay = existing.RateLimitPerDay
+	}
+	if mb.RateLimitPerDay <= 0 {
+		mb.RateLimitPerDay = 1000
 	}
 	m.emailMailboxes[mb.ID] = mb
 	m.saveToDiskLocked()
@@ -1788,8 +1806,9 @@ func (p *PostgresStore) CreateEmailMailbox(ctx context.Context, mb *EmailMailbox
 	query := `
 		INSERT INTO email_mailboxes (
 			id, domain_id, server_id, local_part, email, password_hash,
-			name, quota_bytes, used_bytes, is_active, is_suspended
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			name, quota_bytes, used_bytes, is_active, is_suspended,
+			rate_limit_per_hour, rate_limit_per_day
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING created_at, updated_at
 	`
 	if mb.ID == uuid.Nil {
@@ -1798,11 +1817,18 @@ func (p *PostgresStore) CreateEmailMailbox(ctx context.Context, mb *EmailMailbox
 	if mb.QuotaBytes == 0 {
 		mb.QuotaBytes = 5368709120
 	}
+	if mb.RateLimitPerHour == 0 {
+		mb.RateLimitPerHour = 100
+	}
+	if mb.RateLimitPerDay == 0 {
+		mb.RateLimitPerDay = 1000
+	}
 	mb.IsActive = true
 
 	return p.db.QueryRowContext(ctx, query,
 		mb.ID, mb.DomainID, mb.ServerID, mb.LocalPart, mb.Email, mb.PasswordHash,
 		mb.Name, mb.QuotaBytes, mb.UsedBytes, mb.IsActive, mb.IsSuspended,
+		mb.RateLimitPerHour, mb.RateLimitPerDay,
 	).Scan(&mb.CreatedAt, &mb.UpdatedAt)
 }
 
@@ -1810,6 +1836,7 @@ func (p *PostgresStore) GetEmailMailboxByID(ctx context.Context, id uuid.UUID) (
 	query := `
 		SELECT id, domain_id, server_id, local_part, email, password_hash,
 		       name, quota_bytes, used_bytes, is_active, is_suspended,
+		       COALESCE(rate_limit_per_hour, 100), COALESCE(rate_limit_per_day, 1000),
 		       created_at, updated_at, deleted_at
 		FROM email_mailboxes
 		WHERE id = $1 AND deleted_at IS NULL
@@ -1818,6 +1845,7 @@ func (p *PostgresStore) GetEmailMailboxByID(ctx context.Context, id uuid.UUID) (
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
 		&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash,
 		&mb.Name, &mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
+		&mb.RateLimitPerHour, &mb.RateLimitPerDay,
 		&mb.CreatedAt, &mb.UpdatedAt, &mb.DeletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1830,6 +1858,7 @@ func (p *PostgresStore) GetEmailMailboxByEmail(ctx context.Context, email string
 	query := `
 		SELECT id, domain_id, server_id, local_part, email, password_hash,
 		       name, quota_bytes, used_bytes, is_active, is_suspended,
+		       COALESCE(rate_limit_per_hour, 100), COALESCE(rate_limit_per_day, 1000),
 		       created_at, updated_at, deleted_at
 		FROM email_mailboxes
 		WHERE email = $1 AND deleted_at IS NULL
@@ -1838,6 +1867,7 @@ func (p *PostgresStore) GetEmailMailboxByEmail(ctx context.Context, email string
 	err := p.db.QueryRowContext(ctx, query, email).Scan(
 		&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash,
 		&mb.Name, &mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
+		&mb.RateLimitPerHour, &mb.RateLimitPerDay,
 		&mb.CreatedAt, &mb.UpdatedAt, &mb.DeletedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1850,6 +1880,7 @@ func (p *PostgresStore) ListEmailMailboxesByDomain(ctx context.Context, domainID
 	query := `
 		SELECT id, domain_id, server_id, local_part, email, password_hash, name,
 		       quota_bytes, used_bytes, is_active, is_suspended,
+		       COALESCE(rate_limit_per_hour, 100), COALESCE(rate_limit_per_day, 1000),
 		       created_at, updated_at
 		FROM email_mailboxes
 		WHERE domain_id = $1 AND deleted_at IS NULL
@@ -1867,6 +1898,7 @@ func (p *PostgresStore) ListEmailMailboxesByDomain(ctx context.Context, domainID
 		err := rows.Scan(
 			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash, &mb.Name,
 			&mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
+			&mb.RateLimitPerHour, &mb.RateLimitPerDay,
 			&mb.CreatedAt, &mb.UpdatedAt,
 		)
 		if err != nil {
@@ -1881,6 +1913,7 @@ func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID
 	query := `
 		SELECT id, domain_id, server_id, local_part, email, password_hash, name,
 		       quota_bytes, used_bytes, is_active, is_suspended,
+		       COALESCE(rate_limit_per_hour, 100), COALESCE(rate_limit_per_day, 1000),
 		       created_at, updated_at
 		FROM email_mailboxes
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
@@ -1898,6 +1931,7 @@ func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID
 		err := rows.Scan(
 			&mb.ID, &mb.DomainID, &mb.ServerID, &mb.LocalPart, &mb.Email, &mb.PasswordHash, &mb.Name,
 			&mb.QuotaBytes, &mb.UsedBytes, &mb.IsActive, &mb.IsSuspended,
+			&mb.RateLimitPerHour, &mb.RateLimitPerDay,
 			&mb.CreatedAt, &mb.UpdatedAt,
 		)
 		if err != nil {
@@ -1909,14 +1943,22 @@ func (p *PostgresStore) ListEmailMailboxesByServer(ctx context.Context, serverID
 }
 
 func (p *PostgresStore) UpdateEmailMailbox(ctx context.Context, mb *EmailMailbox) error {
+	if mb.RateLimitPerHour <= 0 {
+		mb.RateLimitPerHour = 100
+	}
+	if mb.RateLimitPerDay <= 0 {
+		mb.RateLimitPerDay = 1000
+	}
 	query := `
 		UPDATE email_mailboxes
-		SET name = $2, quota_bytes = $3, is_active = $4, is_suspended = $5, updated_at = NOW()
+		SET name = $2, quota_bytes = $3, is_active = $4, is_suspended = $5,
+		    rate_limit_per_hour = $6, rate_limit_per_day = $7, updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
 		RETURNING updated_at
 	`
 	return p.db.QueryRowContext(ctx, query,
 		mb.ID, mb.Name, mb.QuotaBytes, mb.IsActive, mb.IsSuspended,
+		mb.RateLimitPerHour, mb.RateLimitPerDay,
 	).Scan(&mb.UpdatedAt)
 }
 

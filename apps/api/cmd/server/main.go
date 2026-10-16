@@ -879,6 +879,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/verify-dns", emailHandler.VerifyDomainDNS)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/domains/{id}/dns/verify", emailHandler.VerifyDomainDNS)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/health", emailHandler.GetDomainHealth)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/domains/{id}/dns-wizard", emailHandler.GetDNSWizardData)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/domains/{id}/dns-wizard/auto-fix", emailHandler.AutoFixDomainDNS)
 
 				// Mailboxes
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes", emailHandler.ListMailboxes)
@@ -890,6 +892,9 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/mailboxes/{id}", emailHandler.DeleteMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/mailboxes/{id}/test", emailHandler.TestMailbox)
 				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/toggle-suspend", emailHandler.ToggleMailboxSuspended)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/mailboxes/{id}/rate-limit", emailHandler.GetMailboxRateLimit)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Put("/mailboxes/{id}/rate-limit", emailHandler.UpdateMailboxRateLimit)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/mailboxes/{id}/rate-limit/reset", emailHandler.ResetMailboxRateLimit)
 
 				// Client Setup Profiles (Thunderbird Autoconfig, Outlook Autodiscover, Apple MobileConfig)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/autoconfig", emailHandler.GetThunderbirdAutoconfig)

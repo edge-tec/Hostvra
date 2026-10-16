@@ -95,11 +95,13 @@ type EmailMailbox struct {
 	Name         string     `json:"name"`          // Display name e.g. "Info Team"
 	QuotaBytes   int64      `json:"quota_bytes"`   // e.g. 5368709120 (5GB)
 	UsedBytes    int64      `json:"used_bytes"`
-	IsActive     bool       `json:"is_active"`
-	IsSuspended  bool       `json:"is_suspended"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
+	IsActive         bool       `json:"is_active"`
+	IsSuspended      bool       `json:"is_suspended"`
+	RateLimitPerHour int        `json:"rate_limit_per_hour"`
+	RateLimitPerDay  int        `json:"rate_limit_per_day"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	DeletedAt        *time.Time `json:"deleted_at,omitempty"`
 }
 
 // EmailAlias maps an address to another destination address

@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
@@ -18,6 +20,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/dns"
 	"hostvra/api/internal/store"
 )
 
@@ -204,4 +207,213 @@ func TestDeleteQueueItemAndClearQueue(t *testing.T) {
 		t.Errorf("expected 200 from ClearQueue, got %d: %s", clearW.Code, clearW.Body.String())
 	}
 }
+
+func TestMailboxRateLimitAPI(t *testing.T) {
+	handler, memStore := setupTestEmailHandlerWithStore(t)
+	ctx := adminContext()
+	orgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	serverID := uuid.New()
+
+	// 1. Setup Domain & Mailbox
+	dom := &store.EmailDomain{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		Domain:         "example-limits.com",
+		MailHostname:   "mail.example-limits.com",
+		Status:         "active",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	_ = memStore.CreateEmailDomain(ctx, dom)
+
+	mb := &store.EmailMailbox{
+		ID:               uuid.New(),
+		DomainID:         dom.ID,
+		ServerID:         serverID,
+		LocalPart:        "support",
+		Email:            "support@example-limits.com",
+		Name:             "Support Team",
+		QuotaBytes:       5368709120,
+		RateLimitPerHour: 100,
+		RateLimitPerDay:  1000,
+		IsActive:         true,
+	}
+	_ = memStore.CreateEmailMailbox(ctx, mb)
+
+	// 2. GET /mailboxes/{id}/rate-limit
+	getReq := httptest.NewRequest("GET", "/api/v1/email/mailboxes/"+mb.ID.String()+"/rate-limit", nil)
+	getReq = getReq.WithContext(ctx)
+	// chi routing params helper
+	rCtx := chi.NewRouteContext()
+	rCtx.URLParams.Add("id", mb.ID.String())
+	getReq = getReq.WithContext(context.WithValue(getReq.Context(), chi.RouteCtxKey, rCtx))
+
+	getW := httptest.NewRecorder()
+	handler.GetMailboxRateLimit(getW, getReq)
+
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GetMailboxRateLimit, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var getRes map[string]any
+	_ = json.Unmarshal(getW.Body.Bytes(), &getRes)
+	data := getRes["data"].(map[string]any)
+	if data["hour_limit"] != float64(100) || data["day_limit"] != float64(1000) {
+		t.Errorf("unexpected limits: %+v", data)
+	}
+
+	// 3. PUT /mailboxes/{id}/rate-limit (update to 250/hr, 2500/day)
+	updatePayload := []byte(`{"rate_limit_per_hour": 250, "rate_limit_per_day": 2500}`)
+	putReq := httptest.NewRequest("PUT", "/api/v1/email/mailboxes/"+mb.ID.String()+"/rate-limit", bytes.NewReader(updatePayload))
+	putReq = putReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+	putW := httptest.NewRecorder()
+	handler.UpdateMailboxRateLimit(putW, putReq)
+
+	if putW.Code != http.StatusOK {
+		t.Fatalf("expected 200 from UpdateMailboxRateLimit, got %d: %s", putW.Code, putW.Body.String())
+	}
+
+	var putRes map[string]any
+	_ = json.Unmarshal(putW.Body.Bytes(), &putRes)
+	putData := putRes["data"].(map[string]any)
+	if putData["hour_limit"] != float64(250) || putData["day_limit"] != float64(2500) {
+		t.Errorf("expected updated limits 250/2500, got: %+v", putData)
+	}
+
+	// 4. Record sending simulation
+	ratecontrol.GetGlobalMailboxRateLimiter().RecordMailboxSent(mb.Email)
+	ratecontrol.GetGlobalMailboxRateLimiter().RecordMailboxSent(mb.Email)
+
+	// Check usage reflects sends
+	chkReq := httptest.NewRequest("GET", "/api/v1/email/mailboxes/"+mb.ID.String()+"/rate-limit", nil)
+	chkReq = chkReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+	chkW := httptest.NewRecorder()
+	handler.GetMailboxRateLimit(chkW, chkReq)
+	var chkRes map[string]any
+	_ = json.Unmarshal(chkW.Body.Bytes(), &chkRes)
+	chkData := chkRes["data"].(map[string]any)
+	if chkData["hour_sent"] != float64(2) {
+		t.Errorf("expected hour_sent=2, got %v", chkData["hour_sent"])
+	}
+
+	// 5. POST /mailboxes/{id}/rate-limit/reset
+	rstReq := httptest.NewRequest("POST", "/api/v1/email/mailboxes/"+mb.ID.String()+"/rate-limit/reset", nil)
+	rstReq = rstReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+	rstW := httptest.NewRecorder()
+	handler.ResetMailboxRateLimit(rstW, rstReq)
+
+	if rstW.Code != http.StatusOK {
+		t.Fatalf("expected 200 from ResetMailboxRateLimit, got %d: %s", rstW.Code, rstW.Body.String())
+	}
+
+	var rstRes map[string]any
+	_ = json.Unmarshal(rstW.Body.Bytes(), &rstRes)
+	rstData := rstRes["data"].(map[string]any)
+	if rstData["hour_sent"] != float64(0) {
+		t.Errorf("expected hour_sent to reset to 0, got %v", rstData["hour_sent"])
+	}
+}
+
+func TestDNSWizardAPI(t *testing.T) {
+	cfg := &config.Config{
+		JWTSecret: "test-jwt-secret-for-rate-control-tests-32-bytes",
+	}
+	memStore := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditLogger := audit.NewLogger(memStore, logger)
+	dnsService := dns.NewService()
+
+	handler := NewEmailHandler(cfg, memStore, dnsService, auditLogger)
+	ctx := adminContext()
+	orgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	serverID := uuid.New()
+
+	// Mail server with public IP
+	ms := &store.MailServer{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		NodeServerID:   serverID,
+		Name:           "Edge Mail 1",
+		Hostname:       "mail.wizard-test.com",
+		IPv4Address:    "109.199.110.101",
+		Status:         "active",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	_ = memStore.CreateMailServer(ctx, ms)
+
+	dom := &store.EmailDomain{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		MailServerID:   &ms.ID,
+		Domain:         "wizard-test.com",
+		MailHostname:   "mail.wizard-test.com",
+		Status:         "active",
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+	_ = memStore.CreateEmailDomain(ctx, dom)
+
+	// 1. GET /domains/{id}/dns-wizard
+	getReq := httptest.NewRequest("GET", "/api/v1/email/domains/"+dom.ID.String()+"/dns-wizard", nil)
+	rCtx := chi.NewRouteContext()
+	rCtx.URLParams.Add("id", dom.ID.String())
+	getReq = getReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+
+	getW := httptest.NewRecorder()
+	handler.GetDNSWizardData(getW, getReq)
+
+	if getW.Code != http.StatusOK {
+		t.Fatalf("expected 200 from GetDNSWizardData, got %d: %s", getW.Code, getW.Body.String())
+	}
+
+	var res map[string]any
+	_ = json.Unmarshal(getW.Body.Bytes(), &res)
+	data := res["data"].(map[string]any)
+
+	if data["domain"] != "wizard-test.com" {
+		t.Errorf("domain mismatch: %v", data["domain"])
+	}
+	if data["server_ip"] != "109.199.110.101" {
+		t.Errorf("server_ip mismatch: %v", data["server_ip"])
+	}
+
+	// Verify BIND Zone Export is generated
+	bindExport, ok := data["bind_zone_export"].(string)
+	if !ok || !strings.Contains(bindExport, "$ORIGIN wizard-test.com.") || !strings.Contains(bindExport, "v=spf1") {
+		t.Errorf("missing or malformed bind_zone_export: %s", bindExport)
+	}
+
+	// Verify Cloudflare records array is generated
+	cfRecords, ok := data["cloudflare_records"].([]any)
+	if !ok || len(cfRecords) < 5 {
+		t.Errorf("expected at least 5 cloudflare records, got %v", cfRecords)
+	}
+
+	// Verify RBL check result is present
+	rblCheck, ok := data["rbl_check"].(map[string]any)
+	if !ok || rblCheck["status"] == "" {
+		t.Errorf("expected valid rbl_check structure: %+v", data["rbl_check"])
+	}
+
+	// 2. POST /domains/{id}/dns-wizard/auto-fix
+	postReq := httptest.NewRequest("POST", "/api/v1/email/domains/"+dom.ID.String()+"/dns-wizard/auto-fix", nil)
+	postReq = postReq.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rCtx))
+	postW := httptest.NewRecorder()
+
+	handler.AutoFixDomainDNS(postW, postReq)
+	if postW.Code != http.StatusOK {
+		t.Fatalf("expected 200 from AutoFixDomainDNS, got %d: %s", postW.Code, postW.Body.String())
+	}
+
+	var autoFixRes map[string]any
+	_ = json.Unmarshal(postW.Body.Bytes(), &autoFixRes)
+	autoFixData := autoFixRes["data"].(map[string]any)
+	if autoFixData["is_dns_verified"] != true {
+		t.Errorf("expected is_dns_verified=true after auto fix")
+	}
+}
+
 

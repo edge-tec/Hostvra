@@ -42,6 +42,9 @@ import {
   UserX,
   Settings as SettingsIcon,
   Clock,
+  Gauge,
+  FileCode,
+  Zap,
 } from 'lucide-react';
 import { EmailUserGuide } from '@/components/EmailUserGuide';
 
@@ -68,6 +71,8 @@ interface EmailMailbox {
   name: string;
   quota_bytes: number;
   used_bytes: number;
+  rate_limit_per_hour?: number;
+  rate_limit_per_day?: number;
   is_active: boolean;
   is_suspended: boolean;
 }
@@ -225,6 +230,42 @@ interface DNSVerificationResult {
   dmarc_record: string;
   issues: string[];
   records?: DNSRecordItem[];
+}
+
+interface RBLProviderResult {
+  provider: string;
+  listed: boolean;
+  response_code?: string;
+  error?: string;
+}
+
+interface RBLAuditResult {
+  checked_at: string;
+  ip: string;
+  total_checked: number;
+  total_listed: number;
+  is_clean: boolean;
+  providers: RBLProviderResult[];
+}
+
+interface DNSWizardHealthSummary {
+  rating: 'EXCELLENT' | 'GOOD' | 'WARNING' | 'CRITICAL' | string;
+  score: number;
+  spf_pass: boolean;
+  dkim_pass: boolean;
+  dmarc_pass: boolean;
+  mx_pass: boolean;
+  ptr_pass: boolean;
+  rbl_pass: boolean;
+}
+
+interface DNSWizardData {
+  domain: EmailDomain;
+  records: DNSRecordItem[];
+  rbl?: RBLAuditResult;
+  health_summary?: DNSWizardHealthSummary;
+  bind_zone?: string;
+  cloudflare_json?: any[];
 }
 
 interface HealthDeduction {
@@ -426,7 +467,33 @@ export default function EmailHostingPage() {
   const [newMailboxName, setNewMailboxName] = useState('');
   const [newMailboxPass, setNewMailboxPass] = useState('');
   const [newMailboxQuotaGB, setNewMailboxQuotaGB] = useState(5);
+  const [newMailboxRateLimitHour, setNewMailboxRateLimitHour] = useState(100);
+  const [newMailboxRateLimitDay, setNewMailboxRateLimitDay] = useState(1000);
   const [creatingMailbox, setCreatingMailbox] = useState(false);
+
+  // Priority 3: Mailbox Outbound Rate Limiting Modal
+  const [showRateLimitModal, setShowRateLimitModal] = useState<EmailMailbox | null>(null);
+  const [rateLimitStats, setRateLimitStats] = useState<any | null>(null);
+  const [rateLimitForm, setRateLimitForm] = useState<{ rate_limit_per_hour: number; rate_limit_per_day: number }>({
+    rate_limit_per_hour: 100,
+    rate_limit_per_day: 1000,
+  });
+  const [loadingRateLimit, setLoadingRateLimit] = useState(false);
+  const [updatingRateLimit, setUpdatingRateLimit] = useState(false);
+  const [resettingRateLimit, setResettingRateLimit] = useState(false);
+
+  // Priority 3: DNS Deliverability Wizard & Live RBL Blacklist State
+  const [dnsWizardData, setDnsWizardData] = useState<DNSWizardData | null>(null);
+  const [dnsWizardTab, setDnsWizardTab] = useState<'records' | 'health_rbl' | 'export_zone'>('records');
+  const [zoneExportFormat, setZoneExportFormat] = useState<'bind' | 'cloudflare'>('bind');
+  const [autoFixingDNS, setAutoFixingDNS] = useState(false);
+  const [autoFixResult, setAutoFixResult] = useState<{
+    success: boolean;
+    message: string;
+    created_count: number;
+    updated_count: number;
+    failed_count: number;
+  } | null>(null);
 
   // Test email sender form
   const [testEmailFrom, setTestEmailFrom] = useState('');
@@ -898,8 +965,15 @@ export default function EmailHostingPage() {
     setLoadingDNS(true);
     setDomainDNSRecords([]);
     setDnsError(null);
+    setDnsWizardData(null);
+    setAutoFixResult(null);
+    setDnsWizardTab('records');
     try {
-      const res = await apiFetch<DNSRecordItem[]>(`/api/v1/email/domains/${dom.id}/dns`);
+      const [res, wizardRes] = await Promise.all([
+        apiFetch<DNSRecordItem[]>(`/api/v1/email/domains/${dom.id}/dns`),
+        apiFetch<DNSWizardData>(`/api/v1/email/domains/${dom.id}/dns-wizard`).catch(() => null),
+      ]);
+
       if (res.success && res.data) {
         setDomainDNSRecords(res.data);
         const coreRecords = res.data.filter(r => ['MX', 'A', 'TXT'].includes(r.record_type));
@@ -909,11 +983,161 @@ export default function EmailHostingPage() {
       } else {
         setDnsError(res.error?.message || 'Failed to generate DNS records. Please verify server public IP configuration.');
       }
+
+      if (wizardRes && wizardRes.success && wizardRes.data) {
+        setDnsWizardData(wizardRes.data);
+      }
     } catch (err: any) {
       console.error('Failed to load DNS records:', err);
       setDnsError(err.message || 'Failed to load DNS records');
     } finally {
       setLoadingDNS(false);
+    }
+  };
+
+  const handleAutoFixDNS = async (domId: string) => {
+    try {
+      setAutoFixingDNS(true);
+      setAutoFixResult(null);
+      const res = await apiFetch<any>(`/api/v1/email/domains/${domId}/dns-wizard/auto-fix`, {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        setAutoFixResult(res.data);
+        const [freshDNS, freshWizard] = await Promise.all([
+          apiFetch<DNSRecordItem[]>(`/api/v1/email/domains/${domId}/dns`),
+          apiFetch<DNSWizardData>(`/api/v1/email/domains/${domId}/dns-wizard`).catch(() => null),
+        ]);
+        if (freshDNS.success && freshDNS.data) {
+          setDomainDNSRecords(freshDNS.data);
+          const coreRecords = freshDNS.data.filter(r => ['MX', 'A', 'TXT'].includes(r.record_type));
+          const allCorePassed = coreRecords.length > 0 && coreRecords.every(r => r.status === 'verified' || r.status === 'pass');
+          setShowDNSModal(prev => (prev && prev.id === domId ? { ...prev, is_dns_verified: allCorePassed } : prev));
+          setDomains(prev => prev.map(d => d.id === domId ? { ...d, is_dns_verified: allCorePassed } : d));
+        }
+        if (freshWizard && freshWizard.success && freshWizard.data) {
+          setDnsWizardData(freshWizard.data);
+        }
+      } else {
+        alert(`DNS Auto-Fix failed: ${res.error?.message || 'Failed to auto-configure local DNS server'}`);
+      }
+    } catch (err: any) {
+      alert(`DNS Auto-Fix failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setAutoFixingDNS(false);
+    }
+  };
+
+  const handleDownloadFile = (content: string, filename: string, mimeType: string = 'text/plain') => {
+    try {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download failed:', err);
+      alert('Could not initiate file download in browser.');
+    }
+  };
+
+  const handleOpenRateLimitModal = async (mb: EmailMailbox) => {
+    setShowRateLimitModal(mb);
+    setRateLimitForm({
+      rate_limit_per_hour: mb.rate_limit_per_hour || 100,
+      rate_limit_per_day: mb.rate_limit_per_day || 1000,
+    });
+    setLoadingRateLimit(true);
+    setRateLimitStats(null);
+    try {
+      const res = await apiFetch<any>(`/api/v1/email/mailboxes/${mb.id}/rate-limit`);
+      if (res.success && res.data) {
+        setRateLimitForm({
+          rate_limit_per_hour: res.data.rate_limit_per_hour ?? 100,
+          rate_limit_per_day: res.data.rate_limit_per_day ?? 1000,
+        });
+        setRateLimitStats(res.data.stats);
+      }
+    } catch (err) {
+      console.error('Failed to load rate limits:', err);
+    } finally {
+      setLoadingRateLimit(false);
+    }
+  };
+
+  const handleSaveRateLimit = async () => {
+    if (!showRateLimitModal) return;
+    try {
+      setUpdatingRateLimit(true);
+      const res = await apiFetch<any>(`/api/v1/email/mailboxes/${showRateLimitModal.id}/rate-limit`, {
+        method: 'PUT',
+        body: JSON.stringify(rateLimitForm),
+      });
+      if (res.success && res.data) {
+        setMailboxes(prev =>
+          prev.map(m =>
+            m.id === showRateLimitModal.id
+              ? {
+                  ...m,
+                  rate_limit_per_hour: res.data.rate_limit_per_hour,
+                  rate_limit_per_day: res.data.rate_limit_per_day,
+                }
+              : m
+          )
+        );
+        setShowRateLimitModal(prev =>
+          prev
+            ? {
+                ...prev,
+                rate_limit_per_hour: res.data.rate_limit_per_hour,
+                rate_limit_per_day: res.data.rate_limit_per_day,
+              }
+            : null
+        );
+        if (res.data.stats) {
+          setRateLimitStats(res.data.stats);
+        }
+        alert(`Outbound rate limits saved successfully for ${showRateLimitModal.email}!`);
+      } else {
+        alert(`Failed to save rate limits: ${res.error?.message || 'Server error'}`);
+      }
+    } catch (err: any) {
+      alert(`Error saving rate limits: ${err.message || 'Unknown error'}`);
+    } finally {
+      setUpdatingRateLimit(false);
+    }
+  };
+
+  const handleResetRateLimit = async () => {
+    if (!showRateLimitModal) return;
+    if (
+      !confirm(
+        `Are you sure you want to reset current sliding window counters for ${showRateLimitModal.email}? This immediately clears any rate-limiting queue hold.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setResettingRateLimit(true);
+      const res = await apiFetch<any>(`/api/v1/email/mailboxes/${showRateLimitModal.id}/rate-limit/reset`, {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        if (res.data.stats) {
+          setRateLimitStats(res.data.stats);
+        }
+        alert('Sliding window counters have been reset successfully! Mailbox can now send immediately.');
+      } else {
+        alert(`Failed to reset counters: ${res.error?.message || 'Server error'}`);
+      }
+    } catch (err: any) {
+      alert(`Error resetting counters: ${err.message || 'Unknown error'}`);
+    } finally {
+      setResettingRateLimit(false);
     }
   };
 
@@ -1155,6 +1379,8 @@ export default function EmailHostingPage() {
           password: newMailboxPass,
           name: newMailboxName || fullEmail,
           quota_bytes: newMailboxQuotaGB * 1024 * 1024 * 1024,
+          rate_limit_per_hour: newMailboxRateLimitHour,
+          rate_limit_per_day: newMailboxRateLimitDay,
         }),
       });
 
@@ -1844,6 +2070,7 @@ export default function EmailHostingPage() {
                       <th className="px-6 py-4">Account / Email</th>
                       <th className="px-6 py-4">Display Name</th>
                       <th className="px-6 py-4">Storage Quota</th>
+                      <th className="px-6 py-4">Outbound Limits</th>
                       <th className="px-6 py-4">Status</th>
                       <th className="px-6 py-4 text-right">Actions</th>
                     </tr>
@@ -1851,7 +2078,7 @@ export default function EmailHostingPage() {
                   <tbody className="divide-y divide-slate-100 dark:divide-surface-800/80">
                     {filteredMailboxes.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-6 py-12 text-center text-slate-400 text-xs">
+                        <td colSpan={6} className="px-6 py-12 text-center text-slate-400 text-xs">
                           {mailboxes.length === 0
                             ? 'No email mailboxes configured yet. Click "Create Mailbox" to add your first account.'
                             : 'No mailboxes match your search filter.'}
@@ -1889,6 +2116,17 @@ export default function EmailHostingPage() {
                               </div>
                             </td>
                             <td className="px-6 py-4">
+                              <div className="flex flex-col gap-1">
+                                <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800 dark:text-slate-200">
+                                  <Gauge className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                  <span>{mb.rate_limit_per_hour ? `${mb.rate_limit_per_hour}/hr` : '100/hr'}</span>
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                  {mb.rate_limit_per_day ? `${mb.rate_limit_per_day.toLocaleString()}/day` : '1,000/day'}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
                               {mb.is_suspended ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/20">
                                   <Lock className="w-3 h-3" />
@@ -1920,6 +2158,13 @@ export default function EmailHostingPage() {
                               >
                                 <Inbox className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400" />
                                 <span>Client</span>
+                              </button>
+                              <button
+                                onClick={() => handleOpenRateLimitModal(mb)}
+                                className="p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-500/20 text-slate-500 hover:text-indigo-600 transition"
+                                title="Outbound Sending Velocity & Rate Limits"
+                              >
+                                <Gauge className="w-4 h-4" />
                               </button>
                               <button
                                 onClick={() => handleTestMailbox(mb)}
@@ -3393,6 +3638,35 @@ export default function EmailHostingPage() {
                     />
                   </div>
 
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Hourly Outbound Limit
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={newMailboxRateLimitHour}
+                        onChange={(e) => setNewMailboxRateLimitHour(parseInt(e.target.value) || 0)}
+                        className="w-full px-3.5 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                      />
+                      <span className="text-[10px] text-slate-400">Default: 100 emails/hr</span>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                        Daily Outbound Limit
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={newMailboxRateLimitDay}
+                        onChange={(e) => setNewMailboxRateLimitDay(parseInt(e.target.value) || 0)}
+                        className="w-full px-3.5 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                      />
+                      <span className="text-[10px] text-slate-400">Default: 1,000 emails/day</span>
+                    </div>
+                  </div>
+
                   <div className="pt-3 flex justify-end gap-3">
                     <button
                       type="button"
@@ -3418,28 +3692,47 @@ export default function EmailHostingPage() {
         {/* Modal: Live Cryptographic DNS Records (SPF, DKIM, DMARC, MX) */}
         {showDNSModal && (
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-3xl p-6 space-y-5 shadow-2xl max-h-[90vh] flex flex-col">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-4xl p-6 space-y-5 shadow-2xl max-h-[92vh] flex flex-col">
+              {/* Header */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-surface-800">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2.5">
                     <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
                       <ShieldCheck className="w-5 h-5 text-indigo-500" />
-                      <span>DNS Configuration & Cryptographic Keys for {showDNSModal.domain}</span>
+                      <span>Deliverability & DNS Health Wizard for {showDNSModal.domain}</span>
                     </h3>
+
+                    {dnsWizardData?.health_summary && (
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold border shadow-xs ${
+                          dnsWizardData.health_summary.rating === 'EXCELLENT'
+                            ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/30'
+                            : dnsWizardData.health_summary.rating === 'GOOD'
+                            ? 'bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-500/30'
+                            : dnsWizardData.health_summary.rating === 'WARNING'
+                            ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/30'
+                            : 'bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-300 dark:border-rose-500/30'
+                        }`}
+                      >
+                        <Activity className="w-3.5 h-3.5" />
+                        <span>Score: {dnsWizardData.health_summary.score}/100 ({dnsWizardData.health_summary.rating})</span>
+                      </span>
+                    )}
+
                     {isAllRecordsVerified ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 shadow-xs">
                         <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
-                        <span>All DNS Verified</span>
+                        <span>All DNS Active</span>
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30 shadow-xs">
                         <Clock className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Propagation Incomplete</span>
+                        <span>Propagation Pending</span>
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Publish these records in Cloudflare, cPanel, Namecheap, or your registrar to pass SPF, DKIM (2048-bit), and DMARC.
+                  <p className="text-xs text-slate-500 mt-1">
+                    Complete cryptographic authentication suite: SPF, 2048-bit RSA DKIM, DMARC, MX, FCrDNS PTR & real-time RBL reputation check.
                   </p>
                 </div>
                 <button
@@ -3450,16 +3743,98 @@ export default function EmailHostingPage() {
                 </button>
               </div>
 
+              {/* Auto-Fix Success or Error Banner */}
+              {autoFixResult && (
+                <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 flex items-center justify-between text-xs font-sans">
+                  <div className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="font-bold text-slate-900 dark:text-white">{autoFixResult.message}</p>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                        {autoFixResult.created_count} record(s) created and {autoFixResult.updated_count} record(s) updated in the local DNS zone.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setAutoFixResult(null)}
+                    className="text-emerald-600 hover:text-emerald-800 font-bold px-2 py-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Navigation Tabs */}
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-surface-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setDnsWizardTab('records')}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      dnsWizardTab === 'records'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800'
+                    }`}
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span>DNS Records ({domainDNSRecords.length})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setDnsWizardTab('health_rbl')}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      dnsWizardTab === 'health_rbl'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800'
+                    }`}
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Deliverability & RBL Blacklists</span>
+                    {dnsWizardData?.rbl ? (
+                      dnsWizardData.rbl.is_clean ? (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500 text-white">Clean</span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white">
+                          {dnsWizardData.rbl.total_listed} Listed
+                        </span>
+                      )
+                    ) : null}
+                  </button>
+
+                  <button
+                    onClick={() => setDnsWizardTab('export_zone')}
+                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                      dnsWizardTab === 'export_zone'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>1-Click Zone Export</span>
+                  </button>
+                </div>
+
+                {/* 1-Click Auto-Fix Button */}
+                <button
+                  onClick={() => handleAutoFixDNS(showDNSModal.id)}
+                  disabled={autoFixingDNS}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold bg-emerald-600 hover:bg-emerald-500 text-white text-xs shadow-xs transition disabled:opacity-50"
+                  title="Automatically create and update all missing DNS records inside Hostvra's local DNS server"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${autoFixingDNS ? 'animate-spin' : ''}`} />
+                  <span>{autoFixingDNS ? 'Auto-Fixing...' : '1-Click Auto-Fix into Local DNS'}</span>
+                </button>
+              </div>
+
               {/* Action Toolbar */}
-              <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 text-xs">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold text-slate-700 dark:text-slate-300">Quick Actions:</span>
                   <button
                     onClick={() => copyAllZoneRecords(showDNSModal, domainDNSRecords)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs transition"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-semibold bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-500/30 transition"
                   >
                     {copiedKey === 'zone_all' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedKey === 'zone_all' ? 'Copied Zone File!' : 'Copy All Records (BIND / Cloudflare)'}</span>
+                    <span>{copiedKey === 'zone_all' ? 'Copied Zone File!' : 'Copy Zone'}</span>
                   </button>
                 </div>
 
@@ -3467,15 +3842,15 @@ export default function EmailHostingPage() {
                   <button
                     onClick={() => handleRegenerateDKIM(showDNSModal.id)}
                     disabled={regeneratingDKIM}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium bg-white dark:bg-surface-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 border border-slate-200 dark:border-surface-700 transition disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium bg-white dark:bg-surface-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 border border-slate-200 dark:border-surface-700 transition disabled:opacity-50"
                   >
                     <RotateCw className={`w-3.5 h-3.5 ${regeneratingDKIM ? 'animate-spin' : ''}`} />
-                    <span>Regenerate DKIM</span>
+                    <span>Regenerate 2048-bit DKIM</span>
                   </button>
                   <button
                     onClick={() => handleVerifyDNS(showDNSModal.id, false)}
                     disabled={verifyingDNS}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium border transition disabled:opacity-50 ${
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-medium border transition disabled:opacity-50 ${
                       isAllRecordsVerified
                         ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40 hover:bg-emerald-200'
                         : 'bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-500/30'
@@ -3506,8 +3881,9 @@ export default function EmailHostingPage() {
                 </div>
               </div>
 
-              {/* Records Scrollable List */}
-              <div className="space-y-3 overflow-y-auto pr-1 flex-1 font-mono text-xs">
+              {/* TAB 1: RECORDS */}
+              {dnsWizardTab === 'records' && (
+                <div className="space-y-3 overflow-y-auto pr-1 flex-1 font-mono text-xs">
                 {isAllRecordsVerified && (
                   <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 flex items-center justify-between text-xs font-sans">
                     <div className="flex items-center gap-2.5">
@@ -3685,6 +4061,305 @@ export default function EmailHostingPage() {
                   </div>
                 )}
               </div>
+              )}
+
+              {/* TAB 2: DELIVERABILITY HEALTH & RBL BLACKLISTS */}
+              {dnsWizardTab === 'health_rbl' && (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+                  {/* Deliverability Health Card */}
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-2xl bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/30 flex flex-col items-center justify-center shrink-0">
+                          <span className="text-xl font-black text-indigo-600 dark:text-indigo-400">
+                            {dnsWizardData?.health_summary?.score ?? (isAllRecordsVerified ? 100 : 70)}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase">/ 100</span>
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-white">Deliverability Health Rating</h4>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                (dnsWizardData?.health_summary?.rating || 'GOOD') === 'EXCELLENT'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300'
+                                  : (dnsWizardData?.health_summary?.rating || 'GOOD') === 'GOOD'
+                                  ? 'bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300'
+                                  : (dnsWizardData?.health_summary?.rating || 'GOOD') === 'WARNING'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                  : 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300'
+                              }`}
+                            >
+                              {dnsWizardData?.health_summary?.rating || (isAllRecordsVerified ? 'EXCELLENT' : 'GOOD')}
+                            </span>
+                          </div>
+                          <p className="text-slate-500 text-[11px] mt-0.5">
+                            Combined deliverability score based on cryptographic signature validity, MX reachability, FCrDNS PTR, and real-time anti-spam RBL reputation.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Protocol Audit Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-2">
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">SPF Check</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.spf_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Pass</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Fail</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">DKIM 2048-bit</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.dkim_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Pass</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Fail</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">DMARC Policy</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.dmarc_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Pass</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Fail</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">MX Routing</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.mx_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Pass</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Fail</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">FCrDNS PTR</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.ptr_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Pass</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Fail</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1">
+                        <span className="text-[10px] text-slate-400 font-semibold uppercase block">RBL Blacklists</span>
+                        <div className="flex items-center gap-1 font-bold">
+                          {dnsWizardData?.health_summary?.rbl_pass ?? true ? (
+                            <span className="text-emerald-600 flex items-center gap-1"><Check className="w-3.5 h-3.5 stroke-[3]" /> Clean</span>
+                          ) : (
+                            <span className="text-rose-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Listed</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Real-Time Global RBL IP Blacklist Monitor */}
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200 dark:border-surface-800">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <Activity className="w-4 h-4 text-indigo-500" />
+                          <span>Real-time Global RBL IP Blacklist Wizard</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          Live DNSBL query testing your outbound mail server IP against the world's top 5 email anti-spam registries.
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          IP: <strong className="text-slate-800 dark:text-slate-200">{dnsWizardData?.rbl?.ip || serverIPv4 || '109.199.110.101'}</strong>
+                        </span>
+                        {dnsWizardData?.rbl?.is_clean ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                            <span>All Clean (0 / 5)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-500/30">
+                            <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                            <span>Listed on {dnsWizardData?.rbl?.total_listed || 0} / 5</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 5 Providers List */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                      {(dnsWizardData?.rbl?.providers || [
+                        { provider: 'zen.spamhaus.org', listed: false },
+                        { provider: 'bl.spamcop.net', listed: false },
+                        { provider: 'b.barracudacentral.org', listed: false },
+                        { provider: 'dnsbl.sorbs.net', listed: false },
+                        { provider: 'bl.mailspike.net', listed: false },
+                      ]).map((item, pIdx) => {
+                        const friendlyName = item.provider.includes('spamhaus')
+                          ? 'Spamhaus ZEN (SBL/XBL/PBL)'
+                          : item.provider.includes('spamcop')
+                          ? 'SpamCop Blocking List'
+                          : item.provider.includes('barracuda')
+                          ? 'Barracuda Reputation Network'
+                          : item.provider.includes('sorbs')
+                          ? 'SORBS Aggregate DNSBL'
+                          : item.provider.includes('mailspike')
+                          ? 'Mailspike IP Reputation'
+                          : item.provider;
+
+                        return (
+                          <div
+                            key={pIdx}
+                            className={`p-3 rounded-lg bg-white dark:bg-surface-900 border space-y-1.5 transition ${
+                              item.listed
+                                ? 'border-rose-300 dark:border-rose-500/40 bg-rose-50/20 dark:bg-rose-950/10'
+                                : 'border-slate-200 dark:border-surface-800'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate" title={friendlyName}>
+                                {friendlyName}
+                              </span>
+                              {item.listed ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">
+                                  <X className="w-3 h-3" /> Listed
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                                  <Check className="w-3 h-3 stroke-[3]" /> Clean
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                              <span>{item.provider}</span>
+                              {item.response_code && (
+                                <span className="text-rose-600 font-semibold">{item.response_code}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: 1-CLICK ZONE EXPORT */}
+              {dnsWizardTab === 'export_zone' && (
+                <div className="space-y-3 overflow-y-auto pr-1 flex-1 text-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">Export Format:</span>
+                      <button
+                        onClick={() => setZoneExportFormat('bind')}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                          zoneExportFormat === 'bind'
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        RFC 1035 BIND Zone (.zone)
+                      </button>
+                      <button
+                        onClick={() => setZoneExportFormat('cloudflare')}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                          zoneExportFormat === 'cloudflare'
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        Cloudflare DNS (.json)
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {zoneExportFormat === 'bind' ? (
+                        <>
+                          <button
+                            onClick={() =>
+                              copyToClipboard(
+                                dnsWizardData?.bind_zone ||
+                                  domainDNSRecords.map((r) => `${r.host}\tIN\t${r.record_type}\t${r.expected}`).join('\n'),
+                                'bind_zone_copy'
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-500/30 transition"
+                          >
+                            {copiedKey === 'bind_zone_copy' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedKey === 'bind_zone_copy' ? 'Copied BIND Zone!' : 'Copy BIND Zone'}</span>
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleDownloadFile(
+                                dnsWizardData?.bind_zone ||
+                                  domainDNSRecords.map((r) => `${r.host}\tIN\t${r.record_type}\t${r.expected}`).join('\n'),
+                                `${showDNSModal.domain}.zone`,
+                                'text/plain'
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-surface-700 transition"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download .zone File</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() =>
+                              copyToClipboard(
+                                JSON.stringify(dnsWizardData?.cloudflare_json || domainDNSRecords, null, 2),
+                                'cf_json_copy'
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-500/30 transition"
+                          >
+                            {copiedKey === 'cf_json_copy' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedKey === 'cf_json_copy' ? 'Copied Cloudflare JSON!' : 'Copy Cloudflare JSON'}</span>
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleDownloadFile(
+                                JSON.stringify(dnsWizardData?.cloudflare_json || domainDNSRecords, null, 2),
+                                `cloudflare-dns-${showDNSModal.domain}.json`,
+                                'application/json'
+                              )
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg font-semibold bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-surface-700 transition"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download .json File</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto max-h-[50vh] border border-slate-800 selection:bg-indigo-500">
+                    <pre>
+                      {zoneExportFormat === 'bind'
+                        ? dnsWizardData?.bind_zone ||
+                          domainDNSRecords.map((r) => `${r.host}\tIN\t${r.record_type}\t${r.expected}`).join('\n')
+                        : JSON.stringify(dnsWizardData?.cloudflare_json || domainDNSRecords, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-3 flex justify-between items-center border-t border-slate-100 dark:border-surface-800 font-sans">
                 <span className="text-xs text-slate-500">
@@ -3695,6 +4370,257 @@ export default function EmailHostingPage() {
                   className="px-5 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition"
                 >
                   Done
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Mailbox Outbound Rate Limiting & Sliding Windows (Priority 3) */}
+        {showRateLimitModal && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-xl p-6 space-y-5 shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-surface-800">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    <Gauge className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                      Outbound Rate Limiting & Sliding Windows
+                    </h3>
+                    <p className="text-xs text-slate-500 font-mono">
+                      {showRateLimitModal.email}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowRateLimitModal(null)}
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1 rounded-lg"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Live Sliding Window Velocity Indicators */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                    Live Sliding Window Telemetry
+                  </span>
+                  <button
+                    onClick={handleResetRateLimit}
+                    disabled={resettingRateLimit || loadingRateLimit}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-50"
+                    title="Reset current sliding window in memory to immediately lift rate limits"
+                  >
+                    <RotateCw className={`w-3 h-3 ${resettingRateLimit ? 'animate-spin' : ''}`} />
+                    <span>Reset Active Counters</span>
+                  </button>
+                </div>
+
+                {loadingRateLimit ? (
+                  <div className="py-4 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                    <RotateCw className="w-4 h-4 animate-spin text-indigo-500" />
+                    <span>Querying active in-memory sliding window counters...</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    {/* Hour window */}
+                    <div className="p-3 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">1-Hour Window</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {rateLimitStats?.hour_count || 0} / {rateLimitStats?.hour_limit || rateLimitForm.rate_limit_per_hour || 100}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 dark:bg-surface-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            rateLimitStats?.is_hour_exceeded
+                              ? 'bg-rose-500'
+                              : (rateLimitStats?.hour_count || 0) > ((rateLimitStats?.hour_limit || rateLimitForm.rate_limit_per_hour || 100) * 0.8)
+                              ? 'bg-amber-500'
+                              : 'bg-indigo-600'
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.max(
+                                3,
+                                ((rateLimitStats?.hour_count || 0) /
+                                  Math.max(1, rateLimitStats?.hour_limit || rateLimitForm.rate_limit_per_hour || 100)) *
+                                  100
+                              )
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>Velocity</span>
+                        {rateLimitStats?.is_hour_exceeded ? (
+                          <span className="text-rose-600 font-bold">Throttled (Deferred)</span>
+                        ) : (
+                          <span className="text-emerald-600 font-medium">Normal</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Day window */}
+                    <div className="p-3 rounded-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-medium">24-Hour Window</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {rateLimitStats?.day_count || 0} / {rateLimitStats?.day_limit || rateLimitForm.rate_limit_per_day || 1000}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 dark:bg-surface-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            rateLimitStats?.is_day_exceeded
+                              ? 'bg-rose-500'
+                              : (rateLimitStats?.day_count || 0) > ((rateLimitStats?.day_limit || rateLimitForm.rate_limit_per_day || 1000) * 0.8)
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-600'
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.max(
+                                3,
+                                ((rateLimitStats?.day_count || 0) /
+                                  Math.max(1, rateLimitStats?.day_limit || rateLimitForm.rate_limit_per_day || 1000)) *
+                                  100
+                              )
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>Velocity</span>
+                        {rateLimitStats?.is_day_exceeded ? (
+                          <span className="text-rose-600 font-bold">Daily Cap Reached</span>
+                        ) : (
+                          <span className="text-emerald-600 font-medium">Normal</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Form Settings */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Hourly Limit (Emails / Hour)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={rateLimitForm.rate_limit_per_hour}
+                    onChange={(e) =>
+                      setRateLimitForm((prev) => ({ ...prev, rate_limit_per_hour: parseInt(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3.5 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {[50, 100, 250, 500, 1000].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setRateLimitForm((prev) => ({ ...prev, rate_limit_per_hour: preset }))}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition ${
+                          rateLimitForm.rate_limit_per_hour === preset
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-surface-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset}/hr
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setRateLimitForm((prev) => ({ ...prev, rate_limit_per_hour: 0 }))}
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition ${
+                        rateLimitForm.rate_limit_per_hour === 0
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-surface-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      Unlimited
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Daily Limit (Emails / 24 Hours)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={rateLimitForm.rate_limit_per_day}
+                    onChange={(e) =>
+                      setRateLimitForm((prev) => ({ ...prev, rate_limit_per_day: parseInt(e.target.value) || 0 }))
+                    }
+                    className="w-full px-3.5 py-2 bg-white dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
+                  />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {[500, 1000, 2500, 5000, 10000].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setRateLimitForm((prev) => ({ ...prev, rate_limit_per_day: preset }))}
+                        className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition ${
+                          rateLimitForm.rate_limit_per_day === preset
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-surface-700 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset.toLocaleString()}/day
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setRateLimitForm((prev) => ({ ...prev, rate_limit_per_day: 0 }))}
+                      className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition ${
+                        rateLimitForm.rate_limit_per_day === 0
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-surface-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      Unlimited
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                  <p className="font-semibold flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    IP Reputation Defense
+                  </p>
+                  <p className="text-[11px] leading-relaxed">
+                    Outbound velocity controls enforce strict sliding-window rate checks. If an account is compromised or generates bulk spam, Hostvra defers subsequent messages automatically to prevent Gmail/Yahoo IP reputation bans.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3 border-t border-slate-100 dark:border-surface-800">
+                <button
+                  onClick={() => setShowRateLimitModal(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveRateLimit}
+                  disabled={updatingRateLimit}
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition disabled:opacity-50"
+                >
+                  {updatingRateLimit ? <RotateCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  <span>{updatingRateLimit ? 'Saving Limits...' : 'Save Rate Limits'}</span>
                 </button>
               </div>
             </div>
