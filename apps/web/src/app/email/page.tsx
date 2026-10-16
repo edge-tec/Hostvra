@@ -74,12 +74,43 @@ interface EmailMailbox {
 
 interface QueueItem {
   id: string;
-  size_bytes: number;
-  arrival_time: string;
+  size_bytes?: number;
+  size?: number;
+  arrival_time?: string;
+  arrival?: string;
   sender: string;
+  sender_domain?: string;
   recipients: string[];
   reason: string;
-  status: string;
+  status?: string;
+  is_gmail_deferred?: boolean;
+  is_spf_domain_rate_lim?: boolean;
+}
+
+interface RateControlState {
+  domain: string;
+  state: string;
+  in_cooldown: boolean;
+  cooldown_remaining_sec: number;
+  cooldown_until?: string;
+  consecutive_failures: number;
+  current_concurrency: number;
+  current_backoff_interval: string;
+  last_attempt?: string;
+  last_success?: string;
+  last_failure?: string;
+  last_smtp_code?: number;
+  last_enhanced_code?: string;
+  last_diagnostic?: string;
+}
+
+interface RateControlOverview {
+  default_domain: string;
+  default_destination: string;
+  cooldown_active: boolean;
+  min_cooldown_sec: number;
+  max_concurrency: number;
+  domains: Record<string, RateControlState>;
 }
 
 interface DeliveryLog {
@@ -331,6 +362,10 @@ export default function EmailHostingPage() {
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [flushingQueue, setFlushingQueue] = useState(false);
+  const [rateControlOverview, setRateControlOverview] = useState<RateControlOverview | null>(null);
+  const [rateControlLoading, setRateControlLoading] = useState(false);
+  const [resettingCooldown, setResettingCooldown] = useState(false);
+  const [simulatingEvent, setSimulatingEvent] = useState(false);
 
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -587,15 +622,85 @@ export default function EmailHostingPage() {
     }
   };
 
-  // Flush queue
-  const handleFlushQueue = async () => {
+  // Fetch rate control status
+  const fetchRateControl = async () => {
+    try {
+      setRateControlLoading(true);
+      const res = await apiFetch<RateControlOverview>('/api/v1/email/rate-control');
+      if (res.success && res.data) {
+        setRateControlOverview(res.data);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch rate control status:', err);
+    } finally {
+      setRateControlLoading(false);
+    }
+  };
+
+  // Reset rate control cooldown
+  const handleResetCooldown = async (domain: string = 'onlyflrt.net', destination: string = 'gmail.com') => {
+    if (!confirm(`Reset active rate-limit cooldown for ${domain} -> ${destination}?\n\nWarning: Only do this if you have resolved the root cause or confirmed that Google has lifted the SPF domain throttling.`)) {
+      return;
+    }
+    try {
+      setResettingCooldown(true);
+      const res = await apiFetch<any>('/api/v1/email/rate-control/reset', {
+        method: 'POST',
+        body: JSON.stringify({ domain, destination }),
+      });
+      alert(res.data?.message || 'Rate control cooldown reset successfully.');
+      fetchRateControl();
+    } catch (err: any) {
+      alert(`Failed to reset cooldown: ${err.message || 'Unknown error'}`);
+    } finally {
+      setResettingCooldown(false);
+    }
+  };
+
+  // Simulate 421 Rate Limit Event (for operational testing)
+  const handleSimulate421 = async (domain: string = 'onlyflrt.net', destination: string = 'gmail.com') => {
+    try {
+      setSimulatingEvent(true);
+      const res = await apiFetch<any>('/api/v1/email/rate-control/simulate-event', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain,
+          destination,
+          smtp_code: 421,
+          enhanced_code: '4.7.28',
+          diagnostic: `421-4.7.28 Gmail has detected an unusual rate of mail originating from your SPF domain [${domain}].`,
+        }),
+      });
+      alert(res.data?.message || 'Rate limit event simulated.');
+      fetchRateControl();
+    } catch (err: any) {
+      alert(`Simulation failed: ${err.message || 'Error'}`);
+    } finally {
+      setSimulatingEvent(false);
+    }
+  };
+
+  // Flush queue with retry storm protection
+  const handleFlushQueue = async (force: boolean = false) => {
     try {
       setFlushingQueue(true);
-      const res = await apiFetch<any>('/api/v1/email/queue/flush', { method: 'POST' });
-      if (res.success) {
-        alert(res.data?.message || 'Postfix mail queue flushed successfully (postqueue -f).');
-        fetchQueue();
+      const url = force ? '/api/v1/email/queue/flush?force=true' : '/api/v1/email/queue/flush';
+      const res = await apiFetch<any>(url, { method: 'POST' });
+      if (!res.success) {
+        const errMsg = res.error?.message || 'Flush queue failed';
+        if (errMsg.includes('Rate limited') || errMsg.includes('Cooldown active')) {
+          if (confirm(`Active Gmail Rate-Limit Cooldown!\n\n${errMsg}\n\nDo you want to FORCE flush anyway?\n\nWarning: This may trigger a Gmail retry storm, extend rate limiting, and degrade domain reputation.`)) {
+            handleFlushQueue(true);
+            return;
+          }
+        } else {
+          alert(`Flush queue failed: ${errMsg}`);
+        }
+        return;
       }
+      alert(res.data?.message || 'Postfix mail queue processed safely.');
+      fetchQueue();
+      fetchRateControl();
     } catch (err: any) {
       alert(`Flush queue failed: ${err.message || 'Error executing postqueue'}`);
     } finally {
@@ -897,7 +1002,10 @@ export default function EmailHostingPage() {
   // React to tab changes
   useEffect(() => {
     if (activeTab === 'servers') fetchMailServers();
-    if (activeTab === 'queue') fetchQueue();
+    if (activeTab === 'queue') {
+      fetchQueue();
+      fetchRateControl();
+    }
     if (activeTab === 'logs') fetchLogs();
     if (activeTab === 'suppressions') fetchSuppressions();
     if (activeTab === 'services') fetchServices();
@@ -2403,7 +2511,141 @@ export default function EmailHostingPage() {
         {/* Tab Content: Mail Queue */}
         {activeTab === 'queue' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            {/* Rate Control & FCrDNS Safeguards Panel */}
+            {(() => {
+              const activeRateState =
+                rateControlOverview?.domains?.['onlyflrt.net'] ||
+                (rateControlOverview?.domains ? Object.values(rateControlOverview.domains)[0] : null);
+              const inCooldown = activeRateState?.in_cooldown || false;
+
+              return (
+                <div className={`p-5 rounded-2xl border transition-all ${
+                  inCooldown
+                    ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800/60 shadow-xs'
+                    : 'bg-white dark:bg-surface-900 border-slate-200 dark:border-surface-800 shadow-xs'
+                }`}>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-200/60 dark:border-surface-800">
+                    <div className="flex items-start gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                        inCooldown
+                          ? 'bg-amber-100 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                          : 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                      }`}>
+                        {inCooldown ? <ShieldAlert className="w-5 h-5" /> : <ShieldCheck className="w-5 h-5" />}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                            Gmail Outbound Rate Control &amp; Delivery Safeguards
+                          </h3>
+                          {inCooldown ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300 border border-rose-300 dark:border-rose-700 animate-pulse">
+                              <Clock className="w-3 h-3" />
+                              COOLDOWN ACTIVE ({activeRateState?.cooldown_remaining_sec || 0}s remaining)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                              <CheckCircle2 className="w-3 h-3" />
+                              DELIVERY NORMAL
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-surface-700 font-mono">
+                            SPF: onlyflrt.net
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          Automated 421 4.7.28 detection, 10m minimum cooldown pause, single-connection backoff ramp-up, and retry-storm protection for Google MX destinations.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-start md:self-auto shrink-0">
+                      <button
+                        onClick={() => handleSimulate421('onlyflrt.net', 'gmail.com')}
+                        disabled={simulatingEvent}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-surface-750 transition disabled:opacity-50"
+                        title="Simulate 421 4.7.28 event to verify controller safeguards"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                        <span>{simulatingEvent ? 'Testing...' : 'Simulate 421'}</span>
+                      </button>
+
+                      {inCooldown && (
+                        <button
+                          onClick={() => handleResetCooldown('onlyflrt.net', 'gmail.com')}
+                          disabled={resettingCooldown}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-xs transition disabled:opacity-50"
+                          title="Reset cooldown timer after confirming resolution"
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 ${resettingCooldown ? 'animate-spin' : ''}`} />
+                          <span>{resettingCooldown ? 'Resetting...' : 'Reset Cooldown'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Controller Status Metrics Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-4">
+                    <div className="p-3 rounded-xl bg-slate-50/80 dark:bg-surface-800/60 border border-slate-200/60 dark:border-surface-700/60">
+                      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Delivery State</div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5 uppercase flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${inCooldown ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`} />
+                        {activeRateState?.state || 'NORMAL'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                        {inCooldown
+                          ? `Paused for ${activeRateState?.cooldown_remaining_sec || 0}s`
+                          : '10m minimum cooldown configured'}
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50/80 dark:bg-surface-800/60 border border-slate-200/60 dark:border-surface-700/60">
+                      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Active Concurrency</div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                        {activeRateState?.current_concurrency || 1} <span className="text-xs font-normal text-slate-500">/ 3 max connections</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                        Starts at 1; ramps after 5 consecutive OKs
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50/80 dark:bg-surface-800/60 border border-slate-200/60 dark:border-surface-700/60">
+                      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">Backoff Interval</div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white mt-0.5">
+                        {activeRateState?.current_backoff_interval || '10m0s'}
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                        Failures: {activeRateState?.consecutive_failures || 0} (10m &rarr; 20m &rarr; 40m &rarr; 60m max)
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50/80 dark:bg-surface-800/60 border border-slate-200/60 dark:border-surface-700/60">
+                      <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">FCrDNS &amp; HELO Banner</div>
+                      <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 font-mono truncate">
+                        mail.onlyflrt.net
+                      </div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                        PTR: 109.199.110.101 &harr; mail.onlyflrt.net
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Diagnostic details if available */}
+                  {activeRateState?.last_diagnostic && (
+                    <div className="mt-3 p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-slate-200">
+                      <div className="text-[10px] uppercase font-bold text-amber-400 mb-1 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3 h-3" />
+                        Observed Gmail SMTP Response (Logged):
+                      </div>
+                      <p className="text-amber-200/90 break-words">{activeRateState.last_diagnostic}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Standard Postfix Outbound Queue Table Header */}
+            <div className="flex items-center justify-between pt-2">
               <div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">Postfix Outbound Mail Queue</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -2413,21 +2655,25 @@ export default function EmailHostingPage() {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={fetchQueue}
-                  disabled={queueLoading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-200"
+                  onClick={() => {
+                    fetchQueue();
+                    fetchRateControl();
+                  }}
+                  disabled={queueLoading || rateControlLoading}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-surface-750 transition"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${queueLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-3.5 h-3.5 ${queueLoading || rateControlLoading ? 'animate-spin' : ''}`} />
                   <span>Refresh</span>
                 </button>
 
                 <button
-                  onClick={handleFlushQueue}
+                  onClick={() => handleFlushQueue(false)}
                   disabled={flushingQueue}
                   className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition disabled:opacity-50"
+                  title="Flushes queue safely while honoring active Gmail rate-limit cooldowns"
                 >
                   <RotateCw className={`w-3.5 h-3.5 ${flushingQueue ? 'animate-spin' : ''}`} />
-                  <span>{flushingQueue ? 'Flushing Postfix...' : 'Flush Queue (postqueue -f)'}</span>
+                  <span>{flushingQueue ? 'Flushing Postfix...' : 'Safe Flush (postqueue -f)'}</span>
                 </button>
               </div>
             </div>
@@ -2466,11 +2712,22 @@ export default function EmailHostingPage() {
                     <tbody className="divide-y divide-slate-100 dark:divide-surface-800/80 font-mono text-xs">
                       {queueItems.map((item) => (
                         <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-surface-800/40">
-                          <td className="px-6 py-4 font-bold text-indigo-600 dark:text-indigo-400">{item.id}</td>
+                          <td className="px-6 py-4 font-bold text-indigo-600 dark:text-indigo-400">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{item.id}</span>
+                              {item.is_spf_domain_rate_lim && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                  Gmail 421 Rate-Limited
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-6 py-4 text-slate-900 dark:text-white">{item.sender}</td>
                           <td className="px-6 py-4 text-slate-700 dark:text-slate-300">{item.recipients.join(', ')}</td>
-                          <td className="px-6 py-4 text-slate-500">{item.arrival_time}</td>
-                          <td className="px-6 py-4 text-amber-600 dark:text-amber-400">{item.reason || 'Deferred'}</td>
+                          <td className="px-6 py-4 text-slate-500">{item.arrival_time || item.arrival}</td>
+                          <td className="px-6 py-4 text-amber-600 dark:text-amber-400">
+                            {item.reason || 'Deferred'}
+                          </td>
                           <td className="px-6 py-4 text-right">
                             <button
                               onClick={() => handleDeleteQueueItem(item.id)}

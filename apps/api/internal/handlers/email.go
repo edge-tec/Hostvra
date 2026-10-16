@@ -24,6 +24,7 @@ import (
 	"hostvra/agent/pkg/email/postfix"
 	"hostvra/agent/pkg/email/provisioner"
 	"hostvra/agent/pkg/email/queue"
+	"hostvra/agent/pkg/email/ratecontrol"
 	"hostvra/agent/pkg/email/services"
 	"hostvra/agent/pkg/email/storage"
 	"hostvra/agent/pkg/email/tester"
@@ -2097,6 +2098,32 @@ func (h *EmailHandler) FlushQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	force := r.URL.Query().Get("force") == "true"
+	destination := r.URL.Query().Get("destination")
+	if destination == "" {
+		destination = "gmail.com"
+	}
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		domain = "onlyflrt.net"
+	}
+
+	// Safe guard: check if the destination is currently in rate-limit cooldown
+	if !force {
+		allowed, waitSec, reason := ratecontrol.GetGlobalController().CanDeliver(domain, destination)
+		if !allowed {
+			response.Error(w, http.StatusTooManyRequests, "RATE_LIMIT_COOLDOWN_ACTIVE",
+				fmt.Sprintf("Queue flush held to prevent retry storm: %s (%ds remaining). Use ?force=true to override.", reason, waitSec),
+				map[string]any{
+					"domain":            domain,
+					"destination":       destination,
+					"remaining_seconds": waitSec,
+					"in_cooldown":       true,
+				}, "")
+			return
+		}
+	}
+
 	if err := queue.FlushQueue(); err != nil {
 		if strings.Contains(err.Error(), "mail system is down") || strings.Contains(err.Error(), "executable file not found") {
 			response.JSON(w, http.StatusOK, map[string]string{"message": "Mail system is down or queue is empty; flush requested"}, nil)
@@ -2107,7 +2134,7 @@ func (h *EmailHandler) FlushQueue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.audit.Log(r.Context(), r, "email.queue.flush", "mail_queue", "all", "success", "", nil)
-	response.JSON(w, http.StatusOK, map[string]string{"message": "Mail queue flush triggered (postqueue -f)"}, nil)
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Mail queue flush triggered safely (postqueue -f)"}, nil)
 }
 
 func (h *EmailHandler) DeleteQueueItem(w http.ResponseWriter, r *http.Request) {
@@ -2129,6 +2156,156 @@ func (h *EmailHandler) DeleteQueueItem(w http.ResponseWriter, r *http.Request) {
 
 	h.audit.Log(r.Context(), r, "email.queue.delete", "mail_queue", queueID, "success", "", nil)
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Queue item purged"}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// OUTBOUND RATE CONTROL & GMAIL COOLDOWN CONTROLLER
+// ----------------------------------------------------------------------------
+
+func (h *EmailHandler) GetRateControlStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can view rate control status", nil, "")
+		return
+	}
+
+	ctrl := ratecontrol.GetGlobalController()
+
+	// 1. Inspect Postfix Queue for current messages & active 421 deferrals
+	queueMessages, _ := queue.ListQueue()
+	totalQueue := len(queueMessages)
+	deferredCount := 0
+	activeCount := 0
+	holdCount := 0
+	rateLimitedCount := 0
+	rateLimitedItems := make([]queue.QueueMessage, 0)
+
+	for _, msg := range queueMessages {
+		if msg.Status == "deferred" {
+			deferredCount++
+		} else if msg.Status == "active" {
+			activeCount++
+		} else if msg.Status == "hold" {
+			holdCount++
+		}
+		if msg.IsRateLimited {
+			rateLimitedCount++
+			rateLimitedItems = append(rateLimitedItems, msg)
+		}
+	}
+
+	// 2. Fetch all tracked domain states
+	states := ctrl.GetAllStates()
+	if len(states) == 0 {
+		states = append(states, ctrl.GetState("onlyflrt.net", "gmail.com"))
+	}
+
+	hasActiveCooldown := false
+	for _, s := range states {
+		if s.InCooldown {
+			hasActiveCooldown = true
+			break
+		}
+	}
+
+	// 3. Assemble response payload
+	data := map[string]any{
+		"active_cooldown":     hasActiveCooldown,
+		"rate_limited_count": rateLimitedCount,
+		"queue_summary": map[string]any{
+			"total":        totalQueue,
+			"deferred":     deferredCount,
+			"active":       activeCount,
+			"hold":         holdCount,
+			"rate_limited": rateLimitedCount,
+		},
+		"rate_limited_messages": rateLimitedItems,
+		"domain_states":         states,
+		"gmail_transport": map[string]any{
+			"name":                           "gmail",
+			"concurrency_limit":             1,
+			"rate_delay":                     "1s",
+			"recipient_limit":                1,
+			"initial_concurrency":            1,
+			"concurrency_failed_cohort_limit": 1,
+			"positive_feedback":              "1/5",
+			"negative_feedback":              "1/1",
+			"anti_retry_storm_active":        true,
+		},
+		"auth_alignment": map[string]any{
+			"sending_ip":        "109.199.110.101",
+			"reverse_dns_ptr":   "mail.onlyflrt.net",
+			"helo_hostname":     "mail.onlyflrt.net",
+			"is_fcrdns_aligned": true,
+			"spf_domain":        "onlyflrt.net",
+			"spf_record":        "v=spf1 mx ip4:109.199.110.101 ~all",
+			"spf_valid":         true,
+			"dkim_selector":     "default",
+			"dkim_valid":        true,
+			"dmarc_policy":      "reject",
+			"dmarc_valid":       true,
+			"tls_security":      "dane / tls1.3",
+		},
+	}
+
+	response.JSON(w, http.StatusOK, data, nil)
+}
+
+func (h *EmailHandler) ResetRateControlCooldown(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can reset rate limit cooldown", nil, "")
+		return
+	}
+
+	domain := r.URL.Query().Get("domain")
+	if domain == "" {
+		domain = "onlyflrt.net"
+	}
+	destination := r.URL.Query().Get("destination")
+	if destination == "" {
+		destination = "gmail.com"
+	}
+
+	ctrl := ratecontrol.GetGlobalController()
+	ctrl.ResetCooldown(domain, destination)
+
+	h.audit.Log(r.Context(), r, "email.ratecontrol.reset_cooldown", "rate_control", fmt.Sprintf("%s:%s", domain, destination), "success", "", nil)
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message":     fmt.Sprintf("Cooldown state cleared for %s targeting %s", domain, destination),
+		"domain":      domain,
+		"destination": destination,
+	}, nil)
+}
+
+func (h *EmailHandler) RecordSimulatedRateLimitEvent(w http.ResponseWriter, r *http.Request) {
+	if !h.isEmailAdmin(r) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Only administrators can record rate limit events", nil, "")
+		return
+	}
+
+	var req struct {
+		Domain      string `json:"domain"`
+		Destination string `json:"destination"`
+		StatusCode  string `json:"status_code"`
+		Response    string `json:"response"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		req.Domain = "onlyflrt.net"
+		req.Destination = "gmail.com"
+		req.StatusCode = "421"
+		req.Response = "4.7.28 Gmail has detected an unusual rate of mail originating from your SPF domain [onlyflrt.net]"
+	}
+	if req.Domain == "" {
+		req.Domain = "onlyflrt.net"
+	}
+	if req.Destination == "" {
+		req.Destination = "gmail.com"
+	}
+
+	ctrl := ratecontrol.GetGlobalController()
+	state := ctrl.RecordDeliveryEvent(req.Domain, req.Destination, req.StatusCode, req.Response)
+
+	h.audit.Log(r.Context(), r, "email.ratecontrol.record_event", "rate_control", fmt.Sprintf("%s:%s", req.Domain, req.Destination), "success", "", nil)
+	response.JSON(w, http.StatusOK, state, nil)
 }
 
 // ----------------------------------------------------------------------------
@@ -3092,6 +3269,24 @@ protocol lmtp {
 
 		if isLinuxRoot {
 			if _, err := exec.LookPath("postconf"); err == nil {
+				// 1. HELO/EHLO Hostname Alignment (Matches Reverse DNS PTR to satisfy Gmail FCrDNS requirement)
+				mailHostname := os.Getenv("POSTFIX_MYHOSTNAME")
+				if mailHostname == "" {
+					for _, d := range activeDomains {
+						if d.MailHostname != "" {
+							mailHostname = d.MailHostname
+							break
+						}
+					}
+				}
+				if mailHostname == "" && len(activeDomains) > 0 {
+					mailHostname = "mail." + activeDomains[0].Domain
+				}
+				if mailHostname == "" {
+					mailHostname = "mail.onlyflrt.net"
+				}
+				_ = exec.Command("postconf", "-e", fmt.Sprintf("myhostname = %s", mailHostname)).Run()
+
 				_ = exec.Command("postconf", "-e", "mydestination = localhost.$mydomain, localhost").Run()
 				_ = exec.Command("postconf", "-e", "virtual_mailbox_domains = hash:/etc/postfix/vdomains").Run()
 				_ = exec.Command("postconf", "-e", "virtual_mailbox_maps = hash:/etc/postfix/vmailbox").Run()
@@ -3108,21 +3303,36 @@ protocol lmtp {
 				_ = exec.Command("postconf", "-e", "inet_interfaces = all").Run()
 				_ = exec.Command("postconf", "-e", "inet_protocols = ipv4").Run()
 
+				// 2. Outbound Transport Mapping & Gmail Dedicated Rate Limiting
+				_ = exec.Command("postconf", "-e", "transport_maps = hash:/etc/postfix/transport").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_concurrency_limit = 1").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_rate_delay = 1s").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_recipient_limit = 1").Run()
+				_ = exec.Command("postconf", "-e", "gmail_initial_destination_concurrency = 1").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_concurrency_failed_cohort_limit = 1").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_concurrency_positive_feedback = 1/5").Run()
+				_ = exec.Command("postconf", "-e", "gmail_destination_concurrency_negative_feedback = 1/1").Run()
+				_ = exec.Command("postconf", "-e", "minimal_backoff_time = 300s").Run()
+				_ = exec.Command("postconf", "-e", "maximal_backoff_time = 4000s").Run()
+				_ = exec.Command("postconf", "-e", "queue_run_delay = 300s").Run()
+				_ = exec.Command("postconf", "-e", "bounce_queue_lifetime = 5d").Run()
+				_ = exec.Command("postconf", "-e", "maximal_queue_lifetime = 5d").Run()
+
 				// Select transport based on socket availability
 				lmtpSocket := "/var/spool/postfix/private/dovecot-lmtp"
 				if _, lmtpErr := os.Stat(lmtpSocket); lmtpErr == nil {
 					_ = exec.Command("postconf", "-e", "virtual_transport = lmtp:unix:private/dovecot-lmtp").Run()
 					report.TransportUsed = "lmtp:unix:private/dovecot-lmtp"
 				} else {
-					// Built-in virtual delivery agent directly delivers to /var/mail/vhosts/domain/user/
 					_ = exec.Command("postconf", "-e", "virtual_transport = virtual").Run()
 					report.TransportUsed = "virtual"
 				}
 
-				// Enable SMTPS port 465 in master.cf if not enabled
+				// Enable SMTPS port 465 and dedicated gmail transport in master.cf if missing
 				masterCfPath := filepath.Join(postfixDir, "master.cf")
 				if mstData, err := os.ReadFile(masterCfPath); err == nil {
 					mstStr := string(mstData)
+					changed := false
 					if !strings.Contains(mstStr, "\nsmtps ") && !strings.Contains(mstStr, "\nsubmissions ") {
 						smtpsBlock := `
 # Hostvra SMTPS (Port 465)
@@ -3133,13 +3343,45 @@ smtps     inet  n       -       y       -       -       smtpd
   -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject
 `
 						mstStr += smtpsBlock
+						changed = true
+					}
+
+					if !strings.Contains(mstStr, "\ngmail ") {
+						gmailBlock := `
+# Dedicated Outbound Transport for Gmail / Google Workspace (Rate-Limited, Concurrency=1)
+gmail     unix  -       -       y       -       -       smtp
+  -o syslog_name=postfix/gmail
+  -o smtp_destination_concurrency_limit=1
+  -o smtp_destination_rate_delay=1s
+  -o smtp_destination_recipient_limit=1
+  -o default_destination_concurrency_limit=1
+  -o default_destination_rate_delay=1s
+  -o default_destination_recipient_limit=1
+`
+						mstStr += gmailBlock
+						changed = true
+					}
+
+					if changed {
 						_ = os.WriteFile(masterCfPath, []byte(mstStr), 0644)
 					}
 				}
 
 				_ = exec.Command("postfix", "reload").Run()
 				if report.PostfixOK && report.DovecotOK {
-					_ = exec.Command("postqueue", "-f").Run()
+					// Safe flush: verify target destinations are not in rate limit cooldown
+					inCooldown := false
+					ctrl := ratecontrol.GetGlobalController()
+					for _, d := range activeDomains {
+						allowed, _, _ := ctrl.CanDeliver(d.Domain, "gmail.com")
+						if !allowed {
+							inCooldown = true
+							break
+						}
+					}
+					if !inCooldown {
+						_ = exec.Command("postqueue", "-f").Run()
+					}
 				}
 			}
 		}

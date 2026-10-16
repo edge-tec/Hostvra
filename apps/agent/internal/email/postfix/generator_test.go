@@ -101,4 +101,72 @@ func TestGenerateMapsAndApply(t *testing.T) {
 	if err != nil || !strings.Contains(string(valias), "support@example.com info@example.com") {
 		t.Errorf("valias content incorrect: %v", string(valias))
 	}
+
+	// Check transport map generated with dedicated Gmail transport
+	transport, err := os.ReadFile(filepath.Join(tmpDir, "transport"))
+	if err != nil || !strings.Contains(string(transport), "gmail.com          gmail:") {
+		t.Errorf("transport map missing gmail.com routing: %v", string(transport))
+	}
 }
+
+func TestGenerateMainCF_OutboundGmailRateLimiting(t *testing.T) {
+	opts := ConfigOptions{
+		Hostname:     "mail.onlyflrt.net",
+		Domain:       "onlyflrt.net",
+		MailDirBase:  "/var/mail/vhosts",
+		EnableRspamd: true,
+	}
+
+	conf := GenerateMainCF(opts)
+
+	// Verify transport_maps directive
+	if !strings.Contains(conf, "transport_maps = hash:/etc/postfix/transport") {
+		t.Errorf("main.cf must declare transport_maps = hash:/etc/postfix/transport")
+	}
+
+	// Verify Gmail rate limiting parameters
+	if !strings.Contains(conf, "gmail_destination_concurrency_limit = 1") {
+		t.Errorf("main.cf must set gmail_destination_concurrency_limit = 1")
+	}
+	if !strings.Contains(conf, "gmail_destination_rate_delay = 1s") {
+		t.Errorf("main.cf must set gmail_destination_rate_delay = 1s")
+	}
+	if !strings.Contains(conf, "gmail_destination_recipient_limit = 1") {
+		t.Errorf("main.cf must set gmail_destination_recipient_limit = 1")
+	}
+	if !strings.Contains(conf, "gmail_initial_destination_concurrency = 1") {
+		t.Errorf("main.cf must set gmail_initial_destination_concurrency = 1")
+	}
+	if !strings.Contains(conf, "gmail_destination_concurrency_failed_cohort_limit = 1") {
+		t.Errorf("main.cf must set gmail_destination_concurrency_failed_cohort_limit = 1")
+	}
+
+	// Verify backoff policy
+	if !strings.Contains(conf, "minimal_backoff_time = 300s") {
+		t.Errorf("main.cf must set safe minimal_backoff_time = 300s")
+	}
+	if !strings.Contains(conf, "maximal_backoff_time = 4000s") {
+		t.Errorf("main.cf must set safe maximal_backoff_time = 4000s")
+	}
+}
+
+func TestGenerateMasterCF_GmailTransport(t *testing.T) {
+	master := GenerateMasterCF()
+
+	if !strings.Contains(master, "gmail     unix") {
+		t.Errorf("master.cf must declare dedicated gmail transport")
+	}
+	if !strings.Contains(master, "-o syslog_name=postfix/gmail") {
+		t.Errorf("gmail transport must have postfix/gmail syslog_name")
+	}
+	if !strings.Contains(master, "-o smtp_destination_concurrency_limit=1") {
+		t.Errorf("gmail transport must enforce smtp_destination_concurrency_limit=1")
+	}
+	if !strings.Contains(master, "-o smtp_destination_rate_delay=1s") {
+		t.Errorf("gmail transport must enforce smtp_destination_rate_delay=1s")
+	}
+	if !strings.Contains(master, "-o smtp_destination_recipient_limit=1") {
+		t.Errorf("gmail transport must enforce smtp_destination_recipient_limit=1")
+	}
+}
+

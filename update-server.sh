@@ -143,7 +143,13 @@ else
     rollback_server
 fi
 
-# 6. Restart Systemd Services
+# 6. Apply Postfix Rate Control & FCrDNS Alignment
+if [[ -f "${REPO_DIR}/deploy-gmail-rate-control.sh" ]]; then
+    echo -e "${BLUE}[INFO]${NC} Applying Postfix Gmail 421 rate control and FCrDNS alignment..."
+    bash "${REPO_DIR}/deploy-gmail-rate-control.sh" || echo -e "${YELLOW}[WARN] deploy-gmail-rate-control.sh completed with warnings.${NC}"
+fi
+
+# 7. Restart Systemd Services
 echo -e "${BLUE}[INFO]${NC} Restarting Hostvra services..."
 systemctl daemon-reload 2>/dev/null || true
 systemctl restart hostvra-api 2>/dev/null || true

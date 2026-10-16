@@ -8,22 +8,54 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hostvra/agent/internal/email/ratecontrol"
 )
 
 type QueueMessage struct {
-	QueueID     string    `json:"queue_id"`
-	SizeBytes   int64     `json:"size_bytes"`
-	ArrivalTime time.Time `json:"arrival_time"`
-	Sender      string    `json:"sender"`
-	Recipients  []string  `json:"recipients"`
-	Status      string    `json:"status"` // active, deferred, hold
-	Reason      string    `json:"reason,omitempty"`
+	QueueID              string    `json:"queue_id"`
+	SizeBytes            int64     `json:"size_bytes"`
+	ArrivalTime          time.Time `json:"arrival_time"`
+	Sender               string    `json:"sender"`
+	Recipients           []string  `json:"recipients"`
+	Status               string    `json:"status"` // active, deferred, hold
+	Reason               string    `json:"reason,omitempty"`
+	IsRateLimited        bool      `json:"is_rate_limited"`
+	RateLimitCode        string    `json:"rate_limit_code,omitempty"`
+	RateLimitDomain      string    `json:"rate_limit_domain,omitempty"`
+	RateLimitDestination string    `json:"rate_limit_destination,omitempty"`
 }
 
 var (
 	// Matches: "12345ABCDE*     1024 Sun Sep  6 10:00:00  sender@example.com"
-	headerRegex = regexp.MustCompile(`^([A-Za-z0-9]+)([\*!]?)\s+(\d+)\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+\d+\s+\d+:\d+:\d+)\s+(.+)$`)
+	headerRegex    = regexp.MustCompile(`^([A-Za-z0-9]+)([\*!]?)\s+(\d+)\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+\d+\s+\d+:\d+:\d+)\s+(.+)$`)
+	spfDomainRegex = regexp.MustCompile(`(?i)SPF domain\s+\[([a-zA-Z0-9\.\-]+)\]`)
 )
+
+func enrichRateLimitInfo(msg *QueueMessage) {
+	if msg == nil || msg.Reason == "" {
+		return
+	}
+	is421, _, _, _ := ratecontrol.ClassifySMTPResponse("421", msg.Reason)
+	if is421 {
+		msg.IsRateLimited = true
+		msg.RateLimitCode = "421 4.7.28"
+		msg.RateLimitDestination = "gmail.com"
+
+		// Extract SPF domain from reason if formatted as: SPF domain [domain]
+		spfMatch := spfDomainRegex.FindStringSubmatch(msg.Reason)
+		if len(spfMatch) > 1 {
+			msg.RateLimitDomain = strings.ToLower(spfMatch[1])
+		} else if strings.Contains(msg.Sender, "@") {
+			parts := strings.Split(msg.Sender, "@")
+			msg.RateLimitDomain = strings.ToLower(parts[len(parts)-1])
+		}
+
+		if msg.RateLimitDomain != "" {
+			ratecontrol.GetGlobalController().RecordDeliveryEvent(msg.RateLimitDomain, "gmail.com", "421", msg.Reason)
+		}
+	}
+}
 
 // ParsePostqueueOutput parses output from `postqueue -p`
 func ParsePostqueueOutput(output string) ([]QueueMessage, error) {
@@ -42,6 +74,7 @@ func ParsePostqueueOutput(output string) ([]QueueMessage, error) {
 
 		if matches := headerRegex.FindStringSubmatch(trimmed); matches != nil {
 			if current != nil {
+				enrichRateLimitInfo(current)
 				messages = append(messages, *current)
 			}
 
@@ -73,6 +106,7 @@ func ParsePostqueueOutput(output string) ([]QueueMessage, error) {
 	}
 
 	if current != nil {
+		enrichRateLimitInfo(current)
 		messages = append(messages, *current)
 	}
 
@@ -108,6 +142,17 @@ func FlushQueue() error {
 		return fmt.Errorf("postqueue -f failed: %s (%w)", string(out), err)
 	}
 	return nil
+}
+
+// SafeFlushQueue checks destination cooldown before triggering a queue flush
+func SafeFlushQueue(domain, destination string) error {
+	if domain != "" && destination != "" {
+		allowed, waitSec, reason := ratecontrol.GetGlobalController().CanDeliver(domain, destination)
+		if !allowed {
+			return fmt.Errorf("queue flush blocked: %s (cooldown active: %ds remaining)", reason, waitSec)
+		}
+	}
+	return FlushQueue()
 }
 
 // DeleteQueueMessage deletes a message from the queue via postsuper -d

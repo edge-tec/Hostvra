@@ -473,11 +473,12 @@ if command -v systemctl &>/dev/null; then
         systemctl restart dovecot 2>/dev/null || true
     fi
     if systemctl list-unit-files | grep -q "postfix"; then
-        echo "Restarting Postfix SMTP service..."
-        systemctl restart postfix 2>/dev/null || true
-        if command -v postqueue &>/dev/null; then
-            postqueue -f 2>/dev/null || true
-            echo "Postfix mail queue flushed for immediate inbound delivery."
+        if [[ -f "${HOSTVRA_DIR}/deploy-gmail-rate-control.sh" ]]; then
+            echo "Applying Postfix Gmail 421 Rate Control & FCrDNS alignment..."
+            bash "${HOSTVRA_DIR}/deploy-gmail-rate-control.sh" || true
+        else
+            echo "Restarting Postfix SMTP service..."
+            systemctl restart postfix 2>/dev/null || true
         fi
     fi
 fi

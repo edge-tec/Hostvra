@@ -900,10 +900,13 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/reconcile", emailHandler.ReconcileEmailServices)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/smtp-settings", emailHandler.GetSMTPSettings)
 
-				// Mail Queue
+				// Mail Queue & Outbound Rate Control
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/queue", emailHandler.ListQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/flush", emailHandler.FlushQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/record-event", emailHandler.RecordSimulatedRateLimitEvent)
 
 				// Suppression List
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/suppressions", emailHandler.ListSuppressions)
@@ -965,6 +968,9 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/queue", emailHandler.ListQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/queue/flush", emailHandler.FlushQueue)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/record-event", emailHandler.RecordSimulatedRateLimitEvent)
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/diagnostics", emailHandler.GetMailDiagnostics)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/spam", emailHandler.GetSpamProtectionStats)

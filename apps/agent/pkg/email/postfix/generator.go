@@ -110,6 +110,28 @@ func GenerateMainCF(opts ConfigOptions) string {
 	sb.WriteString("mailbox_size_limit = 0\n")        // Handled by Dovecot quota
 	sb.WriteString("smtpd_recipient_limit = 50\n\n")
 
+	// Outbound Destination Rate Control & Transport Mapping
+	sb.WriteString("# Outbound Destination Rate Control & Transport Mapping\n")
+	sb.WriteString("transport_maps = hash:/etc/postfix/transport\n\n")
+
+	// Dedicated Gmail Outbound Rate Limiting & Cooldown Protection (RFC & Google Bulk Sender Guidelines)
+	sb.WriteString("# Dedicated Gmail Outbound Rate Limiting & Cooldown Protection\n")
+	sb.WriteString("gmail_destination_concurrency_limit = 1\n")
+	sb.WriteString("gmail_destination_rate_delay = 1s\n")
+	sb.WriteString("gmail_destination_recipient_limit = 1\n")
+	sb.WriteString("gmail_initial_destination_concurrency = 1\n")
+	sb.WriteString("gmail_destination_concurrency_failed_cohort_limit = 1\n")
+	sb.WriteString("gmail_destination_concurrency_positive_feedback = 1/5\n")
+	sb.WriteString("gmail_destination_concurrency_negative_feedback = 1/1\n\n")
+
+	// Queue Backoff & Safe Retry Intervals (Prevents Retry Storms)
+	sb.WriteString("# Queue Backoff & Safe Retry Policy (Prevents Retry Storms)\n")
+	sb.WriteString("minimal_backoff_time = 300s\n")
+	sb.WriteString("maximal_backoff_time = 4000s\n")
+	sb.WriteString("queue_run_delay = 300s\n")
+	sb.WriteString("bounce_queue_lifetime = 5d\n")
+	sb.WriteString("maximal_queue_lifetime = 5d\n\n")
+
 	// Rspamd Milter
 	if opts.EnableRspamd {
 		sb.WriteString("# Rspamd Milter Integration (Spam, DKIM, DMARC)\n")
@@ -173,6 +195,17 @@ proxymap  unix  -       -       n       -       -       proxymap
 proxywrite unix -       -       n       -       1       proxymap
 smtp      unix  -       -       y       -       -       smtp
 relay     unix  -       -       y       -       -       smtp
+
+# Dedicated Outbound Transport for Gmail / Google Workspace (Rate-Limited, Concurrency=1)
+gmail     unix  -       -       y       -       -       smtp
+  -o syslog_name=postfix/gmail
+  -o smtp_destination_concurrency_limit=1
+  -o smtp_destination_rate_delay=1s
+  -o smtp_destination_recipient_limit=1
+  -o default_destination_concurrency_limit=1
+  -o default_destination_rate_delay=1s
+  -o default_destination_recipient_limit=1
+
 showq     unix  n       -       y       -       -       showq
 error     unix  -       -       y       -       -       error
 retry     unix  -       -       y       -       -       error
@@ -183,6 +216,16 @@ lmtp      unix  -       -       y       -       -       lmtp
 anvil     unix  -       -       y       -       1       anvil
 scache    unix  -       -       y       -       1       scache
 postlog   unix-dgram n  -       n       -       1       postlogd
+`
+}
+
+// GenerateTransportMaps generates the transport map content directing Gmail to dedicated transport
+func GenerateTransportMaps() string {
+	return `# Hostvra Outbound Destination Transport Maps
+# Routes Gmail / Googlemail to dedicated rate-limited transport
+gmail.com          gmail:
+googlemail.com     gmail:
+google.com         gmail:
 `
 }
 
@@ -223,9 +266,10 @@ func ApplyMaps(configDir string, domains []VirtualDomain, mailboxes []VirtualMai
 	}
 
 	files := map[string]string{
-		"vdomains": GenerateVirtualDomains(domains),
-		"vmailbox": GenerateVirtualMailboxes(mailboxes),
-		"valias":   GenerateVirtualAliases(aliases),
+		"vdomains":  GenerateVirtualDomains(domains),
+		"vmailbox":  GenerateVirtualMailboxes(mailboxes),
+		"valias":    GenerateVirtualAliases(aliases),
+		"transport": GenerateTransportMaps(),
 	}
 
 	for fname, content := range files {

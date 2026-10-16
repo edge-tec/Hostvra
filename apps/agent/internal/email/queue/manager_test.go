@@ -50,3 +50,45 @@ func TestDeleteQueueMessage_Sanitization(t *testing.T) {
 		t.Errorf("expected validation failure for malicious queue ID")
 	}
 }
+
+func TestParsePostqueueOutput_Gmail421RateLimit(t *testing.T) {
+	rawOutput := `-Queue ID-  --Size-- ----Arrival Time---- -Sender/Recipient-------
+4V3L9j013gz2X     1234 Sun Sep  6 10:00:00  newsletter@onlyflrt.net
+(host gmail-smtp-in.l.google.com[142.250.27.26] said: 421-4.7.28 Gmail has detected an unusual rate of mail originating from your SPF domain [onlyflrt.net]. 421-4.7.28 To protect our users from spam, mail originating from your domain has 421-4.7.28 been temporarily rate limited. (in reply to end of DATA command))
+                                         customer1@gmail.com
+
+-- 1 Kbytes in 1 Request.
+`
+
+	messages, err := ParsePostqueueOutput(rawOutput)
+	if err != nil {
+		t.Fatalf("ParsePostqueueOutput failed: %v", err)
+	}
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+
+	m := messages[0]
+	if !m.IsRateLimited {
+		t.Errorf("expected IsRateLimited=true for Gmail 421 4.7.28")
+	}
+	if m.RateLimitCode != "421 4.7.28" {
+		t.Errorf("expected RateLimitCode '421 4.7.28', got '%s'", m.RateLimitCode)
+	}
+	if m.RateLimitDomain != "onlyflrt.net" {
+		t.Errorf("expected RateLimitDomain 'onlyflrt.net', got '%s'", m.RateLimitDomain)
+	}
+	if m.RateLimitDestination != "gmail.com" {
+		t.Errorf("expected RateLimitDestination 'gmail.com', got '%s'", m.RateLimitDestination)
+	}
+}
+
+func TestSafeFlushQueue_BlockedWhenInCooldown(t *testing.T) {
+	// After parsing the 421 queue message above, onlyflrt.net is automatically placed into cooldown!
+	err := SafeFlushQueue("onlyflrt.net", "gmail.com")
+	if err == nil {
+		t.Errorf("SafeFlushQueue must be blocked when domain is in cooldown")
+	}
+}
+
