@@ -65,6 +65,7 @@ type Subscription struct {
 	PlanID          uuid.UUID          `json:"plan_id"`
 	PlanName        string             `json:"plan_name"`
 	ServerID        *uuid.UUID         `json:"server_id,omitempty"`
+	Domain          string             `json:"domain,omitempty"`
 	Status          SubscriptionStatus `json:"status"`
 	BillingCycle    string             `json:"billing_cycle"` // monthly, yearly
 	Amount          float64            `json:"amount"`

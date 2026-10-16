@@ -167,6 +167,7 @@ func main() {
 	ftpHandler.SetQuotaService(quotaService)
 	fileHandler.SetQuotaService(quotaService)
 	billingHandler.SetEmailService(emailService)
+	billingHandler.StartLifecycleWorker(context.Background(), 1*time.Hour)
 
 	adminUsersHandler := handlers.NewAdminUsersHandler(cfg, dataStore, quotaService, auditLogger, emailService)
 
@@ -1046,6 +1047,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/extend", billingHandler.ExtendTrial)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/end", billingHandler.EndTrial)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/trials/{id}/convert", billingHandler.ConvertTrial)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/lifecycle/run", billingHandler.RunLifecycle)
 			})
 
 			// Client Hosting Accounts (WHM Multi-Tenancy & Provisioning)

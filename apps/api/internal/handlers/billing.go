@@ -9,9 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/rand"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -366,15 +370,38 @@ func (h *BillingHandler) GetSubscription(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, sub, nil)
 }
 
-func (h *BillingHandler) provisionUserForPlan(ctx context.Context, userID, orgID uuid.UUID, plan *store.HostingPlan) {
+var slugRegex = regexp.MustCompile(`[^a-z0-9]`)
+
+func sanitizeSlug(input string, maxLen int) string {
+	s := strings.ToLower(strings.TrimSpace(input))
+	s = slugRegex.ReplaceAllString(s, "")
+	if maxLen > 0 && len(s) > maxLen {
+		s = s[:maxLen]
+	}
+	return s
+}
+
+func randomAlphanumeric(length int) string {
+	const chars = "abcdefghjkmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = chars[rand.Intn(len(chars))]
+	}
+	return string(b)
+}
+
+func (h *BillingHandler) provisionUserForPlan(ctx context.Context, userID, orgID uuid.UUID, plan *store.HostingPlan, sub *store.Subscription) {
 	if plan == nil {
 		return
 	}
 
 	// 1. Synchronize WHM Hosting Accounts if present
-	if accounts, err := h.store.ListHostingAccounts(ctx, orgID, nil); err == nil {
+	accounts, err := h.store.ListHostingAccounts(ctx, orgID, nil)
+	hasExistingAccount := false
+	if err == nil {
 		for _, acc := range accounts {
-			if acc.UserID == userID || orgID != uuid.Nil {
+			if acc.UserID == userID || (orgID != uuid.Nil && acc.OrganizationID == orgID) {
+				hasExistingAccount = true
 				acc.PlanID = plan.ID
 				acc.PlanName = plan.Name
 				acc.DiskLimitMB = plan.DiskSpaceMB
@@ -382,13 +409,263 @@ func (h *BillingHandler) provisionUserForPlan(ctx context.Context, userID, orgID
 				acc.WebsitesLimit = plan.MaxWebsites
 				acc.DatabasesLimit = plan.MaxDatabases
 				acc.MailboxesLimit = plan.MaxMailboxes
-				if acc.Status == "suspended" && (acc.SuspendReason == "" || strings.Contains(strings.ToLower(acc.SuspendReason), "billing") || strings.Contains(strings.ToLower(acc.SuspendReason), "trial")) {
-					acc.Status = "active"
+				wasSuspended := acc.Status == store.AccountStatusSuspended || acc.Status == "suspended"
+				if wasSuspended {
+					acc.Status = store.AccountStatusActive
 					acc.SuspendReason = ""
+					acc.SuspendedAt = nil
+					_ = h.store.UpdateHostingAccount(ctx, acc)
+
+					// Unsuspend corresponding website
+					if sites, sErr := h.store.ListAllWebsites(ctx); sErr == nil {
+						for _, site := range sites {
+							if strings.EqualFold(site.PrimaryDomain, acc.Domain) && (site.Status == "suspended" || site.Status == "disabled") {
+								site.Status = "active"
+								_ = h.store.UpdateWebsite(ctx, site)
+							}
+						}
+					}
+
+					// Notify account unsuspended
+					if h.emailSvc != nil {
+						if u, uErr := h.store.GetUserByID(ctx, userID); uErr == nil && u != nil {
+							_ = h.emailSvc.SendAccountUnsuspended(ctx, u.Email, u.FullName, acc.Domain)
+						}
+					}
+				} else {
+					_ = h.store.UpdateHostingAccount(ctx, acc)
 				}
-				_ = h.store.UpdateHostingAccount(ctx, acc)
 			}
 		}
+	}
+
+	// 2. If user does NOT have any hosting accounts, execute ZERO-TOUCH AUTO-PROVISIONING!
+	if !hasExistingAccount {
+		h.autoProvisionAccount(ctx, userID, orgID, plan, sub)
+	}
+}
+
+func (h *BillingHandler) autoProvisionAccount(ctx context.Context, userID, orgID uuid.UUID, plan *store.HostingPlan, sub *store.Subscription) {
+	// 1. Resolve Target Domain
+	domain := ""
+	if sub != nil && sub.Domain != "" {
+		domain = sub.Domain
+	}
+	if domain == "" {
+		if u, err := h.store.GetUserByID(ctx, userID); err == nil && u != nil {
+			userSlug := sanitizeSlug(strings.Split(u.Email, "@")[0], 12)
+			if userSlug == "" {
+				userSlug = sanitizeSlug(u.FullName, 12)
+			}
+			if userSlug != "" {
+				domain = userSlug + ".hostvra.site"
+			}
+		}
+	}
+	if domain == "" {
+		domain = fmt.Sprintf("site-%s.hostvra.site", randomAlphanumeric(6))
+	}
+	domain = strings.ToLower(strings.TrimSpace(domain))
+
+	// 2. Resolve Server
+	var serverID uuid.UUID
+	var serverIP string = "127.0.0.1"
+	var serverName string = "Local Cloud Node"
+
+	if sub != nil && sub.ServerID != nil && *sub.ServerID != uuid.Nil {
+		if s, err := h.store.GetServerByID(ctx, *sub.ServerID); err == nil && s != nil {
+			serverID = s.ID
+			if s.IPAddress != "" {
+				serverIP = s.IPAddress
+			}
+			if s.Name != "" {
+				serverName = s.Name
+			}
+		}
+	}
+
+	if serverID == uuid.Nil {
+		if servers, err := h.store.ListServersByOrg(ctx, orgID); err == nil && len(servers) > 0 {
+			serverID = servers[0].ID
+			if servers[0].IPAddress != "" {
+				serverIP = servers[0].IPAddress
+			}
+			if servers[0].Name != "" {
+				serverName = servers[0].Name
+			}
+		} else if allServers, err := h.store.ListServersByOrg(ctx, uuid.Nil); err == nil && len(allServers) > 0 {
+			serverID = allServers[0].ID
+			if allServers[0].IPAddress != "" {
+				serverIP = allServers[0].IPAddress
+			}
+			if allServers[0].Name != "" {
+				serverName = allServers[0].Name
+			}
+		} else {
+			defaultServerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+			if s, err := h.store.GetServerByID(ctx, defaultServerID); err == nil && s != nil {
+				serverID = s.ID
+			} else {
+				_ = h.store.CreateServer(ctx, &store.Server{
+					ID:             defaultServerID,
+					OrganizationID: orgID,
+					Name:           serverName,
+					Hostname:       "localhost",
+					IPAddress:      serverIP,
+					Status:         "online",
+					OSName:         "Linux",
+					CreatedAt:      time.Now().UTC(),
+					UpdatedAt:      time.Now().UTC(),
+				})
+				serverID = defaultServerID
+			}
+		}
+	}
+
+	// 3. Generate Linux / SFTP System User and Random Password
+	cleanSlug := sanitizeSlug(strings.Split(domain, ".")[0], 10)
+	if cleanSlug == "" {
+		cleanSlug = "user"
+	}
+	cleanUser := fmt.Sprintf("c_%s%s", cleanSlug, randomAlphanumeric(3))
+	if len(cleanUser) > 16 {
+		cleanUser = cleanUser[:16]
+	}
+	cleanPass := randomAlphanumeric(14)
+	docRoot := fmt.Sprintf("/home/%s/public_html", cleanUser)
+	phpVer := "8.3"
+
+	var subID *uuid.UUID
+	if sub != nil {
+		subID = &sub.ID
+	}
+
+	// 4. Create HostingAccount
+	acc := &store.HostingAccount{
+		ID:               uuid.New(),
+		OrganizationID:   orgID,
+		UserID:           userID,
+		SubscriptionID:   subID,
+		ServerID:         &serverID,
+		ServerName:       serverName,
+		Domain:           domain,
+		Username:         cleanUser,
+		DocumentRoot:     docRoot,
+		PlanID:           plan.ID,
+		PlanName:         plan.Name,
+		Status:           store.AccountStatusActive,
+		DiskLimitMB:      plan.DiskSpaceMB,
+		DiskUsedMB:       120, // initial welcome scaffold
+		BandwidthLimitMB: plan.BandwidthMB,
+		BandwidthUsedMB:  0,
+		WebsitesLimit:    plan.MaxWebsites,
+		DatabasesLimit:   plan.MaxDatabases,
+		MailboxesLimit:   plan.MaxMailboxes,
+		IPAddress:        serverIP,
+		PHPVersion:       phpVer,
+		SSLActive:        plan.FreeSSL,
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}
+	_ = h.store.CreateHostingAccount(ctx, acc)
+
+	// 5. Create Website (Nginx/Apache VHost)
+	_ = h.store.CreateWebsite(ctx, &store.Website{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		PrimaryDomain:  domain,
+		DocumentRoot:   docRoot,
+		SystemUser:     cleanUser,
+		PHPVersion:     &phpVer,
+		WebServerType:  "nginx",
+		AppType:        "php",
+		Status:         "active",
+		SSLEnabled:     plan.FreeSSL,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	})
+
+	// 6. Create Initial Database if allowed
+	var dbName, dbUser, dbPass string
+	if plan.MaxDatabases > 0 {
+		dbName = fmt.Sprintf("db_%s", sanitizeSlug(cleanSlug, 8))
+		dbUser = fmt.Sprintf("u_%s", sanitizeSlug(cleanSlug, 8))
+		dbPass = randomAlphanumeric(14)
+
+		_ = h.store.CreateDatabase(ctx, &store.Database{
+			ID:             uuid.New(),
+			OrganizationID: orgID,
+			ServerID:       serverID,
+			DBType:         "mysql",
+			Name:           dbName,
+			Username:       dbUser,
+			Password:       dbPass,
+			CharacterSet:   "utf8mb4",
+			Collation:      "utf8mb4_unicode_ci",
+			CreatedAt:      time.Now().UTC(),
+		})
+	}
+
+	// 7. Scaffold welcome index.html safely
+	if docRoot != "" && strings.HasPrefix(docRoot, "/home/") {
+		_ = os.MkdirAll(docRoot, 0755)
+		welcomeFile := filepath.Join(docRoot, "index.html")
+		if _, err := os.Stat(welcomeFile); os.IsNotExist(err) {
+			welcomeHTML := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Welcome to %s</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 60px 20px; background: #0f172a; color: #f8fafc; }
+        .box { max-width: 600px; margin: 0 auto; background: #1e293b; padding: 40px; border-radius: 16px; border: 1px solid #334155; }
+        h1 { color: #38bdf8; font-size: 28px; margin-bottom: 12px; }
+        p { color: #94a3b8; font-size: 16px; line-height: 1.6; }
+        .badge { display: inline-block; background: #0284c7; color: white; padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 13px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🚀 Welcome to %s</h1>
+        <p>Your web hosting account has been successfully provisioned by Hostvra Cloud.</p>
+        <div class="badge">PHP %s • SSL Ready • Nginx FastCGI</div>
+    </div>
+</body>
+</html>`, domain, domain, phpVer)
+			_ = os.WriteFile(welcomeFile, []byte(welcomeHTML), 0644)
+		}
+	}
+
+	// 8. Send cPanel-style welcome email with credentials
+	if h.emailSvc != nil {
+		go func() {
+			bgCtx := context.Background()
+			u, err := h.store.GetUserByID(bgCtx, userID)
+			if err != nil || u == nil {
+				return
+			}
+			ctrlPanel := "https://cp.hostvra.com"
+			if h.cfg != nil && h.cfg.AppURL != "" {
+				ctrlPanel = h.cfg.AppURL
+			}
+			provDetails := email.HostingProvisionDetails{
+				Domain:       domain,
+				PlanName:     plan.Name,
+				Username:     cleanUser,
+				Password:     cleanPass,
+				ControlPanel: ctrlPanel,
+				ServerIP:     serverIP,
+				Nameservers:  []string{"ns1.hostvra.com", "ns2.hostvra.com"},
+				DiskSpaceMB:  plan.DiskSpaceMB,
+				BandwidthMB:  plan.BandwidthMB,
+				PHPVersion:   phpVer,
+				DBName:       dbName,
+				DBUser:       dbUser,
+				DBPassword:   dbPass,
+			}
+			_ = h.emailSvc.SendHostingProvisioned(bgCtx, u.Email, u.FullName, provDetails)
+		}()
 	}
 }
 
@@ -398,6 +675,8 @@ type CreateSubscriptionRequest struct {
 	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad
 	AutoRenew     bool   `json:"auto_renew"`
 	StartTrial    bool   `json:"start_trial"`
+	Domain        string `json:"domain"`
+	ServerID      string `json:"server_id"`
 	SuccessURL    string `json:"success_url"`
 	CancelURL     string `json:"cancel_url"`
 }
@@ -474,6 +753,14 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 			trialDays = 14
 		}
 
+		var srvUUID *uuid.UUID
+		if req.ServerID != "" {
+			if parsed, err := uuid.Parse(req.ServerID); err == nil && parsed != uuid.Nil {
+				srvUUID = &parsed
+			}
+		}
+		cleanDomain := strings.ToLower(strings.TrimSpace(req.Domain))
+
 		now := time.Now().UTC()
 		ends := now.AddDate(0, 0, trialDays)
 		subID := uuid.New()
@@ -483,6 +770,8 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 			OrganizationID:  claims.OrganizationID,
 			PlanID:          plan.ID,
 			PlanName:        plan.Name,
+			ServerID:        srvUUID,
+			Domain:          cleanDomain,
 			Status:          store.SubStatusTrial,
 			BillingCycle:    req.BillingCycle,
 			Amount:          amount,
@@ -527,7 +816,7 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		_ = h.store.CreateInvoice(r.Context(), inv)
 
 		// Provision user profile and limits directly from plan
-		h.provisionUserForPlan(r.Context(), claims.UserID, claims.OrganizationID, plan)
+		h.provisionUserForPlan(r.Context(), claims.UserID, claims.OrganizationID, plan, sub)
 
 		// Record trial transaction
 		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
@@ -577,6 +866,14 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	var srvUUID *uuid.UUID
+	if req.ServerID != "" {
+		if parsed, err := uuid.Parse(req.ServerID); err == nil && parsed != uuid.Nil {
+			srvUUID = &parsed
+		}
+	}
+	cleanDomain := strings.ToLower(strings.TrimSpace(req.Domain))
+
 	subID := uuid.New()
 	now := time.Now().UTC()
 	sub := &store.Subscription{
@@ -585,6 +882,8 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 		OrganizationID:  claims.OrganizationID,
 		PlanID:          plan.ID,
 		PlanName:        plan.Name,
+		ServerID:        srvUUID,
+		Domain:          cleanDomain,
 		Status:          store.SubStatusPending, // Subscriptions MUST start as pending until paid!
 		BillingCycle:    req.BillingCycle,
 		Amount:          amount,
@@ -879,7 +1178,7 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 			_ = h.store.UpdateSubscription(r.Context(), sub)
 
 			if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
-				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
+				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan, sub)
 			}
 		}
 	}
@@ -1169,7 +1468,7 @@ func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Req
 			_ = h.store.UpdateSubscription(r.Context(), sub)
 
 			if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
-				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
+				h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan, sub)
 			}
 		}
 	}
@@ -1477,19 +1776,9 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				}
 				_ = h.store.UpdateSubscription(r.Context(), sub)
 
-				// Provision user quotas and features from hosting package
+				// Provision user quotas, auto-provision account if needed, and unsuspend existing accounts
 				if plan, err := h.store.GetPlanByID(r.Context(), sub.PlanID); err == nil && plan != nil {
-					h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan)
-				}
-
-				// Automatically unsuspend user's hosting accounts if suspended for billing
-				if accounts, err := h.store.ListHostingAccounts(r.Context(), sub.OrganizationID, nil); err == nil {
-					for _, acc := range accounts {
-						if acc.UserID == inv.UserID && acc.Status == "suspended" {
-							acc.Status = "active"
-							_ = h.store.UpdateHostingAccount(r.Context(), acc)
-						}
-					}
+					h.provisionUserForPlan(r.Context(), inv.UserID, inv.OrganizationID, plan, sub)
 				}
 			}
 		}
@@ -1813,6 +2102,8 @@ type CheckoutSessionRequest struct {
 	BillingCycle  string `json:"billing_cycle"` // monthly, yearly
 	PaymentMethod string `json:"payment_method"` // stripe, bkash, nagad, paypal
 	StartTrial    bool   `json:"start_trial"`
+	Domain        string `json:"domain"`
+	ServerID      string `json:"server_id"`
 	SuccessURL    string `json:"success_url"`
 	CancelURL     string `json:"cancel_url"`
 }
@@ -1855,6 +2146,8 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 			PaymentMethod: "free_trial",
 			AutoRenew:     true,
 			StartTrial:    true,
+			Domain:        req.Domain,
+			ServerID:      req.ServerID,
 		}
 		jsonBody, _ := json.Marshal(subReq)
 		r.Body = io.NopCloser(strings.NewReader(string(jsonBody)))
@@ -1874,6 +2167,14 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 	}
 
 	// Create Pending Subscription & Invoice
+	var srvUUID *uuid.UUID
+	if req.ServerID != "" {
+		if parsed, err := uuid.Parse(req.ServerID); err == nil && parsed != uuid.Nil {
+			srvUUID = &parsed
+		}
+	}
+	cleanDomain := strings.ToLower(strings.TrimSpace(req.Domain))
+
 	subID := uuid.New()
 	now := time.Now().UTC()
 	nextBilling := now.AddDate(0, 1, 0)
@@ -1887,6 +2188,8 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 		OrganizationID:  claims.OrganizationID,
 		PlanID:          plan.ID,
 		PlanName:        plan.Name,
+		ServerID:        srvUUID,
+		Domain:          cleanDomain,
 		Status:          store.SubStatusPending,
 		BillingCycle:    req.BillingCycle,
 		Amount:          amount,
@@ -1990,6 +2293,167 @@ func (h *BillingHandler) ListTransactions(w http.ResponseWriter, r *http.Request
 
 	response.JSON(w, http.StatusOK, txns, &response.Meta{Total: len(txns)})
 }
+
+// ----------------------------------------------------------------------------
+// Automated Billing Lifecycle Engine (Auto-Suspension & Overdue Tracking)
+// ----------------------------------------------------------------------------
+
+// ProcessBillingLifecycle evaluates all unpaid invoices, overdue grace periods, and expired free trials
+func (h *BillingHandler) ProcessBillingLifecycle(ctx context.Context) (map[string]int, error) {
+	stats := map[string]int{
+		"overdue_invoices":   0,
+		"suspended_accounts": 0,
+		"expired_trials":     0,
+	}
+
+	now := time.Now().UTC()
+
+	// 1. Process Invoices: Check for unpaid invoices past due date
+	invoices, err := h.store.ListInvoices(ctx, uuid.Nil)
+	if err == nil {
+		for _, inv := range invoices {
+			// Mark overdue if due date has passed
+			if inv.Status == store.InvoiceStatusUnpaid && inv.DueDate.Before(now) {
+				inv.Status = store.InvoiceStatusOverdue
+				_ = h.store.UpdateInvoice(ctx, inv)
+				stats["overdue_invoices"]++
+			}
+
+			// If invoice is overdue past 2-day grace period (48h) and linked to a subscription, suspend services
+			if inv.Status == store.InvoiceStatusOverdue && now.Sub(inv.DueDate) > 48*time.Hour && inv.SubscriptionID != nil {
+				if sub, sErr := h.store.GetSubscriptionByID(ctx, *inv.SubscriptionID); sErr == nil && sub != nil && sub.Status == store.SubStatusActive {
+					sub.Status = store.SubStatusSuspended
+					_ = h.store.UpdateSubscription(ctx, sub)
+
+					// Suspend hosting accounts
+					if accounts, aErr := h.store.ListHostingAccounts(ctx, sub.OrganizationID, nil); aErr == nil {
+						for _, acc := range accounts {
+							if acc.UserID == inv.UserID && acc.Status == store.AccountStatusActive {
+								acc.Status = store.AccountStatusSuspended
+								acc.SuspendReason = fmt.Sprintf("Overdue invoice %s past grace period", inv.InvoiceNumber)
+								suspendedAt := now
+								acc.SuspendedAt = &suspendedAt
+								_ = h.store.UpdateHostingAccount(ctx, acc)
+								stats["suspended_accounts"]++
+
+								// Suspend website vhost
+								if sites, siteErr := h.store.ListAllWebsites(ctx); siteErr == nil {
+									for _, site := range sites {
+										if strings.EqualFold(site.PrimaryDomain, acc.Domain) && site.Status == "active" {
+											site.Status = "suspended"
+											_ = h.store.UpdateWebsite(ctx, site)
+										}
+									}
+								}
+
+								// Send email notice
+								if h.emailSvc != nil {
+									if u, uErr := h.store.GetUserByID(ctx, inv.UserID); uErr == nil && u != nil {
+										_ = h.emailSvc.SendAccountSuspended(ctx, u.Email, u.FullName, acc.Domain, "Overdue unpaid invoice past grace period", &inv.ID)
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Process Free Trials: Expire trials that ended
+	subs, sErr := h.store.ListSubscriptions(ctx, uuid.Nil)
+	if sErr == nil {
+		for _, sub := range subs {
+			if sub.Status == store.SubStatusTrial && sub.TrialEndsAt != nil && sub.TrialEndsAt.Before(now) {
+				sub.Status = store.SubStatusExpired
+				_ = h.store.UpdateSubscription(ctx, sub)
+				stats["expired_trials"]++
+
+				// Suspend linked hosting accounts
+				if accounts, aErr := h.store.ListHostingAccounts(ctx, sub.OrganizationID, nil); aErr == nil {
+					for _, acc := range accounts {
+						if acc.UserID == sub.UserID && acc.Status == store.AccountStatusActive {
+							acc.Status = store.AccountStatusSuspended
+							acc.SuspendReason = "Free trial expired. Please upgrade to a paid plan."
+							suspendedAt := now
+							acc.SuspendedAt = &suspendedAt
+							_ = h.store.UpdateHostingAccount(ctx, acc)
+
+							// Suspend website vhost
+							if sites, siteErr := h.store.ListAllWebsites(ctx); siteErr == nil {
+								for _, site := range sites {
+									if strings.EqualFold(site.PrimaryDomain, acc.Domain) && site.Status == "active" {
+										site.Status = "suspended"
+										_ = h.store.UpdateWebsite(ctx, site)
+									}
+								}
+							}
+
+							// Send suspension notification
+							if h.emailSvc != nil {
+								if u, uErr := h.store.GetUserByID(ctx, sub.UserID); uErr == nil && u != nil {
+									_ = h.emailSvc.SendAccountSuspended(ctx, u.Email, u.FullName, acc.Domain, "Free trial period expired", nil)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// RunLifecycle triggers a manual run of the billing lifecycle engine
+func (h *BillingHandler) RunLifecycle(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.ProcessBillingLifecycle(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "LIFECYCLE_FAILED", "Failed to process billing lifecycle", err.Error(), "")
+		return
+	}
+
+	auditDetails := map[string]interface{}{
+		"overdue_invoices":   stats["overdue_invoices"],
+		"suspended_accounts": stats["suspended_accounts"],
+		"expired_trials":     stats["expired_trials"],
+	}
+	h.audit.Log(r.Context(), r, "billing.lifecycle.run", "billing", "system", "success", "Ran automated billing lifecycle scan", auditDetails)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Billing lifecycle processed successfully",
+		"stats":   stats,
+	}, nil)
+}
+
+// StartLifecycleWorker runs the automated billing lifecycle in a background goroutine
+func (h *BillingHandler) StartLifecycleWorker(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 1 * time.Hour
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				stats, err := h.ProcessBillingLifecycle(context.Background())
+				if err != nil {
+					slog.Error("Billing lifecycle worker error", "error", err)
+				} else if stats["overdue_invoices"] > 0 || stats["suspended_accounts"] > 0 || stats["expired_trials"] > 0 {
+					slog.Info("Billing lifecycle worker cycle completed",
+						"overdue_invoices", stats["overdue_invoices"],
+						"suspended_accounts", stats["suspended_accounts"],
+						"expired_trials", stats["expired_trials"])
+				}
+			}
+		}
+	}()
+}
+
 
 
 

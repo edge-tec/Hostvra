@@ -7,11 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -543,4 +545,210 @@ func TestBillingWebhook_SecurityAndReplay(t *testing.T) {
 			t.Fatalf("Expected 200 OK on 3rd webhook replay, got %d", rec3.Code)
 		}
 	})
+}
+
+func TestBilling_AutoProvisioningAndLifecycle(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewBillingHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	userID := uuid.New()
+
+	ctx := context.Background()
+
+	// Seed user
+	user := &store.User{
+		ID:       userID,
+		Email:    "testuser@hostvra.com",
+		FullName: "Test Auto User",
+		IsActive: true,
+	}
+	_ = s.CreateUser(ctx, user, orgID, "owner")
+
+	// Seed plan with MySQL database allowed
+	plan := &store.HostingPlan{
+		ID:           uuid.New(),
+		Name:         "Cloud Pro Auto",
+		Slug:         "cloud-pro-auto",
+		PriceMonthly: 29.99,
+		Currency:     "USD",
+		DiskSpaceMB:  25000,
+		BandwidthMB:  500000,
+		MaxWebsites:  5,
+		MaxDatabases: 5,
+		MaxMailboxes: 10,
+		FreeSSL:      true,
+		IsActive:     true,
+	}
+	_ = s.CreatePlan(ctx, plan)
+
+	// Setup router with auth context
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			reqCtx := context.WithValue(req.Context(), auth.UserContextKey, &auth.Claims{
+				UserID:         userID,
+				OrganizationID: orgID,
+				Role:           "admin",
+				IsSuperAdmin:   true,
+			})
+			next.ServeHTTP(w, req.WithContext(reqCtx))
+		})
+	})
+	r.Post("/subscriptions", h.CreateSubscription)
+	r.Post("/invoices/{id}/pay", h.PayInvoice)
+	r.Post("/lifecycle/run", h.RunLifecycle)
+
+	// Setup Stripe gateway
+	_ = s.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:   "stripe",
+		SecretKey: "mock_test_secret",
+		ApiKey:    "pk_test_123",
+		TestMode:  true,
+		Enabled:   true,
+	})
+
+	// 1. Create Paid Subscription for domain "mycustomshop.com"
+	subReqBody, _ := json.Marshal(CreateSubscriptionRequest{
+		PlanID:        plan.ID.String(),
+		BillingCycle:  "monthly",
+		PaymentMethod: "stripe",
+		Domain:        "mycustomshop.com",
+		AutoRenew:     true,
+	})
+	req := httptest.NewRequest("POST", "/subscriptions", bytes.NewReader(subReqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 Created for subscription, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var subResp struct {
+		Data struct {
+			Subscription *store.Subscription `json:"subscription"`
+			Invoice      *store.Invoice      `json:"invoice"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &subResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if subResp.Data.Invoice == nil || subResp.Data.Invoice.ID == uuid.Nil {
+		t.Fatalf("expected created invoice: %s", rec.Body.String())
+	}
+
+	// Verify no accounts exist prior to payment
+	accountsPre, err := s.ListHostingAccounts(ctx, orgID, nil)
+	if err != nil || len(accountsPre) != 0 {
+		t.Fatalf("expected 0 accounts before payment, got %d", len(accountsPre))
+	}
+
+	// 2. Pay Invoice -> Triggers Instant Zero-Touch Provisioning!
+	payReq := httptest.NewRequest("POST", fmt.Sprintf("/invoices/%s/pay", subResp.Data.Invoice.ID.String()), nil)
+	payRec := httptest.NewRecorder()
+	r.ServeHTTP(payRec, payReq)
+
+	if payRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on paying invoice, got %d: %s", payRec.Code, payRec.Body.String())
+	}
+
+	// Verify Hosting Account was automatically provisioned
+	accountsPost, err := s.ListHostingAccounts(ctx, orgID, nil)
+	if err != nil || len(accountsPost) != 1 {
+		t.Fatalf("expected 1 auto-provisioned account, got %d", len(accountsPost))
+	}
+	acc := accountsPost[0]
+	if acc.Domain != "mycustomshop.com" {
+		t.Errorf("expected domain 'mycustomshop.com', got '%s'", acc.Domain)
+	}
+	if acc.Status != store.AccountStatusActive {
+		t.Errorf("expected account status 'active', got '%s'", acc.Status)
+	}
+	if acc.PlanName != plan.Name {
+		t.Errorf("expected plan name '%s', got '%s'", plan.Name, acc.PlanName)
+	}
+
+	// Verify Website VHost was automatically provisioned
+	websites, err := s.ListAllWebsites(ctx)
+	if err != nil || len(websites) != 1 {
+		t.Fatalf("expected 1 auto-provisioned website, got %d", len(websites))
+	}
+	if websites[0].PrimaryDomain != "mycustomshop.com" {
+		t.Errorf("expected website domain 'mycustomshop.com', got '%s'", websites[0].PrimaryDomain)
+	}
+	if websites[0].Status != "active" {
+		t.Errorf("expected website status 'active', got '%s'", websites[0].Status)
+	}
+
+	// 3. Test Auto-Suspension: Simulate an overdue renewal invoice past grace period (>48h)
+	overdueInv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-RENEW-OVERDUE-01",
+		UserID:         userID,
+		OrganizationID: orgID,
+		SubscriptionID: &subResp.Data.Subscription.ID,
+		PlanID:         plan.ID,
+		Description:    "Renewal Overdue",
+		Subtotal:       29.99,
+		Total:          29.99,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+		DueDate:        time.Now().UTC().Add(-72 * time.Hour), // 3 days overdue
+		CreatedAt:      time.Now().UTC().Add(-10 * 24 * time.Hour),
+	}
+	_ = s.CreateInvoice(ctx, overdueInv)
+
+	// Run Lifecycle
+	stats, err := h.ProcessBillingLifecycle(ctx)
+	if err != nil {
+		t.Fatalf("lifecycle run failed: %v", err)
+	}
+	if stats["overdue_invoices"] < 1 {
+		t.Errorf("expected at least 1 overdue invoice, got %d", stats["overdue_invoices"])
+	}
+	if stats["suspended_accounts"] < 1 {
+		t.Errorf("expected at least 1 suspended account, got %d", stats["suspended_accounts"])
+	}
+
+	// Verify Account is Suspended
+	accCheck, _ := s.GetHostingAccountByID(ctx, acc.ID)
+	if accCheck.Status != store.AccountStatusSuspended {
+		t.Errorf("expected account to be suspended, got '%s'", accCheck.Status)
+	}
+
+	// Verify Website is Suspended
+	siteCheck, _ := s.GetWebsiteByID(ctx, websites[0].ID)
+	if siteCheck.Status != "suspended" {
+		t.Errorf("expected website to be suspended, got '%s'", siteCheck.Status)
+	}
+
+	// 4. Test Automated Un-suspension: User pays the overdue invoice!
+	payOverdueReq := httptest.NewRequest("POST", fmt.Sprintf("/invoices/%s/pay", overdueInv.ID.String()), nil)
+	payOverdueRec := httptest.NewRecorder()
+	r.ServeHTTP(payOverdueRec, payOverdueReq)
+
+	if payOverdueRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on paying overdue invoice, got %d", payOverdueRec.Code)
+	}
+
+	// Verify Account is INSTANTLY RESTORED to Active!
+	accRestored, _ := s.GetHostingAccountByID(ctx, acc.ID)
+	if accRestored.Status != store.AccountStatusActive {
+		t.Errorf("expected restored account to be active, got '%s'", accRestored.Status)
+	}
+	if accRestored.SuspendReason != "" {
+		t.Errorf("expected empty suspend reason, got '%s'", accRestored.SuspendReason)
+	}
+
+	// Verify Website is INSTANTLY RESTORED to Active!
+	siteRestored, _ := s.GetWebsiteByID(ctx, websites[0].ID)
+	if siteRestored.Status != "active" {
+		t.Errorf("expected restored website to be active, got '%s'", siteRestored.Status)
+	}
 }

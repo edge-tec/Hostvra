@@ -368,6 +368,7 @@ export default function BillingPage() {
   const [selectedPaymentGateway, setSelectedPaymentGateway] = useState<string>('stripe');
   const [couponCode, setCouponCode] = useState<string>('');
   const [couponApplied, setCouponApplied] = useState<boolean>(false);
+  const [orderDomain, setOrderDomain] = useState<string>('');
 
   // Invoice Receipt Modal
   const [receiptModalOpen, setReceiptModalOpen] = useState(false);
@@ -531,6 +532,7 @@ export default function BillingPage() {
     setSelectedPlanForOrder(plan);
     setCouponApplied(false);
     setCouponCode('');
+    setOrderDomain('');
     // Pick first enabled gateway
     const enabledGw = gateways.find(g => g.enabled);
     setSelectedPaymentGateway(enabledGw ? enabledGw.gateway : 'stripe');
@@ -547,6 +549,7 @@ export default function BillingPage() {
           plan_id: selectedPlanForOrder.id,
           billing_cycle: billingCycle,
           payment_method: selectedPaymentGateway,
+          domain: orderDomain.trim() || undefined,
           auto_renew: true,
           success_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?session_id={CHECKOUT_SESSION_ID}&gateway=${selectedPaymentGateway}` : undefined,
           cancel_url: typeof window !== 'undefined' ? `${window.location.origin}/billing?cancelled=true` : undefined,
@@ -789,7 +792,7 @@ export default function BillingPage() {
   };
 
   // Start Free Trial Directly
-  const handleStartFreeTrial = async (plan: HostingPlan) => {
+  const handleStartFreeTrial = async (plan: HostingPlan, domain?: string) => {
     setActionLoading(`trial-${plan.id}`);
     try {
       const res = await apiFetch<any>('/api/v1/billing/subscriptions', {
@@ -798,6 +801,7 @@ export default function BillingPage() {
           plan_id: plan.id,
           billing_cycle: 'monthly',
           start_trial: true,
+          domain: domain?.trim() || undefined,
         }),
       });
 
@@ -2547,6 +2551,29 @@ export default function BillingPage() {
                 </div>
               </div>
 
+              {/* Target Domain Input for Instant Auto-Provisioning */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Primary Domain Name:</span>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold flex items-center gap-1">
+                    <Zap className="w-3 h-3" /> Zero-Touch Auto-Provisioning
+                  </span>
+                </label>
+                <div className="relative">
+                  <Globe className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={orderDomain}
+                    onChange={e => setOrderDomain(e.target.value)}
+                    placeholder="e.g. mycompany.com (or leave empty for auto-generated subdomain)"
+                    className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <p className="text-[10.5px] text-slate-400 leading-tight">
+                  Your isolated Linux user, Nginx vhost, PHP fastcgi pool, and MySQL database will be created instantly upon payment.
+                </p>
+              </div>
+
               {/* Coupon Code Simulator */}
               <div className="flex items-center gap-2">
                 <input
@@ -2613,7 +2640,7 @@ export default function BillingPage() {
                     type="button"
                     onClick={() => {
                       setCheckoutModalOpen(false);
-                      handleStartFreeTrial(selectedPlanForOrder);
+                      handleStartFreeTrial(selectedPlanForOrder, orderDomain);
                     }}
                     disabled={actionLoading === `trial-${selectedPlanForOrder.id}`}
                     className="px-4 py-2.5 rounded-xl border border-purple-500/40 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 text-xs font-bold transition-all flex items-center justify-center gap-1.5"

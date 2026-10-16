@@ -287,3 +287,170 @@ func (s *Service) SendOrderConfirmation(ctx context.Context, to, fullName, planN
 	_, err := s.SendIdempotent(ctx, "order_confirmed", eventKey, to, subject, body)
 	return err
 }
+
+type HostingProvisionDetails struct {
+	Domain       string
+	PlanName     string
+	Username     string
+	Password     string
+	ControlPanel string
+	ServerIP     string
+	Nameservers  []string
+	DiskSpaceMB  int64
+	BandwidthMB  int64
+	PHPVersion   string
+	DBName       string
+	DBUser       string
+	DBPassword   string
+}
+
+// SendHostingProvisioned sends comprehensive hosting welcome email with credentials
+func (s *Service) SendHostingProvisioned(ctx context.Context, to, fullName string, p HostingProvisionDetails) error {
+	subject := fmt.Sprintf("🚀 Your Hosting is Ready: %s", p.Domain)
+
+	nsRows := ""
+	for i, ns := range p.Nameservers {
+		nsRows += fmt.Sprintf("<tr><td style=\"padding: 4px 0; color: #64748b; font-size: 13px;\">NS %d</td><td style=\"padding: 4px 0; text-align: right; font-mono: monospace; font-size: 13px; color: #0f172a;\">%s</td></tr>", i+1, ns)
+	}
+	if nsRows == "" {
+		nsRows = `<tr><td style="padding: 4px 0; color: #64748b; font-size: 13px;">NS 1</td><td style="padding: 4px 0; text-align: right; font-mono: monospace; font-size: 13px; color: #0f172a;">ns1.hostvra.com</td></tr>
+		<tr><td style="padding: 4px 0; color: #64748b; font-size: 13px;">NS 2</td><td style="padding: 4px 0; text-align: right; font-mono: monospace; font-size: 13px; color: #0f172a;">ns2.hostvra.com</td></tr>`
+	}
+
+	dbSection := ""
+	if p.DBName != "" {
+		dbSection = fmt.Sprintf(`
+		<div style="background: #f1f5f9; border-radius: 8px; padding: 16px; margin-top: 16px;">
+		  <div style="font-weight: 700; font-size: 14px; color: #0f172a; margin-bottom: 8px;">Database Credentials (MySQL)</div>
+		  <table style="width: 100%%; font-size: 13px;">
+		    <tr><td style="color: #64748b;">DB Name:</td><td style="font-family: monospace; font-weight: 600; text-align: right;">%s</td></tr>
+		    <tr><td style="color: #64748b;">DB User:</td><td style="font-family: monospace; font-weight: 600; text-align: right;">%s</td></tr>
+		    <tr><td style="color: #64748b;">Password:</td><td style="font-family: monospace; font-weight: 600; text-align: right;">%s</td></tr>
+		  </table>
+		</div>`, p.DBName, p.DBUser, p.DBPassword)
+	}
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; padding: 30px;">
+<div style="max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+  <div style="text-align: center; margin-bottom: 24px;">
+    <h1 style="font-size: 24px; font-weight: 800; color: #0f172a; margin: 0;">🎉 Your Hosting Account is Live!</h1>
+    <p style="color: #64748b; font-size: 14px; margin-top: 6px;">Thank you for choosing Hostvra. Your server has been zero-touch provisioned.</p>
+  </div>
+
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+    <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 12px;">Account Overview</div>
+    <table style="width: 100%%; border-collapse: collapse; font-size: 14px;">
+      <tr><td style="padding: 6px 0; color: #64748b;">Primary Domain</td><td style="padding: 6px 0; text-align: right; font-weight: 700; color: #0f172a;"><a href="https://%s" style="color: #2563eb; text-decoration: none;">%s</a></td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">Hosting Plan</td><td style="padding: 6px 0; text-align: right; font-weight: 600; color: #0f172a;">%s</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">Server IP Address</td><td style="padding: 6px 0; text-align: right; font-family: monospace; color: #0f172a;">%s</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">Storage / Bandwidth</td><td style="padding: 6px 0; text-align: right; color: #0f172a;">%d MB / %d MB</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">PHP FastCGI Version</td><td style="padding: 6px 0; text-align: right; font-weight: 600; color: #0f172a;">PHP %s</td></tr>
+    </table>
+  </div>
+
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+    <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 12px;">SFTP / SSH & Panel Access</div>
+    <table style="width: 100%%; border-collapse: collapse; font-size: 14px;">
+      <tr><td style="padding: 6px 0; color: #64748b;">Control Panel URL</td><td style="padding: 6px 0; text-align: right;"><a href="%s" style="color: #2563eb; font-weight: 600; text-decoration: none;">Login to Hostvra</a></td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">System / SFTP User</td><td style="padding: 6px 0; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a;">%s</td></tr>
+      <tr><td style="padding: 6px 0; color: #64748b;">Temporary Password</td><td style="padding: 6px 0; text-align: right; font-family: monospace; font-weight: 700; color: #0f172a;">%s</td></tr>
+    </table>
+    %s
+  </div>
+
+  <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+    <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #1e40af; margin-bottom: 10px;">Nameservers (DNS Configuration)</div>
+    <p style="font-size: 13px; color: #1e3a8a; margin: 0 0 10px 0;">Point your domain registrar to the following authoritative nameservers:</p>
+    <table style="width: 100%%; border-collapse: collapse;">
+      %s
+    </table>
+  </div>
+
+  <div style="text-align: center; margin-bottom: 24px;">
+    <a href="%s/websites" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 14px 36px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 14px; box-shadow: 0 4px 10px rgba(37,99,235,0.25);">
+      Manage Your Website
+    </a>
+  </div>
+
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+  <p style="color: #94a3b8; font-size: 12px; text-align: center; margin: 0;">Hostvra Cloud & Server Management Platform • support@hostvra.com</p>
+</div>
+</body>
+</html>`,
+		p.Domain, p.Domain, p.PlanName, p.ServerIP, p.DiskSpaceMB, p.BandwidthMB, p.PHPVersion,
+		p.ControlPanel, p.Username, p.Password, dbSection, nsRows, s.appURL(),
+	)
+
+	eventKey := fmt.Sprintf("provision:%s:%s", to, p.Domain)
+	_, err := s.SendIdempotent(ctx, "hosting_provisioned", eventKey, to, subject, body)
+	return err
+}
+
+// SendAccountSuspended notifies user of account suspension
+func (s *Service) SendAccountSuspended(ctx context.Context, to, fullName, domain, reason string, invoiceID *uuid.UUID) error {
+	subject := fmt.Sprintf("⚠️ Notice: Hosting Account Suspended (%s)", domain)
+	payURL := s.appURL() + "/billing"
+	if invoiceID != nil {
+		payURL = fmt.Sprintf("%s/billing?invoice=%s", s.appURL(), invoiceID.String())
+	}
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; padding: 30px;">
+<div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #fee2e2;">
+  <h1 style="font-size: 20px; font-weight: 700; color: #dc2626; margin-bottom: 12px;">Account Suspended</h1>
+  <p style="color: #475569; font-size: 14px; line-height: 1.6;">Hi %s,</p>
+  <p style="color: #475569; font-size: 14px; line-height: 1.6;">
+    Your hosting account for <strong>%s</strong> has been temporarily suspended due to: <strong style="color: #dc2626;">%s</strong>.
+  </p>
+  <p style="color: #475569; font-size: 14px; line-height: 1.6;">
+    To reactivate your service instantly, please settle the outstanding invoice. Once paid, your website and email will be restored automatically within seconds.
+  </p>
+  <div style="text-align: center; margin: 24px 0;">
+    <a href="%s" style="display: inline-block; background: #dc2626; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">
+      Pay & Reactivate Account
+    </a>
+  </div>
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+  <p style="color: #94a3b8; font-size: 11px; text-align: center;">Hostvra — Automated Cloud Billing Engine</p>
+</div>
+</body>
+</html>`, fullName, domain, reason, payURL)
+
+	eventKey := fmt.Sprintf("suspended:%s:%s:%s", to, domain, time.Now().UTC().Format("2006-01-02"))
+	_, err := s.SendIdempotent(ctx, "account_suspended", eventKey, to, subject, body)
+	return err
+}
+
+// SendAccountUnsuspended notifies user that their account was restored
+func (s *Service) SendAccountUnsuspended(ctx context.Context, to, fullName, domain string) error {
+	subject := fmt.Sprintf("✅ Service Restored: %s is Active", domain)
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8fafc; padding: 30px;">
+<div style="max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; padding: 36px; border: 1px solid #dcfce7;">
+  <h1 style="font-size: 20px; font-weight: 700; color: #16a34a; margin-bottom: 12px;">✓ Service Reactivated</h1>
+  <p style="color: #475569; font-size: 14px; line-height: 1.6;">Hi %s,</p>
+  <p style="color: #475569; font-size: 14px; line-height: 1.6;">
+    Your payment has been received and your hosting account for <strong>%s</strong> is now completely reactivated. All web, database, and email services are running normally.
+  </p>
+  <div style="text-align: center; margin: 24px 0;">
+    <a href="%s/websites" style="display: inline-block; background: #16a34a; color: white; padding: 12px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;">
+      View Websites
+    </a>
+  </div>
+  <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+  <p style="color: #94a3b8; font-size: 11px; text-align: center;">Hostvra — Automated Cloud Billing Engine</p>
+</div>
+</body>
+</html>`, fullName, domain, s.appURL())
+
+	eventKey := fmt.Sprintf("unsuspended:%s:%s:%s", to, domain, time.Now().UTC().Format("2006-01-02"))
+	_, err := s.SendIdempotent(ctx, "account_unsuspended", eventKey, to, subject, body)
+	return err
+}
