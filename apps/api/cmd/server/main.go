@@ -130,6 +130,7 @@ func main() {
 	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
 	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
+	wordPressHandler := handlers.NewWordPressHandler(cfg, dataStore, auditLogger)
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
 
@@ -558,7 +559,28 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/app", installerHandler.GetWebsiteApp)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/app/install", installerHandler.InstallWebsiteApp)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/app/uninstall", installerHandler.UninstallWebsiteApp)
+
+				// Per-Website WordPress Toolkit (WP-CLI & Native Management)
+				r.Route("/{id}/wordpress", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", wordPressHandler.GetDetails)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/install", wordPressHandler.Install)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/maintenance", wordPressHandler.ToggleMaintenance)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/debug", wordPressHandler.ToggleDebug)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/cache/flush", wordPressHandler.FlushCache)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/db/optimize", wordPressHandler.OptimizeDB)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/reset-password", wordPressHandler.ResetPassword)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/plugins", wordPressHandler.ListPlugins)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/plugins/toggle", wordPressHandler.TogglePlugin)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/plugins/install", wordPressHandler.InstallPlugin)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Delete("/plugins/{plugin}", wordPressHandler.DeletePlugin)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/themes", wordPressHandler.ListThemes)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/themes/activate", wordPressHandler.ActivateTheme)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/update-core", wordPressHandler.UpdateCore)
+				})
 			})
+
+			// WordPress Recommended Plugins Catalog
+			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/wordpress/catalog", wordPressHandler.GetCatalog)
 
 			// 1-Click Application Installer Catalog
 			r.Route("/installer", func(r chi.Router) {

@@ -87,7 +87,7 @@ export interface Website {
   system_user?: string;
   php_version?: string;
   web_server_type?: string;
-  app_type: 'php' | 'static' | 'proxy' | 'nodejs' | 'python' | 'go';
+  app_type: 'php' | 'static' | 'proxy' | 'nodejs' | 'python' | 'go' | 'wordpress' | 'laravel' | string;
   proxy_port?: number;
   status: 'active' | 'suspended' | 'disabled';
   ssl_enabled: boolean;
@@ -883,6 +883,58 @@ export interface WebsiteAppStatus {
   app?: InstalledAppInfo;
 }
 
+export interface WordPressDetails {
+  is_installed: boolean;
+  version: string;
+  site_title: string;
+  site_url: string;
+  admin_url: string;
+  admin_email: string;
+  db_name: string;
+  db_user: string;
+  db_prefix: string;
+  db_host: string;
+  maintenance_mode: boolean;
+  debug_mode: boolean;
+  auto_updates: boolean;
+  plugins_count: number;
+  active_plugins: number;
+  themes_count: number;
+  active_theme: string;
+  php_version?: string;
+  wp_cli_installed: boolean;
+  config_path: string;
+  extra_constants?: Record<string, string>;
+}
+
+export interface WordPressPlugin {
+  name: string;
+  title: string;
+  status: 'active' | 'inactive' | 'must-use';
+  version: string;
+  update_available: boolean;
+  update_version?: string;
+  description?: string;
+  author?: string;
+}
+
+export interface WordPressTheme {
+  name: string;
+  title: string;
+  status: 'active' | 'inactive';
+  version: string;
+  update_available: boolean;
+  author?: string;
+}
+
+export interface PopularPlugin {
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+}
+
 export interface HostingPlan {
   id: string;
   name: string;
@@ -1654,4 +1706,102 @@ export async function impersonateAdminUser(userId: string): Promise<ApiResponse<
     method: 'POST',
   });
 }
+
+// WordPress Toolkit API Functions
+export async function getWordPressDetails(websiteId: string): Promise<ApiResponse<WordPressDetails>> {
+  return apiFetch<WordPressDetails>(`/api/v1/websites/${websiteId}/wordpress`);
+}
+
+export async function installWordPress(websiteId: string, payload: {
+  site_title?: string;
+  admin_user?: string;
+  admin_email?: string;
+  admin_password?: string;
+  db_name?: string;
+  install_plugins?: string[];
+}): Promise<ApiResponse<WordPressDetails>> {
+  return apiFetch<WordPressDetails>(`/api/v1/websites/${websiteId}/wordpress/install`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function toggleWordPressMaintenance(websiteId: string, enabled: boolean): Promise<ApiResponse<{ success: boolean; maintenance_mode: boolean }>> {
+  return apiFetch<{ success: boolean; maintenance_mode: boolean }>(`/api/v1/websites/${websiteId}/wordpress/maintenance`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function toggleWordPressDebug(websiteId: string, enabled: boolean): Promise<ApiResponse<{ success: boolean; debug_mode: boolean }>> {
+  return apiFetch<{ success: boolean; debug_mode: boolean }>(`/api/v1/websites/${websiteId}/wordpress/debug`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function flushWordPressCache(websiteId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/websites/${websiteId}/wordpress/cache/flush`, {
+    method: 'POST',
+  });
+}
+
+export async function optimizeWordPressDB(websiteId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/websites/${websiteId}/wordpress/db/optimize`, {
+    method: 'POST',
+  });
+}
+
+export async function resetWordPressPassword(websiteId: string, username: string, newPassword: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/websites/${websiteId}/wordpress/reset-password`, {
+    method: 'POST',
+    body: JSON.stringify({ username, new_password: newPassword }),
+  });
+}
+
+export async function listWordPressPlugins(websiteId: string): Promise<ApiResponse<WordPressPlugin[]>> {
+  return apiFetch<WordPressPlugin[]>(`/api/v1/websites/${websiteId}/wordpress/plugins`);
+}
+
+export async function toggleWordPressPlugin(websiteId: string, plugin: string, activate: boolean): Promise<ApiResponse<{ success: boolean; plugin: string; action: string }>> {
+  return apiFetch<{ success: boolean; plugin: string; action: string }>(`/api/v1/websites/${websiteId}/wordpress/plugins/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ plugin, activate }),
+  });
+}
+
+export async function installWordPressPlugin(websiteId: string, plugin: string, activate: boolean = true): Promise<ApiResponse<{ success: boolean; plugin: string }>> {
+  return apiFetch<{ success: boolean; plugin: string }>(`/api/v1/websites/${websiteId}/wordpress/plugins/install`, {
+    method: 'POST',
+    body: JSON.stringify({ plugin, activate }),
+  });
+}
+
+export async function deleteWordPressPlugin(websiteId: string, plugin: string): Promise<ApiResponse<{ success: boolean; plugin: string }>> {
+  return apiFetch<{ success: boolean; plugin: string }>(`/api/v1/websites/${websiteId}/wordpress/plugins/${plugin}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listWordPressThemes(websiteId: string): Promise<ApiResponse<WordPressTheme[]>> {
+  return apiFetch<WordPressTheme[]>(`/api/v1/websites/${websiteId}/wordpress/themes`);
+}
+
+export async function activateWordPressTheme(websiteId: string, theme: string): Promise<ApiResponse<{ success: boolean; theme: string }>> {
+  return apiFetch<{ success: boolean; theme: string }>(`/api/v1/websites/${websiteId}/wordpress/themes/activate`, {
+    method: 'POST',
+    body: JSON.stringify({ theme }),
+  });
+}
+
+export async function updateWordPressCore(websiteId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/websites/${websiteId}/wordpress/update-core`, {
+    method: 'POST',
+  });
+}
+
+export async function getPopularWordPressPlugins(): Promise<ApiResponse<PopularPlugin[]>> {
+  return apiFetch<PopularPlugin[]>(`/api/v1/wordpress/catalog`);
+}
+
 

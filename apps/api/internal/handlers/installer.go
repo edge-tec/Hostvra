@@ -114,6 +114,20 @@ func (h *InstallerHandler) InstallWebsiteApp(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// 2b. Persist database record if auto-generated
+	if req.DBName == "" && info.DBName != "" {
+		_ = h.store.CreateDatabase(r.Context(), &store.Database{
+			ID:             uuid.New(),
+			OrganizationID: site.OrganizationID,
+			ServerID:       site.ServerID,
+			DBType:         req.DBType,
+			Name:           info.DBName,
+			Username:       info.DBUser,
+			CharacterSet:   "utf8mb4",
+			Collation:      "utf8mb4_unicode_ci",
+		})
+	}
+
 	// 3. Update Website app_type
 	site.AppType = req.AppID
 	_ = h.store.UpdateWebsiteStatus(r.Context(), site.ID, "running")

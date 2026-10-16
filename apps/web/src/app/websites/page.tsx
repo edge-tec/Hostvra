@@ -1085,6 +1085,15 @@ export default function WebsitesPage() {
                                   >
                                     <ExternalLink className="w-3 h-3 flex-shrink-0" />
                                   </a>
+                                  {site.app_type === 'wordpress' && (
+                                    <button
+                                      onClick={() => openSiteModal(site, 'wordpress')}
+                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors cursor-pointer flex items-center gap-1"
+                                      title="Open WordPress Manager"
+                                    >
+                                      <span className="font-black">W</span> WP
+                                    </button>
+                                  )}
                                 </div>
                                 <span className="text-[11px] text-slate-500 truncate">
                                   {site.remarks || site.primary_domain.split('.')[0]}
@@ -2731,9 +2740,22 @@ export default function WebsitesPage() {
                 const s = activeDropdownSite;
                 setOpenDropdownId(null);
                 setActiveDropdownSite(null);
-                setAppModalSite(s);
+                if (s) openSiteModal(s, 'wordpress');
               }}
               className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400 font-semibold"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>WordPress Manager</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const s = activeDropdownSite;
+                setOpenDropdownId(null);
+                setActiveDropdownSite(null);
+                setAppModalSite(s);
+              }}
+              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
             >
               <Zap className="w-3.5 h-3.5" />
               <span>1-Click App Installer</span>

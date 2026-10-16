@@ -34,9 +34,11 @@ import {
   Zap,
 } from 'lucide-react';
 import { Website, apiFetch } from '@/lib/api';
+import { WordPressManagerTab } from '@/components/WordPressManagerTab';
 
 export type SiteModalTab =
   | 'domain'
+  | 'wordpress'
   | 'directory'
   | 'limit'
   | 'rewrite'
@@ -89,6 +91,7 @@ interface SiteModificationModalProps {
 
 const SIDEBAR_TABS = [
   { id: 'domain', label: 'Domain Manager', icon: Globe },
+  { id: 'wordpress', label: 'WordPress', icon: Globe },
   { id: 'directory', label: 'Directory', icon: Folder },
   { id: 'limit', label: 'Limit access', icon: Shield },
   { id: 'rewrite', label: 'URL rewrite', icon: FileCode },
@@ -631,6 +634,11 @@ server {
 
           {/* Right Content Area: Pure White in Light Mode, Dark in Dark Mode */}
           <div className="flex-1 overflow-y-auto p-5 bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100">
+            {/* 0. WORDPRESS MANAGER */}
+            {activeTab === 'wordpress' && website && (
+              <WordPressManagerTab website={website} showToast={showToast} />
+            )}
+
             {/* 1. DOMAIN MANAGER */}
             {activeTab === 'domain' && (
               <div className="space-y-4">
