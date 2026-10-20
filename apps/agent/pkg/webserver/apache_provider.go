@@ -334,7 +334,7 @@ func (p *ApacheProvider) GenerateVHost(ctx context.Context, params VHostParams) 
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 {{- end }}
 
-{{- if or (eq .AppType "php") (eq .AppType "laravel") }}
+{{- if or (eq .AppType "php") (eq .AppType "laravel") (eq .AppType "wordpress") }}
     <FilesMatch \.php$>
 {{- if stringsHasPrefix .PHPSocket "/" }}
         SetHandler "proxy:unix:{{ .PHPSocket }}|fcgi://localhost"

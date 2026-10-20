@@ -301,7 +301,7 @@ index  {
   autoIndex               0
 }
 
-{{- if or (eq .AppType "php") (eq .AppType "laravel") }}
+{{- if or (eq .AppType "php") (eq .AppType "laravel") (eq .AppType "wordpress") }}
 scripthandler  {
   add                     lsapi:lsphp{{ cleanVersion .PHPVersion }} php
 }

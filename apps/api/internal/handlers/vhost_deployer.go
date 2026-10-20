@@ -233,6 +233,30 @@ server {
 	return nil
 }
 
+// EnsureFastCGISnippet ensures that /etc/nginx/snippets/fastcgi-php.conf exists
+// on all Linux distributions (including mainline Nginx from nginx.org which omits it)
+// preventing nginx syntax validation errors.
+func EnsureFastCGISnippet() error {
+	snippetsDir := "/etc/nginx/snippets"
+	if _, err := os.Stat("/etc/nginx"); err != nil && os.Geteuid() == 0 {
+		return nil
+	}
+	_ = os.MkdirAll(snippetsDir, 0755)
+	fastcgiSnippet := filepath.Join(snippetsDir, "fastcgi-php.conf")
+	if _, err := os.Stat(fastcgiSnippet); os.IsNotExist(err) {
+		snippetContent := `# Hostvra FastCGI PHP configuration
+fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+try_files $fastcgi_script_name =404;
+set $path_info $fastcgi_path_info;
+fastcgi_param PATH_INFO $path_info;
+fastcgi_index index.php;
+include fastcgi_params;
+`
+		_ = os.WriteFile(fastcgiSnippet, []byte(snippetContent), 0644)
+	}
+	return nil
+}
+
 // EnsureHostvraPanelIsolated ensures that the Hostvra control panel vhost
 // is explicitly bound ONLY to Hostvra domains (hostvra.com, www.hostvra.com, panel.hostvra.com, localhost)
 // and is NEVER configured as default_server or wildcard catch-all.
@@ -415,6 +439,7 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 	// 1. Ensure neutral default server & isolated Hostvra panel exist
 	_ = EnsureNeutralDefaultServer()
 	_ = EnsureHostvraPanelIsolated()
+	_ = EnsureFastCGISnippet()
 
 	// 2. Ensure document root exists and has initial placeholder
 	if docRoot == "" {
@@ -575,9 +600,12 @@ server {
 		} else {
 			fastcgiBlock = fmt.Sprintf(`
     location ~ \.php$ {
-        include snippets/fastcgi-php.conf;
+        fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+        try_files $fastcgi_script_name =404;
         fastcgi_pass %s;
+        fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
         include fastcgi_params;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;

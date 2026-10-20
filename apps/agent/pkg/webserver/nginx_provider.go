@@ -491,7 +491,7 @@ server {
     access_log {{ if .AccessLog }}{{ .AccessLog }}{{ else }}/var/log/nginx/{{ .Domain }}.access.log{{ end }};
     error_log {{ if .ErrorLog }}{{ .ErrorLog }}{{ else }}/var/log/nginx/{{ .Domain }}.error.log{{ end }};
 
-{{- if eq .AppType "laravel" }}
+{{- if or (eq .AppType "laravel") (eq .AppType "wordpress") (eq .AppType "php") }}
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
@@ -514,7 +514,7 @@ server {
     }
 {{- end }}
 
-{{- if or (eq .AppType "php") (eq .AppType "laravel") }}
+{{- if or (eq .AppType "php") (eq .AppType "laravel") (eq .AppType "wordpress") }}
     location ~ \.php$ {
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;

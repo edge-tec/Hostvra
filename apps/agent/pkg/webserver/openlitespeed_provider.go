@@ -291,14 +291,14 @@ index  {
   autoIndex               0
 }
 
-{{- if or (eq .AppType "php") (eq .AppType "laravel") }}
+{{- if or (eq .AppType "php") (eq .AppType "laravel") (eq .AppType "wordpress") }}
 # Scripthandler for LSPHP
 scripthandler  {
   add                     lsapi:lsphp{{ cleanVersion .PHPVersion }} php
 }
 {{- end }}
 
-{{- if eq .AppType "laravel" }}
+{{- if or (eq .AppType "laravel") (eq .AppType "wordpress") }}
 rewrite  {
   enable                  1
   autoLoadHtaccess        1

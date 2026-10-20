@@ -60,7 +60,7 @@ server {
 
     client_max_body_size 128M;
 
-{{- if eq .AppType "php" }}
+{{- if or (eq .AppType "php") (eq .AppType "wordpress") }}
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
