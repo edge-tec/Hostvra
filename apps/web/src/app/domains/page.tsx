@@ -241,6 +241,8 @@ export default function DomainsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
   useEffect(() => {
     fetchAllData();
 
