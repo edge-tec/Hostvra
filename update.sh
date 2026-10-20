@@ -446,6 +446,19 @@ echo "Reconciling all domain virtual hosts and SSL certificates..."
 sleep 2
 curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null || true
 
+# Reconcile all physical website document roots in /var/www
+if [[ -f "${HOSTVRA_DIR}/repair-domain.sh" ]]; then
+    for site_dir in /var/www/*; do
+        if [[ -d "$site_dir" ]]; then
+            d_name=$(basename "$site_dir")
+            if [[ "$d_name" != "html" && "$d_name" != "default" && "$d_name" != "hostvra-temp" && "$d_name" =~ \. ]]; then
+                echo "Reconciling virtual host for: $d_name..."
+                bash "${HOSTVRA_DIR}/repair-domain.sh" "$d_name" >/dev/null 2>&1 || true
+            fi
+        fi
+    done
+fi
+
 # Repair and ensure Dovecot IMAP/LMTP & Postfix SASL configuration
 if [[ -f "fix-dovecot-auth.sh" ]]; then
     echo "Running Dovecot configuration repair..."
