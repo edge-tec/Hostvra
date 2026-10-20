@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"hostvra/agent/pkg/wordpress"
 )
 
 var (
@@ -277,119 +279,53 @@ func (m *InstallerManager) findTemplate(id string) *AppTemplate {
 	return nil
 }
 
-// deployWordPress scaffolds complete WordPress installation with wp-config.php
+// deployWordPress scaffolds complete WordPress installation with wp-config.php and database
 func (m *InstallerManager) deployWordPress(ctx context.Context, req InstallSiteAppRequest, logCb func(string, int)) (*InstalledAppInfo, error) {
-	docRoot := req.DocumentRoot
-
-	if logCb != nil {
-		logCb("Deploying official WordPress core files...", 35)
+	wpMgr := wordpress.NewManager()
+	wpReq := wordpress.InstallWordPressRequest{
+		PrimaryDomain: req.PrimaryDomain,
+		DocumentRoot:  req.DocumentRoot,
+		SystemUser:    req.SystemUser,
+		SiteTitle:     req.SiteTitle,
+		AdminUser:     req.AdminUser,
+		AdminEmail:    req.AdminEmail,
+		AdminPassword: req.AdminPassword,
+		DBName:        req.DBName,
+		DBUser:        req.DBUser,
+		DBPassword:    req.DBPassword,
+		DBHost:        req.DBHost,
+		TablePrefix:   req.TablePrefix,
+		Overwrite:     req.OverwriteFiles,
 	}
 
-	// 1. Download official WordPress archive if wp-load.php doesn't exist
-	if _, err := os.Stat(filepath.Join(docRoot, "wp-load.php")); err != nil {
-		downloadCmd := fmt.Sprintf(
-			"cd %s && rm -f index.html 404.html && (curl -fsSL https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1",
-			docRoot,
-		)
-		_ = exec.Command("bash", "-c", downloadCmd).Run()
+	details, err := wpMgr.Install(ctx, wpReq, logCb)
+	if err != nil {
+		return nil, err
 	}
 
-	// Create core directories and ensure permissions
-	for _, dir := range []string{"wp-admin", "wp-content/plugins", "wp-content/themes", "wp-content/uploads", "wp-content/upgrade", "wp-includes"} {
-		_ = os.MkdirAll(filepath.Join(docRoot, dir), 0755)
+	version := "6.7.2"
+	if details.Version != "" {
+		version = details.Version
 	}
-	_ = os.Chmod(filepath.Join(docRoot, "wp-content"), 0777)
-
-	// Write fallback files only if missing from tarball
-	if _, err := os.Stat(filepath.Join(docRoot, "index.php")); err != nil {
-		indexPHP := "<?php\ndefine('WP_USE_THEMES', true);\nrequire __DIR__ . '/wp-blog-header.php';\n"
-		_ = os.WriteFile(filepath.Join(docRoot, "index.php"), []byte(indexPHP), 0644)
+	adminURL := fmt.Sprintf("https://%s/wp-admin", req.PrimaryDomain)
+	if details.AdminURL != "" {
+		adminURL = details.AdminURL
 	}
-
-	if _, err := os.Stat(filepath.Join(docRoot, "wp-blog-header.php")); err != nil {
-		blogHeader := "<?php\nif (!isset($wp_did_header)) {\n    $wp_did_header = true;\n    require_once __DIR__ . '/wp-load.php';\n    wp();\n    require_once ABSPATH . WPINC . '/template-loader.php';\n}\n"
-		_ = os.WriteFile(filepath.Join(docRoot, "wp-blog-header.php"), []byte(blogHeader), 0644)
-	}
-
-	if _, err := os.Stat(filepath.Join(docRoot, "wp-load.php")); err != nil {
-		wpLoad := "<?php\ndefine('ABSPATH', __DIR__ . '/');\nerror_reporting(E_CORE_ERROR | E_CORE_WARNING | E_COMPILE_ERROR | E_ERROR | E_WARNING | E_PARSE | E_USER_ERROR | E_USER_WARNING | E_RECOVERABLE_ERROR);\nif (file_exists(ABSPATH . 'wp-config.php')) {\n    require_once ABSPATH . 'wp-config.php';\n}\n"
-		_ = os.WriteFile(filepath.Join(docRoot, "wp-load.php"), []byte(wpLoad), 0644)
-	}
-
-	if _, err := os.Stat(filepath.Join(docRoot, "wp-includes", "version.php")); err != nil {
-		versionPHP := "<?php\n$wp_version = '6.7.2';\n$wp_db_version = 57155;\n$tinymce_version = '49110-20201110';\n$required_php_version = '8.1';\n$required_mysql_version = '5.5.5';\n"
-		_ = os.WriteFile(filepath.Join(docRoot, "wp-includes", "version.php"), []byte(versionPHP), 0644)
-	}
-
-	if logCb != nil {
-		logCb("Configuring wp-config.php with database credentials & security salts...", 65)
-	}
-
-	// Generate security salts
-	salts := fmt.Sprintf(
-		"define('AUTH_KEY',         '%s');\n"+
-			"define('SECURE_AUTH_KEY',  '%s');\n"+
-			"define('LOGGED_IN_KEY',    '%s');\n"+
-			"define('NONCE_KEY',        '%s');\n"+
-			"define('AUTH_SALT',        '%s');\n"+
-			"define('SECURE_AUTH_SALT', '%s');\n"+
-			"define('LOGGED_IN_SALT',   '%s');\n"+
-			"define('NONCE_SALT',       '%s');\n",
-		RandomString(64), RandomString(64), RandomString(64), RandomString(64),
-		RandomString(64), RandomString(64), RandomString(64), RandomString(64),
-	)
-
-	wpConfig := fmt.Sprintf(`<?php
-/**
- * Hostvra Managed WordPress Configuration
- */
-
-define('DB_NAME', '%s');
-define('DB_USER', '%s');
-define('DB_PASSWORD', '%s');
-define('DB_HOST', '%s');
-define('DB_CHARSET', 'utf8mb4');
-define('DB_COLLATE', '');
-
-/**#@+
- * Authentication Unique Keys and Salts.
- */
-%s
-/**#@-*/
-
-$table_prefix = '%s';
-
-define('WP_DEBUG', false);
-define('DISALLOW_FILE_EDIT', true);
-define('WP_AUTO_UPDATE_CORE', true);
-define('FS_METHOD', 'direct');
-
-if (!defined('ABSPATH')) {
-    define('ABSPATH', __DIR__ . '/');
-}
-
-require_once ABSPATH . 'wp-settings.php';
-`, req.DBName, req.DBUser, req.DBPassword, req.DBHost, salts, req.TablePrefix)
-
-	configPath := filepath.Join(docRoot, "wp-config.php")
-	if err := os.WriteFile(configPath, []byte(wpConfig), 0640); err != nil {
-		return nil, fmt.Errorf("failed to write wp-config.php: %w", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(docRoot, "wp-settings.php")); os.IsNotExist(err) {
-		_ = os.WriteFile(filepath.Join(docRoot, "wp-settings.php"), []byte("<?php // WordPress Environment Initializer\n"), 0644)
+	configFile := filepath.Join(req.DocumentRoot, "wp-config.php")
+	if details.ConfigPath != "" {
+		configFile = details.ConfigPath
 	}
 
 	return &InstalledAppInfo{
 		AppID:        "wordpress",
 		Name:         "WordPress",
-		Version:      "6.7.2",
-		DocumentRoot: docRoot,
+		Version:      version,
+		DocumentRoot: req.DocumentRoot,
 		InstalledAt:  time.Now().UTC(),
-		DBName:       req.DBName,
-		DBUser:       req.DBUser,
-		AdminURL:     fmt.Sprintf("https://%s/wp-admin", req.PrimaryDomain),
-		ConfigFile:   configPath,
+		DBName:       details.DBName,
+		DBUser:       details.DBUser,
+		AdminURL:     adminURL,
+		ConfigFile:   configFile,
 		Status:       "healthy",
 	}, nil
 }

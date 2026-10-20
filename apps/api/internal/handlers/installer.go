@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"hostvra/agent/pkg/installer"
+	"hostvra/agent/pkg/isolation"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -92,7 +93,13 @@ func (h *InstallerHandler) InstallWebsiteApp(w http.ResponseWriter, r *http.Requ
 	req.WebsiteID = site.ID.String()
 	req.PrimaryDomain = site.PrimaryDomain
 	req.DocumentRoot = site.DocumentRoot
-	req.SystemUser = site.SystemUser
+	if site.SystemUser != "" {
+		req.SystemUser = site.SystemUser
+	} else {
+		req.SystemUser = isolation.DeriveUsername(site.PrimaryDomain)
+		site.SystemUser = req.SystemUser
+		_ = h.store.UpdateWebsite(r.Context(), site)
+	}
 
 	// 1. If database required, create database record in store
 	if req.DBName != "" {
@@ -128,8 +135,9 @@ func (h *InstallerHandler) InstallWebsiteApp(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	// 3. Update Website app_type
+	// 3. Update Website app_type and status
 	site.AppType = req.AppID
+	_ = h.store.UpdateWebsite(r.Context(), site)
 	_ = h.store.UpdateWebsiteStatus(r.Context(), site.ID, "running")
 
 	h.audit.Log(r.Context(), r, "website.app_install", "website", site.ID.String(), "success", "", map[string]interface{}{

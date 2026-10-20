@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/agent/pkg/isolation"
 	"hostvra/agent/pkg/wordpress"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
@@ -40,17 +41,21 @@ func (h *WordPressHandler) SetManager(m *wordpress.Manager) {
 // verifyWebsiteAccess helper
 func (h *WordPressHandler) verifyWebsiteAccess(r *http.Request) (*store.Website, error) {
 	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		return nil, errors.New("unauthorized")
+	}
 	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		return nil, errors.New("invalid website ID")
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil {
+	if err != nil || site == nil {
 		return nil, errors.New("website not found")
 	}
 
-	if site.OrganizationID != claims.OrganizationID && claims.Role != "owner" && claims.Role != "admin" {
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin"
+	if site.OrganizationID != claims.OrganizationID && !isAdmin {
 		return nil, errors.New("forbidden")
 	}
 
@@ -71,6 +76,16 @@ func (h *WordPressHandler) GetDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if details.SiteURL == "" {
+		details.SiteURL = "https://" + site.PrimaryDomain
+	}
+	if details.AdminURL == "" {
+		details.AdminURL = "https://" + site.PrimaryDomain + "/wp-admin"
+	}
+	if details.SiteTitle == "" {
+		details.SiteTitle = site.PrimaryDomain
+	}
+
 	response.JSON(w, http.StatusOK, details, nil)
 }
 
@@ -83,14 +98,19 @@ func (h *WordPressHandler) Install(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req wordpress.InstallWordPressRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid WordPress install payload", nil, "")
-		return
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
 	req.PrimaryDomain = site.PrimaryDomain
 	req.DocumentRoot = site.DocumentRoot
-	req.SystemUser = site.SystemUser
+	if site.SystemUser != "" {
+		req.SystemUser = site.SystemUser
+	} else {
+		req.SystemUser = isolation.DeriveUsername(site.PrimaryDomain)
+		site.SystemUser = req.SystemUser
+		_ = h.store.UpdateWebsite(r.Context(), site)
+	}
 
 	details, err := h.manager.Install(r.Context(), req, nil)
 	if err != nil {
@@ -117,10 +137,18 @@ func (h *WordPressHandler) Install(w http.ResponseWriter, r *http.Request) {
 	_ = h.store.UpdateWebsite(r.Context(), site)
 	_ = h.store.UpdateWebsiteStatus(r.Context(), site.ID, "running")
 
+	// Redeploy vhost configuration with PHP execution support
+	phpVer := "8.3"
+	if site.PHPVersion != nil && *site.PHPVersion != "" {
+		phpVer = *site.PHPVersion
+	}
+	_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+
 	h.audit.Log(r.Context(), r, "website.wordpress_install", "website", site.ID.String(), "success", "", map[string]interface{}{
 		"domain":     site.PrimaryDomain,
 		"wp_version": details.Version,
 		"db_name":    details.DBName,
+		"admin_url":  details.AdminURL,
 	})
 
 	response.JSON(w, http.StatusOK, details, nil)

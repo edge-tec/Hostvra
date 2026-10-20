@@ -254,6 +254,18 @@ export default function WebsitesPage() {
     }
   }, [statsOpen]);
 
+  // Handle open 1-click installer custom event
+  useEffect(() => {
+    const handleOpenInstaller = (e: any) => {
+      const site = e.detail?.website || siteModalWebsite;
+      if (site) {
+        setAppModalSite(site);
+      }
+    };
+    window.addEventListener('hostvra:open-installer', handleOpenInstaller);
+    return () => window.removeEventListener('hostvra:open-installer', handleOpenInstaller);
+  }, [siteModalWebsite]);
+
   // Close dropdown on outside click, scroll, or window resize
   useEffect(() => {
     const handleDocClick = (e: MouseEvent) => {
