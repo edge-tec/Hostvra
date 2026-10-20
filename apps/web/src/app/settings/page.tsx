@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Globe,
   Shield,
@@ -42,6 +42,106 @@ import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, User as UserType, Organization, SystemSettings } from '@/lib/api';
 
 type SettingsTab = 'global' | 'page' | 'alarm' | 'backup' | 'migrate' | 'other_migrate' | 'service';
+
+function getLevenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = i;
+    for (let j = 1; j <= b.length; j++) {
+      const val = a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1], prev, row[j]) + 1;
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[b.length] = prev;
+  }
+  return row[b.length];
+}
+
+const SETTING_SYNONYMS: Record<string, string[]> = {
+  domin: ['domain'],
+  doman: ['domain'],
+  domen: ['domain'],
+  dom: ['domain'],
+  dmn: ['domain'],
+  ssl: ['ssl', 'https', 'certificate', 'cert', 'tls'],
+  tls: ['ssl', 'https', 'certificate', 'tls'],
+  cert: ['ssl', 'certificate', 'validity', 'issuer'],
+  https: ['ssl', 'certificate', 'https'],
+  pass: ['password'],
+  pwd: ['password'],
+  pasword: ['password'],
+  psswd: ['password'],
+  usr: ['user', 'admin'],
+  usrname: ['user', 'username'],
+  sec: ['security', 'entrance', 'alarm', 'basicauth'],
+  secur: ['security', 'entrance', 'alarm'],
+  secuirty: ['security', 'entrance', 'alarm'],
+  gate: ['security entrance', 'entrance'],
+  entrance: ['security entrance'],
+  auth: ['authentication', 'basicauth', 'authenticator', 'google', '2fa'],
+  '2fa': ['authenticator', 'google', 'token', 'dynamic'],
+  twofa: ['authenticator', 'google', 'token', 'dynamic'],
+  otp: ['authenticator', 'google', 'token'],
+  ip: ['ipv6', 'server ip', 'mail server', 'authorized ip', 'cdn proxy', 'whitelist'],
+  whitelist: ['whitelist', 'authorized ip', 'ip whitelist'],
+  mail: ['mail', 'email', 'spf', 'mx', 'smtp'],
+  email: ['mail', 'email', 'spf', 'mx', 'smtp'],
+  dns: ['domain', 'mail server', 'ip', 'spf', 'mx'],
+  bkup: ['backup', 'restore', 'snapshot'],
+  bakup: ['backup', 'restore', 'snapshot'],
+  backup: ['backup', 'restore', 'snapshot'],
+  notif: ['alarm', 'notification', 'alert'],
+  alert: ['alarm', 'notification', 'alert'],
+  alrm: ['alarm', 'notification', 'alert'],
+  migrat: ['migrate', 'migration', 'import'],
+  migartion: ['migrate', 'migration', 'import'],
+  servce: ['service', 'daemon', 'systemd'],
+  servis: ['service', 'daemon', 'systemd'],
+  lang: ['language'],
+  lng: ['language'],
+  time: ['timezone', 'server time', 'timeout', 'sync'],
+  tz: ['timezone'],
+  theme: ['dark', 'fresh', 'classic', 'style', 'appearance'],
+  dark: ['theme', 'dark slate'],
+};
+
+function matchesSetting(query: string, ...targets: (string | undefined | null)[]): boolean {
+  if (!query || !query.trim()) return true;
+  const q = query.toLowerCase().trim();
+  const haystack = targets.filter(Boolean).join(' ').toLowerCase();
+
+  // 1. Exact substring
+  if (haystack.includes(q)) return true;
+
+  // 2. Query words all present
+  const qWords = q.split(/\s+/).filter(Boolean);
+  if (qWords.length > 1 && qWords.every((w) => haystack.includes(w))) return true;
+
+  // 3. Synonym / typo expansion
+  const expanded = [q, ...(SETTING_SYNONYMS[q] || [])];
+  for (const exp of expanded) {
+    if (haystack.includes(exp)) return true;
+  }
+
+  // 4. Fuzzy word comparison with Levenshtein edit distance
+  const haystackWords = haystack.split(/[^a-z0-9_-]+/).filter((w) => w.length >= 3);
+  for (const term of expanded) {
+    const maxDist = term.length <= 4 ? 1 : term.length <= 7 ? 2 : 3;
+    for (const hw of haystackWords) {
+      if (Math.abs(hw.length - term.length) <= maxDist) {
+        if (getLevenshteinDistance(term, hw) <= maxDist) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('global');
@@ -428,6 +528,330 @@ export default function SettingsPage() {
     setModalType(null);
   };
 
+  const tabLabels: Record<SettingsTab, string> = {
+    global: 'Global',
+    page: 'Page',
+    alarm: 'Alarm',
+    backup: 'Backup Restore',
+    migrate: 'Hostvra Migrate',
+    other_migrate: 'Other Panel Migrate',
+    service: 'Service',
+  };
+
+  // Real-time Search Match Evaluation
+  const searchResults = useMemo(() => {
+    // 1. Global tab - Section 1: Commonly Used
+    const showCardNetwork = matchesSetting(
+      searchQuery,
+      'Network & Access',
+      'Configure panel network settings and access methods',
+      'Domain',
+      'Set the domain for the panel',
+      'Panel port',
+      'Suggested port',
+      'Security Entrance',
+      'Panel Admin entrance',
+      panelDomain,
+      panelPort,
+      securityEntrance
+    );
+    const showCardSsl = matchesSetting(
+      searchQuery,
+      'Panel SSL',
+      'Configure HTTPS secure connection',
+      'SSL Certificate',
+      'HTTPS secure connection',
+      'Certificate Status',
+      'Validity Period',
+      'Domain',
+      'Issuer',
+      'None Plain HTTP Self-Signed',
+      'Expiration Date',
+      'Days Remaining',
+      'Trusted',
+      panelCert.domain,
+      panelCert.issuer,
+      serverIp
+    );
+    const showCardAdvanced = matchesSetting(
+      searchQuery,
+      'Advanced Features',
+      'Developer mode',
+      'Panel debug mode error logs',
+      'API',
+      'Application Programming Interface',
+      'API Configuration',
+      'IP whitelist',
+      'API secret key',
+      apiKey
+    );
+    const showCardAuth = matchesSetting(
+      searchQuery,
+      'Authentication & Security',
+      'Panel login username password identity verification',
+      'Panel user',
+      'Change panel login username',
+      'Panel password',
+      'Change panel login password',
+      panelUser
+    );
+    const showCardAccount = matchesSetting(
+      searchQuery,
+      'Account Integration',
+      'Link official Hostvra account',
+      'Bind Hostvra account',
+      'Official Cloud Services',
+      boundAccount
+    );
+    const showCardInterface = matchesSetting(
+      searchQuery,
+      'Interface Preferences',
+      'Personalize dashboard look and feel',
+      'Menu bar hidden',
+      'Left navigation collapsible behavior',
+      menuBarHidden
+    );
+
+    const hasCommonlyUsedMatches =
+      showCardNetwork || showCardSsl || showCardAdvanced || showCardAuth || showCardAccount || showCardInterface;
+
+    // 2. Global tab - Section 2: Panel Setting (rows)
+    const showRowClosePanel = matchesSetting(searchQuery, 'Close panel', 'Only close the panel does not affect operation of web database');
+    const showRowIpv6 = matchesSetting(searchQuery, 'IPv6', 'Allow panel access via IPv6 address', 'ip');
+    const showRowOffline = matchesSetting(searchQuery, 'Offline mode', 'All services that require internet access will be unavailable');
+    const showRowCdn = matchesSetting(searchQuery, 'CDN Proxy', 'Retrieve the real IP of the request from the CDN proxy', 'ip');
+    const showRowBulletin = matchesSetting(searchQuery, 'Home Bulletin', 'Show panel announcements and update notices on the home page');
+    const showRowMonitor = matchesSetting(searchQuery, 'Site Monitor', 'Free website monitor');
+    const showRowFavicon = matchesSetting(searchQuery, 'Auto-fetch favicon', 'Attempts to fetch favicon every 12 hours when enabled');
+    const showRowAutoBackup = matchesSetting(searchQuery, 'Auto Backup Panel', 'Backup schedule one-click clear backup number of backups used', 'snapshot');
+    const showRowTheme = matchesSetting(searchQuery, 'Theme', 'Panel theme Fresh Classic Dark Slate', panelTheme);
+    const showRowLanguage = matchesSetting(searchQuery, 'Language', 'Panel language English Bengali Chinese Feedback', panelLanguage);
+    const showRowAlias = matchesSetting(searchQuery, 'Alias', 'Take alias for Hostvra', panelAlias);
+    const showRowTimeout = matchesSetting(searchQuery, 'Timeout', 'Panel auto logout session timeout 24 hours', sessionTimeout);
+    const showRowSiteFolder = matchesSetting(searchQuery, 'Default site folder', 'New created site will be saved to subdirectory by default directory path', defaultSiteFolder);
+    const showRowBackupFolder = matchesSetting(searchQuery, 'Default backup folder', 'Directory of site and database backup archive path', defaultBackupFolder);
+    const showRowServerIp = matchesSetting(searchQuery, 'Server IP', 'Default IP is Internet IP Intranet IP address', serverIp);
+    const showRowMailServerIp = matchesSetting(searchQuery, 'Mail Server Public IP', 'DNS A SPF Canonical IP automatic detection manual override mx records mail smtp', mailServerPublicIp, detectedPublicIp);
+    const showRowServerTime = matchesSetting(searchQuery, 'Server time', 'Synchronize current server time clock ntp', serverTime);
+    const showRowTimezone = matchesSetting(searchQuery, 'Server Timezone', 'Set correct timezone timestamps UTC Dhaka London New York', timezoneRegion, timezoneCity);
+
+    const hasPanelSettingMatches =
+      showRowClosePanel ||
+      showRowIpv6 ||
+      showRowOffline ||
+      showRowCdn ||
+      showRowBulletin ||
+      showRowMonitor ||
+      showRowFavicon ||
+      showRowAutoBackup ||
+      showRowTheme ||
+      showRowLanguage ||
+      showRowAlias ||
+      showRowTimeout ||
+      showRowSiteFolder ||
+      showRowBackupFolder ||
+      showRowServerIp ||
+      showRowMailServerIp ||
+      showRowServerTime ||
+      showRowTimezone;
+
+    // 3. Global tab - Section 3: Security (rows)
+    const showRowSecurityAlarm = matchesSetting(searchQuery, 'Panel Security Alarm', 'Alarm content includes panel user changes panel log deletion developer mode enabled');
+    const showRowBasicAuth = matchesSetting(searchQuery, 'BasicAuth', 'Add an extra layer of auth to effectively prevent panel scanning secondary authentication');
+    const showRowGoogleAuth = matchesSetting(searchQuery, 'Google Authenticator', 'Dynamic verification code required to log in to the panel 2FA OTP two factor MFA');
+    const showRowStrongPass = matchesSetting(searchQuery, 'Strong password', 'Enable strong password for panel length 8 upper lower numbers characters policy');
+    const showRowAuthorizedIp = matchesSetting(searchQuery, 'Authorized IP', 'Whitelist only authorized IP can access panel login firewall', authorizedIp);
+    const showRowNotLoggedIn = matchesSetting(searchQuery, 'Not logged in response', 'Response when not logged in and not properly entered for security entry hide panel features 404 403', notLoggedInResponse);
+    const showRowPasswordExpire = matchesSetting(searchQuery, 'Password expire', 'Set an expiration time for the panel password reset expiration policy', passwordExpire);
+    const showRowTempLogin = matchesSetting(searchQuery, 'Temporary login', 'Temporarily provide panel access to non-admins one-time magic link token');
+
+    const hasSecurityMatches =
+      showRowSecurityAlarm ||
+      showRowBasicAuth ||
+      showRowGoogleAuth ||
+      showRowStrongPass ||
+      showRowAuthorizedIp ||
+      showRowNotLoggedIn ||
+      showRowPasswordExpire ||
+      showRowTempLogin;
+
+    const globalCount =
+      (showCardNetwork ? 1 : 0) +
+      (showCardSsl ? 1 : 0) +
+      (showCardAdvanced ? 1 : 0) +
+      (showCardAuth ? 1 : 0) +
+      (showCardAccount ? 1 : 0) +
+      (showCardInterface ? 1 : 0) +
+      (showRowClosePanel ? 1 : 0) +
+      (showRowIpv6 ? 1 : 0) +
+      (showRowOffline ? 1 : 0) +
+      (showRowCdn ? 1 : 0) +
+      (showRowBulletin ? 1 : 0) +
+      (showRowMonitor ? 1 : 0) +
+      (showRowFavicon ? 1 : 0) +
+      (showRowAutoBackup ? 1 : 0) +
+      (showRowTheme ? 1 : 0) +
+      (showRowLanguage ? 1 : 0) +
+      (showRowAlias ? 1 : 0) +
+      (showRowTimeout ? 1 : 0) +
+      (showRowSiteFolder ? 1 : 0) +
+      (showRowBackupFolder ? 1 : 0) +
+      (showRowServerIp ? 1 : 0) +
+      (showRowMailServerIp ? 1 : 0) +
+      (showRowServerTime ? 1 : 0) +
+      (showRowTimezone ? 1 : 0) +
+      (showRowSecurityAlarm ? 1 : 0) +
+      (showRowBasicAuth ? 1 : 0) +
+      (showRowGoogleAuth ? 1 : 0) +
+      (showRowStrongPass ? 1 : 0) +
+      (showRowAuthorizedIp ? 1 : 0) +
+      (showRowNotLoggedIn ? 1 : 0) +
+      (showRowPasswordExpire ? 1 : 0) +
+      (showRowTempLogin ? 1 : 0);
+
+    // Other Tabs Counts
+    const pageCount = matchesSetting(searchQuery, 'Custom Page Branding', 'Configure logo favicon portal title footer text', 'Panel Title', 'Hostvra Enterprise Control Panel') ? 1 : 0;
+    const alarmChannels = ['Email Notification', 'Telegram Bot', 'DingTalk / Feishu', 'Custom Webhook'];
+    const matchingAlarmChannels = alarmChannels.filter((ch) => matchesSetting(searchQuery, ch, 'Alarm & Incident Notifications alert channels'));
+    const alarmCount = matchingAlarmChannels.length;
+    const backupCount = matchesSetting(searchQuery, 'Panel Backup & Disaster Recovery', 'Create instant backup archives of all panel databases snapshot restore') ? 1 : 0;
+    const migrateCount = matchesSetting(searchQuery, 'Hostvra Server Migration Engine', 'Live panel-to-panel sync migration host port key target server credentials') ? 1 : 0;
+    const otherMigratePanels = ['cPanel Full Backup (.tar.gz)', 'CyberPanel Backup (.tar.gz)', 'Plesk XML Archive (.zip)'];
+    const matchingOtherPanels = otherMigratePanels.filter((p) => matchesSetting(searchQuery, p, 'Import from Other Panels archive restoration'));
+    const otherMigrateCount = matchingOtherPanels.length;
+    const services = [
+      { name: 'hostvra-web (Next.js Frontend)', status: 'active (running)' },
+      { name: 'hostvra-api (Go Chi REST Engine)', status: 'active (running)' },
+      { name: 'hostvra-agent (Native System Daemon)', status: 'active (running)' },
+    ];
+    const matchingServices = services.filter((s) => matchesSetting(searchQuery, s.name, 'Hostvra Panel Services Daemon Control systemd background daemons service health restart'));
+    const serviceCount = matchingServices.length;
+
+    const tabCounts: Record<SettingsTab, number> = {
+      global: globalCount,
+      page: pageCount,
+      alarm: alarmCount,
+      backup: backupCount,
+      migrate: migrateCount,
+      other_migrate: otherMigrateCount,
+      service: serviceCount,
+    };
+
+    return {
+      showCardNetwork,
+      showCardSsl,
+      showCardAdvanced,
+      showCardAuth,
+      showCardAccount,
+      showCardInterface,
+      hasCommonlyUsedMatches,
+
+      showRowClosePanel,
+      showRowIpv6,
+      showRowOffline,
+      showRowCdn,
+      showRowBulletin,
+      showRowMonitor,
+      showRowFavicon,
+      showRowAutoBackup,
+      showRowTheme,
+      showRowLanguage,
+      showRowAlias,
+      showRowTimeout,
+      showRowSiteFolder,
+      showRowBackupFolder,
+      showRowServerIp,
+      showRowMailServerIp,
+      showRowServerTime,
+      showRowTimezone,
+      hasPanelSettingMatches,
+
+      showRowSecurityAlarm,
+      showRowBasicAuth,
+      showRowGoogleAuth,
+      showRowStrongPass,
+      showRowAuthorizedIp,
+      showRowNotLoggedIn,
+      showRowPasswordExpire,
+      showRowTempLogin,
+      hasSecurityMatches,
+
+      tabCounts,
+      matchingAlarmChannels,
+      matchingOtherPanels,
+      matchingServices,
+    };
+  }, [
+    searchQuery,
+    panelDomain,
+    panelPort,
+    securityEntrance,
+    panelCert,
+    serverIp,
+    apiKey,
+    panelUser,
+    boundAccount,
+    menuBarHidden,
+    panelTheme,
+    panelLanguage,
+    panelAlias,
+    sessionTimeout,
+    defaultSiteFolder,
+    defaultBackupFolder,
+    mailServerPublicIp,
+    detectedPublicIp,
+    serverTime,
+    timezoneRegion,
+    timezoneCity,
+    authorizedIp,
+    notLoggedInResponse,
+    passwordExpire,
+  ]);
+
+  const otherTabsWithMatches = Object.entries(searchResults.tabCounts)
+    .filter(([id, count]) => id !== activeTab && count > 0)
+    .map(([id, count]) => ({ id: id as SettingsTab, label: tabLabels[id as SettingsTab], count }));
+
+  const currentTabMatches = searchResults.tabCounts[activeTab] ?? 0;
+
+  const renderEmptyState = (tabId: SettingsTab) => (
+    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-12 text-center space-y-3 shadow-2xs">
+      <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-surface-800 flex items-center justify-center text-slate-400">
+        <Search className="w-6 h-6" />
+      </div>
+      <h3 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+        No settings found matching &ldquo;{searchQuery}&rdquo; in {tabLabels[tabId]}
+      </h3>
+      <p className="text-xs text-slate-500 max-w-md mx-auto">
+        Try searching for terms like &ldquo;domain&rdquo;, &ldquo;ssl&rdquo;, &ldquo;port&rdquo;, &ldquo;ip&rdquo;, &ldquo;password&rdquo;, &ldquo;backup&rdquo;, or &ldquo;theme&rdquo;.
+      </p>
+      {otherTabsWithMatches.length > 0 && (
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-2">
+          <span className="text-xs text-slate-500">Found in other tabs:</span>
+          {otherTabsWithMatches.map(({ id, label, count }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className="px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold hover:bg-emerald-500/20 transition cursor-pointer"
+            >
+              {label} ({count})
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => setSearchQuery('')}
+          className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+        >
+          Reset Search
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <DashboardShell>
       {/* Toast Alert */}
@@ -464,21 +888,35 @@ export default function SettingsPage() {
               { id: 'migrate', label: 'Hostvra Migrate' },
               { id: 'other_migrate', label: 'Other Panel Migrate' },
               { id: 'service', label: 'Service' },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                role="tab"
-                data-tab="true"
-                onClick={() => setActiveTab(tab.id as SettingsTab)}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
-                  activeTab === tab.id
-                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-700/40'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+            ].map((tab) => {
+              const count = searchResults.tabCounts[tab.id as SettingsTab] || 0;
+              return (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  data-tab="true"
+                  onClick={() => setActiveTab(tab.id as SettingsTab)}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none flex items-center gap-1.5 ${
+                    activeTab === tab.id
+                      ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-700/40'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  {searchQuery.trim() && count > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        activeTab === tab.id
+                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-slate-200 dark:bg-surface-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* Right Enterprise Edition Badge */}
@@ -494,33 +932,87 @@ export default function SettingsPage() {
         </div>
 
         {/* Search Bar */}
-        <div className="relative max-w-sm">
-          <input
-            type="text"
-            placeholder="Search settings"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3.5 py-1.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs pr-8"
-          />
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+        <div className="space-y-2">
+          <div className="relative max-w-md">
+            <input
+              type="text"
+              placeholder="Search settings (e.g. domain, ssl, port, password, ip)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-4 py-2 rounded-full bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs pr-16 transition"
+            />
+            <div className="absolute right-3.5 top-2.5 flex items-center gap-1.5">
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="p-0.5 rounded-full hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+                  title="Clear search"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <Search className="w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            </div>
+          </div>
+
+          {searchQuery.trim() && (
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 text-xs text-emerald-900 dark:text-emerald-300">
+              <div className="flex items-center gap-2">
+                <Search className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                <span>
+                  Showing <strong>{currentTabMatches}</strong> matching setting{currentTabMatches === 1 ? '' : 's'} in <strong>{tabLabels[activeTab]}</strong> for &ldquo;{searchQuery}&rdquo;
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                {otherTabsWithMatches.length > 0 && (
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <span>Also in:</span>
+                    {otherTabsWithMatches.map(({ id, label, count }) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setActiveTab(id)}
+                        className="underline font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 transition cursor-pointer"
+                      >
+                        {label} ({count})
+                      </button>
+                    ))}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-2 py-0.5 rounded-md bg-white dark:bg-surface-800 border border-emerald-300 dark:border-emerald-700 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-surface-700 transition cursor-pointer"
+                >
+                  Clear search
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* =========================================================================
             TAB 1: GLOBAL SETTINGS (Main aaPanel Layout)
             ========================================================================= */}
         {activeTab === 'global' && (
-          <div className="space-y-8">
+          searchQuery.trim() && searchResults.tabCounts.global === 0 ? (
+            renderEmptyState('global')
+          ) : (
+            <div className="space-y-8">
             {/* ---------------------------------------------------------------------
                 SECTION 1: COMMONLY USED (2x2 Grid of Feature Cards)
                 --------------------------------------------------------------------- */}
-            <div>
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
-                Commonly used
-              </h2>
+            {searchResults.hasCommonlyUsedMatches && (
+              <div>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-3">
+                  Commonly used
+                </h2>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* 1. Network & Access Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* 1. Network & Access Card */}
+                  {searchResults.showCardNetwork && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <Globe className="w-4 h-4" />
@@ -619,8 +1111,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 2. Panel SSL Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                  )}
+
+                  {/* 2. Panel SSL Card */}
+                  {searchResults.showCardSsl && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <Shield className="w-4 h-4" />
@@ -710,8 +1205,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 3. Advanced Features Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                  )}
+
+                  {/* 3. Advanced Features Card */}
+                  {searchResults.showCardAdvanced && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <Code2 className="w-4 h-4" />
@@ -834,8 +1332,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 4. Authentication & Security Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                  )}
+
+                  {/* 4. Authentication & Security Card */}
+                  {searchResults.showCardAuth && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <ShieldCheck className="w-4 h-4" />
@@ -897,8 +1398,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 5. Account Integration Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                  )}
+
+                  {/* 5. Account Integration Card */}
+                  {searchResults.showCardAccount && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <User className="w-4 h-4" />
@@ -945,8 +1449,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 6. Interface Preferences Card */}
-                <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
+                  )}
+
+                  {/* 6. Interface Preferences Card */}
+                  {searchResults.showCardInterface && (
+                    <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                       <SettingsIcon className="w-4 h-4" />
@@ -977,19 +1484,23 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
+          </div>
+        )}
 
-            {/* ---------------------------------------------------------------------
-                SECTION 2: PANEL SETTING (Comprehensive Vertical Options)
-                --------------------------------------------------------------------- */}
-            <div className="pt-2 border-t border-slate-200 dark:border-surface-800 space-y-4">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                Panel Setting
-              </h2>
+        {/* ---------------------------------------------------------------------
+            SECTION 2: PANEL SETTING (Comprehensive Vertical Options)
+            --------------------------------------------------------------------- */}
+        {searchResults.hasPanelSettingMatches && (
+          <div className="pt-2 border-t border-slate-200 dark:border-surface-800 space-y-4">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Panel Setting
+            </h2>
 
-              <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs divide-y divide-slate-100 dark:divide-surface-800 text-xs font-semibold">
-                {/* 1. Close panel */}
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs divide-y divide-slate-100 dark:divide-surface-800 text-xs font-semibold">
+              {/* 1. Close panel */}
+              {searchResults.showRowClosePanel && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Close panel</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1019,7 +1530,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 2. IPv6 */}
+              )}
+
+              {/* 2. IPv6 */}
+              {searchResults.showRowIpv6 && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">IPv6</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1049,7 +1563,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 3. Offline mode */}
+              )}
+
+              {/* 3. Offline mode */}
+              {searchResults.showRowOffline && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Offline mode</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1079,7 +1596,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 4. CDN Proxy */}
+              )}
+
+              {/* 4. CDN Proxy */}
+              {searchResults.showRowCdn && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">CDN Proxy</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1109,7 +1629,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 5. Home Bulletin */}
+              )}
+
+              {/* 5. Home Bulletin */}
+              {searchResults.showRowBulletin && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Home Bulletin</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1139,7 +1662,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 6. Site Monitor */}
+              )}
+
+              {/* 6. Site Monitor */}
+              {searchResults.showRowMonitor && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Site Monitor</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1167,7 +1693,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 7. Auto-fetch favicon */}
+              )}
+
+              {/* 7. Auto-fetch favicon */}
+              {searchResults.showRowFavicon && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Auto-fetch favicon</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1197,7 +1726,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 8. Auto Backup Panel */}
+              )}
+
+              {/* 8. Auto Backup Panel */}
+              {searchResults.showRowAutoBackup && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Auto Backup Panel</span>
                   <div className="flex-1 flex flex-wrap items-center gap-3">
@@ -1240,7 +1772,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 9. Theme */}
+              )}
+
+              {/* 9. Theme */}
+              {searchResults.showRowTheme && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Theme</span>
                   <div className="flex-1">
@@ -1259,7 +1794,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 10. Language */}
+              )}
+
+              {/* 10. Language */}
+              {searchResults.showRowLanguage && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Language</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1285,7 +1823,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 11. Alias */}
+              )}
+
+              {/* 11. Alias */}
+              {searchResults.showRowAlias && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Alias</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1305,7 +1846,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 12. Timeout */}
+              )}
+
+              {/* 12. Timeout */}
+              {searchResults.showRowTimeout && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Timeout</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1330,7 +1874,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 13. Default site folder */}
+              )}
+
+              {/* 13. Default site folder */}
+              {searchResults.showRowSiteFolder && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Default site folder</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1358,7 +1905,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 14. Default backup folder */}
+              )}
+
+              {/* 14. Default backup folder */}
+              {searchResults.showRowBackupFolder && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Default backup folder</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1384,7 +1934,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 15. Server IP */}
+              )}
+
+              {/* 15. Server IP */}
+              {searchResults.showRowServerIp && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Server IP</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1409,7 +1962,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 15b. Mail Server Public IP */}
+              )}
+
+              {/* 15b. Mail Server Public IP */}
+              {searchResults.showRowMailServerIp && (
                 <div className="py-4 border-t border-b border-slate-200/60 dark:border-surface-800 flex flex-col md:flex-row md:items-start justify-between gap-4">
                   <div className="w-44">
                     <span className="text-slate-800 dark:text-slate-200 font-semibold block">Mail Server Public IP</span>
@@ -1510,7 +2066,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 16. Server time */}
+              )}
+
+              {/* 16. Server time */}
+              {searchResults.showRowServerTime && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Server time</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1530,7 +2089,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 17. Server Timezone */}
+              )}
+
+              {/* 17. Server Timezone */}
+              {searchResults.showRowTimezone && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-44 text-slate-800 dark:text-slate-200">Server Timezone</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1568,19 +2130,23 @@ export default function SettingsPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
+          </div>
+        )}
 
-            {/* ---------------------------------------------------------------------
-                SECTION 3: SECURITY (Deep Panel Defense Options)
-                --------------------------------------------------------------------- */}
-            <div className="pt-2 border-t border-slate-200 dark:border-surface-800 space-y-4">
-              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-                Security
-              </h2>
+        {/* ---------------------------------------------------------------------
+            SECTION 3: SECURITY (Deep Panel Defense Options)
+            --------------------------------------------------------------------- */}
+        {searchResults.hasSecurityMatches && (
+          <div className="pt-2 border-t border-slate-200 dark:border-surface-800 space-y-4">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+              Security
+            </h2>
 
-              <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs divide-y divide-slate-100 dark:divide-surface-800 text-xs font-semibold">
-                {/* 1. Panel Security Alarm */}
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs divide-y divide-slate-100 dark:divide-surface-800 text-xs font-semibold">
+              {/* 1. Panel Security Alarm */}
+              {searchResults.showRowSecurityAlarm && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Panel Security Alarm</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1616,7 +2182,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 2. BasicAuth */}
+              )}
+
+              {/* 2. BasicAuth */}
+              {searchResults.showRowBasicAuth && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">BasicAuth</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1647,7 +2216,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 3. Google Authenticator */}
+              )}
+
+              {/* 3. Google Authenticator */}
+              {searchResults.showRowGoogleAuth && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Google Authenticator</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1684,7 +2256,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 4. Strong password */}
+              )}
+
+              {/* 4. Strong password */}
+              {searchResults.showRowStrongPass && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Strong password</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1717,7 +2292,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 5. Authorized IP */}
+              )}
+
+              {/* 5. Authorized IP */}
+              {searchResults.showRowAuthorizedIp && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Authorized IP</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1743,7 +2321,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 6. Not logged in response */}
+              )}
+
+              {/* 6. Not logged in response */}
+              {searchResults.showRowNotLoggedIn && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Not logged in response</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1768,7 +2349,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 7. Password expire */}
+              )}
+
+              {/* 7. Password expire */}
+              {searchResults.showRowPasswordExpire && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Password expire</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1793,7 +2377,10 @@ export default function SettingsPage() {
                   </div>
                 </div>
 
-                {/* 8. Temporary login */}
+              )}
+
+              {/* 8. Temporary login */}
+              {searchResults.showRowTempLogin && (
                 <div className="py-3 flex items-center justify-between">
                   <span className="w-48 text-slate-800 dark:text-slate-200">Temporary login</span>
                   <div className="flex-1 flex items-center gap-3">
@@ -1808,80 +2395,98 @@ export default function SettingsPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
+      </div>
+    )
+  )}
 
         {/* =========================================================================
             OTHER TABS: Page, Alarm, Backup, Migrate, Other Migrate, Service
             ========================================================================= */}
         {activeTab === 'page' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Custom Page Branding</h3>
-            <p className="text-xs text-slate-500">Configure logo, favicon, portal title, and footer text</p>
-            <div className="space-y-3 max-w-lg text-xs font-semibold">
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 mb-1">Panel Title</label>
-                <input
-                  type="text"
-                  defaultValue="Hostvra Enterprise Control Panel"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white"
-                />
+          searchQuery.trim() && searchResults.tabCounts.page === 0 ? (
+            renderEmptyState('page')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Custom Page Branding</h3>
+              <p className="text-xs text-slate-500">Configure logo, favicon, portal title, and footer text</p>
+              <div className="space-y-3 max-w-lg text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Panel Title</label>
+                  <input
+                    type="text"
+                    defaultValue="Hostvra Enterprise Control Panel"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <button
+                  onClick={() => showToast('Branding settings saved')}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold"
+                >
+                  Save Page Settings
+                </button>
               </div>
-              <button
-                onClick={() => showToast('Branding settings saved')}
-                className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold"
-              >
-                Save Page Settings
-              </button>
             </div>
-          </div>
+          )
         )}
 
         {activeTab === 'alarm' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Alarm &amp; Incident Notifications</h3>
-            <p className="text-xs text-slate-500">Integrate Email, Telegram Bot, Slack, and Webhook alert channels</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {['Email Notification', 'Telegram Bot', 'DingTalk / Feishu', 'Custom Webhook'].map((ch) => (
-                <div key={ch} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 flex items-center justify-between">
-                  <span className="font-bold text-xs">{ch}</span>
-                  <button
-                    onClick={() => showToast(`${ch} configuration opened`)}
-                    className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-bold"
-                  >
-                    Setup
-                  </button>
-                </div>
-              ))}
+          searchQuery.trim() && searchResults.matchingAlarmChannels.length === 0 ? (
+            renderEmptyState('alarm')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Alarm &amp; Incident Notifications</h3>
+              <p className="text-xs text-slate-500">Integrate Email, Telegram Bot, Slack, and Webhook alert channels</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {searchResults.matchingAlarmChannels.map((ch) => (
+                  <div key={ch} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 flex items-center justify-between">
+                    <span className="font-bold text-xs">{ch}</span>
+                    <button
+                      onClick={() => showToast(`${ch} configuration opened`)}
+                      className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-bold"
+                    >
+                      Setup
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {activeTab === 'backup' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Panel Backup &amp; Disaster Recovery</h3>
-            <p className="text-xs text-slate-500">Create instant backup archives of all panel databases and configurations</p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => showToast('Creating instant panel configuration snapshot...')}
-                className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs"
-              >
-                Create Backup Now
-              </button>
-              <button
-                onClick={() => showToast('Restore wizard launched')}
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-200 font-bold text-xs"
-              >
-                Import &amp; Restore
-              </button>
+          searchQuery.trim() && searchResults.tabCounts.backup === 0 ? (
+            renderEmptyState('backup')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Panel Backup &amp; Disaster Recovery</h3>
+              <p className="text-xs text-slate-500">Create instant backup archives of all panel databases and configurations</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => showToast('Creating instant panel configuration snapshot...')}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs"
+                >
+                  Create Backup Now
+                </button>
+                <button
+                  onClick={() => showToast('Restore wizard launched')}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-200 font-bold text-xs"
+                >
+                  Import &amp; Restore
+                </button>
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {activeTab === 'migrate' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-6 shadow-2xs">
+          searchQuery.trim() && searchResults.tabCounts.migrate === 0 ? (
+            renderEmptyState('migrate')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-6 shadow-2xs">
             <div>
               <h3 className="font-bold text-sm text-slate-900 dark:text-white">One-Click Server Migration Engine</h3>
               <p className="text-xs text-slate-500">Live inter-server asset migration for websites, databases, configurations, and DNS zones</p>
@@ -2027,62 +2632,67 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+          )
         )}
 
         {activeTab === 'other_migrate' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Import from Other Panels</h3>
-            <p className="text-xs text-slate-500">Direct archive restoration from cPanel, CyberPanel, Plesk, or DirectAdmin</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-              {['cPanel Full Backup (.tar.gz)', 'CyberPanel Backup (.tar.gz)', 'Plesk XML Archive (.zip)'].map((panel) => (
-                <div key={panel} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 flex flex-col justify-between gap-3">
-                  <span className="font-bold text-xs">{panel}</span>
-                  <label className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold text-center cursor-pointer transition">
-                    Select Archive
-                    <input
-                      type="file"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          showToast(`Uploading and validating ${file.name} for extraction...`);
-                        }
-                      }}
-                    />
-                  </label>
-                </div>
-              ))}
+          searchQuery.trim() && searchResults.matchingOtherPanels.length === 0 ? (
+            renderEmptyState('other_migrate')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Import from Other Panels</h3>
+              <p className="text-xs text-slate-500">Direct archive restoration from cPanel, CyberPanel, Plesk, or DirectAdmin</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                {searchResults.matchingOtherPanels.map((panel) => (
+                  <div key={panel} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 flex flex-col justify-between gap-3">
+                    <span className="font-bold text-xs">{panel}</span>
+                    <label className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold text-center cursor-pointer transition">
+                      Select Archive
+                      <input
+                        type="file"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            showToast(`Uploading and validating ${file.name} for extraction...`);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {activeTab === 'service' && (
-          <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-            <h3 className="font-bold text-sm text-slate-900 dark:text-white">Hostvra Panel Services &amp; Daemon Control</h3>
-            <p className="text-xs text-slate-500">Control systemd background daemons and service health</p>
-            <div className="space-y-3 max-w-xl text-xs font-semibold">
-              {[
-                { name: 'hostvra-web (Next.js Frontend)', status: 'active (running)' },
-                { name: 'hostvra-api (Go Chi REST Engine)', status: 'active (running)' },
-                { name: 'hostvra-agent (Native System Daemon)', status: 'active (running)' },
-              ].map((svc) => (
-                <div key={svc.name} className="p-3.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 flex items-center justify-between">
-                  <div>
-                    <span className="block font-bold">{svc.name}</span>
-                    <span className="text-emerald-600 text-[11px]">{svc.status}</span>
+          searchQuery.trim() && searchResults.matchingServices.length === 0 ? (
+            renderEmptyState('service')
+          ) : (
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Hostvra Panel Services &amp; Daemon Control</h3>
+              <p className="text-xs text-slate-500">Control systemd background daemons and service health</p>
+              <div className="space-y-3 max-w-xl text-xs font-semibold">
+                {searchResults.matchingServices.map((svc) => (
+                  <div key={svc.name} className="p-3.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 flex items-center justify-between">
+                    <div>
+                      <span className="block font-bold">{svc.name}</span>
+                      <span className="text-emerald-600 text-[11px]">{svc.status}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => showToast(`Restarting ${svc.name}...`)}
+                        className="px-3 py-1 rounded-lg bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-xs font-bold"
+                      >
+                        Restart
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => showToast(`Restarting ${svc.name}...`)}
-                      className="px-3 py-1 rounded-lg bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-xs font-bold"
-                    >
-                      Restart
-                    </button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )
         )}
 
         {/* =========================================================================
