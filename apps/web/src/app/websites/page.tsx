@@ -237,6 +237,11 @@ export default function WebsitesPage() {
 
   useEffect(() => {
     fetchData();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q') || params.get('domain');
+      if (q) setSearch(q);
+    }
   }, [fetchData]);
 
   // Fetch website traffic telemetry when statistics modal opens
@@ -893,12 +898,22 @@ export default function WebsitesPage() {
             <div className="relative flex-1 sm:w-52">
               <input
                 type="text"
-                placeholder="Domain or Remarks"
+                placeholder="Domain or Remarks..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-slate-100 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs transition-all pr-8"
               />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+              {search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+              )}
             </div>
 
             {/* Column Display Settings Gear Icon */}

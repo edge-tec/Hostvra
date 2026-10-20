@@ -241,10 +241,28 @@ export default function DomainsPage() {
     } finally {
       setLoading(false);
     }
-  };
-
   useEffect(() => {
     fetchAllData();
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      const qParam = params.get('q') || params.get('domain');
+      if (tabParam === 'search' || tabParam === 'hosted' || tabParam === 'transfer' || tabParam === 'whois' || tabParam === 'registered') {
+        setActiveTab(tabParam as any);
+      }
+      if (qParam) {
+        setSearchQuery(qParam);
+        if (tabParam === 'whois') {
+          setWhoisQuery(qParam);
+        } else {
+          setActiveTab('search');
+          setTimeout(() => {
+            handleDomainSearch(undefined, qParam);
+          }, 100);
+        }
+      }
+    }
   }, []);
 
   const copyToClipboard = (text: string, key: string) => {
@@ -451,13 +469,14 @@ export default function DomainsPage() {
   // --------------------------------------------------------------------------
   // Domain Search & Registration
   // --------------------------------------------------------------------------
-  const handleDomainSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
+  const handleDomainSearch = async (e?: React.FormEvent, customQuery?: string) => {
+    if (e) e.preventDefault();
+    const queryToSearch = (customQuery !== undefined ? customQuery : searchQuery).trim();
+    if (!queryToSearch) return;
     setIsSearching(true);
     setError(null);
     try {
-      const res = await searchDomainAvailability(searchQuery.trim());
+      const res = await searchDomainAvailability(queryToSearch);
       if (res.success && res.data && res.data.length > 0) {
         setSearchResults(res.data);
       } else {
@@ -466,7 +485,7 @@ export default function DomainsPage() {
       }
     } catch (err: any) {
       setSearchResults([]);
-      setError('Unable to query domain registrar API. Please verify configuration.');
+      setError('Unable to check domain availability. Please try again.');
     } finally {
       setIsSearching(false);
     }
@@ -774,8 +793,17 @@ export default function DomainsPage() {
                     value={registeredSearchQuery}
                     onChange={(e) => setRegisteredSearchQuery(e.target.value)}
                     placeholder="Search your domains..."
-                    className="pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] placeholder-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 w-48 sm:w-60"
+                    className="pl-8 pr-7 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] placeholder-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 w-48 sm:w-60"
                   />
+                  {registeredSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setRegisteredSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
 
                 <select
@@ -898,7 +926,7 @@ export default function DomainsPage() {
                   Find and Register Your Perfect Domain
                 </h2>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Direct ResellerClub API integration with live availability checks and instant provisioning.
+                  Real-time registrar and DNS availability checks across top extensions with instant provisioning.
                 </p>
               </div>
 
@@ -909,9 +937,18 @@ export default function DomainsPage() {
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search domain (e.g. example.com)..."
-                    className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600"
+                    placeholder="Search domain (e.g. onlyflrt.net or mybrand)..."
+                    className="w-full pl-10 pr-9 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600"
                   />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
                 <button
                   type="submit"
@@ -922,6 +959,26 @@ export default function DomainsPage() {
                   <span>Check Availability</span>
                 </button>
               </form>
+
+              {/* Quick Popular TLD Chips */}
+              <div className="flex flex-wrap justify-center items-center gap-1.5 pt-1">
+                <span className="text-[11px] text-slate-400 mr-1 font-medium">Quick Check:</span>
+                {['.com', '.net', '.org', '.xyz', '.io', '.co', '.tech', '.online'].map((tld) => (
+                  <button
+                    key={tld}
+                    type="button"
+                    onClick={() => {
+                      const base = searchQuery ? searchQuery.split('.')[0].trim() : 'mybrand';
+                      const target = `${base}${tld}`;
+                      setSearchQuery(target);
+                      handleDomainSearch(undefined, target);
+                    }}
+                    className="px-2.5 py-1 rounded-full text-[11px] font-mono font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+                  >
+                    {tld}
+                  </button>
+                ))}
+              </div>
 
               <div className="flex justify-center items-center gap-1 text-xs pt-1">
                 <span className="text-slate-500">Currency:</span>
@@ -1151,8 +1208,17 @@ export default function DomainsPage() {
                     value={hostedSearchQuery}
                     onChange={(e) => setHostedSearchQuery(e.target.value)}
                     placeholder="Search hosted sites..."
-                    className="pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] placeholder-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 w-48"
+                    className="pl-8 pr-7 py-1.5 text-xs text-slate-900 dark:text-white bg-slate-50 dark:bg-[#0B1120] placeholder-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg focus:outline-none focus:border-emerald-600 w-48 sm:w-60"
                   />
+                  {hostedSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setHostedSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
 
                 <button

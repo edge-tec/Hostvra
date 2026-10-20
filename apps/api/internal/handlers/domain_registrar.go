@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -118,39 +120,110 @@ func (h *DomainRegistrarHandler) WhoisLookup(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	info, err := h.domainSvc.Registrar.GetDomainInfo(r.Context(), cleanDomain)
-	if err != nil {
-		// Return basic whois record
-		response.JSON(w, http.StatusOK, &store.WhoisRecord{
-			Domain:    cleanDomain,
-			TLD:       "." + tld,
-			Available: false,
-			CheckedAt: time.Now().UTC(),
-		}, nil)
-		return
+	var rec *store.WhoisRecord
+	if h.domainSvc != nil && h.domainSvc.Registrar != nil {
+		info, err := h.domainSvc.Registrar.GetDomainInfo(r.Context(), cleanDomain)
+		if err == nil && info != nil {
+			var regDateStr, expDateStr string
+			if info.RegistrationDate != nil {
+				regDateStr = info.RegistrationDate.Format(time.RFC3339)
+			}
+			if info.ExpiryDate != nil {
+				expDateStr = info.ExpiryDate.Format(time.RFC3339)
+			}
+
+			rec = &store.WhoisRecord{
+				Domain:         cleanDomain,
+				TLD:            "." + tld,
+				Available:      false,
+				Registrar:      "Hostvra Domain Reseller (ResellerClub)",
+				CreationDate:   regDateStr,
+				ExpirationDate: expDateStr,
+				NameServers:    info.Nameservers,
+				Status:         []string{info.Status},
+				CheckedAt:      time.Now().UTC(),
+			}
+		}
 	}
 
-	var regDateStr, expDateStr string
-	if info.RegistrationDate != nil {
-		regDateStr = info.RegistrationDate.Format(time.RFC3339)
-	}
-	if info.ExpiryDate != nil {
-		expDateStr = info.ExpiryDate.Format(time.RFC3339)
-	}
-
-	rec := &store.WhoisRecord{
-		Domain:         cleanDomain,
-		TLD:            "." + tld,
-		Available:      false,
-		Registrar:      "Hostvra Domain Reseller (ResellerClub)",
-		CreationDate:   regDateStr,
-		ExpirationDate: expDateStr,
-		NameServers:    info.Nameservers,
-		Status:         []string{info.Status},
-		CheckedAt:      time.Now().UTC(),
+	if rec == nil {
+		rec = fetchLiveWhoisRecord(r.Context(), cleanDomain, tld)
 	}
 
 	response.JSON(w, http.StatusOK, rec, nil)
+}
+
+func fetchLiveWhoisRecord(ctx context.Context, domain, tld string) *store.WhoisRecord {
+	rec := &store.WhoisRecord{
+		Domain:    domain,
+		TLD:       "." + tld,
+		Available: false,
+		CheckedAt: time.Now().UTC(),
+	}
+
+	// 1. DNS Nameservers and IPs
+	ns, _ := net.DefaultResolver.LookupNS(ctx, domain)
+	for _, n := range ns {
+		rec.NameServers = append(rec.NameServers, strings.TrimRight(n.Host, "."))
+	}
+	ips, _ := net.DefaultResolver.LookupHost(ctx, domain)
+	if len(ips) > 0 {
+		rec.IPAddress = ips[0]
+	}
+
+	// 2. Query RDAP for registrar and timestamps
+	client := &http.Client{Timeout: 3500 * time.Millisecond}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://rdap.org/domain/"+domain, nil)
+	if err == nil {
+		req.Header.Set("Accept", "application/rdap+json, application/json")
+		resp, err := client.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound {
+				rec.Available = true
+				rec.Status = []string{"available"}
+				return rec
+			}
+			if resp.StatusCode == http.StatusOK {
+				var rdapData struct {
+					Status []string `json:"status"`
+					Events []struct {
+						Action string `json:"eventAction"`
+						Date   string `json:"eventDate"`
+					} `json:"events"`
+					Nameservers []struct {
+						LDHName string `json:"ldhName"`
+					} `json:"nameservers"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&rdapData) == nil {
+					rec.Status = rdapData.Status
+					for _, ev := range rdapData.Events {
+						switch ev.Action {
+						case "registration":
+							rec.CreationDate = ev.Date
+						case "expiration":
+							rec.ExpirationDate = ev.Date
+						case "last changed":
+							rec.UpdatedDate = ev.Date
+						}
+					}
+					if len(rec.NameServers) == 0 {
+						for _, n := range rdapData.Nameservers {
+							rec.NameServers = append(rec.NameServers, n.LDHName)
+						}
+					}
+					rec.Registrar = "Authoritative Registry (RDAP)"
+				}
+			}
+		}
+	}
+
+	if len(rec.NameServers) == 0 && rec.IPAddress == "" && rec.CreationDate == "" {
+		rec.Available = true
+		rec.Status = []string{"available"}
+	}
+
+	return rec
 }
 
 // ----------------------------------------------------------------------------

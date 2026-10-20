@@ -24,12 +24,16 @@ import {
 } from 'lucide-react';
 import { clearStoredAuth, apiFetch, User, Organization } from '@/lib/api';
 import { useTheme } from '@/components/ThemeProvider';
+import { GlobalSearchModal } from '@/components/GlobalSearchModal';
 
 export function Header() {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [org, setOrg] = useState<Organization | null>(null);
+
+  // Global Search Modal
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   // Modals for Header Actions
   const [restartModalOpen, setRestartModalOpen] = useState(false);
@@ -47,6 +51,17 @@ export function Header() {
   const [hasAlerts, setHasAlerts] = useState<boolean>(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     async function loadMe() {
@@ -168,22 +183,32 @@ export function Header() {
             <Menu className="w-5 h-5" />
           </button>
 
-          {/* Clean Enterprise Search Bar */}
-          <div className="relative w-full max-w-md hidden sm:block">
+          {/* Clean Enterprise Interactive Search Bar */}
+          <button
+            type="button"
+            onClick={() => setSearchModalOpen(true)}
+            className="relative w-full max-w-md hidden sm:flex items-center text-left pl-9 pr-14 py-2 text-xs text-slate-400 dark:text-slate-400 bg-[#F8FAFC] dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-lg hover:border-emerald-500/50 hover:bg-white dark:hover:bg-[#0F172A] focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all cursor-pointer group"
+          >
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Search className="h-4 w-4 text-slate-400" />
+              <Search className="h-4 w-4 text-slate-400 group-hover:text-emerald-500 transition-colors" />
             </div>
-            <input
-              type="text"
-              placeholder="Search anything... (domains, files, settings)"
-              className="w-full pl-9 pr-14 py-2 text-xs text-slate-900 dark:text-slate-100 bg-[#F8FAFC] dark:bg-[#0F172A] placeholder-slate-400 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:bg-white dark:focus:bg-[#0F172A] focus:border-emerald-600 focus:ring-1 focus:ring-emerald-500 transition-all"
-            />
+            <span className="truncate">Search anything... (domains, files, settings)</span>
             <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
               <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-2xs">
                 Ctrl + K
               </kbd>
             </div>
-          </div>
+          </button>
+
+          {/* Mobile Search Button */}
+          <button
+            onClick={() => setSearchModalOpen(true)}
+            className="p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden flex items-center justify-center flex-shrink-0 cursor-pointer"
+            title="Search Platform"
+            aria-label="Search Platform"
+          >
+            <Search className="w-5 h-5" />
+          </button>
         </div>
 
         {/* Right: Actions, Node Status & User Dropdown */}
@@ -506,6 +531,18 @@ export function Header() {
           </div>
         </div>
       )}
+
+      {/* Real-Time Global Command Palette / Spotlight Search */}
+      <GlobalSearchModal
+        isOpen={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+        onTriggerRestart={() => setRestartModalOpen(true)}
+        onTriggerFix={() => {
+          setFixModalOpen(true);
+          executeFix();
+        }}
+        onTriggerUpdate={() => setUpdateModalOpen(true)}
+      />
     </>
   );
 }
