@@ -407,44 +407,40 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
       <div className="flex items-center gap-1 border-b border-slate-200 dark:border-surface-800 pb-2">
         <button
           onClick={() => setActiveSubTab('overview')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'overview'
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeSubTab === 'overview'
               ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
               : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-          }`}
+            }`}
         >
           <Sliders className="w-3.5 h-3.5 inline mr-1.5" />
           Dashboard & Tools
         </button>
         <button
           onClick={() => setActiveSubTab('plugins')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'plugins'
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeSubTab === 'plugins'
               ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
               : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-          }`}
+            }`}
         >
           <Layers className="w-3.5 h-3.5 inline mr-1.5" />
           Plugins ({plugins.length})
         </button>
         <button
           onClick={() => setActiveSubTab('themes')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'themes'
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeSubTab === 'themes'
               ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
               : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-          }`}
+            }`}
         >
           <Globe className="w-3.5 h-3.5 inline mr-1.5" />
           Themes ({themes.length})
         </button>
         <button
           onClick={() => setActiveSubTab('security')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-            activeSubTab === 'security'
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeSubTab === 'security'
               ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
               : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-          }`}
+            }`}
         >
           <Shield className="w-3.5 h-3.5 inline mr-1.5" />
           Security & Admin
@@ -478,14 +474,12 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
               <button
                 onClick={handleToggleMaintenance}
                 disabled={submitting === 'maintenance'}
-                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                  details.maintenance_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-surface-700'
-                }`}
+                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${details.maintenance_mode ? 'bg-amber-500' : 'bg-slate-300 dark:bg-surface-700'
+                  }`}
               >
                 <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    details.maintenance_mode ? 'translate-x-5' : 'translate-x-0'
-                  }`}
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${details.maintenance_mode ? 'translate-x-5' : 'translate-x-0'
+                    }`}
                 />
               </button>
             </div>
@@ -502,14 +496,12 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
               <button
                 onClick={handleToggleDebug}
                 disabled={submitting === 'debug'}
-                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${
-                  details.debug_mode ? 'bg-purple-600' : 'bg-slate-300 dark:bg-surface-700'
-                }`}
+                className={`relative inline-flex h-5 w-10 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden ${details.debug_mode ? 'bg-purple-600' : 'bg-slate-300 dark:bg-surface-700'
+                  }`}
               >
                 <span
-                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    details.debug_mode ? 'translate-x-5' : 'translate-x-0'
-                  }`}
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${details.debug_mode ? 'translate-x-5' : 'translate-x-0'
+                    }`}
                 />
               </button>
             </div>
@@ -602,11 +594,10 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
                   <button
                     key={mode}
                     onClick={() => setPluginFilter(mode)}
-                    className={`px-2.5 py-1 rounded capitalize font-medium ${
-                      pluginFilter === mode
+                    className={`px-2.5 py-1 rounded capitalize font-medium ${pluginFilter === mode
                         ? 'bg-purple-600 text-white'
                         : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     {mode}
                   </button>
@@ -644,11 +635,10 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
                         </td>
                         <td className="py-3 px-3">
                           <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              isActive
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isActive
                                 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                                 : 'bg-slate-200 dark:bg-surface-700 text-slate-600 dark:text-slate-400'
-                            }`}
+                              }`}
                           >
                             {plug.status.toUpperCase()}
                           </span>
@@ -663,11 +653,10 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
                           <button
                             onClick={() => handleTogglePlugin(plug.name, plug.status)}
                             disabled={submitting === `plug-${plug.name}`}
-                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                              isActive
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors ${isActive
                                 ? 'bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300'
                                 : 'bg-purple-600 hover:bg-purple-700 text-white'
-                            }`}
+                              }`}
                           >
                             {isActive ? 'Deactivate' : 'Activate'}
                           </button>
@@ -749,11 +738,10 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
               return (
                 <div
                   key={thm.name}
-                  className={`p-4 rounded-xl border transition-all ${
-                    isActive
+                  className={`p-4 rounded-xl border transition-all ${isActive
                       ? 'border-purple-500/60 bg-purple-500/5 shadow-md shadow-purple-500/10'
                       : 'border-slate-200 dark:border-surface-800 bg-white dark:bg-surface-900'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-bold text-sm text-slate-900 dark:text-white">{thm.title || thm.name}</div>

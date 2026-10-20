@@ -114,6 +114,7 @@ func (h *WordPressHandler) Install(w http.ResponseWriter, r *http.Request) {
 
 	// Update site app_type to wordpress
 	site.AppType = "wordpress"
+	_ = h.store.UpdateWebsite(r.Context(), site)
 	_ = h.store.UpdateWebsiteStatus(r.Context(), site.ID, "running")
 
 	h.audit.Log(r.Context(), r, "website.wordpress_install", "website", site.ID.String(), "success", "", map[string]interface{}{

@@ -71,13 +71,26 @@ func NewInstallerManager(opts ...Option) *InstallerManager {
 				query := fmt.Sprintf(
 					"CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n"+
 						"CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\n"+
+						"CREATE USER IF NOT EXISTS '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n"+
+						"ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\n"+
+						"ALTER USER '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n"+
 						"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'localhost';\n"+
+						"GRANT ALL PRIVILEGES ON `%s`.* TO '%s'@'127.0.0.1';\n"+
 						"FLUSH PRIVILEGES;\n",
-					dbName, dbUser, safePass, dbName, dbUser,
+					dbName, dbUser, safePass, dbUser, safePass, dbUser, safePass, dbUser, safePass, dbName, dbUser, dbName, dbUser,
 				)
-				cmd := exec.CommandContext(ctx, "mysql")
+				var cmd *exec.Cmd
+				if _, err := os.Stat("/etc/mysql/debian.cnf"); err == nil {
+					cmd = exec.CommandContext(ctx, "mysql", "--defaults-file=/etc/mysql/debian.cnf")
+				} else {
+					cmd = exec.CommandContext(ctx, "mysql", "-u", "root")
+				}
 				cmd.Stdin = strings.NewReader(query)
-				_ = cmd.Run()
+				if err := cmd.Run(); err != nil {
+					cmdFallback := exec.CommandContext(ctx, "mysql")
+					cmdFallback.Stdin = strings.NewReader(query)
+					_ = cmdFallback.Run()
+				}
 			}
 			return nil
 		},
@@ -196,7 +209,7 @@ func (m *InstallerManager) InstallApplication(ctx context.Context, req InstallSi
 		req.DBPassword = RandomString(16)
 	}
 	if req.DBHost == "" {
-		req.DBHost = "127.0.0.1:3306"
+		req.DBHost = "localhost"
 	}
 	if req.TablePrefix == "" {
 		req.TablePrefix = "wp_"
@@ -269,55 +282,44 @@ func (m *InstallerManager) deployWordPress(ctx context.Context, req InstallSiteA
 	docRoot := req.DocumentRoot
 
 	if logCb != nil {
-		logCb("Generating core WordPress structure...", 40)
+		logCb("Deploying official WordPress core files...", 35)
 	}
 
-	// Create core directories
-	for _, dir := range []string{"wp-admin", "wp-content/plugins", "wp-content/themes", "wp-content/uploads", "wp-includes"} {
-		if err := os.MkdirAll(filepath.Join(docRoot, dir), 0755); err != nil {
-			return nil, err
-		}
+	// 1. Download official WordPress archive if wp-load.php doesn't exist
+	if _, err := os.Stat(filepath.Join(docRoot, "wp-load.php")); err != nil {
+		downloadCmd := fmt.Sprintf(
+			"cd %s && rm -f index.html 404.html && (curl -fsSL https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1",
+			docRoot,
+		)
+		_ = exec.Command("bash", "-c", downloadCmd).Run()
 	}
 
-	// Write index.php
-	indexPHP := `<?php
-define('WP_USE_THEMES', true);
-require __DIR__ . '/wp-blog-header.php';
-`
-	if err := os.WriteFile(filepath.Join(docRoot, "index.php"), []byte(indexPHP), 0644); err != nil {
-		return nil, err
+	// Create core directories and ensure permissions
+	for _, dir := range []string{"wp-admin", "wp-content/plugins", "wp-content/themes", "wp-content/uploads", "wp-content/upgrade", "wp-includes"} {
+		_ = os.MkdirAll(filepath.Join(docRoot, dir), 0755)
+	}
+	_ = os.Chmod(filepath.Join(docRoot, "wp-content"), 0777)
+
+	// Write fallback files only if missing from tarball
+	if _, err := os.Stat(filepath.Join(docRoot, "index.php")); err != nil {
+		indexPHP := "<?php\ndefine('WP_USE_THEMES', true);\nrequire __DIR__ . '/wp-blog-header.php';\n"
+		_ = os.WriteFile(filepath.Join(docRoot, "index.php"), []byte(indexPHP), 0644)
 	}
 
-	// Write wp-blog-header.php
-	blogHeader := `<?php
-if (!isset($wp_did_header)) {
-    $wp_did_header = true;
-    require_once __DIR__ . '/wp-load.php';
-    wp();
-    require_once ABSPATH . WPINC . '/template-loader.php';
-}
-`
-	_ = os.WriteFile(filepath.Join(docRoot, "wp-blog-header.php"), []byte(blogHeader), 0644)
+	if _, err := os.Stat(filepath.Join(docRoot, "wp-blog-header.php")); err != nil {
+		blogHeader := "<?php\nif (!isset($wp_did_header)) {\n    $wp_did_header = true;\n    require_once __DIR__ . '/wp-load.php';\n    wp();\n    require_once ABSPATH . WPINC . '/template-loader.php';\n}\n"
+		_ = os.WriteFile(filepath.Join(docRoot, "wp-blog-header.php"), []byte(blogHeader), 0644)
+	}
 
-	// Write wp-load.php
-	wpLoad := `<?php
-define('ABSPATH', __DIR__ . '/');
-error_reporting(E_CORE_ERROR | E_CORE_WARNING | E_COMPILE_ERROR | E_ERROR | E_WARNING | E_PARSE | E_USER_ERROR | E_USER_WARNING | E_RECOVERABLE_ERROR);
-if (file_exists(ABSPATH . 'wp-config.php')) {
-    require_once ABSPATH . 'wp-config.php';
-}
-`
-	_ = os.WriteFile(filepath.Join(docRoot, "wp-load.php"), []byte(wpLoad), 0644)
+	if _, err := os.Stat(filepath.Join(docRoot, "wp-load.php")); err != nil {
+		wpLoad := "<?php\ndefine('ABSPATH', __DIR__ . '/');\nerror_reporting(E_CORE_ERROR | E_CORE_WARNING | E_COMPILE_ERROR | E_ERROR | E_WARNING | E_PARSE | E_USER_ERROR | E_USER_WARNING | E_RECOVERABLE_ERROR);\nif (file_exists(ABSPATH . 'wp-config.php')) {\n    require_once ABSPATH . 'wp-config.php';\n}\n"
+		_ = os.WriteFile(filepath.Join(docRoot, "wp-load.php"), []byte(wpLoad), 0644)
+	}
 
-	// Write version.php
-	versionPHP := `<?php
-$wp_version = '6.7.2';
-$wp_db_version = 57155;
-$tinymce_version = '49110-20201110';
-$required_php_version = '8.1';
-$required_mysql_version = '5.5.5';
-`
-	_ = os.WriteFile(filepath.Join(docRoot, "wp-includes", "version.php"), []byte(versionPHP), 0644)
+	if _, err := os.Stat(filepath.Join(docRoot, "wp-includes", "version.php")); err != nil {
+		versionPHP := "<?php\n$wp_version = '6.7.2';\n$wp_db_version = 57155;\n$tinymce_version = '49110-20201110';\n$required_php_version = '8.1';\n$required_mysql_version = '5.5.5';\n"
+		_ = os.WriteFile(filepath.Join(docRoot, "wp-includes", "version.php"), []byte(versionPHP), 0644)
+	}
 
 	if logCb != nil {
 		logCb("Configuring wp-config.php with database credentials & security salts...", 65)
@@ -360,6 +362,7 @@ $table_prefix = '%s';
 define('WP_DEBUG', false);
 define('DISALLOW_FILE_EDIT', true);
 define('WP_AUTO_UPDATE_CORE', true);
+define('FS_METHOD', 'direct');
 
 if (!defined('ABSPATH')) {
     define('ABSPATH', __DIR__ . '/');
@@ -369,12 +372,13 @@ require_once ABSPATH . 'wp-settings.php';
 `, req.DBName, req.DBUser, req.DBPassword, req.DBHost, salts, req.TablePrefix)
 
 	configPath := filepath.Join(docRoot, "wp-config.php")
-	if err := os.WriteFile(configPath, []byte(wpConfig), 0600); err != nil {
+	if err := os.WriteFile(configPath, []byte(wpConfig), 0640); err != nil {
 		return nil, fmt.Errorf("failed to write wp-config.php: %w", err)
 	}
 
-	// Write standard wp-settings.php stub
-	_ = os.WriteFile(filepath.Join(docRoot, "wp-settings.php"), []byte("<?php // WordPress Environment Initializer\n"), 0644)
+	if _, err := os.Stat(filepath.Join(docRoot, "wp-settings.php")); os.IsNotExist(err) {
+		_ = os.WriteFile(filepath.Join(docRoot, "wp-settings.php"), []byte("<?php // WordPress Environment Initializer\n"), 0644)
+	}
 
 	return &InstalledAppInfo{
 		AppID:        "wordpress",
