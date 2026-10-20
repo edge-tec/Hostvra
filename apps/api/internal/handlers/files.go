@@ -134,8 +134,45 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 			}
 		}
 
-		if strings.HasPrefix(clean, "/home") && (clean == "/home" || clean == "/home/") {
-			return fmt.Errorf("direct access to root /home directory forbidden")
+		// Multi-Tenant Isolation: Ensure non-admin cannot access another tenant's /home directories
+		if strings.HasPrefix(clean, "/home") {
+			if clean == "/home" || clean == "/home/" {
+				return fmt.Errorf("direct access to root /home directory forbidden")
+			}
+			relHome := strings.TrimPrefix(clean, "/home/")
+			homeParts := strings.Split(relHome, "/")
+			targetUser := homeParts[0]
+
+			allowedHome := false
+			if claims.Email != "" {
+				userPrefix := strings.Split(claims.Email, "@")[0]
+				if strings.EqualFold(targetUser, userPrefix) {
+					allowedHome = true
+				}
+			}
+			if !allowedHome && h.store != nil {
+				if accounts, err := h.store.ListHostingAccounts(r.Context(), claims.OrganizationID, nil); err == nil {
+					for _, acc := range accounts {
+						if strings.EqualFold(acc.Username, targetUser) {
+							allowedHome = true
+							break
+						}
+					}
+				}
+			}
+			if !allowedHome && h.store != nil {
+				if sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID); err == nil {
+					for _, s := range sites {
+						if s.SystemUser != "" && strings.EqualFold(s.SystemUser, targetUser) {
+							allowedHome = true
+							break
+						}
+					}
+				}
+			}
+			if !allowedHome {
+				return fmt.Errorf("access denied: home directory '/home/%s' does not belong to your organization", targetUser)
+			}
 		}
 
 		// Security: Prevent symlink escape traversal (resolve target if path exists)
@@ -165,6 +202,46 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 				}
 				if !allowed {
 					return fmt.Errorf("symlink target '%s' does not belong to your organization's websites", resolved)
+				}
+			}
+
+			if strings.HasPrefix(resolved, "/home") {
+				if resolved == "/home" || resolved == "/home/" {
+					return fmt.Errorf("symlink target escapes to root /home directory")
+				}
+				relHome := strings.TrimPrefix(resolved, "/home/")
+				homeParts := strings.Split(relHome, "/")
+				targetUser := homeParts[0]
+
+				allowedHome := false
+				if claims.Email != "" {
+					userPrefix := strings.Split(claims.Email, "@")[0]
+					if strings.EqualFold(targetUser, userPrefix) {
+						allowedHome = true
+					}
+				}
+				if !allowedHome && h.store != nil {
+					if accounts, err := h.store.ListHostingAccounts(r.Context(), claims.OrganizationID, nil); err == nil {
+						for _, acc := range accounts {
+							if strings.EqualFold(acc.Username, targetUser) {
+								allowedHome = true
+								break
+							}
+						}
+					}
+				}
+				if !allowedHome && h.store != nil {
+					if sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID); err == nil {
+						for _, s := range sites {
+							if s.SystemUser != "" && strings.EqualFold(s.SystemUser, targetUser) {
+								allowedHome = true
+								break
+							}
+						}
+					}
+				}
+				if !allowedHome {
+					return fmt.Errorf("symlink target '/home/%s' does not belong to your organization", targetUser)
 				}
 			}
 		}

@@ -1958,5 +1958,134 @@ func TestAdversarialMultiTenantSecurityVerification(t *testing.T) {
 	})
 }
 
+func TestSecurityAudit_EnterpriseHardenings(t *testing.T) {
+	// 1. Cross-Site WebSocket Hijacking (CSWSH) Origin Validation
+	t.Run("Terminal_CSWSH_OriginValidation", func(t *testing.T) {
+		reqUntrusted := httptest.NewRequest("GET", "/api/v1/terminal/ws", nil)
+		reqUntrusted.Host = "panel.hostvra.com"
+		reqUntrusted.Header.Set("Origin", "https://evil-attacker.com")
+		if wsUpgrader.CheckOrigin(reqUntrusted) {
+			t.Fatalf("Expected wsUpgrader to reject untrusted origin https://evil-attacker.com")
+		}
+
+		reqTrusted := httptest.NewRequest("GET", "/api/v1/terminal/ws", nil)
+		reqTrusted.Host = "panel.hostvra.com"
+		reqTrusted.Header.Set("Origin", "https://panel.hostvra.com")
+		if !wsUpgrader.CheckOrigin(reqTrusted) {
+			t.Fatalf("Expected wsUpgrader to accept matching origin https://panel.hostvra.com")
+		}
+
+		reqLocalhost := httptest.NewRequest("GET", "/api/v1/terminal/ws", nil)
+		reqLocalhost.Host = "localhost:8080"
+		reqLocalhost.Header.Set("Origin", "http://localhost:3000")
+		if !wsUpgrader.CheckOrigin(reqLocalhost) {
+			t.Fatalf("Expected wsUpgrader to accept localhost origin")
+		}
+	})
+
+	// 2. Multi-Tenant /home Directory Path Traversal Prevention
+	t.Run("Files_HomeDirectory_MultiTenantIsolation", func(t *testing.T) {
+		cfg := &config.Config{JWTSecret: "test-secret-at-least-32-bytes-long-12345"}
+		memStore := store.NewMemoryStore()
+		slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		auditLogger := audit.NewLogger(memStore, slogger)
+		handler := NewFileHandler(cfg, memStore, auditLogger)
+
+		orgA := uuid.New()
+		siteA := &store.Website{
+			ID:             uuid.New(),
+			ServerID:       uuid.New(),
+			OrganizationID: orgA,
+			PrimaryDomain:  "alice-shop.com",
+			DocumentRoot:   "/var/www/alice-shop.com/public_html",
+			SystemUser:     "u_alice_shop_com",
+			Status:         "active",
+			CreatedAt:      time.Now(),
+		}
+		_ = memStore.CreateWebsite(context.Background(), siteA)
+
+		// Alice: non-admin tenant user
+		aliceClaims := &auth.Claims{
+			UserID:         uuid.New(),
+			Email:          "alice@alice-shop.com",
+			OrganizationID: orgA,
+			Role:           "customer",
+		}
+		aliceCtx := context.WithValue(context.Background(), auth.UserContextKey, aliceClaims)
+
+		// Alice attempts to access another customer's /home directory (Bob)
+		reqBob := httptest.NewRequest("GET", "/files/content?path=/home/bob/secret.txt", nil).WithContext(aliceCtx)
+		err := handler.checkPathAuthorization(reqBob, "/home/bob/secret.txt")
+		if err == nil {
+			t.Fatalf("Expected checkPathAuthorization to block cross-tenant /home/bob access, but allowed")
+		}
+
+		// Alice attempts to access her own system user directory
+		reqOwnUser := httptest.NewRequest("GET", "/files/content?path=/home/u_alice_shop_com/config.json", nil).WithContext(aliceCtx)
+		err = handler.checkPathAuthorization(reqOwnUser, "/home/u_alice_shop_com/config.json")
+		if err != nil {
+			t.Fatalf("Expected checkPathAuthorization to allow Alice to access her site system user home dir, got %v", err)
+		}
+
+		// Alice attempts to access home dir matching her email prefix
+		reqOwnPrefix := httptest.NewRequest("GET", "/files/content?path=/home/alice/notes.txt", nil).WithContext(aliceCtx)
+		err = handler.checkPathAuthorization(reqOwnPrefix, "/home/alice/notes.txt")
+		if err != nil {
+			t.Fatalf("Expected checkPathAuthorization to allow Alice to access /home/alice, got %v", err)
+		}
+	})
+
+	// 3. Website Isolation Nil Safety & Cross-Tenant Block
+	t.Run("Websites_NilSafetyAndCrossTenantBlock", func(t *testing.T) {
+		cfg := &config.Config{JWTSecret: "test-secret-at-least-32-bytes-long-12345"}
+		memStore := store.NewMemoryStore()
+		slogger := slog.New(slog.NewTextHandler(io.Discard, nil))
+		auditLogger := audit.NewLogger(memStore, slogger)
+		handler := NewWebsiteHandler(cfg, memStore, auditLogger)
+
+		orgA := uuid.New()
+		siteA := &store.Website{
+			ID:             uuid.New(),
+			ServerID:       uuid.New(),
+			OrganizationID: orgA,
+			PrimaryDomain:  "isolated-site.com",
+			DocumentRoot:   "/var/www/isolated-site.com/public_html",
+			Status:         "active",
+			CreatedAt:      time.Now(),
+		}
+		_ = memStore.CreateWebsite(context.Background(), siteA)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", siteA.ID.String())
+
+		// Request with nil claims should fail safely without panic
+		reqNilClaims := httptest.NewRequest("GET", "/api/v1/websites/"+siteA.ID.String(), nil)
+		reqNilClaims = reqNilClaims.WithContext(context.WithValue(reqNilClaims.Context(), chi.RouteCtxKey, rctx))
+		recNilClaims := httptest.NewRecorder()
+		handler.Get(recNilClaims, reqNilClaims)
+		if recNilClaims.Code != http.StatusNotFound {
+			t.Fatalf("Expected 404 Not Found for nil claims, got %d", recNilClaims.Code)
+		}
+
+		// Request from Tenant B should be blocked
+		orgB := uuid.New()
+		bobClaims := &auth.Claims{
+			UserID:         uuid.New(),
+			Email:          "bob@other.com",
+			OrganizationID: orgB,
+			Role:           "customer",
+		}
+		bobCtx := context.WithValue(context.Background(), auth.UserContextKey, bobClaims)
+		reqBob := httptest.NewRequest("GET", "/api/v1/websites/"+siteA.ID.String(), nil).WithContext(bobCtx)
+		reqBob = reqBob.WithContext(context.WithValue(reqBob.Context(), chi.RouteCtxKey, rctx))
+		recBob := httptest.NewRecorder()
+		handler.Get(recBob, reqBob)
+		if recBob.Code != http.StatusNotFound {
+			t.Fatalf("Expected 404 Not Found for cross-tenant Get website, got %d", recBob.Code)
+		}
+	})
+}
+
+
 
 

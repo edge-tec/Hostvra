@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -211,8 +213,69 @@ var wsUpgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Origin checked via auth claims/JWT
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // Non-browser clients (curl, automated agents)
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		// Allow origin if host matches request Host
+		if strings.EqualFold(u.Host, r.Host) {
+			return true
+		}
+		// Allow localhost / loopback development
+		hName := u.Hostname()
+		if hName == "localhost" || hName == "127.0.0.1" || hName == "::1" {
+			return true
+		}
+		return false
 	},
+}
+
+// applyPosixCredentials drops privileges from root to the isolated customer user account
+func applyPosixCredentials(cmd *exec.Cmd, targetUser string) error {
+	if os.Geteuid() != 0 {
+		// When not running as root (e.g. tests or unprivileged container), privilege dropping is not applicable
+		return nil
+	}
+	if targetUser == "" || targetUser == "root" {
+		return nil
+	}
+
+	u, err := user.Lookup(targetUser)
+	if err != nil {
+		// Fallback to unprivileged daemon user if specific tenant user not yet provisioned on OS
+		for _, fallback := range []string{"www-data", "nobody"} {
+			if fbUser, fbErr := user.Lookup(fallback); fbErr == nil {
+				u = fbUser
+				err = nil
+				break
+			}
+		}
+	}
+	if err != nil || u == nil {
+		return fmt.Errorf("unable to drop privileges: user %q not found and no unprivileged fallback available", targetUser)
+	}
+
+	uid, err := strconv.ParseUint(u.Uid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid UID for user %q: %w", u.Username, err)
+	}
+	gid, err := strconv.ParseUint(u.Gid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("invalid GID for user %q: %w", u.Username, err)
+	}
+
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Credential = &syscall.Credential{
+		Uid: uint32(uid),
+		Gid: uint32(gid),
+	}
+	return nil
 }
 
 type WSMessage struct {
@@ -597,6 +660,19 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		fmt.Sprintf("USER=%s", defaultUser),
 		fmt.Sprintf("HOME=%s", defaultCwd),
 	)
+
+	// Non-privileged customers MUST NOT run interactive shell as root
+	if !isPrivileged {
+		if err := applyPosixCredentials(cmd, defaultUser); err != nil {
+			h.audit.Log(r.Context(), r, "terminal.credential.failure", "server", "localhost", "failure", "Privilege dropping failed: "+err.Error(), map[string]interface{}{
+				"username": defaultUser,
+				"error":    err.Error(),
+			})
+			sendWSError(safeConn, "PRIVILEGE_DROP_ERROR", "Security violation: unable to switch to unprivileged customer context: "+err.Error())
+			_ = safeConn.Close()
+			return
+		}
+	}
 
 	// 6. Allocate real Linux PTY attached to interactive shell process
 	h.audit.Log(r.Context(), r, "terminal.pty.create.start", "server", "localhost", "start", "Creating Linux PTY master/slave", map[string]interface{}{
@@ -1002,6 +1078,19 @@ exit $__HV_EXIT__
 	}
 
 	cmd := exec.CommandContext(ctx, shell, "-c", script)
+	cmd.Dir = cwd
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("USER=%s", defaultUser),
+		fmt.Sprintf("HOME=%s", defaultCwd),
+	)
+
+	// Non-privileged customers MUST NOT execute commands as root
+	if !isPrivileged {
+		if err := applyPosixCredentials(cmd, defaultUser); err != nil {
+			response.Error(w, http.StatusForbidden, "PERMISSION_DENIED", "Security violation: unable to switch to unprivileged customer context: "+err.Error(), nil, "")
+			return
+		}
+	}
 
 	const maxOutputBytes = 1024 * 1024 // 1MB buffer ceiling per command output
 	stdoutBuf := &limitedBuffer{limit: maxOutputBytes}

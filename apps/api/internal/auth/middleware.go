@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"hostvra/api/internal/response"
@@ -14,10 +15,58 @@ const (
 	UserContextKey contextKey = "hostvra_user_claims"
 )
 
+func validateCSRF(r *http.Request) bool {
+	// 1. Modern browser Sec-Fetch-Site protection
+	if secSite := r.Header.Get("Sec-Fetch-Site"); secSite == "cross-site" {
+		return false
+	}
+
+	// 2. Explicit anti-CSRF token header
+	if csrfToken := r.Header.Get("X-CSRF-Token"); csrfToken != "" {
+		return true
+	}
+
+	// 3. Origin header validation
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		u, err := url.Parse(origin)
+		if err == nil {
+			if strings.EqualFold(u.Host, r.Host) {
+				return true
+			}
+			h := u.Hostname()
+			if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 4. Referer header validation
+	referer := r.Header.Get("Referer")
+	if referer != "" {
+		u, err := url.Parse(referer)
+		if err == nil {
+			if strings.EqualFold(u.Host, r.Host) {
+				return true
+			}
+			h := u.Hostname()
+			if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// If non-browser client without browser origin headers, allow
+	return true
+}
+
 func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := ""
+			isCookieAuth := false
 			authHeader := r.Header.Get("Authorization")
 			if authHeader != "" {
 				parts := strings.SplitN(authHeader, " ", 2)
@@ -32,8 +81,10 @@ func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 				if tokenStr == "" {
 					if c, err := r.Cookie("hostvra_token"); err == nil && c != nil {
 						tokenStr = c.Value
+						isCookieAuth = true
 					} else if c, err := r.Cookie("access_token"); err == nil && c != nil {
 						tokenStr = c.Value
+						isCookieAuth = true
 					}
 				}
 			}
@@ -41,6 +92,14 @@ func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 			if tokenStr == "" {
 				response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing authorization header", nil, "")
 				return
+			}
+
+			// CSRF defense for cookie-authenticated state-changing requests
+			if isCookieAuth && (r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" || r.Method == "DELETE") {
+				if !validateCSRF(r) {
+					response.Error(w, http.StatusForbidden, "CSRF_BLOCKED", "Cross-site request forgery protection triggered", nil, "")
+					return
+				}
 			}
 
 			claims, err := ValidateAccessToken(tokenStr, jwtSecret)

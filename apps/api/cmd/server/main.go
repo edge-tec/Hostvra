@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -184,10 +185,51 @@ func main() {
 	// CORS Setup - Secure Origin validation allowing credentials
 	r.Use(cors.Handler(cors.Options{
 		AllowOriginFunc: func(r *http.Request, origin string) bool {
-			return true // Configurable per deployment domain
+			if origin == "" {
+				return true
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			// 1. Same host or origin matches request Host
+			if strings.EqualFold(u.Host, r.Host) {
+				return true
+			}
+			// 2. Local development loopback
+			h := u.Hostname()
+			if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+				return true
+			}
+			// 3. Explicitly configured allowed origins
+			for _, allowed := range cfg.CORSAllowedOrigins {
+				trimmed := strings.TrimSpace(allowed)
+				if trimmed == "" {
+					continue
+				}
+				if strings.EqualFold(origin, trimmed) {
+					return true
+				}
+				if au, aErr := url.Parse(trimmed); aErr == nil {
+					if strings.EqualFold(u.Host, au.Host) {
+						return true
+					}
+				}
+			}
+			// 4. Match AppURL / APIURL
+			for _, appTarget := range []string{cfg.AppURL, cfg.APIURL} {
+				if appTarget != "" {
+					if au, aErr := url.Parse(appTarget); aErr == nil {
+						if strings.EqualFold(u.Host, au.Host) {
+							return true
+						}
+					}
+				}
+			}
+			return false
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Server-ID", "X-Webmail-Token", "X-CP-Token", "X-Control-Panel-Token", "*"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Server-ID", "X-Webmail-Token", "X-CP-Token", "X-Control-Panel-Token"},
 		ExposedHeaders:   []string{"Link", "X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -200,6 +242,9 @@ func main() {
 			w.Header().Set("X-Frame-Options", "DENY")
 			w.Header().Set("X-XSS-Protection", "1; mode=block")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';")
+			w.Header().Set("Permissions-Policy", "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()")
 			next.ServeHTTP(w, r)
 		})
 	})

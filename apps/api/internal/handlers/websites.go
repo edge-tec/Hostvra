@@ -692,7 +692,8 @@ func (h *WebsiteHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -719,7 +720,8 @@ func (h *WebsiteHandler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -746,7 +748,8 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -898,7 +901,8 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -948,7 +952,8 @@ func (h *WebsiteHandler) GetIsolation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -977,7 +982,8 @@ func (h *WebsiteHandler) UpdateIsolation(w http.ResponseWriter, r *http.Request)
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || site.OrganizationID != claims.OrganizationID {
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
