@@ -733,6 +733,7 @@ server {
 		// Clean up any legacy or duplicate .conf symlink
 		_ = os.Remove(filepath.Join(sitesEnabled, cleanDomain+".conf"))
 		_ = os.Remove(filepath.Join(sitesAvailable, cleanDomain+".conf"))
+		_ = os.Remove(filepath.Join(confD, cleanDomain+".conf"))
 	}
 
 	// 8. Validate Nginx configuration with nginx -t

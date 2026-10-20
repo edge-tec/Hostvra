@@ -396,19 +396,14 @@ server {
 }
 NGINX_VHOST
 
-# 9. Link to sites-enabled AND ensure nginx.conf includes sites-enabled
-ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/${DOMAIN}"
-
-# Also mirror to conf.d for mainline Nginx setups that only include conf.d
-if [[ -d "/etc/nginx/conf.d" ]]; then
-    ln -sf "$NGINX_CONF" "/etc/nginx/conf.d/${DOMAIN}.conf"
-fi
-
-# Ensure nginx.conf loads sites-enabled if missing
+# 9. Ensure nginx.conf loads sites-enabled, and link vhost once (prevent duplicate name warnings)
 if [[ -f "/etc/nginx/nginx.conf" ]] && ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
     echo "[*] Adding include /etc/nginx/sites-enabled/* to /etc/nginx/nginx.conf..."
     sed -i '/include.*conf\.d/a \    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
 fi
+
+ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/${DOMAIN}"
+rm -f "/etc/nginx/conf.d/${DOMAIN}.conf"
 
 # 10. Set Robust Permissions (traversable by www-data Nginx worker)
 SYS_USER="u_$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')"
