@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import {
   Search,
   Globe,
-  Server,
   Database,
   Folder,
   Shield,
@@ -14,13 +13,11 @@ import {
   Mail,
   HardDrive,
   Settings,
-  Key,
   RefreshCw,
   Wrench,
   Power,
   X,
   ArrowRight,
-  ExternalLink,
   Layers,
   Lock,
   PlusCircle,
@@ -29,7 +26,6 @@ import {
   Clock,
   Activity,
   FileCode,
-  Tag,
   Share2,
 } from 'lucide-react';
 import { apiFetch, Website, RegisteredDomain } from '@/lib/api';
