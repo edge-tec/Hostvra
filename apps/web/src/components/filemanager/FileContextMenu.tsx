@@ -5,6 +5,7 @@ import {
   FolderOpen,
   ExternalLink,
   Edit2,
+  FileCode,
   Copy,
   Scissors,
   Files,
@@ -25,6 +26,7 @@ interface FileContextMenuProps {
   item: FileItem;
   onClose: () => void;
   onOpen: (item: FileItem) => void;
+  onEdit?: (item: FileItem) => void;
   onOpenNewTab: (item: FileItem) => void;
   onRename: (item: FileItem) => void;
   onCopy: (item: FileItem) => void;
@@ -46,6 +48,7 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
   item,
   onClose,
   onOpen,
+  onEdit,
   onOpenNewTab,
   onRename,
   onCopy,
@@ -87,7 +90,7 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
   const adjustedX = Math.min(x, window.innerWidth - menuWidth - 10);
   const adjustedY = Math.min(y, window.innerHeight - menuHeight - 10);
 
-  const ext = (item.extension || '').toLowerCase();
+  const ext = (item.extension || '').toLowerCase().replace(/^\./, '') || item.name.split('.').pop()?.toLowerCase() || '';
   const isArchive = ['zip', 'tar', 'gz', 'bz2', 'rar', '7z'].includes(ext);
 
   return (
@@ -103,6 +106,20 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
 
       {/* Main Actions */}
       <div className="py-1">
+        {!item.is_dir && onEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              onEdit(item);
+              onClose();
+            }}
+            className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-surface-800 text-left cursor-pointer font-bold text-emerald-600 dark:text-emerald-400"
+          >
+            <FileCode className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Edit File</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => {

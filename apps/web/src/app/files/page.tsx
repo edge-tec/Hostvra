@@ -357,35 +357,40 @@ export default function FileManagerPage() {
   };
 
   // Open file or directory
+  const openFileEditor = async (file: FileItem) => {
+    if (file.is_dir) return;
+    try {
+      setEditingFile(file);
+      setSaveSuccess(false);
+      setFileContent('Loading file content...');
+      setEditorOpen(true);
+      const res = await apiFetch<{ content: string }>(
+        `/api/v1/files/content?path=${encodeURIComponent(file.path)}`
+      );
+      if (res.success && res.data) {
+        setFileContent(res.data.content);
+      } else {
+        showToast(res.error?.message || 'Failed to read file content', true);
+        setEditorOpen(false);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Cannot open file', true);
+      setEditorOpen(false);
+    }
+  };
+
   const handleItemClick = async (file: FileItem) => {
     if (file.is_dir) {
       fetchDirectory(file.path);
     } else {
-      // Open editor or select for preview
+      // Select for preview panel
       setPreviewItem(file);
       setPreviewOpen(true);
-      const ext = file.extension.toLowerCase();
-      const isEditable = [
-        'php', 'js', 'jsx', 'ts', 'tsx', 'html', 'htm', 'css', 'scss', 'json',
-        'sql', 'sh', 'bash', 'env', 'conf', 'ini', 'md', 'txt', 'xml', 'yaml', 'yml'
-      ].includes(ext);
+      const ext = (file.extension || '').toLowerCase().replace(/^\./, '') || file.name.split('.').pop()?.toLowerCase() || '';
+      const isBinary = ['zip', 'tar', 'gz', 'bz2', 'rar', '7z', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'pdf', 'mp4', 'webm', 'mov', 'mp3', 'wav'].includes(ext);
 
-      if (isEditable) {
-        try {
-          setEditingFile(file);
-          setSaveSuccess(false);
-          const res = await apiFetch<{ content: string }>(
-            `/api/v1/files/content?path=${encodeURIComponent(file.path)}`
-          );
-          if (res.success && res.data) {
-            setFileContent(res.data.content);
-            setEditorOpen(true);
-          } else {
-            showToast(res.error?.message || 'Failed to read file content', true);
-          }
-        } catch (err: any) {
-          showToast(err.message || 'Cannot open file', true);
-        }
+      if (!isBinary) {
+        openFileEditor(file);
       }
     }
   };
@@ -1159,6 +1164,22 @@ export default function FileManagerPage() {
                       Copy
                     </button>
 
+                    {/* Edit button when 1 non-directory file is selected */}
+                    {(() => {
+                      const selectedFiles = displayedItems.filter((i) => selectedPaths.has(i.path) && !i.is_dir);
+                      if (selectedFiles.length !== 1) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => openFileEditor(selectedFiles[0])}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                      );
+                    })()}
+
                     {/* Unzip / Extract button */}
                     {(() => {
                       const selectedArchives = displayedItems.filter(
@@ -1608,7 +1629,7 @@ export default function FileManagerPage() {
           <FilePreviewPanel
             item={previewItem}
             onClose={() => setPreviewOpen(false)}
-            onEdit={(f) => handleItemClick(f)}
+            onEdit={(f) => openFileEditor(f)}
             onDownload={(f) => {
               window.location.href = `/api/v1/files/download?path=${encodeURIComponent(f.path)}`;
             }}
@@ -1635,6 +1656,7 @@ export default function FileManagerPage() {
             item={contextMenu.item}
             onClose={() => setContextMenu(null)}
             onOpen={(item) => handleItemClick(item)}
+            onEdit={(item) => openFileEditor(item)}
             onOpenNewTab={(item) => {
               if (item.is_dir) {
                 window.open(`/files?path=${encodeURIComponent(item.path)}`, '_blank');

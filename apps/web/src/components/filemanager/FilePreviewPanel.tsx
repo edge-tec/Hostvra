@@ -52,7 +52,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
   const [textContent, setTextContent] = useState<string | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
 
-  const ext = (item?.extension || '').toLowerCase();
+  const ext = (item?.extension || '').toLowerCase().replace(/^\./, '') || item?.name.split('.').pop()?.toLowerCase() || '';
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
   const isVideo = ['mp4', 'webm', 'mov', 'mkv'].includes(ext);
   const isAudio = ['mp3', 'wav', 'ogg', 'm4a'].includes(ext);
@@ -69,7 +69,7 @@ export const FilePreviewPanel: React.FC<FilePreviewPanelProps> = ({
     const parts = item.path.split(activeDomain);
     if (parts.length > 1) {
       let sub = parts[1].replace(/\\/g, '/');
-      if (sub.startsWith('/public')) sub = sub.replace('/public', '');
+      sub = sub.replace(/^\/(public_html|public|html)/, '');
       publicUrl = `https://${activeDomain}${sub}`;
     }
   }
