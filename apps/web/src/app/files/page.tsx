@@ -1159,6 +1159,39 @@ export default function FileManagerPage() {
                       Copy
                     </button>
 
+                    {/* Unzip / Extract button */}
+                    {(() => {
+                      const selectedArchives = displayedItems.filter(
+                        (i) =>
+                          selectedPaths.has(i.path) &&
+                          !i.is_dir &&
+                          /\.(zip|tar\.gz|tgz|tar|gz)$/i.test(i.name)
+                      );
+                      const hasArchive = selectedArchives.length > 0;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (hasArchive) {
+                              setExtractArchiveItem(selectedArchives[0]);
+                              setExtractDestDir(currentPath);
+                              setExtractModalOpen(true);
+                            }
+                          }}
+                          disabled={!hasArchive}
+                          className={`px-2.5 py-1 rounded-lg border font-bold transition flex items-center gap-1 cursor-pointer ${
+                            hasArchive
+                              ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs'
+                              : 'bg-white dark:bg-surface-900 border-slate-200 dark:border-surface-700 text-slate-400 opacity-50 cursor-not-allowed'
+                          }`}
+                          title={hasArchive ? 'Unzip / Extract selected archive' : 'Select a ZIP or TAR archive to extract'}
+                        >
+                          <FolderArchive className="w-3.5 h-3.5" />
+                          <span>Unzip / Extract</span>
+                        </button>
+                      );
+                    })()}
+
                     <button
                       type="button"
                       onClick={() => {
@@ -2012,6 +2045,226 @@ export default function FileManagerPage() {
                     className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50"
                   >
                     {permSaving ? 'Updating...' : 'Apply Permissions'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* EXTRACT ARCHIVE MODAL */}
+        {extractModalOpen && extractArchiveItem && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => setExtractModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <FolderArchive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    Extract Archive
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Uncompress archive contents into destination folder
+                  </p>
+                </div>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!extractArchiveItem) return;
+                  try {
+                    setExtracting(true);
+                    const res = await apiFetch<{ extracted: boolean; dest_dir: string }>('/api/v1/files/extract', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        archive_path: extractArchiveItem.path,
+                        dest_dir: extractDestDir || currentPath,
+                      }),
+                    });
+                    if (res.success) {
+                      showToast(`Extracted ${extractArchiveItem.name} successfully!`);
+                      setExtractModalOpen(false);
+                      fetchDirectory(currentPath);
+                    } else {
+                      showToast(res.error?.message || 'Extraction failed', true);
+                    }
+                  } catch (err: any) {
+                    showToast(err.message || 'Extraction failed', true);
+                  } finally {
+                    setExtracting(false);
+                  }
+                }}
+                className="space-y-4 text-xs"
+              >
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Archive File:
+                  </label>
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 font-mono text-xs text-slate-700 dark:text-slate-300 break-all font-semibold flex items-center gap-2">
+                    <FolderArchive className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span>{extractArchiveItem.name}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Extract Destination Directory:
+                  </label>
+                  <input
+                    type="text"
+                    value={extractDestDir}
+                    onChange={(e) => setExtractDestDir(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-white"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Files will be extracted directly into this directory.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setExtractModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-surface-700 font-bold hover:bg-slate-50 dark:hover:bg-surface-800 transition text-slate-700 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={extracting}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {extracting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Extracting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FolderArchive className="w-3.5 h-3.5" />
+                        <span>Extract Here</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* COMPRESS ARCHIVE MODAL */}
+        {archiveModalOpen && archiveTargetPaths.length > 0 && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => setArchiveModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0">
+                  <Archive className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    Compress to Archive
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Create a ZIP archive of selected items
+                  </p>
+                </div>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    setArchiveProcessing(true);
+                    const cleanName = archiveName.endsWith('.zip') ? archiveName : `${archiveName}.zip`;
+                    const destPath = `${currentPath}/${cleanName}`;
+                    const res = await apiFetch('/api/v1/files/archive', {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        paths: archiveTargetPaths,
+                        dest_path: destPath,
+                        format: 'zip',
+                      }),
+                    });
+                    if (res.success) {
+                      showToast(`Compressed ${archiveTargetPaths.length} item(s) to ${cleanName}`);
+                      setArchiveModalOpen(false);
+                      fetchDirectory(currentPath);
+                    } else {
+                      showToast(res.error?.message || 'Compression failed', true);
+                    }
+                  } catch (err: any) {
+                    showToast(err.message || 'Compression failed', true);
+                  } finally {
+                    setArchiveProcessing(false);
+                  }
+                }}
+                className="space-y-4 text-xs"
+              >
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Items to Compress:
+                  </label>
+                  <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs text-slate-700 dark:text-slate-300">
+                    <span className="font-bold">{archiveTargetPaths.length}</span> item(s) selected
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Archive File Name:
+                  </label>
+                  <input
+                    type="text"
+                    value={archiveName}
+                    onChange={(e) => setArchiveName(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs focus:ring-2 focus:ring-purple-500 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setArchiveModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-surface-700 font-bold hover:bg-slate-50 dark:hover:bg-surface-800 transition text-slate-700 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={archiveProcessing}
+                    className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {archiveProcessing ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Compressing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Archive className="w-3.5 h-3.5" />
+                        <span>Create ZIP</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
