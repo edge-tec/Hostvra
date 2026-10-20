@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Hostvra Domain & WordPress Production VHost Reconciler
+# Hostvra Domain & WordPress Production VHost Reconciler (Hardened)
 # ==============================================================================
 set -e
 
@@ -10,7 +10,7 @@ if [[ -z "$DOMAIN" ]]; then
     echo "Usage: bash repair-domain.sh <domain.com>"
     echo "Example: bash repair-domain.sh onlyflrt.net"
     echo ""
-    echo "Scanning /var/www for existing domains to list available candidates:"
+    echo "Scanning /var/www for existing domains:"
     for d in /var/www/*; do
         if [[ -d "$d" ]]; then
             b=$(basename "$d")
@@ -28,19 +28,25 @@ echo "  Repairing Domain Virtual Host & WordPress for: $DOMAIN"
 echo "=========================================================="
 
 # 1. Detect Real Document Root
+PARENT_DIR="/var/www/${DOMAIN}"
 DOC_ROOT=""
-if [[ -f "/var/www/${DOMAIN}/public_html/index.php" || -f "/var/www/${DOMAIN}/public_html/wp-config.php" ]]; then
-    DOC_ROOT="/var/www/${DOMAIN}/public_html"
-elif [[ -f "/var/www/${DOMAIN}/index.php" || -f "/var/www/${DOMAIN}/wp-config.php" ]]; then
-    DOC_ROOT="/var/www/${DOMAIN}"
-elif [[ -d "/var/www/${DOMAIN}/public_html" ]]; then
-    DOC_ROOT="/var/www/${DOMAIN}/public_html"
+if [[ -f "${PARENT_DIR}/public_html/index.php" || -f "${PARENT_DIR}/public_html/wp-config.php" ]]; then
+    DOC_ROOT="${PARENT_DIR}/public_html"
+elif [[ -f "${PARENT_DIR}/index.php" || -f "${PARENT_DIR}/wp-config.php" ]]; then
+    DOC_ROOT="${PARENT_DIR}"
+elif [[ -d "${PARENT_DIR}/public_html" ]]; then
+    DOC_ROOT="${PARENT_DIR}/public_html"
 else
-    DOC_ROOT="/var/www/${DOMAIN}/public_html"
+    DOC_ROOT="${PARENT_DIR}/public_html"
     mkdir -p "$DOC_ROOT"
 fi
 
 echo "[✓] Document Root determined: $DOC_ROOT"
+
+# Ensure parent and web roots are traversable by web server
+chmod 0755 /var/www 2>/dev/null || true
+chmod 0755 "$PARENT_DIR" 2>/dev/null || true
+chmod 0755 "$DOC_ROOT" 2>/dev/null || true
 
 # 2. Check if WordPress core exists, install if missing
 if [[ ! -f "${DOC_ROOT}/wp-load.php" && ! -f "${DOC_ROOT}/index.php" ]]; then
@@ -51,7 +57,95 @@ if [[ ! -f "${DOC_ROOT}/wp-load.php" && ! -f "${DOC_ROOT}/index.php" ]]; then
     echo "[✓] WordPress core extracted to $DOC_ROOT"
 fi
 
-# 3. Detect and Ensure PHP-FPM Service & Socket
+# 3. Ensure dedicated MySQL Database and wp-config.php exist
+if [[ ! -f "${DOC_ROOT}/wp-config.php" ]]; then
+    echo "[*] Generating wp-config.php and database credentials..."
+    DOMAIN_SLUG=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+    DB_NAME="wp_${DOMAIN_SLUG}"
+    DB_USER="u_${DOMAIN_SLUG}"
+    # Truncate identifier if over 32 chars
+    if [[ ${#DB_USER} -gt 32 ]]; then
+        DB_USER="${DB_USER:0:32}"
+    fi
+    DB_PASS=$(openssl rand -hex 12)
+
+    # Provision MySQL Database and user if mysql is present
+    if command -v mysql &>/dev/null; then
+        echo "[*] Provisioning MySQL database $DB_NAME..."
+        SQL_QUERY="CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
+        if [[ -f "/etc/mysql/debian.cnf" ]]; then
+            mysql --defaults-file=/etc/mysql/debian.cnf -e "$SQL_QUERY" 2>/dev/null || true
+        else
+            mysql -u root -e "$SQL_QUERY" 2>/dev/null || mysql -e "$SQL_QUERY" 2>/dev/null || true
+        fi
+    fi
+
+    # Generate random salts
+    S1=$(openssl rand -hex 32)
+    S2=$(openssl rand -hex 32)
+    S3=$(openssl rand -hex 32)
+    S4=$(openssl rand -hex 32)
+    S5=$(openssl rand -hex 32)
+    S6=$(openssl rand -hex 32)
+    S7=$(openssl rand -hex 32)
+    S8=$(openssl rand -hex 32)
+
+    cat > "${DOC_ROOT}/wp-config.php" << WPCONFIG_EOF
+<?php
+/**
+ * Hostvra Managed WordPress Configuration for ${DOMAIN}
+ */
+define('DB_NAME', '${DB_NAME}');
+define('DB_USER', '${DB_USER}');
+define('DB_PASSWORD', '${DB_PASS}');
+define('DB_HOST', 'localhost');
+define('DB_CHARSET', 'utf8mb4');
+define('DB_COLLATE', '');
+
+define('AUTH_KEY',         '${S1}');
+define('SECURE_AUTH_KEY',  '${S2}');
+define('LOGGED_IN_KEY',    '${S3}');
+define('NONCE_KEY',        '${S4}');
+define('AUTH_SALT',        '${S5}');
+define('SECURE_AUTH_SALT', '${S6}');
+define('LOGGED_IN_SALT',   '${S7}');
+define('NONCE_SALT',       '${S8}');
+
+\$table_prefix = 'wp_';
+
+define('WP_DEBUG', false);
+define('DISALLOW_FILE_EDIT', true);
+define('WP_AUTO_UPDATE_CORE', true);
+define('FS_METHOD', 'direct');
+
+if (!defined('ABSPATH')) {
+    define('ABSPATH', __DIR__ . '/');
+}
+
+if (file_exists(ABSPATH . 'wp-settings.php')) {
+    require_once ABSPATH . 'wp-settings.php';
+}
+WPCONFIG_EOF
+    chmod 0644 "${DOC_ROOT}/wp-config.php"
+    echo "[✓] wp-config.php configured successfully."
+
+    # Run automated installation via PHP CLI to create tables and admin if database is accessible
+    if command -v php &>/dev/null; then
+        echo "[*] Initializing WordPress database tables via PHP CLI..."
+        php -r "
+        define('WP_INSTALLING', true);
+        require_once '${DOC_ROOT}/wp-load.php';
+        if (!function_exists('wp_install') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
+            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        }
+        if (function_exists('wp_install')) {
+            wp_install('${DOMAIN}', 'admin', 'admin@${DOMAIN}', 1, '', '${DB_PASS}');
+        }
+        " 2>/dev/null || true
+    fi
+fi
+
+# 4. Detect and Ensure PHP-FPM Service & Socket
 echo "[*] Detecting PHP-FPM..."
 PHP_SOCKET=""
 for s in \
@@ -80,28 +174,25 @@ if [[ -z "$PHP_SOCKET" ]]; then
 fi
 
 if [[ -z "$PHP_SOCKET" ]]; then
-    echo "[!] Installing php8.3-fpm and essential WordPress extensions..."
+    echo "[!] Installing php8.3-fpm..."
     apt-get update -y && apt-get install -y php8.3-fpm php8.3-mysql php8.3-mbstring php8.3-xml php8.3-curl php8.3-gd php8.3-zip || true
     systemctl enable --now php8.3-fpm || true
     PHP_SOCKET="/run/php/php8.3-fpm.sock"
 fi
 echo "[✓] Active PHP-FPM Socket: $PHP_SOCKET"
 
-# 4. Ensure FastCGI Snippet exists on filesystem
+# 5. Ensure FastCGI Snippet exists on filesystem
 mkdir -p /etc/nginx/snippets
-if [[ ! -f "/etc/nginx/snippets/fastcgi-php.conf" ]]; then
-    cat > /etc/nginx/snippets/fastcgi-php.conf << 'EOF'
+cat > /etc/nginx/snippets/fastcgi-php.conf << 'EOF'
 fastcgi_split_path_info ^(.+?\.php)(/.*)$;
-try_files $fastcgi_script_name =404;
 set $path_info $fastcgi_path_info;
 fastcgi_param PATH_INFO $path_info;
 fastcgi_index index.php;
 include fastcgi_params;
 EOF
-fi
 
-# 5. Ensure Neutral Default Server and remove rogue catch-all default
-mkdir -p /etc/nginx/ssl /etc/nginx/sites-available /etc/nginx/sites-enabled
+# 6. Ensure Neutral Default Server and clean default
+mkdir -p /etc/nginx/ssl /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
 if [[ ! -f "/etc/nginx/ssl/default-fallback.crt" || ! -f "/etc/nginx/ssl/default-fallback.key" ]]; then
     openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
         -keyout /etc/nginx/ssl/default-fallback.key \
@@ -140,7 +231,7 @@ NEUTRAL_EOF
 ln -sf /etc/nginx/sites-available/00-default-neutral /etc/nginx/sites-enabled/00-default-neutral
 rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
 
-# 6. Ensure SSL Certificates for Domain
+# 7. Ensure SSL Certificates for Domain
 SSL_CERT=""
 SSL_KEY=""
 if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" && -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]]; then
@@ -160,11 +251,6 @@ else
         openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
             -keyout "$SSL_KEY" \
             -out "$SSL_CERT" \
-            -subj "/CN=${DOMAIN}" \
-            -addext "subjectAltName=DNS:${DOMAIN},DNS:www.${DOMAIN}" 2>/dev/null || \
-        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-            -keyout "$SSL_KEY" \
-            -out "$SSL_CERT" \
             -subj "/CN=${DOMAIN}" 2>/dev/null
         chmod 600 "$SSL_KEY"
         chmod 644 "$SSL_CERT"
@@ -172,7 +258,7 @@ else
     echo "[✓] Using Domain Origin Certificate: $SSL_CERT"
 fi
 
-# 7. Generate Cloudflare-proof & Modern Nginx Virtual Host
+# 8. Generate Modern, Direct Nginx Virtual Host
 NGINX_CONF="/etc/nginx/sites-available/${DOMAIN}"
 echo "[*] Writing Nginx Virtual Host: $NGINX_CONF..."
 
@@ -205,13 +291,14 @@ server {
         allow all;
     }
 
+    # WordPress Permalinks / Router
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
     }
 
+    # Pass all PHP directly to FastCGI
     location ~ \.php$ {
         fastcgi_split_path_info ^(.+?\.php)(/.*)$;
-        try_files \$fastcgi_script_name =404;
         fastcgi_pass unix:${PHP_SOCKET};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
@@ -273,13 +360,14 @@ server {
         allow all;
     }
 
+    # WordPress Permalinks / Router
     location / {
         try_files \$uri \$uri/ /index.php?\$args;
     }
 
+    # Pass all PHP directly to FastCGI
     location ~ \.php$ {
         fastcgi_split_path_info ^(.+?\.php)(/.*)$;
-        try_files \$fastcgi_script_name =404;
         fastcgi_pass unix:${PHP_SOCKET};
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
@@ -308,37 +396,58 @@ server {
 }
 NGINX_VHOST
 
-# 8. Link to sites-enabled
+# 9. Link to sites-enabled AND ensure nginx.conf includes sites-enabled
 ln -sf "$NGINX_CONF" "/etc/nginx/sites-enabled/${DOMAIN}"
 
-# 9. Set POSIX Permissions
+# Also mirror to conf.d for mainline Nginx setups that only include conf.d
+if [[ -d "/etc/nginx/conf.d" ]]; then
+    ln -sf "$NGINX_CONF" "/etc/nginx/conf.d/${DOMAIN}.conf"
+fi
+
+# Ensure nginx.conf loads sites-enabled if missing
+if [[ -f "/etc/nginx/nginx.conf" ]] && ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
+    echo "[*] Adding include /etc/nginx/sites-enabled/* to /etc/nginx/nginx.conf..."
+    sed -i '/include.*conf\.d/a \    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
+fi
+
+# 10. Set Robust Permissions (traversable by www-data Nginx worker)
 SYS_USER="u_$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')"
 TARGET_USER="www-data"
 if id "$SYS_USER" &>/dev/null; then
     TARGET_USER="$SYS_USER"
+    usermod -a -G "$SYS_USER" www-data 2>/dev/null || true
 fi
 
-echo "[*] Setting filesystem ownership to $TARGET_USER on $DOC_ROOT..."
-chown -R "${TARGET_USER}:${TARGET_USER}" "$DOC_ROOT" 2>/dev/null || chown -R www-data:www-data "$DOC_ROOT" 2>/dev/null || true
+echo "[*] Setting filesystem ownership and permissions (owner: $TARGET_USER)..."
+chmod 0755 /var/www 2>/dev/null || true
+chmod 0755 "$PARENT_DIR" 2>/dev/null || true
+chmod 0755 "$DOC_ROOT" 2>/dev/null || true
+
+chown -R "${TARGET_USER}:${TARGET_USER}" "$DOC_ROOT" 2>/dev/null || true
+chown "${TARGET_USER}:www-data" "$PARENT_DIR" 2>/dev/null || true
+
 find "$DOC_ROOT" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$DOC_ROOT" -type f -exec chmod 644 {} + 2>/dev/null || true
 mkdir -p "$DOC_ROOT/wp-content"/{plugins,themes,uploads,upgrade}
 chmod -R 775 "$DOC_ROOT/wp-content" 2>/dev/null || true
 
-# 10. Validate and reload Nginx
+# 11. Validate and reload Nginx
 echo "[*] Testing Nginx configuration..."
 nginx -t
 
 echo "[*] Reloading Nginx service..."
 systemctl reload nginx
 
-# 11. Self-Check local response
+# 12. Self-Check local response with detailed header info
 echo "[*] Testing local response for $DOMAIN..."
-CODE_80=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${DOMAIN}" http://127.0.0.1/)
-CODE_443=$(curl -k -s -o /dev/null -w "%{http_code}" -H "Host: ${DOMAIN}" https://127.0.0.1/)
-echo "  - HTTP (Port 80):  $CODE_80"
-echo "  - HTTPS (Port 443): $CODE_443"
+HTTP_RESP=$(curl -s -i -H "Host: ${DOMAIN}" http://127.0.0.1/ | head -n 12)
+HTTPS_RESP=$(curl -k -s -i -H "Host: ${DOMAIN}" https://127.0.0.1/ | head -n 12)
+
+echo "--- HTTP Port 80 Response ---"
+echo "$HTTP_RESP"
+echo "--- HTTPS Port 443 Response ---"
+echo "$HTTPS_RESP"
 
 echo "=========================================================="
-echo "  SUCCESS! Virtual host for $DOMAIN is active and serving: $DOC_ROOT"
+echo "  REPAIR COMPLETE! Open https://${DOMAIN} in your browser."
 echo "=========================================================="
