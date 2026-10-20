@@ -113,6 +113,8 @@ define('NONCE_SALT',       '${S8}');
 
 \$table_prefix = 'wp_';
 
+define('WP_HOME',    'https://${DOMAIN}');
+define('WP_SITEURL', 'https://${DOMAIN}');
 define('WP_DEBUG', false);
 define('DISALLOW_FILE_EDIT', true);
 define('WP_AUTO_UPDATE_CORE', true);
@@ -133,6 +135,9 @@ WPCONFIG_EOF
     if command -v php &>/dev/null; then
         echo "[*] Initializing WordPress database tables via PHP CLI..."
         php -r "
+        \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
+        \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
+        \$_SERVER['REQUEST_URI'] = '/';
         define('WP_INSTALLING', true);
         require_once '${DOC_ROOT}/wp-load.php';
         if (!function_exists('wp_install') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
@@ -140,6 +145,29 @@ WPCONFIG_EOF
         }
         if (function_exists('wp_install')) {
             wp_install('${DOMAIN}', 'admin', 'admin@${DOMAIN}', 1, '', '${DB_PASS}');
+        }
+        if (function_exists('update_option')) {
+            update_option('siteurl', 'https://${DOMAIN}');
+            update_option('home', 'https://${DOMAIN}');
+        }
+        " 2>/dev/null || true
+    fi
+fi
+
+# Ensure WP_HOME, WP_SITEURL and options table consistency if wp-config.php already exists
+if [[ -f "${DOC_ROOT}/wp-config.php" ]]; then
+    if ! grep -q "WP_HOME" "${DOC_ROOT}/wp-config.php"; then
+        sed -i "/table_prefix/a define('WP_HOME', 'https://${DOMAIN}');\ndefine('WP_SITEURL', 'https://${DOMAIN}');" "${DOC_ROOT}/wp-config.php"
+    fi
+    if command -v php &>/dev/null; then
+        php -r "
+        \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
+        \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
+        \$_SERVER['REQUEST_URI'] = '/';
+        require_once '${DOC_ROOT}/wp-load.php';
+        if (function_exists('update_option')) {
+            update_option('siteurl', 'https://${DOMAIN}');
+            update_option('home', 'https://${DOMAIN}');
         }
         " 2>/dev/null || true
     fi
@@ -303,6 +331,8 @@ server {
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         fastcgi_param PATH_INFO \$fastcgi_path_info;
+        fastcgi_param HTTP_HOST \$host;
+        fastcgi_param SERVER_NAME \$host;
         include fastcgi_params;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;
@@ -372,6 +402,9 @@ server {
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         fastcgi_param PATH_INFO \$fastcgi_path_info;
+        fastcgi_param HTTP_HOST \$host;
+        fastcgi_param SERVER_NAME \$host;
+        fastcgi_param HTTPS on;
         include fastcgi_params;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;

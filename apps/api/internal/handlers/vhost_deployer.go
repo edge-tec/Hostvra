@@ -594,11 +594,12 @@ server {
 		}
 	} else {
 		// Standard PHP or Static Website
-		var fastcgiBlock string
+		var fastcgiBlockHttp, fastcgiBlockHttps string
 		if appType == "static" {
-			fastcgiBlock = ""
+			fastcgiBlockHttp = ""
+			fastcgiBlockHttps = ""
 		} else {
-			fastcgiBlock = fmt.Sprintf(`
+			fastcgiBlockHttp = fmt.Sprintf(`
     location ~ \.php$ {
         fastcgi_split_path_info ^(.+?\.php)(/.*)$;
         try_files $fastcgi_script_name =404;
@@ -606,6 +607,24 @@ server {
         fastcgi_index index.php;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_param HTTP_HOST $host;
+        fastcgi_param SERVER_NAME $host;
+        include fastcgi_params;
+        fastcgi_read_timeout 600s;
+        fastcgi_send_timeout 600s;
+    }
+`, phpSocket)
+			fastcgiBlockHttps = fmt.Sprintf(`
+    location ~ \.php$ {
+        fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+        try_files $fastcgi_script_name =404;
+        fastcgi_pass %s;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_param HTTP_HOST $host;
+        fastcgi_param SERVER_NAME $host;
+        fastcgi_param HTTPS on;
         include fastcgi_params;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;
@@ -644,7 +663,7 @@ server {
         deny all;
     }
 }
-`, cleanDomain, cleanDomain, docRoot, cleanDomain, cleanDomain, docRoot, fastcgiBlock))
+`, cleanDomain, cleanDomain, docRoot, cleanDomain, cleanDomain, docRoot, fastcgiBlockHttp))
 
 		// Port 443 Block (Always bound to eliminate Cloudflare 525)
 		if sslCertPath != "" && sslKeyPath != "" {
@@ -688,7 +707,7 @@ server {
         deny all;
     }
 }
-`, cleanDomain, cleanDomain, docRoot, sslCertPath, sslKeyPath, cipherList, cleanDomain, cleanDomain, docRoot, fastcgiBlock))
+`, cleanDomain, cleanDomain, docRoot, sslCertPath, sslKeyPath, cipherList, cleanDomain, cleanDomain, docRoot, fastcgiBlockHttps))
 		}
 	}
 

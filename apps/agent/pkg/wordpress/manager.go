@@ -613,6 +613,8 @@ define('DB_COLLATE', '');
 
 $table_prefix = '%s';
 
+define('WP_HOME', 'https://%s');
+define('WP_SITEURL', 'https://%s');
 define('WP_DEBUG', false);
 define('DISALLOW_FILE_EDIT', true);
 define('WP_AUTO_UPDATE_CORE', true);
@@ -625,7 +627,7 @@ if (!defined('ABSPATH')) {
 if (file_exists(ABSPATH . 'wp-settings.php')) {
     require_once ABSPATH . 'wp-settings.php';
 }
-`, req.DBName, req.DBUser, req.DBPassword, req.DBHost, salts, req.TablePrefix)
+`, req.DBName, req.DBUser, req.DBPassword, req.DBHost, salts, req.TablePrefix, req.PrimaryDomain, req.PrimaryDomain)
 
 	if err := os.WriteFile(filepath.Join(docRoot, "wp-config.php"), []byte(wpConfig), 0644); err != nil {
 		return err
@@ -634,19 +636,30 @@ if (file_exists(ABSPATH . 'wp-settings.php')) {
 	// 4. Run automated database install via PHP CLI if php is available
 	if _, err := exec.LookPath("php"); err == nil && os.Geteuid() == 0 {
 		phpScript := fmt.Sprintf(
-			"define('WP_INSTALLING', true);\n"+
+			"$_SERVER['HTTP_HOST'] = '%s';\n"+
+				"$_SERVER['SERVER_NAME'] = '%s';\n"+
+				"$_SERVER['REQUEST_URI'] = '/';\n"+
+				"define('WP_INSTALLING', true);\n"+
 				"require_once '%s/wp-load.php';\n"+
 				"if (!function_exists('wp_install') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {\n"+
 				"    require_once ABSPATH . 'wp-admin/includes/upgrade.php';\n"+
 				"}\n"+
 				"if (function_exists('wp_install')) {\n"+
 				"    wp_install('%s', '%s', '%s', 1, '', '%s');\n"+
+				"}\n"+
+				"if (function_exists('update_option')) {\n"+
+				"    update_option('siteurl', 'https://%s');\n"+
+				"    update_option('home', 'https://%s');\n"+
 				"}\n",
+			escapePHPSingleQuotes(req.PrimaryDomain),
+			escapePHPSingleQuotes(req.PrimaryDomain),
 			docRoot,
 			escapePHPSingleQuotes(req.SiteTitle),
 			escapePHPSingleQuotes(req.AdminUser),
 			escapePHPSingleQuotes(req.AdminEmail),
 			escapePHPSingleQuotes(req.AdminPassword),
+			escapePHPSingleQuotes(req.PrimaryDomain),
+			escapePHPSingleQuotes(req.PrimaryDomain),
 		)
 		_ = exec.CommandContext(ctx, "php", "-r", phpScript).Run()
 	}
