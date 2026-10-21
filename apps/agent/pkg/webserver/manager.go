@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // Manager coordinates multiple web servers, port conflicts, and migrations on a host
@@ -65,11 +66,11 @@ func (m *Manager) DetectConflicts(ctx context.Context, targetServer WebServerTyp
 	return m.portDetector.CheckConflicts(ctx, targetServer)
 }
 
-// ManageService performs system service actions (start, stop, restart, reload) with conflict validation
-func (m *Manager) ManageService(ctx context.Context, serverType WebServerType, action string) error {
+// ManageServiceWithOutput performs system service actions (start, stop, restart, reload, test) with live output
+func (m *Manager) ManageServiceWithOutput(ctx context.Context, serverType WebServerType, action string) (string, error) {
 	p, err := m.GetProvider(serverType)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	switch action {
@@ -81,18 +82,57 @@ func (m *Manager) ManageService(ctx context.Context, serverType WebServerType, a
 			for _, c := range conflicts {
 				procs = append(procs, fmt.Sprintf("port %d held by %s (PID %d)", c.Port, c.ProcessName, c.PID))
 			}
-			return fmt.Errorf("cannot start %s: port conflict detected: %s", serverType, procs)
+			return "", fmt.Errorf("cannot start %s: port conflict detected: %s", serverType, procs)
 		}
-		return p.Start(ctx)
+		if err := p.Start(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s service started successfully", serverType), nil
+
 	case "stop":
-		return p.Stop(ctx)
+		if err := p.Stop(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s service stopped successfully", serverType), nil
+
 	case "restart":
-		return p.Restart(ctx)
+		if err := p.Restart(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s service restarted successfully", serverType), nil
+
 	case "reload":
-		return p.Reload(ctx)
+		if err := p.Reload(ctx); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%s service reloaded successfully (zero downtime)", serverType), nil
+
+	case "test", "test-syntax", "check", "syntax":
+		valid, out, err := p.ValidateConfig(ctx)
+		trimmed := strings.TrimSpace(out)
+		if !valid {
+			if trimmed != "" {
+				return trimmed, fmt.Errorf("syntax test failed: %s", trimmed)
+			}
+			if err != nil {
+				return "", fmt.Errorf("syntax test failed: %w", err)
+			}
+			return "", fmt.Errorf("syntax test failed")
+		}
+		if trimmed == "" {
+			trimmed = fmt.Sprintf("%s configuration syntax is ok (test is successful)", serverType)
+		}
+		return trimmed, nil
+
 	default:
-		return fmt.Errorf("invalid service action: %s", action)
+		return "", fmt.Errorf("invalid service action: %s", action)
 	}
+}
+
+// ManageService performs system service actions (start, stop, restart, reload, test) with conflict validation
+func (m *Manager) ManageService(ctx context.Context, serverType WebServerType, action string) error {
+	_, err := m.ManageServiceWithOutput(ctx, serverType, action)
+	return err
 }
 
 // InstallServer installs the given web server using native packages

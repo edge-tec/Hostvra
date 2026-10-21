@@ -305,7 +305,8 @@ func (h *WebServerHandler) ServiceAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := h.wsMgr.ManageService(r.Context(), wsType, req.Action); err != nil {
+	output, err := h.wsMgr.ManageServiceWithOutput(r.Context(), wsType, req.Action)
+	if err != nil {
 		h.audit.Log(r.Context(), r, fmt.Sprintf("webserver.service.%s", req.Action), "web_server", serverType, "failure", err.Error(), map[string]interface{}{
 			"server_id": serverID.String(),
 			"action":    req.Action,
@@ -319,8 +320,14 @@ func (h *WebServerHandler) ServiceAction(w http.ResponseWriter, r *http.Request)
 		"action":    req.Action,
 	})
 
+	msg := fmt.Sprintf("%s service %s completed successfully", serverType, req.Action)
+	if output != "" {
+		msg = output
+	}
+
 	response.JSON(w, http.StatusOK, map[string]string{
-		"message": fmt.Sprintf("%s service %s completed successfully", serverType, req.Action),
+		"message": msg,
+		"output":  output,
 	}, nil)
 }
 

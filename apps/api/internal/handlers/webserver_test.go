@@ -109,6 +109,36 @@ func TestGetPortConflictsEndpoint(t *testing.T) {
 	}
 }
 
+func TestServiceActionEndpoint(t *testing.T) {
+	handler, _, claims, _, serverID := setupWebServerTestEnv(t)
+
+	r := chi.NewRouter()
+	r.Post("/servers/{serverID}/webservers/{type}/service", handler.ServiceAction)
+
+	// 1. Invalid action should return StatusConflict
+	badBody, _ := json.Marshal(WebServerServiceActionRequest{Action: "invalid-action-xyz"})
+	reqBad := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/servers/%s/webservers/nginx/service", serverID), bytes.NewReader(badBody))
+	ctx := context.WithValue(reqBad.Context(), auth.UserContextKey, claims)
+	reqBad = reqBad.WithContext(ctx)
+
+	recBad := httptest.NewRecorder()
+	r.ServeHTTP(recBad, reqBad)
+	if recBad.Code != http.StatusConflict {
+		t.Fatalf("expected status 409 Conflict for invalid action, got %d: %s", recBad.Code, recBad.Body.String())
+	}
+
+	// 2. Test syntax action (returns 200 if valid or 409 if nginx not found / config test fails in test env)
+	testBody, _ := json.Marshal(WebServerServiceActionRequest{Action: "test"})
+	reqTest := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/servers/%s/webservers/nginx/service", serverID), bytes.NewReader(testBody))
+	reqTest = reqTest.WithContext(ctx)
+
+	recTest := httptest.NewRecorder()
+	r.ServeHTTP(recTest, reqTest)
+	if recTest.Code != http.StatusOK && recTest.Code != http.StatusConflict {
+		t.Fatalf("expected 200 OK or 409 Conflict, got %d: %s", recTest.Code, recTest.Body.String())
+	}
+}
+
 func TestWebsiteWebServerIntegration(t *testing.T) {
 	handler, memStore, claims, orgID, serverID := setupWebServerTestEnv(t)
 

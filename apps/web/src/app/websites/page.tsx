@@ -829,9 +829,10 @@ export default function WebsitesPage() {
         body: JSON.stringify({ action }),
       });
       if (res.data) {
-        const msg = res.data.message || `Nginx service ${action} executed successfully`;
+        const msg = res.data.output || res.data.message || `Nginx service ${action} executed successfully`;
         setNginxServiceOutput(msg);
-        showToast(`Nginx ${action} completed successfully!`);
+        const actionLabel = action === 'test' ? 'Syntax Test OK' : `${action} successful`;
+        showToast(`Nginx ${actionLabel}!`);
       } else {
         const errMsg = res.error?.message || `Failed to ${action} Nginx`;
         setNginxServiceOutput(`Error: ${errMsg}`);
