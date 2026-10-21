@@ -205,6 +205,43 @@ export default function TerminalPage() {
     term.open(container);
     xtermInstanceRef.current = term;
 
+    // Helper to send text to terminal WebSocket with newline standardization
+    const sendToTerminal = (text: string) => {
+      if (text && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        // Standardize CRLF to CR for Linux PTY raw mode
+        const normalized = text.replace(/\r\n/g, '\r');
+        wsRef.current.send(normalized);
+      }
+    };
+
+    // Debounce guard to prevent double-pasting when both keyboard & browser paste events fire
+    let lastPasteTime = 0;
+    let lastPastedText = '';
+    const sendPastedText = (text: string) => {
+      const now = Date.now();
+      if (text && (now - lastPasteTime > 150 || text !== lastPastedText)) {
+        lastPasteTime = now;
+        lastPastedText = text;
+        sendToTerminal(text);
+      }
+    };
+
+    // Helper to read clipboard and paste instantly without external button
+    const pasteFromClipboard = async () => {
+      try {
+        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            sendPastedText(text);
+            return true;
+          }
+        }
+      } catch (err) {
+        console.warn('[TERMINAL] Clipboard read permission blocked or unavailable:', err);
+      }
+      return false;
+    };
+
     // Attach user input listeners
     term.onData((data: string) => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -218,21 +255,84 @@ export default function TerminalPage() {
       }
     });
 
+    // Auto-copy on text selection (PuTTY/Linux terminal style)
+    term.onSelectionChange(() => {
+      if (term.hasSelection()) {
+        const sel = term.getSelection();
+        if (sel && typeof navigator !== 'undefined' && navigator.clipboard) {
+          navigator.clipboard.writeText(sel).catch(() => {});
+        }
+      }
+    });
+
+    // Instant Keyboard Paste (Ctrl+V, Cmd+V, Shift+Insert)
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection());
+      if (e.type !== 'keydown') {
+        if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') || (e.shiftKey && e.key === 'Insert')) {
+          return false;
+        }
+        return true;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && term.hasSelection()) {
+        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+          navigator.clipboard.writeText(term.getSelection());
+        }
         return false;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-        navigator.clipboard.readText().then((text) => {
-          if (text && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(text);
-          }
-        });
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') || (e.shiftKey && e.key === 'Insert')) {
+        pasteFromClipboard();
         return false;
       }
       return true;
     });
+
+    // 1. Right-Click Instant Paste: Completely suppress native context menu / floating "Paste" button
+    const handleContextMenu = async (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      await pasteFromClipboard();
+      term.focus();
+    };
+
+    // 2. Native Paste Event: Capture browser paste event directly and immediately forward to terminal WebSocket
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+      const text = e.clipboardData?.getData('text');
+      if (text) {
+        sendPastedText(text);
+      } else {
+        pasteFromClipboard();
+      }
+      term.focus();
+    };
+
+    // 3. Middle-Click Instant Paste (Mouse Button 1)
+    const handleAuxClick = async (e: MouseEvent) => {
+      if (e.button === 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation?.();
+        await pasteFromClipboard();
+        term.focus();
+      }
+    };
+
+    // Capture phase listeners ensure native browser popups/tooltips never appear
+    container.addEventListener('contextmenu', handleContextMenu, true);
+    container.addEventListener('paste', handlePaste, true);
+    container.addEventListener('auxclick', handleAuxClick, true);
+
+    // Disable browser text assist on xterm hidden textarea to prevent touch/assistive paste bubbles
+    const helperTextarea = container.querySelector('.xterm-helper-textarea') as HTMLTextAreaElement | null;
+    if (helperTextarea) {
+      helperTextarea.setAttribute('autocomplete', 'off');
+      helperTextarea.setAttribute('autocorrect', 'off');
+      helperTextarea.setAttribute('autocapitalize', 'off');
+      helperTextarea.setAttribute('spellcheck', 'false');
+    }
 
     setTimeout(() => {
       try {
