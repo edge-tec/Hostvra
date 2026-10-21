@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   FolderOpen,
   ExternalLink,
@@ -65,7 +65,70 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on click outside or escape
+  // Initial position calculation to prevent layout flash
+  const [pos, setPos] = useState(() => {
+    if (typeof window === 'undefined') return { left: x, top: y };
+    const estWidth = 240;
+    const estHeight = 540;
+    const pad = 12;
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+
+    let initLeft = x;
+    if (x + estWidth > vpW - pad) {
+      initLeft = Math.max(pad, vpW - estWidth - pad);
+    } else {
+      initLeft = Math.max(pad, x);
+    }
+
+    let initTop = y;
+    if (y + estHeight > vpH - pad) {
+      if (y - estHeight >= pad) {
+        initTop = y - estHeight;
+      } else {
+        initTop = Math.max(pad, vpH - estHeight - pad);
+      }
+    } else {
+      initTop = Math.max(pad, y);
+    }
+
+    return { left: initLeft, top: initTop };
+  });
+
+  // Dynamic collision detection and viewport clamping after DOM measurement
+  useLayoutEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const menuWidth = rect.width || 240;
+    const menuHeight = rect.height || 540;
+    const pad = 12;
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+
+    // Horizontal placement
+    let newLeft = x;
+    if (x + menuWidth > vpW - pad) {
+      newLeft = Math.max(pad, vpW - menuWidth - pad);
+    } else {
+      newLeft = Math.max(pad, x);
+    }
+
+    // Vertical placement: if opening downwards overflows screen, flip upward or clamp to viewport
+    let newTop = y;
+    if (y + menuHeight > vpH - pad) {
+      if (y - menuHeight >= pad) {
+        newTop = y - menuHeight;
+      } else {
+        newTop = Math.max(pad, vpH - menuHeight - pad);
+      }
+    } else {
+      newTop = Math.max(pad, y);
+    }
+
+    setPos({ left: newLeft, top: newTop });
+  }, [x, y]);
+
+  // Close on click outside, scroll, resize, or escape key
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -75,24 +138,21 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
+    const handleScrollOrResize = () => {
+      onClose();
+    };
 
     window.addEventListener('mousedown', handleOutside);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
     return () => {
       window.removeEventListener('mousedown', handleOutside);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
     };
   }, [onClose]);
-
-  // Adjust coordinates if menu overflows window
-  const menuWidth = 224;
-  const menuHeight = 440;
-  const adjustedX = typeof window !== 'undefined'
-    ? Math.max(10, Math.min(x, window.innerWidth - menuWidth - 16))
-    : x;
-  const adjustedY = typeof window !== 'undefined'
-    ? Math.max(10, Math.min(y, window.innerHeight - menuHeight - 16))
-    : y;
 
   const ext = (item.extension || '').toLowerCase().replace(/^\./, '') || item.name.split('.').pop()?.toLowerCase() || '';
   const isArchive = ['zip', 'tar', 'gz', 'bz2', 'rar', '7z'].includes(ext);
@@ -100,12 +160,14 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      style={{ left: `${adjustedX}px`, top: `${adjustedY}px` }}
-      className="fixed z-50 w-56 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-2xl py-1 text-xs text-slate-700 dark:text-slate-200 font-sans animate-scaleIn backdrop-blur-md"
+      style={{ left: `${pos.left}px`, top: `${pos.top}px` }}
+      className="fixed z-[9999] w-60 max-h-[calc(100vh-24px)] overflow-y-auto bg-white/95 dark:bg-surface-900/95 border border-slate-200 dark:border-surface-700 rounded-xl shadow-2xl py-1 text-xs text-slate-700 dark:text-slate-200 font-sans animate-scaleIn backdrop-blur-md select-none overscroll-contain custom-scrollbar"
     >
       {/* Item title preview */}
-      <div className="px-3 py-1.5 border-b border-slate-100 dark:border-surface-800 text-[11px] font-bold text-slate-900 dark:text-white truncate">
-        {item.name}
+      <div className="px-3 py-1.5 border-b border-slate-100 dark:border-surface-800 text-[11px] font-bold text-slate-900 dark:text-white truncate sticky top-0 bg-white dark:bg-surface-900 z-10 flex items-center justify-between">
+        <span className="truncate flex-1" title={item.name}>
+          {item.name}
+        </span>
       </div>
 
       {/* Main Actions */}
