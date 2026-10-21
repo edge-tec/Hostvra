@@ -11,7 +11,8 @@ apps/web/.next/
 out/
 build/
 dist/
-bin/
+bin/*
+!bin/hostvra*
 
 # Environment files
 .env

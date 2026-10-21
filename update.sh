@@ -63,7 +63,40 @@ if [[ -n "$FREE_KB" ]] && [[ "$FREE_KB" -lt 512000 ]]; then
     exit 1
 fi
 
-for cmd in git go npm curl; do
+# Auto-detect Go in /usr/local/go/bin or /snap/bin
+export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/snap/bin:$PATH"
+
+ARCH=$(uname -m 2>/dev/null || echo "x86_64")
+case "$ARCH" in
+    x86_64) BIN_ARCH="amd64" ;;
+    aarch64|arm64) BIN_ARCH="arm64" ;;
+    *) BIN_ARCH="amd64" ;;
+esac
+
+if ! command -v go &>/dev/null; then
+    echo "[INFO] Go compiler not found in standard PATH. Searching alternate paths..."
+    if [[ -x "/usr/local/go/bin/go" ]]; then
+        export PATH="/usr/local/go/bin:$PATH"
+    elif [[ -x "/snap/bin/go" ]]; then
+        export PATH="/snap/bin:$PATH"
+    else
+        echo "[INFO] Automatically installing Go toolchain..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update -y && apt-get install -y golang-go 2>/dev/null || true
+        fi
+        if ! command -v go &>/dev/null; then
+            GO_VERSION="1.22.6"
+            curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${BIN_ARCH}.tar.gz" -o /tmp/go.tar.gz 2>/dev/null || true
+            if [[ -f /tmp/go.tar.gz ]]; then
+                rm -rf /usr/local/go && tar -C /usr/local -xzf /tmp/go.tar.gz
+                rm -f /tmp/go.tar.gz
+                export PATH="/usr/local/go/bin:$PATH"
+            fi
+        fi
+    fi
+fi
+
+for cmd in git npm curl; do
     if ! command -v "$cmd" &>/dev/null; then
         echo "[ERROR] Required tool '$cmd' is not installed or not in PATH." >&2
         exit 1
@@ -122,26 +155,43 @@ rollback() {
 trap rollback ERR
 
 echo "=== [2/6] Compiling Hostvra Core API & CLI ==="
-(cd apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o server ./cmd/server)
-cp -fp apps/api/server bin/hostvra-api 2>/dev/null || true
+COMPILED_API=""
+if command -v go &>/dev/null; then
+    (cd apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o server ./cmd/server)
+    COMPILED_API="apps/api/server"
+    cp -fp apps/api/server bin/hostvra-api 2>/dev/null || true
+elif [[ -f "bin/hostvra-api-linux-${BIN_ARCH}" ]]; then
+    echo "[INFO] Using pre-compiled Linux binary: bin/hostvra-api-linux-${BIN_ARCH}"
+    COMPILED_API="bin/hostvra-api-linux-${BIN_ARCH}"
+elif [[ -f "bin/hostvra-api" ]]; then
+    echo "[INFO] Using pre-compiled binary: bin/hostvra-api"
+    COMPILED_API="bin/hostvra-api"
+fi
 
-if [[ -w "/usr/local/bin" ]]; then
+if [[ -n "$COMPILED_API" && -w "/usr/local/bin" ]]; then
     # Atomic binary replacement
-    cp -fp apps/api/server "/usr/local/bin/hostvra-api.tmp"
+    cp -fp "$COMPILED_API" "/usr/local/bin/hostvra-api.tmp"
     mv -f "/usr/local/bin/hostvra-api.tmp" "/usr/local/bin/hostvra-api"
     chmod 0755 "/usr/local/bin/hostvra-api"
 fi
 
 echo "=== [3/6] Compiling Hostvra Node Agent ==="
-if [[ -d "apps/agent" ]]; then
+COMPILED_AGENT=""
+if command -v go &>/dev/null && [[ -d "apps/agent" ]]; then
     (cd apps/agent && CGO_ENABLED=0 go build -ldflags="-s -w" -o agent ./cmd/agent)
+    COMPILED_AGENT="apps/agent/agent"
     cp -fp apps/agent/agent bin/hostvra-agent 2>/dev/null || true
-    if [[ -w "/usr/local/bin" ]]; then
-        # Atomic binary replacement
-        cp -fp apps/agent/agent "/usr/local/bin/hostvra-agent.tmp"
-        mv -f "/usr/local/bin/hostvra-agent.tmp" "/usr/local/bin/hostvra-agent"
-        chmod 0755 "/usr/local/bin/hostvra-agent"
-    fi
+elif [[ -f "bin/hostvra-agent-linux-${BIN_ARCH}" ]]; then
+    COMPILED_AGENT="bin/hostvra-agent-linux-${BIN_ARCH}"
+elif [[ -f "bin/hostvra-agent" ]]; then
+    COMPILED_AGENT="bin/hostvra-agent"
+fi
+
+if [[ -n "$COMPILED_AGENT" && -w "/usr/local/bin" ]]; then
+    # Atomic binary replacement
+    cp -fp "$COMPILED_AGENT" "/usr/local/bin/hostvra-agent.tmp"
+    mv -f "/usr/local/bin/hostvra-agent.tmp" "/usr/local/bin/hostvra-agent"
+    chmod 0755 "/usr/local/bin/hostvra-agent"
 fi
 
 echo "=== [4/6] Building Next.js Web UI Production Bundle ==="
