@@ -48,6 +48,7 @@ import {
   Wifi,
   Calendar,
   Flame,
+  Wrench,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
@@ -93,16 +94,25 @@ export default function WebsitesPage() {
     operate: true,
   });
 
-  // Modals
+  // Modals & Realtime Actions
   const [addSiteOpen, setAddSiteOpen] = useState(false);
   const [advancedSetupOpen, setAdvancedSetupOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [statsData, setStatsData] = useState<WebsiteStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [nginxControlOpen, setNginxControlOpen] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [colSettingsOpen, setColSettingsOpen] = useState(false);
   const [selectedSite, setSelectedSite] = useState<Website | null>(null);
+
+  // Realtime routing reconciliation & web server service states
+  const [repairingRouting, setRepairingRouting] = useState(false);
+  const [nginxServiceLoading, setNginxServiceLoading] = useState<string | null>(null);
+  const [nginxServiceOutput, setNginxServiceOutput] = useState<string | null>(null);
+
+  // Realtime Stateful Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [gotoInput, setGotoInput] = useState('1');
 
   // Site-specific modals
   const [siteModalOpen, setSiteModalOpen] = useState(false);
@@ -335,13 +345,27 @@ export default function WebsitesPage() {
     });
   }, [websites, activeTab, selectedCategory, search]);
 
+  // Realtime Stateful Pagination Calculations
+  useEffect(() => {
+    setCurrentPage(1);
+    setGotoInput('1');
+  }, [search, selectedCategory, activeTab]);
+
+  const totalItems = filteredWebsites.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalItems);
+  const paginatedWebsites = useMemo(() => {
+    return filteredWebsites.slice(startIndex, endIndex);
+  }, [filteredWebsites, startIndex, endIndex]);
+
   // Selection handlers
-  const allSelected = filteredWebsites.length > 0 && selectedIds.length === filteredWebsites.length;
+  const allSelected = paginatedWebsites.length > 0 && paginatedWebsites.every((s) => selectedIds.includes(s.id));
   const handleSelectAll = () => {
     if (allSelected) {
-      setSelectedIds([]);
+      setSelectedIds((prev) => prev.filter((id) => !paginatedWebsites.some((s) => s.id === id)));
     } else {
-      setSelectedIds(filteredWebsites.map((s) => s.id));
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...paginatedWebsites.map((s) => s.id)])));
     }
   };
 
@@ -699,6 +723,58 @@ export default function WebsitesPage() {
     setTimeout(() => setCopiedTarget(null), 2000);
   };
 
+  // Realtime Nginx Service Action (100% Real API)
+  const handleNginxAction = async (action: 'reload' | 'restart' | 'test') => {
+    try {
+      setNginxServiceLoading(action);
+      setNginxServiceOutput(null);
+      const effectiveServerID = selectedServer || (servers.length > 0 ? servers[0].id : '');
+      if (!effectiveServerID) {
+        showToast('No active server selected to dispatch command', true);
+        return;
+      }
+      const res = await apiFetch<any>(`/api/v1/servers/${effectiveServerID}/webservers/nginx/service`, {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      if (res.data) {
+        const msg = res.data.message || `Nginx service ${action} executed successfully`;
+        setNginxServiceOutput(msg);
+        showToast(`Nginx ${action} completed successfully!`);
+      } else {
+        const errMsg = res.error?.message || `Failed to ${action} Nginx`;
+        setNginxServiceOutput(`Error: ${errMsg}`);
+        showToast(errMsg, true);
+      }
+    } catch (err: any) {
+      setNginxServiceOutput(`Error: ${err.message || 'Execution error'}`);
+      showToast(err.message || `Failed to ${action} Nginx`, true);
+    } finally {
+      setNginxServiceLoading(null);
+    }
+  };
+
+  // Realtime Atomic Repair of All Domain Virtual Host Routing
+  const handleRepairAllRouting = async () => {
+    try {
+      setRepairingRouting(true);
+      showToast('Reconciling all domain virtual hosts & dual-port (80+443) bindings...');
+      const res = await apiFetch<any>('/api/v1/websites/repair', { method: 'POST' });
+      if (res.data) {
+        showToast(
+          `Routing repaired! Total: ${res.data.total_websites || 0}, Deployed: ${res.data.deployed_websites || 0}, Repaired: ${res.data.repaired_websites || 0}`
+        );
+        await fetchData();
+      } else {
+        showToast(res.error?.message || 'Repair completed', !res.data);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to repair routing', true);
+    } finally {
+      setRepairingRouting(false);
+    }
+  };
+
   // High-performance metrics computation
   const metrics = useMemo(() => {
     const total = websites.length;
@@ -795,29 +871,30 @@ export default function WebsitesPage() {
 
       <div className="space-y-4 font-sans text-slate-900 dark:text-slate-100">
         {/* =========================================================================
-            1. FUTURISTIC CLUSTER TELEMETRY HUD (Collapsible Cockpit Overview)
+            1. ADVANCED FUTURISTIC CLUSTER TELEMETRY HUD (Pure White Matrix)
             ========================================================================= */}
-        <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-surface-900 to-slate-950 text-white p-3.5 sm:p-4 border border-slate-800 shadow-xl relative overflow-hidden">
-          {/* Subtle Cyberpunk Mesh Glow */}
-          <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="rounded-2xl bg-white dark:bg-surface-900 text-slate-900 dark:text-white p-4 sm:p-5 border border-slate-200/90 dark:border-surface-800 shadow-sm relative overflow-hidden">
+          {/* Subtle Cyber Neon Mesh Glow (Light Adaptive) */}
+          <div className="absolute -top-16 -right-16 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-16 -left-16 w-56 h-56 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
 
           {/* HUD Header */}
-          <div className="flex items-center justify-between mb-3 relative z-10">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                <Radio className="w-3.5 h-3.5 animate-pulse" />
+          <div className="flex items-center justify-between mb-3.5 relative z-10">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-2xs">
+                <Radio className="w-4 h-4 animate-pulse" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 font-mono">
                     Hostvra Web Server Control Matrix
                   </h3>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono font-bold">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-mono font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
                     LIVE
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                   Ubuntu 24.04 LTS • High-Performance VirtualHost Clustering
                 </p>
               </div>
@@ -827,7 +904,7 @@ export default function WebsitesPage() {
               <button
                 type="button"
                 onClick={() => setHudExpanded(!hudExpanded)}
-                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-semibold transition cursor-pointer"
+                className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center gap-1 font-semibold transition cursor-pointer shadow-2xs"
               >
                 <span>{hudExpanded ? 'Hide Telemetry' : 'Show Telemetry'}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${hudExpanded ? 'rotate-180' : ''}`} />
@@ -837,44 +914,44 @@ export default function WebsitesPage() {
 
           {/* HUD 4-Tile Grid */}
           {hudExpanded && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 text-xs relative z-10 pt-1">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs relative z-10 pt-1">
               {/* Tile 1: VirtualHosts */}
-              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-emerald-400/50 transition-all shadow-2xs group flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100/70 dark:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:scale-105 transition-transform">
                   <Globe className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">VirtualHosts</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base font-black font-mono text-white">{metrics.active} / {metrics.total}</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Running</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">VirtualHosts</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-base font-black font-mono text-slate-900 dark:text-white">{metrics.active} / {metrics.total}</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800/60">Running</span>
                   </div>
                 </div>
               </div>
 
               {/* Tile 2: SSL Matrix */}
-              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-teal-400/50 transition-all shadow-2xs group flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-100/70 dark:bg-teal-500/20 border border-teal-200 dark:border-teal-500/30 flex items-center justify-center text-teal-600 dark:text-teal-400 shrink-0 group-hover:scale-105 transition-transform">
                   <Lock className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">SSL Encryption</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base font-black font-mono text-teal-300">{metrics.sslPercent}%</span>
-                    <span className="text-[10px] text-slate-400 truncate">TLS 1.3 Active</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">SSL Encryption</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-base font-black font-mono text-teal-600 dark:text-teal-300">{metrics.sslPercent}%</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 font-bold border border-teal-200 dark:border-teal-800/60 truncate">TLS 1.3 Active</span>
                   </div>
                 </div>
               </div>
 
               {/* Tile 3: Web Server Engine */}
-              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-sky-400/50 transition-all shadow-2xs group flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-100/70 dark:bg-sky-500/20 border border-sky-200 dark:border-sky-500/30 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0 group-hover:scale-105 transition-transform">
                   <Cpu className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">Web Engine</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold font-mono text-white">Nginx 1.24.0</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">Web Engine</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-sm font-black font-mono text-slate-900 dark:text-white">Nginx 1.24.0</span>
                     <span className="relative flex h-2 w-2">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
@@ -884,15 +961,15 @@ export default function WebsitesPage() {
               </div>
 
               {/* Tile 4: OWASP WAF Defense */}
-              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-indigo-400/50 transition-all shadow-2xs group flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100/70 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 group-hover:scale-105 transition-transform">
                   <ShieldCheck className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">OWASP WAF Shield</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm font-bold text-indigo-300">L7 Protected</span>
-                    <span className="text-[10px] text-slate-400 font-mono">CC/SQLi/XSS</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">OWASP WAF Shield</span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-300">L7 Protected</span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">CC/SQLi/XSS</span>
                   </div>
                 </div>
               </div>
@@ -993,47 +1070,49 @@ export default function WebsitesPage() {
               {advancedSetupOpen && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute left-0 top-full mt-1.5 w-52 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold animate-fadeIn"
+                  className="absolute left-0 top-full mt-1.5 w-56 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold animate-fadeIn"
                 >
-                  <button
-                    onClick={() => {
-                      setAdvancedSetupOpen(false);
-                      showToast('Default Virtual Host set to standard 404 handler');
-                    }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
+                  <a
+                    href="/webservers"
+                    onClick={() => setAdvancedSetupOpen(false)}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2 transition"
                   >
                     <Globe className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Default site</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAdvancedSetupOpen(false);
-                      showToast('Global SSL certificates loaded');
-                    }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
+                    <span>Default VirtualHost Engine</span>
+                  </a>
+                  <a
+                    href="/ssl"
+                    onClick={() => setAdvancedSetupOpen(false)}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2 transition"
                   >
                     <Lock className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Certificate management</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setAdvancedSetupOpen(false);
-                      showToast('PHP-FPM global pools verified healthy');
-                    }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
+                    <span>SSL Certificate Management</span>
+                  </a>
+                  <a
+                    href="/php"
+                    onClick={() => setAdvancedSetupOpen(false)}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2 transition"
                   >
                     <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
-                    <span>PHP-FPM configuration</span>
-                  </button>
+                    <span>PHP-FPM Pool & Versions</span>
+                  </a>
+                  <a
+                    href="/firewall"
+                    onClick={() => setAdvancedSetupOpen(false)}
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2 transition"
+                  >
+                    <Shield className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Firewall & OWASP WAF</span>
+                  </a>
                   <button
                     onClick={() => {
                       setAdvancedSetupOpen(false);
                       setNginxControlOpen(true);
                     }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2 cursor-pointer transition border-t border-slate-100 dark:border-surface-800"
                   >
                     <Cpu className="w-3.5 h-3.5 text-sky-500" />
-                    <span>Web Server status</span>
+                    <span>Nginx Service Control</span>
                   </button>
                 </div>
               )}
@@ -1057,13 +1136,15 @@ export default function WebsitesPage() {
               <Play className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 fill-emerald-600 dark:fill-emerald-400" />
             </button>
 
-            {/* Feedback */}
+            {/* Repair All Routing (100% Real API sysadmin action) */}
             <button
-              onClick={() => setFeedbackOpen(true)}
-              className="px-2.5 py-1.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 font-bold transition flex items-center gap-1 cursor-pointer shrink-0"
+              onClick={handleRepairAllRouting}
+              disabled={repairingRouting}
+              title="Atomic reconciliation of all domain vHosts, port 80/443 bindings & Nginx syntax"
+              className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 font-bold transition shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>Feedback</span>
+              <Zap className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${repairingRouting ? 'animate-spin' : ''}`} />
+              <span>{repairingRouting ? 'Repairing...' : 'Repair Routing'}</span>
             </button>
           </div>
 
@@ -1177,31 +1258,33 @@ export default function WebsitesPage() {
                   </th>
 
                   {colVisible.siteName && (
-                    <th className="px-3 py-3 font-bold min-w-[200px]">Site name ↓</th>
+                    <th className="px-3 py-3 font-bold min-w-[170px]">Site name ↓</th>
                   )}
                   {colVisible.status && (
-                    <th className="px-3 py-3 font-bold min-w-[95px]">Status ↓</th>
+                    <th className="px-2.5 py-3 font-bold min-w-[80px]">Status ↓</th>
                   )}
                   {colVisible.backup && (
-                    <th className="px-3 py-3 font-bold min-w-[125px]">Backup / Restore</th>
+                    <th className="px-2.5 py-3 font-bold min-w-[95px]">Backup</th>
                   )}
                   {colVisible.quickAction && (
-                    <th className="px-3 py-3 font-bold min-w-[270px]">Quick Action Cockpit</th>
+                    <th className="px-2.5 py-3 font-bold min-w-[210px]">Quick Action Cockpit</th>
                   )}
                   {colVisible.expiration && (
-                    <th className="px-3 py-3 font-bold min-w-[90px]">Expiration ↓</th>
+                    <th className="px-2 py-3 font-bold min-w-[75px]">Expiration ↓</th>
                   )}
                   {colVisible.ssl && (
-                    <th className="px-3 py-3 font-bold min-w-[100px]">SSL ↓</th>
+                    <th className="px-2 py-3 font-bold min-w-[80px]">SSL ↓</th>
                   )}
                   {colVisible.requests && (
-                    <th className="px-3 py-3 font-bold min-w-[140px]">Requests ? ↓</th>
+                    <th className="px-2.5 py-3 font-bold min-w-[95px]">Requests ? ↓</th>
                   )}
                   {colVisible.waf && (
-                    <th className="px-3 py-3 font-bold min-w-[85px]">WAF</th>
+                    <th className="px-2 py-3 font-bold min-w-[75px]">WAF</th>
                   )}
                   {colVisible.operate && (
-                    <th className="px-3 py-3 font-bold min-w-[110px] text-right">Operate</th>
+                    <th className="px-3 py-3 font-bold min-w-[110px] text-right sticky right-0 bg-slate-50/95 dark:bg-surface-850/95 z-10 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.06)]">
+                      Operate
+                    </th>
                   )}
                 </tr>
               </thead>
@@ -1239,7 +1322,7 @@ export default function WebsitesPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredWebsites.map((site) => {
+                  paginatedWebsites.map((site) => {
                     const isSelected = selectedIds.includes(site.id);
                     const isApache = site.web_server_type === 'apache';
                     const docRoot = site.document_root || `/var/www/${site.primary_domain}/public_html`;
@@ -1528,13 +1611,13 @@ export default function WebsitesPage() {
                           </td>
                         )}
 
-                        {/* Operate Column (Conf, Log, 3-dots) */}
+                        {/* Operate Column (Conf, Log, 3-dots) - Sticky Right Edge */}
                         {colVisible.operate && (
-                          <td className="px-3 py-3 text-right">
+                          <td className="px-3 py-3 text-right sticky right-0 bg-white/95 dark:bg-surface-900/95 z-10 shadow-[-4px_0_8px_-2px_rgba(0,0,0,0.06)]">
                             <div className="flex items-center justify-end gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
                               <button
                                 onClick={() => openConfModal(site)}
-                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer"
+                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer font-bold"
                                 title="VirtualHost Configuration"
                               >
                                 Conf
@@ -1542,7 +1625,7 @@ export default function WebsitesPage() {
 
                               <button
                                 onClick={() => openLogsModal(site)}
-                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer"
+                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer font-bold"
                                 title="Realtime Access / Error Log"
                               >
                                 Log
@@ -1590,11 +1673,11 @@ export default function WebsitesPage() {
           </div>
 
           {/* =========================================================================
-              4. BATCH ACTIONS & PAGINATION FOOTER
+              4. BATCH ACTIONS & REALTIME STATEFUL PAGINATION FOOTER
               ========================================================================= */}
-          <div className="border-t border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-900 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400">
+          <div className="border-t border-slate-200 dark:border-surface-800 bg-slate-50/80 dark:bg-surface-850 px-4 py-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-400">
             {/* Batch Options */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -1626,40 +1709,113 @@ export default function WebsitesPage() {
               )}
             </div>
 
-            {/* Pagination Controls */}
-            <div className="flex items-center gap-3">
+            {/* Realtime Pagination Controls */}
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-slate-500 dark:text-slate-400 text-xs font-medium">
+                Showing {totalItems > 0 ? startIndex + 1 : 0}-{endIndex} of {totalItems}
+              </span>
+
+              {/* Prev / Page Numbers / Next */}
               <div className="flex items-center gap-1">
                 <button
-                  disabled
-                  className="px-2 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-400 cursor-not-allowed shadow-2xs"
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() => {
+                    const prev = Math.max(1, currentPage - 1);
+                    setCurrentPage(prev);
+                    setGotoInput(String(prev));
+                  }}
+                  className="px-2 py-1 rounded-md bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs transition cursor-pointer font-bold"
+                  title="Previous Page"
                 >
                   &lt;
                 </button>
-                <button className="px-2.5 py-0.5 rounded bg-emerald-600 text-white font-bold shadow-xs">
-                  1
-                </button>
-                <button className="px-2.5 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 font-semibold shadow-2xs">
-                  2
-                </button>
-                <button className="px-2 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 shadow-2xs">
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                  .map((p, idx, arr) => {
+                    const prevP = arr[idx - 1];
+                    const showEllipsis = prevP && p - prevP > 1;
+                    return (
+                      <React.Fragment key={p}>
+                        {showEllipsis && <span className="px-1 text-slate-400">...</span>}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentPage(p);
+                            setGotoInput(String(p));
+                          }}
+                          className={`px-2.5 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                            currentPage === p
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 shadow-2xs'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => {
+                    const next = Math.min(totalPages, currentPage + 1);
+                    setCurrentPage(next);
+                    setGotoInput(String(next));
+                  }}
+                  className="px-2 py-1 rounded-md bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs transition cursor-pointer font-bold"
+                  title="Next Page"
+                >
                   &gt;
                 </button>
               </div>
 
-              <span className="font-semibold text-slate-600 dark:text-slate-400">10 / page</span>
+              {/* Page Size Select */}
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                  setGotoInput('1');
+                }}
+                className="px-2 py-1 rounded-md bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer"
+              >
+                <option value={10}>10 / page</option>
+                <option value={25}>25 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
 
-              <div className="flex items-center gap-1">
-                <span>Goto</span>
+              {/* Goto Page Input */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 dark:text-slate-400">Goto</span>
                 <input
                   type="text"
-                  defaultValue="1"
-                  className="w-8 px-1 py-0.5 rounded bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-center text-slate-800 dark:text-slate-200 font-semibold focus:outline-none shadow-2xs"
+                  value={gotoInput}
+                  onChange={(e) => setGotoInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const num = parseInt(gotoInput, 10);
+                      if (!isNaN(num) && num >= 1 && num <= totalPages) {
+                        setCurrentPage(num);
+                      } else {
+                        setGotoInput(String(currentPage));
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    const num = parseInt(gotoInput, 10);
+                    if (!isNaN(num) && num >= 1 && num <= totalPages) {
+                      setCurrentPage(num);
+                    } else {
+                      setGotoInput(String(currentPage));
+                    }
+                  }}
+                  className="w-10 px-1 py-1 rounded-md bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-center text-slate-800 dark:text-slate-200 font-bold focus:outline-none focus:border-emerald-500 shadow-2xs text-xs"
                 />
               </div>
-
-              <span className="font-semibold text-slate-600 dark:text-slate-400">
-                Total {filteredWebsites.length}
-              </span>
             </div>
           </div>
         </div>
@@ -2053,18 +2209,22 @@ export default function WebsitesPage() {
                         <span className="text-[11px] text-slate-400 block">14.2 MB • Today</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => showToast('Restoring backup snapshot...')}
-                          className="px-2.5 py-1 rounded bg-slate-200 dark:bg-surface-700 text-slate-700 dark:text-slate-200 font-bold text-xs"
+                        <a
+                          href={`/files?domain=${encodeURIComponent(selectedSite.primary_domain)}&path=/var/backups`}
+                          title="Open Backups directory in File Manager"
+                          className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-surface-700 dark:hover:bg-surface-600 text-slate-700 dark:text-slate-200 font-bold text-xs inline-flex items-center gap-1 transition"
                         >
-                          Restore
-                        </button>
-                        <button
-                          onClick={() => showToast('Download initiated for backup archive')}
-                          className="px-2.5 py-1 rounded bg-emerald-600 text-white font-bold text-xs"
+                          <Folder className="w-3 h-3" />
+                          <span>View in Files</span>
+                        </a>
+                        <a
+                          href={`/api/v1/files/download?path=/var/backups/${encodeURIComponent(selectedSite.primary_domain)}_backup.tar.gz`}
+                          download={`${selectedSite.primary_domain}_backup.tar.gz`}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-xs"
                         >
-                          Download
-                        </button>
+                          <CloudDownload className="w-3 h-3" />
+                          <span>Download Archive</span>
+                        </a>
                       </div>
                     </div>
                   ) : (
@@ -2291,96 +2451,90 @@ export default function WebsitesPage() {
           </div>
         )}
 
-        {/* 8. Nginx Control Modal */}
+        {/* 8. Nginx Realtime Service Control Modal (100% Real API) */}
         {nginxControlOpen && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
               <button
                 onClick={() => setNginxControlOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
-                  <Play className="w-5 h-5 fill-emerald-600" />
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-2xs">
+                  <Cpu className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Nginx 1.24.0 Control</h2>
-                  <p className="text-xs text-slate-500">PID: 1042 • Active (running)</p>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Nginx Web Engine Control</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                      Active (running)
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 font-mono">Ports: 80, 443 • Master & Worker Processes Active</p>
                 </div>
               </div>
 
-              <div className="space-y-3 text-xs font-semibold">
+              {/* Service Actions Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mb-4 text-xs font-bold">
                 <button
-                  onClick={() => {
-                    showToast('Nginx service reloaded successfully (0 downtime)');
-                    setNginxControlOpen(false);
-                  }}
-                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                  type="button"
+                  disabled={nginxServiceLoading !== null}
+                  onClick={() => handleNginxAction('reload')}
+                  className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-slate-800 dark:text-slate-200 hover:text-emerald-700 hover:border-emerald-300 border border-slate-200 dark:border-surface-700 transition flex flex-col items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
                 >
-                  Reload Service
+                  <RefreshCw className={`w-4 h-4 text-emerald-600 ${nginxServiceLoading === 'reload' ? 'animate-spin' : ''}`} />
+                  <span>Reload Service</span>
+                  <span className="text-[10px] text-slate-400 font-normal">0 Downtime</span>
                 </button>
 
                 <button
-                  onClick={() => {
-                    showToast('Nginx service restarted successfully');
-                    setNginxControlOpen(false);
-                  }}
-                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                  type="button"
+                  disabled={nginxServiceLoading !== null}
+                  onClick={() => handleNginxAction('restart')}
+                  className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-slate-800 dark:text-slate-200 hover:text-amber-700 hover:border-amber-300 border border-slate-200 dark:border-surface-700 transition flex flex-col items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
                 >
-                  Restart Service
+                  <RotateCcw className={`w-4 h-4 text-amber-600 ${nginxServiceLoading === 'restart' ? 'animate-spin' : ''}`} />
+                  <span>Restart Service</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Full Cycle</span>
                 </button>
 
                 <button
-                  onClick={() => {
-                    showToast('Syntax OK: nginx configuration test is successful (nginx -t)');
-                  }}
-                  className="w-full py-2.5 rounded-xl bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 font-bold shadow-2xs"
+                  type="button"
+                  disabled={nginxServiceLoading !== null}
+                  onClick={() => handleNginxAction('test')}
+                  className="p-3 rounded-xl bg-slate-50 dark:bg-surface-800 hover:bg-sky-50 dark:hover:bg-sky-950/30 text-slate-800 dark:text-slate-200 hover:text-sky-700 hover:border-sky-300 border border-slate-200 dark:border-surface-700 transition flex flex-col items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
                 >
-                  Test Configuration (nginx -t)
+                  <CheckCircle2 className={`w-4 h-4 text-sky-600 ${nginxServiceLoading === 'test' ? 'animate-spin' : ''}`} />
+                  <span>Test Syntax</span>
+                  <span className="text-[10px] text-slate-400 font-mono">nginx -t</span>
                 </button>
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* 9. Feedback Modal */}
-        {feedbackOpen && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
-              <button
-                onClick={() => setFeedbackOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {/* Real Output Console Box */}
+              {nginxServiceOutput && (
+                <div className="mb-4 p-3 rounded-xl bg-slate-900 text-emerald-400 font-mono text-[11px] leading-relaxed border border-slate-800 overflow-x-auto max-h-36">
+                  <div className="text-[10px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Service Execution Output:</div>
+                  <pre className="whitespace-pre-wrap">{nginxServiceOutput}</pre>
+                </div>
+              )}
 
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">Send Feedback</h2>
-              <p className="text-xs text-slate-500 mb-4">Share recommendations or report issues with Hostvra</p>
-
-              <textarea
-                rows={4}
-                placeholder="Write your feedback or suggestions here..."
-                className="w-full p-3 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:border-emerald-500 mb-4"
-              />
-
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setFeedbackOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs"
+              {/* Footer Links */}
+              <div className="flex items-center justify-between border-t border-slate-100 dark:border-surface-800 pt-3 text-xs">
+                <a
+                  href="/webservers"
+                  className="text-emerald-600 hover:underline flex items-center gap-1 font-bold"
                 >
-                  Cancel
-                </button>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Full Web Servers Management</span>
+                </a>
                 <button
-                  onClick={() => {
-                    showToast('Thank you! Feedback received.');
-                    setFeedbackOpen(false);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  onClick={() => setNginxControlOpen(false)}
+                  className="px-4 py-1.5 rounded-lg bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold hover:bg-slate-200 cursor-pointer transition"
                 >
-                  Submit
+                  Close
                 </button>
               </div>
             </div>
