@@ -50,6 +50,16 @@ import {
   ArrowUpDown,
   Layers,
   PanelLeft,
+  Image as ImageIcon,
+  Film,
+  Music,
+  Database,
+  File,
+  HardDrive,
+  Key,
+  ShieldAlert,
+  Server,
+  Filter,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, getApiBaseUrl } from '@/lib/api';
@@ -913,6 +923,154 @@ export default function FileManagerPage() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
+  // Category counts based on active filtered folder items
+  const categoryCounts = useMemo(() => {
+    const source = (searchResults || files).filter(
+      (item) => showHidden || !item.name.startsWith('.')
+    );
+    let folders = 0, code = 0, images = 0, archives = 0, configs = 0;
+    for (const item of source) {
+      if (item.is_dir) {
+        folders++;
+      } else {
+        const ext = (item.extension || item.name.split('.').pop() || '').toLowerCase();
+        if (['php', 'js', 'ts', 'jsx', 'tsx', 'html', 'css', 'json', 'sql', 'sh', 'py'].includes(ext)) code++;
+        if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) images++;
+        if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z'].includes(ext)) archives++;
+        if (item.name.startsWith('.') || ['conf', 'ini', 'json', 'yaml', 'yml', 'env'].some((e) => item.name.endsWith(e))) configs++;
+      }
+    }
+    return { all: source.length, folders, code, images, archives, configs };
+  }, [files, searchResults, showHidden]);
+
+  const [copiedPath, setCopiedPath] = useState(false);
+  const handleCopyPath = () => {
+    navigator.clipboard.writeText(currentPath);
+    setCopiedPath(true);
+    showToast('Full directory path copied to clipboard');
+    setTimeout(() => setCopiedPath(false), 2000);
+  };
+
+  const formatDate = (isoString?: string) => {
+    if (!isoString) return '-';
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return isoString;
+      return d.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
+  const renderFileIcon = (item: FileItem, size: 'sm' | 'md' | 'lg' = 'sm') => {
+    if (item.is_dir) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-500/10 text-amber-500 border border-amber-500/25 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <Folder className={`${size === 'lg' ? 'w-8 h-8' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'} fill-amber-500/30 text-amber-500`} />
+        </div>
+      );
+    }
+
+    const ext = (item.extension || '').toLowerCase().replace(/^\./, '') || item.name.split('.').pop()?.toLowerCase() || '';
+
+    if (['php'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-indigo-500/20 to-indigo-600/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0 shadow-2xs font-extrabold ${size === 'lg' ? 'text-sm' : size === 'md' ? 'text-xs' : 'text-[10px]'} font-mono group-hover:scale-105 transition-transform duration-150`}>
+          PHP
+        </div>
+      );
+    }
+    if (['js', 'ts', 'jsx', 'tsx', 'mjs'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-amber-500/20 to-yellow-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0 shadow-2xs font-extrabold ${size === 'lg' ? 'text-xs' : size === 'md' ? 'text-[11px]' : 'text-[9px]'} font-mono group-hover:scale-105 transition-transform duration-150`}>
+          {ext.slice(0, 3).toUpperCase()}
+        </div>
+      );
+    }
+    if (['html', 'htm'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-orange-500/20 to-rose-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/30 flex items-center justify-center shrink-0 shadow-2xs font-extrabold ${size === 'lg' ? 'text-xs' : size === 'md' ? 'text-[11px]' : 'text-[9px]'} font-mono group-hover:scale-105 transition-transform duration-150`}>
+          HTML
+        </div>
+      );
+    }
+    if (['css', 'scss', 'sass', 'less'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-sky-500/20 to-blue-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/30 flex items-center justify-center shrink-0 shadow-2xs font-extrabold ${size === 'lg' ? 'text-xs' : size === 'md' ? 'text-[11px]' : 'text-[9px]'} font-mono group-hover:scale-105 transition-transform duration-150`}>
+          CSS
+        </div>
+      );
+    }
+    if (['json', 'yaml', 'yml', 'xml', 'toml'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs font-extrabold ${size === 'lg' ? 'text-xs' : size === 'md' ? 'text-[11px]' : 'text-[9px]'} font-mono group-hover:scale-105 transition-transform duration-150`}>
+          {ext.slice(0, 3).toUpperCase()}
+        </div>
+      );
+    }
+    if (['sql', 'sqlite', 'db'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <Database className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (['zip', 'tar', 'gz', 'bz2', 'rar', '7z', 'tgz'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-amber-600/20 to-amber-700/10 text-amber-700 dark:text-amber-400 border border-amber-600/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <Archive className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-rose-500/20 to-pink-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <ImageIcon className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-violet-500/20 to-purple-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <Film className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-fuchsia-500/20 to-pink-500/10 text-fuchsia-600 dark:text-fuchsia-400 border border-fuchsia-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <Music className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (item.name.startsWith('.env') || item.name === '.htaccess' || item.name.endsWith('.conf') || item.name.endsWith('.ini')) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-teal-500/20 to-emerald-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <ShieldCheck className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+    if (['pdf', 'doc', 'docx', 'txt', 'md', 'log'].includes(ext)) {
+      return (
+        <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-gradient-to-br from-slate-500/20 to-slate-600/10 text-slate-600 dark:text-slate-400 border border-slate-500/30 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+          <FileText className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+        </div>
+      );
+    }
+
+    return (
+      <div className={`${size === 'lg' ? 'w-14 h-14' : size === 'md' ? 'w-10 h-10' : 'w-8 h-8'} rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-surface-700 flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform duration-150`}>
+        <File className={`${size === 'lg' ? 'w-7 h-7' : size === 'md' ? 'w-5 h-5' : 'w-4 h-4'}`} />
+      </div>
+    );
+  };
+
   return (
     <DashboardShell>
       <div className="flex h-[calc(100vh-4rem)] bg-white dark:bg-surface-950 font-sans text-slate-800 dark:text-slate-200 overflow-hidden relative">
@@ -1340,52 +1498,59 @@ export default function FileManagerPage() {
               )}
             </div>
 
-            {/* Breadcrumb Right Controls & Category Chips */}
+            {/* Breadcrumb Right Controls & Category Filter Chips */}
             {!isTrashActive && (
-              <div className="flex items-center gap-2 shrink-0 text-[11px] text-slate-400">
-                {/* Category Filter Chips on wide screens */}
-                <div className="hidden 2xl:flex items-center gap-1">
+              <div className="flex items-center gap-2 shrink-0 text-[11px] text-slate-500">
+                {/* Responsive Category Filter Chips with live item counts */}
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-[280px] sm:max-w-none py-0.5">
                   {[
-                    { id: 'all', label: 'All' },
-                    { id: 'folders', label: 'Folders' },
-                    { id: 'code', label: 'Code' },
-                    { id: 'images', label: 'Images' },
-                    { id: 'archives', label: 'Archives' },
-                    { id: 'configs', label: 'Configs' },
+                    { id: 'all', label: 'All', count: categoryCounts.all },
+                    { id: 'folders', label: 'Folders', count: categoryCounts.folders },
+                    { id: 'code', label: 'Code', count: categoryCounts.code },
+                    { id: 'images', label: 'Images', count: categoryCounts.images },
+                    { id: 'archives', label: 'Archives', count: categoryCounts.archives },
+                    { id: 'configs', label: 'Configs', count: categoryCounts.configs },
                   ].map((chip) => (
                     <button
                       key={chip.id}
                       type="button"
                       onClick={() => setActiveCategoryFilter(chip.id)}
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition cursor-pointer ${
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-semibold transition cursor-pointer flex items-center gap-1 shrink-0 ${
                         activeCategoryFilter === chip.id
-                          ? 'bg-emerald-600 text-white font-bold'
-                          : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                          ? 'bg-emerald-600 text-white font-bold shadow-2xs'
+                          : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-surface-700'
                       }`}
                     >
-                      {chip.label}
+                      <span>{chip.label}</span>
+                      <span className={`text-[9px] px-1 py-0.2 rounded-full font-mono ${
+                        activeCategoryFilter === chip.id
+                          ? 'bg-emerald-700/60 text-white'
+                          : 'bg-slate-200/80 dark:bg-surface-700 text-slate-500 dark:text-slate-400'
+                      }`}>
+                        {chip.count}
+                      </span>
                     </button>
                   ))}
                 </div>
 
-                <span className="h-3 w-px bg-slate-200 dark:bg-surface-700 hidden 2xl:inline" />
+                <span className="h-3 w-px bg-slate-200 dark:bg-surface-700 hidden sm:inline shrink-0" />
 
+                {/* Copy Path with checkmark animation */}
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(currentPath);
-                    showToast('Full path copied to clipboard');
-                  }}
-                  className="hover:text-slate-700 dark:hover:text-white flex items-center gap-1 font-mono shrink-0 cursor-pointer"
+                  onClick={handleCopyPath}
+                  className={`hover:text-slate-700 dark:hover:text-white flex items-center gap-1 font-mono shrink-0 cursor-pointer transition ${
+                    copiedPath ? 'text-emerald-600 font-bold' : ''
+                  }`}
                   title="Copy Full Directory Path"
                 >
-                  <Copy className="w-3 h-3" />
-                  <span className="hidden md:inline">Copy Path</span>
+                  {copiedPath ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                  <span className="hidden md:inline">{copiedPath ? 'Copied!' : 'Copy Path'}</span>
                 </button>
 
-                <span className="h-3 w-px bg-slate-200 dark:bg-surface-700" />
+                <span className="h-3 w-px bg-slate-200 dark:bg-surface-700 shrink-0" />
 
-                <span className="font-mono text-emerald-600 font-semibold shrink-0 whitespace-nowrap">
+                <span className="font-mono text-emerald-600 font-bold shrink-0 whitespace-nowrap text-[11px] bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200/60 dark:border-emerald-800/60">
                   {displayedItems.length} items
                 </span>
               </div>
@@ -1827,13 +1992,14 @@ export default function FileManagerPage() {
                                 setPreviewItem(file);
                               }}
                               onDoubleClick={() => handleItemClick(file)}
-                              className={`group cursor-pointer transition select-none ${
+                              className={`group cursor-pointer transition-colors duration-100 select-none ${
                                 isSelected
-                                  ? 'bg-emerald-50/70 text-emerald-950 dark:bg-emerald-950/40 dark:text-emerald-200 font-medium'
-                                  : 'hover:bg-slate-50/80 dark:hover:bg-surface-800/60'
-                              } ${isDragTarget ? 'ring-2 ring-emerald-500 bg-emerald-100' : ''}`}
+                                  ? 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-200'
+                                  : 'hover:bg-slate-50/90 dark:hover:bg-surface-800/60'
+                              } ${isDragTarget ? 'ring-2 ring-emerald-500 bg-emerald-100/70' : ''}`}
                             >
-                              <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
+                              {/* Selection Checkbox */}
+                              <td className="py-2.5 px-3 w-8" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
@@ -1846,45 +2012,152 @@ export default function FileManagerPage() {
                                   className="rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                                 />
                               </td>
-                              <td className="py-2 px-3 min-w-[160px]">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  {file.is_dir ? (
-                                    <Folder className="w-4 h-4 text-amber-500 shrink-0" />
-                                  ) : (
-                                    <FileCode className="w-4 h-4 text-emerald-600 shrink-0" />
-                                  )}
-                                  <span className="font-semibold truncate max-w-[160px] sm:max-w-xs md:max-w-md">
-                                    {file.name}
-                                  </span>
+
+                              {/* File / Folder Name with Rich Icon */}
+                              <td className="py-2.5 px-3 min-w-[200px]">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  {renderFileIcon(file, 'sm')}
+                                  <div className="min-w-0 flex-1">
+                                    <span
+                                      className="font-bold text-xs text-slate-900 dark:text-white truncate block group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors"
+                                      title={file.name}
+                                    >
+                                      {file.name}
+                                    </span>
+                                    {searchResults && (
+                                      <span className="block text-[10px] text-slate-400 font-mono truncate max-w-xs">
+                                        {file.path}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </td>
-                              <td className="py-2 px-3 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap min-w-[70px]">
-                                {file.is_dir ? '-' : formatBytes(file.size)}
+
+                              {/* File Size */}
+                              <td className="py-2.5 px-3 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap min-w-[75px]">
+                                {file.is_dir ? (
+                                  <span className="text-slate-400 text-xs">—</span>
+                                ) : (
+                                  <span className="font-semibold text-slate-700 dark:text-slate-300 text-xs">
+                                    {formatBytes(file.size)}
+                                  </span>
+                                )}
                               </td>
-                              <td className="py-2 px-3 font-mono text-emerald-600 dark:text-emerald-400 font-semibold hidden sm:table-cell whitespace-nowrap min-w-[70px]">
-                                {file.perm_octal || '0644'}
-                              </td>
-                              <td className="py-2 px-3 font-mono text-slate-500 hidden lg:table-cell max-w-[140px] truncate" title={`${file.owner}:${file.group}`}>
-                                {file.owner}:{file.group}
-                              </td>
-                              <td className="py-2 px-3 text-slate-500 font-mono text-[11px] hidden md:table-cell whitespace-nowrap min-w-[130px]">
-                                {new Date(file.modified_at).toLocaleString()}
-                              </td>
-                              <td className="py-2 px-3 text-right w-10 shrink-0" onClick={(e) => e.stopPropagation()}>
+
+                              {/* Interactive Permissions Pill */}
+                              <td className="py-2.5 px-3 font-mono hidden sm:table-cell whitespace-nowrap min-w-[85px]">
                                 <button
                                   type="button"
                                   onClick={(e) => {
-                                    const rect = e.currentTarget.getBoundingClientRect();
-                                    setContextMenu({
-                                      x: rect.left,
-                                      y: rect.bottom,
-                                      item: file,
-                                    });
+                                    e.stopPropagation();
+                                    setPermTargetPaths([file.path]);
+                                    setPermMode(file.perm_octal || (file.is_dir ? '0755' : '0644'));
+                                    setPermModalOpen(true);
                                   }}
-                                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                  className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                                    file.perm_octal === '0777' || file.perm_octal === '0666'
+                                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 hover:bg-rose-500/20'
+                                      : file.is_dir
+                                      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/25 hover:bg-amber-500/20'
+                                      : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-surface-700 hover:border-emerald-500/40'
+                                  }`}
+                                  title={`Permissions: ${file.perm_octal || (file.is_dir ? '0755' : '0644')} (Click to edit)`}
                                 >
-                                  <MoreVertical className="w-3.5 h-3.5" />
+                                  <Lock className="w-2.5 h-2.5 opacity-60" />
+                                  <span>{file.perm_octal || (file.is_dir ? '0755' : '0644')}</span>
                                 </button>
+                              </td>
+
+                              {/* Owner & Group */}
+                              <td className="py-2.5 px-3 font-mono text-slate-500 hidden lg:table-cell max-w-[130px] truncate" title={`${file.owner}:${file.group}`}>
+                                <span className="px-1.5 py-0.5 rounded text-[11px] bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-surface-700">
+                                  {file.owner}:{file.group}
+                                </span>
+                              </td>
+
+                              {/* Last Modified */}
+                              <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 font-mono text-[11px] hidden md:table-cell whitespace-nowrap min-w-[140px]">
+                                {formatDate(file.modified_at)}
+                              </td>
+
+                              {/* Actions: Fast Inline Hover Actions + More Button */}
+                              <td className="py-2.5 px-3 text-right shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-1">
+                                  {/* Fast Inline Hover Actions */}
+                                  <div className="hidden sm:flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    {!file.is_dir ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => openFileEditor(file)}
+                                        title="Quick Edit File"
+                                        className="p-1 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer"
+                                      >
+                                        <Edit className="w-3.5 h-3.5" />
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleItemClick(file)}
+                                        title="Open Folder"
+                                        className="p-1 rounded-lg text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition cursor-pointer"
+                                      >
+                                        <Folder className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+
+                                    {!file.is_dir && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          window.location.href = `/api/v1/files/download?path=${encodeURIComponent(file.path)}`;
+                                        }}
+                                        title="Download File"
+                                        className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setItemToRename(file);
+                                        setNewName(file.name);
+                                        setRenameModalOpen(true);
+                                      }}
+                                      title="Rename"
+                                      className="p-1 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
+                                    >
+                                      <PenLine className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleMoveToTrash([file.path])}
+                                      title="Move to Trash"
+                                      className="p-1 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* Full Context Menu Button */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      setContextMenu({
+                                        x: rect.left,
+                                        y: rect.bottom,
+                                        item: file,
+                                      });
+                                    }}
+                                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
+                                    title="More Options"
+                                  >
+                                    <MoreVertical className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1893,10 +2166,11 @@ export default function FileManagerPage() {
                     </table>
                   </div>
                 ) : (
-                  /* GRID / CARD VIEW */
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  /* MODERN GRID / CARD VIEW */
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
                     {displayedItems.map((file) => {
                       const isSelected = selectedPaths.has(file.path);
+                      const ext = (file.extension || file.name.split('.').pop() || '').toUpperCase();
                       return (
                         <div
                           key={file.path}
@@ -1918,25 +2192,85 @@ export default function FileManagerPage() {
                             setPreviewItem(file);
                           }}
                           onDoubleClick={() => handleItemClick(file)}
-                          className={`p-3 rounded-xl border flex flex-col items-center text-center cursor-pointer transition select-none ${
+                          className={`group relative p-3 rounded-2xl border flex flex-col justify-between cursor-pointer transition-all duration-150 select-none hover:shadow-md hover:-translate-y-0.5 ${
                             isSelected
-                              ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 shadow-xs'
-                              : 'border-slate-200 dark:border-surface-800 bg-white dark:bg-surface-900 hover:bg-slate-50'
+                              ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/40 shadow-xs'
+                              : 'border-slate-200 dark:border-surface-800 bg-white dark:bg-surface-900 hover:border-slate-300 dark:hover:border-surface-700'
                           }`}
                         >
-                          <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-2">
-                            {file.is_dir ? (
-                              <Folder className="w-8 h-8 text-amber-500" />
-                            ) : (
-                              <FileCode className="w-8 h-8 text-emerald-600" />
-                            )}
+                          {/* Top Row: Checkbox & Type Badge */}
+                          <div className="flex items-center justify-between w-full mb-1">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const next = new Set(selectedPaths);
+                                if (e.target.checked) next.add(file.path);
+                                else next.delete(file.path);
+                                setSelectedPaths(next);
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className={`rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer ${
+                                isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                              } transition-opacity`}
+                            />
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-slate-100 dark:bg-surface-800 text-slate-500 dark:text-slate-400">
+                              {file.is_dir ? 'DIR' : ext || 'FILE'}
+                            </span>
                           </div>
-                          <span className="font-semibold text-xs text-slate-900 dark:text-white truncate w-full">
-                            {file.name}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono mt-1">
-                            {file.is_dir ? 'Folder' : formatBytes(file.size)}
-                          </span>
+
+                          {/* Center Icon & Filename */}
+                          <div className="flex flex-col items-center text-center my-2">
+                            <div className="mb-2">
+                              {renderFileIcon(file, 'md')}
+                            </div>
+                            <span
+                              className="font-bold text-xs text-slate-900 dark:text-white truncate w-full group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors"
+                              title={file.name}
+                            >
+                              {file.name}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                              {file.is_dir ? 'Folder' : formatBytes(file.size)}
+                            </span>
+                          </div>
+
+                          {/* Bottom Row: Quick Action Bar visible on hover */}
+                          <div className="mt-1 pt-1.5 border-t border-slate-100 dark:border-surface-800 flex items-center justify-between text-[10px] text-slate-400 font-mono">
+                            <span>{file.perm_octal || (file.is_dir ? '0755' : '0644')}</span>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {!file.is_dir && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openFileEditor(file);
+                                  }}
+                                  title="Edit"
+                                  className="p-0.5 hover:text-emerald-600"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  setContextMenu({
+                                    x: rect.left,
+                                    y: rect.bottom,
+                                    item: file,
+                                  });
+                                }}
+                                title="More"
+                                className="p-0.5 hover:text-slate-700 dark:hover:text-white"
+                              >
+                                <MoreVertical className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}

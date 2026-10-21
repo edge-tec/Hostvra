@@ -63,49 +63,39 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
   const docRoot = selectedDomainObj?.document_root || (currentPath.startsWith('/var/www') ? currentPath : '/var/www');
 
   return (
-    <div className="bg-white dark:bg-surface-900 border-b border-slate-200 dark:border-surface-800 px-3 sm:px-4 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-2xs">
-      {/* Left: Domain Selector and Website Shortcuts */}
-      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-        {/* Domain Switcher Pill */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 sm:py-1.5 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs shrink-0">
+    <div className="bg-white/90 dark:bg-surface-900/90 backdrop-blur-xs border-b border-slate-200/80 dark:border-surface-800 px-3 sm:px-4 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-2xs">
+      {/* Left: Website Context & Fast Destination Jump Pills */}
+      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto no-scrollbar py-0.5">
+        {/* Website Status Badge */}
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs shrink-0 select-none">
           <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span className="font-semibold text-slate-500 text-[11px] hidden sm:inline">Active Website:</span>
-          <select
-            value={activeDomain}
-            onChange={(e) => {
-              const dom = e.target.value;
-              const matched = domains.find((d) => d.domain === dom);
-              if (matched) {
-                onDomainSelect(dom, matched.document_root);
-              } else {
-                onDomainSelect('', '/var/www');
-              }
-            }}
-            className="bg-transparent text-slate-900 dark:text-white font-bold font-mono focus:outline-none cursor-pointer text-xs max-w-[130px] sm:max-w-[180px] truncate"
-          >
-            <option value="">All Websites / Server Root</option>
-            {domains.map((d) => (
-              <option key={d.domain} value={d.domain} className="bg-white dark:bg-surface-900 text-slate-900 dark:text-white">
-                {d.domain}
-              </option>
-            ))}
-          </select>
+          <span className="font-medium text-slate-500 text-[11px] hidden sm:inline">Website:</span>
+          {activeDomain ? (
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-bold font-mono text-emerald-700 dark:text-emerald-400 text-xs truncate max-w-[140px] sm:max-w-[200px]">
+                {activeDomain}
+              </span>
+            </div>
+          ) : (
+            <span className="text-slate-500 dark:text-slate-400 font-medium text-xs">Server Root</span>
+          )}
         </div>
 
-        {/* Quick Directory Jump Pills with smooth scroll */}
+        {/* Quick Directory Jump Pills with active state highlighting */}
         {activeDomain && (
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 text-xs min-w-0 flex-1">
             {/* Root */}
             <button
               type="button"
               onClick={() => onNavigate(docRoot)}
-              className={`px-2 sm:px-2.5 py-1 rounded-lg border font-semibold text-[11px] transition flex items-center gap-1 shrink-0 ${
+              className={`px-2 sm:px-2.5 py-1 rounded-lg border font-semibold text-[11px] transition flex items-center gap-1 shrink-0 cursor-pointer ${
                 currentPath === docRoot
                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800'
               }`}
             >
-              <Folder className="w-3 h-3 text-amber-500 shrink-0" />
+              <Folder className={`w-3 h-3 ${currentPath === docRoot ? 'text-white' : 'text-amber-500'} shrink-0`} />
               <span>Doc Root</span>
             </button>
 
@@ -116,7 +106,11 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
                 const target = docRoot.endsWith('/public_html') ? docRoot : `${docRoot}/public_html`;
                 onNavigate(target);
               }}
-              className="px-2 sm:px-2.5 py-1 rounded-lg bg-white dark:bg-surface-850 border border-slate-200 dark:border-surface-700 hover:bg-slate-100 text-slate-700 dark:text-slate-300 font-semibold text-[11px] transition flex items-center gap-1 shrink-0"
+              className={`px-2 sm:px-2.5 py-1 rounded-lg border font-semibold text-[11px] transition flex items-center gap-1 shrink-0 cursor-pointer ${
+                currentPath.endsWith('/public_html')
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800'
+              }`}
             >
               <span>public_html</span>
             </button>
@@ -125,16 +119,25 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
             <button
               type="button"
               onClick={() => onNavigate(`${docRoot}/wp-content`)}
-              className="px-2 sm:px-2.5 py-1 rounded-lg bg-white dark:bg-surface-850 border border-slate-200 dark:border-surface-700 hover:bg-slate-100 text-slate-700 dark:text-slate-300 font-semibold text-[11px] transition flex items-center gap-1 shrink-0"
+              className={`px-2 sm:px-2.5 py-1 rounded-lg border font-semibold text-[11px] transition flex items-center gap-1 shrink-0 cursor-pointer ${
+                currentPath.includes('/wp-content') && !currentPath.includes('/plugins') && !currentPath.includes('/themes')
+                  ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/30'
+              }`}
             >
-              <span className="text-purple-600 dark:text-purple-400 font-bold">wp-content</span>
+              <Sparkles className="w-3 h-3 shrink-0" />
+              <span>wp-content</span>
             </button>
 
             {/* plugins */}
             <button
               type="button"
               onClick={() => onNavigate(`${docRoot}/wp-content/plugins`)}
-              className="px-2 py-1 rounded-lg bg-white dark:bg-surface-850 border border-slate-200 dark:border-surface-700 hover:bg-slate-100 text-slate-600 dark:text-slate-400 font-medium text-[11px] transition flex items-center gap-1 shrink-0"
+              className={`px-2 py-1 rounded-lg border font-medium text-[11px] transition flex items-center gap-1 shrink-0 cursor-pointer ${
+                currentPath.includes('/plugins')
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400'
+              }`}
             >
               <span>plugins</span>
             </button>
@@ -143,7 +146,11 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
             <button
               type="button"
               onClick={() => onNavigate(`${docRoot}/wp-content/themes`)}
-              className="px-2 py-1 rounded-lg bg-white dark:bg-surface-850 border border-slate-200 dark:border-surface-700 hover:bg-slate-100 text-slate-600 dark:text-slate-400 font-medium text-[11px] transition flex items-center gap-1 shrink-0"
+              className={`px-2 py-1 rounded-lg border font-medium text-[11px] transition flex items-center gap-1 shrink-0 cursor-pointer ${
+                currentPath.includes('/themes')
+                  ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                  : 'bg-white dark:bg-surface-850 border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400'
+              }`}
             >
               <span>themes</span>
             </button>
@@ -157,7 +164,7 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
         <button
           type="button"
           onClick={() => setConfigsModalOpen(true)}
-          className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+          className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
           title="Instant access to wp-config, .htaccess, .env, robots.txt"
         >
           <FileCode className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -169,10 +176,10 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
           type="button"
           onClick={() => setFixConfirmOpen(true)}
           disabled={fixingPermissions}
-          className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 shrink-0"
+          className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-50 shrink-0"
           title="Reset directory permissions to 0755 and file permissions to 0644"
         >
-          <ShieldCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+          <ShieldCheck className={`w-3.5 h-3.5 text-blue-600 shrink-0 ${fixingPermissions ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline whitespace-nowrap">Fix Permissions</span>
           <span className="sm:hidden text-[11px]">Fix Perms</span>
         </button>
@@ -182,7 +189,7 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
           href={`/terminal?cwd=${encodeURIComponent(currentPath)}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="p-1 sm:p-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 transition shrink-0"
+          className="p-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 transition shrink-0"
           title="Open web terminal at this directory"
         >
           <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
