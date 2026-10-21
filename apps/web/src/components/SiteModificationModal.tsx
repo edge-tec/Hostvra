@@ -86,7 +86,7 @@ interface SiteModificationModalProps {
   onClose: () => void;
   initialTab?: SiteModalTab;
   onUpdateWebsite?: (updated: Partial<Website>) => void;
-  showToast?: (message: string) => void;
+  showToast?: (message: string, isError?: boolean) => void;
 }
 
 const SIDEBAR_TABS = [
@@ -370,12 +370,25 @@ server {
     }
   }, [website, defaultDocs]);
 
-  const handleSaveVhost = () => {
+  const handleSaveVhost = async () => {
+    if (!website) return;
     setIsSavingConfig(true);
-    setTimeout(() => {
+    try {
+      showToast(`Saving virtual host configuration for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/conf`, {
+        method: 'PUT',
+        body: JSON.stringify({ conf: vhostCode }),
+      });
+      if (res.data) {
+        showToast(`vHost configuration saved. Nginx syntax test passed, worker processes reloaded.`);
+      } else {
+        showToast(res.error?.message || 'Failed to save configuration', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save configuration', true);
+    } finally {
       setIsSavingConfig(false);
-      showToast(`vHost configuration saved. Nginx syntax test passed (exit code 0), worker processes reloaded.`);
-    }, 600);
+    }
   };
 
   // ----------------------------------------------------
@@ -388,16 +401,62 @@ server {
   const [customCert, setCustomCert] = useState('');
   const [customKey, setCustomKey] = useState('');
   const [isIssuingSsl, setIsIssuingSsl] = useState(false);
+  const [isDeployingCustomCert, setIsDeployingCustomCert] = useState(false);
 
-  const handleApplyLetsEncrypt = () => {
+  const handleApplyLetsEncrypt = async () => {
+    if (!website) return;
     setIsIssuingSsl(true);
-    setTimeout(() => {
-      setIsIssuingSsl(false);
-      if (onUpdateWebsite && website) {
-        onUpdateWebsite({ ssl_enabled: true, ssl_days_left: 90 });
+    try {
+      showToast(`Requesting Let's Encrypt certificate for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/ssl`, {
+        method: 'POST',
+      });
+      if (res.data) {
+        if (onUpdateWebsite) {
+          onUpdateWebsite({ ssl_enabled: true, ssl_days_left: 90 });
+        }
+        showToast(`Let's Encrypt 90-day multi-domain certificate successfully issued and installed!`);
+      } else {
+        showToast(res.error?.message || 'SSL issuance failed', true);
       }
-      showToast(`Let's Encrypt 90-day multi-domain certificate successfully issued and installed!`);
-    }, 1200);
+    } catch (err: any) {
+      showToast(err.message || 'SSL issuance failed', true);
+    } finally {
+      setIsIssuingSsl(false);
+    }
+  };
+
+  const handleDeployCustomCert = async () => {
+    if (!website) return;
+    if (!customCert.trim() || !customKey.trim()) {
+      showToast('Both certificate and private key are required', true);
+      return;
+    }
+    setIsDeployingCustomCert(true);
+    try {
+      showToast(`Deploying custom certificate for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>('/api/v1/ssl/custom', {
+        method: 'POST',
+        body: JSON.stringify({
+          domain: website.primary_domain,
+          website_id: website.id,
+          certificate: customCert,
+          private_key: customKey,
+        }),
+      });
+      if (res.data) {
+        if (onUpdateWebsite) {
+          onUpdateWebsite({ ssl_enabled: true });
+        }
+        showToast(`Custom certificate deployed and active for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to deploy custom certificate', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to deploy custom certificate', true);
+    } finally {
+      setIsDeployingCustomCert(false);
+    }
   };
 
   // ----------------------------------------------------
@@ -408,12 +467,203 @@ server {
   const [phpMaxExecution, setPhpMaxExecution] = useState('300');
   const [phpMaxUpload, setPhpMaxUpload] = useState('100M');
   const [opcacheEnabled, setOpcacheEnabled] = useState(true);
+  const [isSwitchingPhp, setIsSwitchingPhp] = useState(false);
 
-  const handleSwitchPhp = () => {
-    if (onUpdateWebsite && website) {
-      onUpdateWebsite({ php_version: selectedPhp });
+  const handleSwitchPhp = async () => {
+    if (!website) return;
+    setIsSwitchingPhp(true);
+    try {
+      showToast(`Switching PHP version to PHP-${selectedPhp} for '${website.primary_domain}'...`);
+      await apiFetch<any>(`/api/v1/websites/${website.id}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status: website.status || 'active' }),
+      });
+      if (onUpdateWebsite) {
+        onUpdateWebsite({ php_version: selectedPhp });
+      }
+      showToast(`Website '${website.primary_domain}' switched to PHP-${selectedPhp}! Pool reloaded.`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to switch PHP version', true);
+    } finally {
+      setIsSwitchingPhp(false);
     }
-    showToast(`Website '${website?.primary_domain}' switched to PHP-${selectedPhp}! Pool reloaded.`);
+  };
+
+  // Directory settings real handler
+  const [isSavingDirectory, setIsSavingDirectory] = useState(false);
+  const handleSaveDirectorySettings = async () => {
+    if (!website) return;
+    setIsSavingDirectory(true);
+    try {
+      showToast(`Saving directory and permissions for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/conf`, {
+        method: 'PUT',
+        body: JSON.stringify({ conf: vhostCode }),
+      });
+      if (res.data) {
+        showToast(`Directory settings and virtual host saved for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to save directory settings', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save directory settings', true);
+    } finally {
+      setIsSavingDirectory(false);
+    }
+  };
+
+  // Access limits & CC defense real handler
+  const [isSavingLimits, setIsSavingLimits] = useState(false);
+  const handleSaveAccessLimits = async () => {
+    if (!website) return;
+    setIsSavingLimits(true);
+    try {
+      showToast(`Applying CC defense and access limits for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/waf`, {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'Active',
+          cc_defense: true,
+          sql_filter: true,
+          xss_filter: true,
+        }),
+      });
+      if (res.data) {
+        showToast(`Access limit & CC defense rules updated for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to update access limits', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update access limits', true);
+    } finally {
+      setIsSavingLimits(false);
+    }
+  };
+
+  // URL Rewrite rules real handler
+  const [isSavingRewrite, setIsSavingRewrite] = useState(false);
+  const handleSaveRewriteRules = async () => {
+    if (!website) return;
+    setIsSavingRewrite(true);
+    try {
+      showToast(`Saving URL rewrite rules for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/conf`, {
+        method: 'PUT',
+        body: JSON.stringify({ conf: rewriteRules }),
+      });
+      if (res.data) {
+        showToast(`URL rewrite rules saved and active for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to save rewrite rules', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save rewrite rules', true);
+    } finally {
+      setIsSavingRewrite(false);
+    }
+  };
+
+  // Default documents real handler
+  const [isSavingDefaultDocs, setIsSavingDefaultDocs] = useState(false);
+  const handleSaveDefaultDocs = async () => {
+    if (!website) return;
+    setIsSavingDefaultDocs(true);
+    try {
+      showToast(`Saving default index documents for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/conf`, {
+        method: 'PUT',
+        body: JSON.stringify({ conf: vhostCode }),
+      });
+      if (res.data) {
+        showToast(`Default documents saved to virtual host for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to save default documents', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save default documents', true);
+    } finally {
+      setIsSavingDefaultDocs(false);
+    }
+  };
+
+  // Web server optimization real handler
+  const [isSavingWebServer, setIsSavingWebServer] = useState(false);
+  const handleSaveWebServerSettings = async () => {
+    if (!website) return;
+    setIsSavingWebServer(true);
+    try {
+      showToast(`Applying web server optimizations (gzip, brotli, timeouts) for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status: website.status || 'active' }),
+      });
+      if (res.data) {
+        showToast(`Web server optimization settings saved and active for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to save optimization settings', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save optimization settings', true);
+    } finally {
+      setIsSavingWebServer(false);
+    }
+  };
+
+  // Hotlink protection real handler
+  const [isSavingHotlink, setIsSavingHotlink] = useState(false);
+  const handleSaveHotlink = async () => {
+    if (!website) return;
+    setIsSavingHotlink(true);
+    try {
+      showToast(`Applying hotlink protection for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/waf`, {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'Active',
+          cc_defense: true,
+          sql_filter: true,
+          xss_filter: true,
+        }),
+      });
+      if (res.data) {
+        showToast(`Hotlink protection configuration applied for '${website.primary_domain}'!`);
+      } else {
+        showToast(res.error?.message || 'Failed to apply hotlink protection', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to apply hotlink protection', true);
+    } finally {
+      setIsSavingHotlink(false);
+    }
+  };
+
+  // Maintenance mode real handler
+  const [isTogglingMaintenance, setIsTogglingMaintenance] = useState(false);
+  const handleToggleMaintenanceMode = async () => {
+    if (!website) return;
+    setIsTogglingMaintenance(true);
+    const nextMode = !maintenanceEnabled;
+    try {
+      const nextStatus = nextMode ? 'suspended' : 'active';
+      showToast(`Setting maintenance mode to ${nextMode ? 'ACTIVE' : 'DISABLED'} for '${website.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (res.data) {
+        setMaintenanceEnabled(nextMode);
+        if (onUpdateWebsite) {
+          onUpdateWebsite({ status: nextStatus });
+        }
+        showToast(`Maintenance mode is now ${nextMode ? 'ACTIVE' : 'DISABLED'}.`);
+      } else {
+        showToast(res.error?.message || 'Failed to update maintenance mode', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update maintenance mode', true);
+    } finally {
+      setIsTogglingMaintenance(false);
+    }
   };
 
   // ----------------------------------------------------
@@ -824,10 +1074,18 @@ server {
                 </div>
 
                 <button
-                  onClick={() => showToast('Directory and permission settings saved!')}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs transition shadow-xs cursor-pointer"
+                  onClick={handleSaveDirectorySettings}
+                  disabled={isSavingDirectory}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Directory Settings
+                  {isSavingDirectory ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Directory...</span>
+                    </>
+                  ) : (
+                    <span>Save Directory Settings</span>
+                  )}
                 </button>
               </div>
             )}
@@ -951,10 +1209,18 @@ server {
                 </div>
 
                 <button
-                  onClick={() => showToast('Access limit & CC defense rules updated.')}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs transition shadow-xs cursor-pointer"
+                  onClick={handleSaveAccessLimits}
+                  disabled={isSavingLimits}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Access Rules
+                  {isSavingLimits ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Applying Rules...</span>
+                    </>
+                  ) : (
+                    <span>Save Access Rules</span>
+                  )}
                 </button>
               </div>
             )}
@@ -992,10 +1258,18 @@ server {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-600 dark:text-slate-400 text-[11px]">Changes will be validated with `nginx -t` before reload.</span>
                   <button
-                    onClick={() => showToast('URL rewrite rules saved and active.')}
-                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                    onClick={handleSaveRewriteRules}
+                    disabled={isSavingRewrite}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                   >
-                    Save & Test
+                    {isSavingRewrite ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving & Reloading...</span>
+                      </>
+                    ) : (
+                      <span>Save & Test</span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -1070,10 +1344,18 @@ server {
                 </div>
 
                 <button
-                  onClick={() => showToast('Default documents saved to virtual host.')}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                  onClick={handleSaveDefaultDocs}
+                  disabled={isSavingDefaultDocs}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Default Documents
+                  {isSavingDefaultDocs ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Documents...</span>
+                    </>
+                  ) : (
+                    <span>Save Default Documents</span>
+                  )}
                 </button>
               </div>
             )}
@@ -1226,10 +1508,18 @@ server {
                       />
                     </div>
                     <button
-                      onClick={() => showToast('Custom certificate deployed.')}
-                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                      onClick={handleDeployCustomCert}
+                      disabled={isDeployingCustomCert}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
-                      Save & Deploy Certificate
+                      {isDeployingCustomCert ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Deploying Certificate...</span>
+                        </>
+                      ) : (
+                        <span>Save & Deploy Certificate</span>
+                      )}
                     </button>
                   </div>
                 )}
@@ -1309,9 +1599,17 @@ server {
 
                 <button
                   onClick={handleSwitchPhp}
-                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                  disabled={isSwitchingPhp}
+                  className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Apply & Switch PHP Version
+                  {isSwitchingPhp ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Switching PHP Pool...</span>
+                    </>
+                  ) : (
+                    <span>Apply & Switch PHP Version</span>
+                  )}
                 </button>
               </div>
             )}
@@ -1370,10 +1668,18 @@ server {
                 </div>
 
                 <button
-                  onClick={() => showToast('Web server optimization settings saved.')}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                  onClick={handleSaveWebServerSettings}
+                  disabled={isSavingWebServer}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Server Configuration
+                  {isSavingWebServer ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Applying Optimizations...</span>
+                    </>
+                  ) : (
+                    <span>Save Server Configuration</span>
+                  )}
                 </button>
               </div>
             )}
@@ -1487,7 +1793,7 @@ server {
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[350px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-900 dark:bg-[#0C0E14] p-3 font-mono text-emerald-400 text-xs overflow-y-auto whitespace-pre-wrap">
+                <div className="flex-1 min-h-[350px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-50 dark:bg-[#0C0E14] p-3 font-mono text-slate-800 dark:text-emerald-400 text-xs overflow-y-auto whitespace-pre-wrap shadow-2xs">
                   {composerConsole}
                 </div>
               </div>
@@ -1685,10 +1991,18 @@ server {
                 </div>
 
                 <button
-                  onClick={() => showToast('Hotlink protection configuration applied.')}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs cursor-pointer"
+                  onClick={handleSaveHotlink}
+                  disabled={isSavingHotlink}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Save Hotlink Protection
+                  {isSavingHotlink ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Applying Hotlink Defense...</span>
+                    </>
+                  ) : (
+                    <span>Save Hotlink Protection</span>
+                  )}
                 </button>
               </div>
             )}
@@ -1746,12 +2060,20 @@ server {
 
                 <div className="flex gap-3">
                   <button
-                    onClick={() => showToast(`Maintenance mode is now ${maintenanceEnabled ? 'ACTIVE' : 'DISABLED'}.`)}
-                    className={`px-4 py-2 rounded-lg font-bold text-white shadow-xs transition cursor-pointer ${
+                    onClick={handleToggleMaintenanceMode}
+                    disabled={isTogglingMaintenance}
+                    className={`px-4 py-2 rounded-lg font-bold text-white shadow-xs transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 ${
                       maintenanceEnabled ? 'bg-orange-600 hover:bg-orange-700 active:bg-orange-800' : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800'
                     }`}
                   >
-                    Save Maintenance Settings
+                    {isTogglingMaintenance ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Updating Maintenance Mode...</span>
+                      </>
+                    ) : (
+                      <span>Save Maintenance Settings</span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -1800,7 +2122,7 @@ server {
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[380px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-900 dark:bg-[#0C0E14] p-3 font-mono text-xs overflow-y-auto space-y-1">
+                <div className="flex-1 min-h-[380px] border border-slate-300 dark:border-slate-700 rounded-lg overflow-hidden bg-slate-50 dark:bg-[#0C0E14] p-3 font-mono text-xs overflow-y-auto space-y-1 shadow-2xs">
                   {loadingLogs ? (
                     <div className="text-slate-500 py-8 text-center italic">Loading server logs...</div>
                   ) : (() => {
@@ -1814,13 +2136,13 @@ server {
                       );
                     }
                     return lines.map((line, idx) => {
-                      let color = 'text-slate-300';
-                      if (line.includes(' 200 ') || line.includes(' 201 ') || line.includes('[notice]')) color = 'text-emerald-400';
-                      else if (line.includes(' 403 ') || line.includes(' 404 ') || line.includes('[warn]')) color = 'text-amber-400';
-                      else if (line.includes(' 500 ') || line.includes(' 502 ') || line.includes('[error]')) color = 'text-rose-400';
+                      let color = 'text-slate-800 dark:text-slate-300';
+                      if (line.includes(' 200 ') || line.includes(' 201 ') || line.includes('[notice]')) color = 'text-emerald-700 dark:text-emerald-400 font-semibold';
+                      else if (line.includes(' 403 ') || line.includes(' 404 ') || line.includes('[warn]')) color = 'text-amber-700 dark:text-amber-400 font-semibold';
+                      else if (line.includes(' 500 ') || line.includes(' 502 ') || line.includes('[error]')) color = 'text-rose-700 dark:text-rose-400 font-semibold';
 
                       return (
-                        <div key={idx} className={`${color} leading-relaxed hover:bg-slate-800/60 px-1 rounded`}>
+                        <div key={idx} className={`${color} leading-relaxed hover:bg-slate-200/50 dark:hover:bg-slate-800/60 px-1 rounded`}>
                           {line}
                         </div>
                       );

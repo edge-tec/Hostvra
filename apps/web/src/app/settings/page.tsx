@@ -2578,11 +2578,11 @@ export default function SettingsPage() {
               </div>
 
               {/* Live Migration Status & Logs Terminal */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-300 flex flex-col justify-between h-80">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
+              <div className="bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-800 dark:text-slate-300 flex flex-col justify-between h-80 shadow-2xs">
+                <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2 mb-2">
                   <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${activeMigrationJob?.status === 'completed' ? 'bg-emerald-500' : activeMigrationJob?.status === 'failed' ? 'bg-rose-500' : activeMigrationJob ? 'bg-amber-500 animate-pulse' : 'bg-slate-600'}`} />
-                    <span className="font-bold text-[11px] text-white uppercase">Status: {activeMigrationJob?.status || 'IDLE'}</span>
+                    <span className={`w-2 h-2 rounded-full ${activeMigrationJob?.status === 'completed' ? 'bg-emerald-500' : activeMigrationJob?.status === 'failed' ? 'bg-rose-500' : activeMigrationJob ? 'bg-amber-500 animate-pulse' : 'bg-slate-400'}`} />
+                    <span className="font-bold text-[11px] text-slate-900 dark:text-white uppercase">Status: {activeMigrationJob?.status || 'IDLE'}</span>
                   </div>
                   {activeMigrationJob && activeMigrationJob.status !== 'completed' && activeMigrationJob.status !== 'failed' && (
                     <button
@@ -2596,7 +2596,7 @@ export default function SettingsPage() {
                           showToast(e.message || 'Failed to cancel', true);
                         }
                       }}
-                      className="text-rose-400 hover:text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded border border-rose-900 bg-rose-950/40"
+                      className="text-rose-600 dark:text-rose-400 hover:text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 cursor-pointer"
                     >
                       Cancel Job
                     </button>
@@ -2605,11 +2605,11 @@ export default function SettingsPage() {
 
                 {activeMigrationJob && (
                   <div className="mb-2">
-                    <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                    <div className="flex justify-between text-[11px] text-slate-600 dark:text-slate-400 mb-1">
                       <span>{activeMigrationJob.current_step || 'Initializing...'}</span>
-                      <span className="font-bold text-emerald-400">{Math.round(activeMigrationJob.progress || 0)}%</span>
+                      <span className="font-bold text-emerald-600 dark:text-emerald-400">{Math.round(activeMigrationJob.progress || 0)}%</span>
                     </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
                       <div className="h-full bg-emerald-500 transition-all duration-300 rounded-full" style={{ width: `${activeMigrationJob.progress || 0}%` }} />
                     </div>
                   </div>
@@ -2620,13 +2620,13 @@ export default function SettingsPage() {
                     activeMigrationJob.logs.map((log: any, idx: number) => (
                       <div key={idx} className="flex gap-2">
                         <span className="text-slate-500">{new Date(log.timestamp).toLocaleTimeString()}</span>
-                        <span className={log.level === 'SUCCESS' ? 'text-emerald-400' : log.level === 'ERROR' ? 'text-rose-400' : log.level === 'WARN' ? 'text-amber-400' : 'text-slate-300'}>
+                        <span className={log.level === 'SUCCESS' ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : log.level === 'ERROR' ? 'text-rose-700 dark:text-rose-400 font-semibold' : log.level === 'WARN' ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-slate-800 dark:text-slate-300'}>
                           [{log.level}] {log.message}
                         </span>
                       </div>
                     ))
                   ) : (
-                    <div className="text-slate-600 italic">No active migration in progress. Fill out the target server credentials to initiate live asset sync.</div>
+                    <div className="text-slate-500 dark:text-slate-400 italic">No active migration in progress. Fill out the target server credentials to initiate live asset sync.</div>
                   )}
                 </div>
               </div>

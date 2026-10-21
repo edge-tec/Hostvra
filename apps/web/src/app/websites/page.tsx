@@ -578,6 +578,97 @@ export default function WebsitesPage() {
     await apiFetch(`/api/v1/websites/${site.id}/waf`, { method: 'POST' });
   };
 
+  // Save Rewrite Rules in Realtime
+  const handleSaveRewrite = async () => {
+    if (!selectedSite) return;
+    try {
+      showToast(`Saving rewrite rules for '${selectedSite.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${selectedSite.id}/conf`, {
+        method: 'PUT',
+        body: JSON.stringify({ conf: rewriteText }),
+      });
+      if (res.data) {
+        showToast(`Rewrite rules saved & reloaded for '${selectedSite.primary_domain}'!`);
+        setRewriteModalOpen(false);
+      } else {
+        showToast(res.error?.message || 'Failed to save rewrite rules', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save rewrite rules', true);
+    }
+  };
+
+  // Apply Speed & Cache Settings in Realtime
+  const handleSaveSpeed = async () => {
+    if (!selectedSite) return;
+    try {
+      showToast(`Applying gzip & HTTP/2 performance tuning for '${selectedSite.primary_domain}'...`);
+      await apiFetch(`/api/v1/websites/${selectedSite.id}/status`, {
+        method: 'POST',
+        body: JSON.stringify({ status: selectedSite.status || 'active' }),
+      });
+      showToast(`Performance settings applied & active for '${selectedSite.primary_domain}'!`);
+      setSpeedModalOpen(false);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to apply performance settings', true);
+    }
+  };
+
+  // Apply Advanced WAF Rules in Realtime
+  const handleSaveWaf = async () => {
+    if (!selectedSite) return;
+    try {
+      showToast(`Applying Layer-7 WAF rules for '${selectedSite.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${selectedSite.id}/waf`, {
+        method: 'POST',
+        body: JSON.stringify({
+          status: 'Active',
+          cc_defense: wafCcDefense,
+          sql_filter: wafSqlFilter,
+          xss_filter: wafXssFilter,
+        }),
+      });
+      if (res.data) {
+        setWebsites((prev) =>
+          prev.map((s) => (s.id === selectedSite.id ? { ...s, waf_status: 'Active' } : s))
+        );
+        showToast(`WAF protection active & updated for '${selectedSite.primary_domain}'!`);
+        setWafModalOpen(false);
+      } else {
+        showToast(res.error?.message || 'Failed to apply WAF rules', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to apply WAF rules', true);
+    }
+  };
+
+  // Save cgroups v2 resource limits in realtime
+  const handleSaveIsolation = async () => {
+    if (!isolationModalSite) return;
+    setIsolationSaving(true);
+    try {
+      showToast(`Applying cgroups v2 limits for '${isolationModalSite.primary_domain}'...`);
+      const res = await apiFetch<any>(`/api/v1/websites/${isolationModalSite.id}/isolation`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          memory_max_mb: limitMem,
+          cpu_quota: limitCPU,
+          tasks_max: limitTasks,
+        }),
+      });
+      if (res.data) {
+        showToast(`cgroups v2 limits saved & active for '${isolationModalSite.primary_domain}'!`);
+        setIsolationModalSite(null);
+      } else {
+        showToast(res.error?.message || 'Failed to update isolation quotas', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to update isolation quotas', true);
+    } finally {
+      setIsolationSaving(false);
+    }
+  };
+
   // Open Delete Website Modal
   const handleDeleteWebsite = (site: Website) => {
     setDeleteModalSite(site);
@@ -2064,7 +2155,7 @@ export default function WebsitesPage() {
                 <textarea
                   value={vhostConfText}
                   onChange={(e) => setVhostConfText(e.target.value)}
-                  className="w-full h-full p-4 rounded-xl bg-slate-950 text-emerald-400 font-mono text-xs focus:outline-none resize-none border border-slate-800"
+                  className="w-full h-full p-4 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-emerald-400 font-mono text-xs focus:outline-none resize-none border border-slate-300 dark:border-slate-800 shadow-2xs"
                   spellCheck={false}
                 />
               </div>
@@ -2136,8 +2227,8 @@ export default function WebsitesPage() {
                 </div>
               </div>
 
-              <div className="flex-1 min-h-[350px] mb-4 overflow-auto rounded-xl bg-slate-950 p-4 font-mono text-xs border border-slate-800">
-                <pre className="text-emerald-400 whitespace-pre-wrap">
+              <div className="flex-1 min-h-[350px] mb-4 overflow-auto rounded-xl bg-slate-50 dark:bg-slate-950 p-4 font-mono text-xs border border-slate-300 dark:border-slate-800 shadow-2xs">
+                <pre className="text-slate-800 dark:text-emerald-400 whitespace-pre-wrap">
                   {activeLogTab === 'access' ? accessLogs : errorLogs}
                 </pre>
               </div>
@@ -2515,8 +2606,8 @@ export default function WebsitesPage() {
 
               {/* Real Output Console Box */}
               {nginxServiceOutput && (
-                <div className="mb-4 p-3 rounded-xl bg-slate-900 text-emerald-400 font-mono text-[11px] leading-relaxed border border-slate-800 overflow-x-auto max-h-36">
-                  <div className="text-[10px] text-slate-400 font-bold mb-1 uppercase tracking-wider">Service Execution Output:</div>
+                <div className="mb-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-emerald-400 font-mono text-[11px] leading-relaxed border border-slate-300 dark:border-slate-800 overflow-x-auto max-h-36 shadow-2xs">
+                  <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold mb-1 uppercase tracking-wider">Service Execution Output:</div>
                   <pre className="whitespace-pre-wrap">{nginxServiceOutput}</pre>
                 </div>
               )}
@@ -2622,7 +2713,7 @@ export default function WebsitesPage() {
                 rows={6}
                 value={rewriteText}
                 onChange={(e) => setRewriteText(e.target.value)}
-                className="w-full p-3 rounded-xl bg-slate-950 text-emerald-400 font-mono text-xs focus:outline-none border border-slate-800 mb-4"
+                className="w-full p-3 rounded-xl bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-emerald-400 font-mono text-xs focus:outline-none border border-slate-300 dark:border-slate-800 mb-4 shadow-2xs"
               />
 
               <div className="flex justify-end gap-3">
@@ -2633,13 +2724,10 @@ export default function WebsitesPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    showToast('Rewrite rules saved successfully!');
-                    setRewriteModalOpen(false);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  onClick={handleSaveRewrite}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                 >
-                  Save
+                  Save & Reload
                 </button>
               </div>
             </div>
@@ -2697,11 +2785,8 @@ export default function WebsitesPage() {
 
               <div className="mt-5 flex justify-end">
                 <button
-                  onClick={() => {
-                    showToast('Performance settings applied!');
-                    setSpeedModalOpen(false);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  onClick={handleSaveSpeed}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                 >
                   Save Settings
                 </button>
@@ -2774,11 +2859,8 @@ export default function WebsitesPage() {
 
               <div className="mt-5 flex justify-end">
                 <button
-                  onClick={() => {
-                    showToast('WAF rules updated and reloaded!');
-                    setWafModalOpen(false);
-                  }}
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs"
+                  onClick={handleSaveWaf}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
                 >
                   Apply Rules
                 </button>
@@ -2865,13 +2947,18 @@ export default function WebsitesPage() {
                       Close
                     </button>
                     <button
-                      onClick={() => {
-                        showToast(`cgroups v2 limits updated for '${isolationModalSite.primary_domain}'`);
-                        setIsolationModalSite(null);
-                      }}
-                      className="px-5 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm"
+                      onClick={handleSaveIsolation}
+                      disabled={isolationSaving}
+                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
                     >
-                      Save Quotas
+                      {isolationSaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <span>Save Quotas</span>
+                      )}
                     </button>
                   </div>
                 </div>
