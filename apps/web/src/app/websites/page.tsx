@@ -962,106 +962,190 @@ export default function WebsitesPage() {
 
       <div className="space-y-4 font-sans text-slate-900 dark:text-slate-100">
         {/* =========================================================================
-            1. ADVANCED FUTURISTIC CLUSTER TELEMETRY HUD (Pure White Matrix)
+            1. ADVANCED EXECUTIVE CLUSTER TELEMETRY HUD (Pure Solid White - Zero Blur)
             ========================================================================= */}
-        <div className="rounded-2xl bg-white dark:bg-surface-900 text-slate-900 dark:text-white p-4 sm:p-5 border border-slate-200/90 dark:border-surface-800 shadow-sm relative overflow-hidden">
-          {/* Subtle Cyber Neon Mesh Glow (Light Adaptive) */}
-          <div className="absolute -top-16 -right-16 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute -bottom-16 -left-16 w-56 h-56 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-
-          {/* HUD Header */}
-          <div className="flex items-center justify-between mb-3.5 relative z-10">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-2xs">
-                <Radio className="w-4 h-4 animate-pulse" />
+        <div className="rounded-2xl bg-white text-slate-900 p-5 sm:p-6 border border-slate-200 shadow-xs relative overflow-hidden">
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 shadow-2xs shrink-0">
+                <Radio className="w-5 h-5 animate-pulse" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-slate-100 font-mono">
-                    Hostvra Web Server Control Matrix
-                  </h3>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 font-mono font-bold">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm font-black uppercase tracking-wider text-slate-900 font-mono">
+                    Hostvra Cluster Control Center
+                  </h2>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                    LIVE
+                    LIVE SYNCHRONIZED
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                  Ubuntu 24.04 LTS • High-Performance VirtualHost Clustering
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  Ubuntu 24.04 LTS • Dual-Port (80+443) Binding • HTTP/2 & TLS 1.3 Active
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Quick Action Cockpit Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                disabled={nginxServiceLoading !== null}
+                onClick={() => handleNginxAction('test')}
+                className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+                title="Test Nginx configuration syntax (nginx -t)"
+              >
+                <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                <span>Test Syntax</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={nginxServiceLoading !== null}
+                onClick={() => handleNginxAction('reload')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200 text-emerald-700 border border-emerald-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+                title="Reload Nginx workers with zero downtime"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${nginxServiceLoading === 'reload' ? 'animate-spin' : ''}`} />
+                <span>Reload Nginx</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={repairingRouting}
+                onClick={handleRepairAllRouting}
+                className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 active:bg-indigo-200 text-indigo-700 border border-indigo-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-2xs"
+                title="Repair all domain routing & dual-port 80+443 bindings"
+              >
+                <Zap className={`w-3.5 h-3.5 ${repairingRouting ? 'animate-spin' : ''}`} />
+                <span>Repair Routing</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setHudExpanded(!hudExpanded)}
-                className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center gap-1 font-semibold transition cursor-pointer shadow-2xs"
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-2xs"
               >
-                <span>{hudExpanded ? 'Hide Telemetry' : 'Show Telemetry'}</span>
+                <span>{hudExpanded ? 'Hide' : 'Show'}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${hudExpanded ? 'rotate-180' : ''}`} />
               </button>
             </div>
           </div>
 
+          {/* Quick Output Banner if command executed */}
+          {nginxServiceOutput && (
+            <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-800 font-mono text-xs shadow-2xs">
+              <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">Command Output:</div>
+              <pre className="whitespace-pre-wrap">{nginxServiceOutput}</pre>
+            </div>
+          )}
+
           {/* HUD 4-Tile Grid */}
           {hudExpanded && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs relative z-10 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-4">
               {/* Tile 1: VirtualHosts */}
-              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-emerald-400/50 transition-all shadow-2xs group flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-100/70 dark:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0 group-hover:scale-105 transition-transform">
-                  <Globe className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">VirtualHosts</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-base font-black font-mono text-slate-900 dark:text-white">{metrics.active} / {metrics.total}</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-200 dark:border-emerald-800/60">Running</span>
+              <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-xs transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                    <Globe className="w-4 h-4" />
                   </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 font-mono">
+                    {metrics.active} Active
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">VirtualHosts Routing</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-2xl font-black font-mono text-slate-900">{metrics.active} / {metrics.total}</span>
+                    <span className="text-xs text-slate-500 font-medium">Clustered</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                    <div
+                      className="bg-emerald-500 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${metrics.total > 0 ? (metrics.active / metrics.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                    {metrics.total - metrics.active} suspended • 100% vHost synced
+                  </span>
                 </div>
               </div>
 
-              {/* Tile 2: SSL Matrix */}
-              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-teal-400/50 transition-all shadow-2xs group flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-100/70 dark:bg-teal-500/20 border border-teal-200 dark:border-teal-500/30 flex items-center justify-center text-teal-600 dark:text-teal-400 shrink-0 group-hover:scale-105 transition-transform">
-                  <Lock className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">SSL Encryption</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-base font-black font-mono text-teal-600 dark:text-teal-300">{metrics.sslPercent}%</span>
-                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 font-bold border border-teal-200 dark:border-teal-800/60 truncate">TLS 1.3 Active</span>
+              {/* Tile 2: SSL Encryption */}
+              <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-teal-500 hover:shadow-xs transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600">
+                    <Lock className="w-4 h-4" />
                   </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 font-bold border border-teal-200 font-mono">
+                    TLS 1.3
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">SSL Security Matrix</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-2xl font-black font-mono text-teal-600">{metrics.sslPercent}%</span>
+                    <span className="text-xs text-slate-500 font-medium">Encrypted</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                    <div
+                      className="bg-teal-500 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${metrics.sslPercent}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                    Dual 80+443 HTTPS auto-redirect enabled
+                  </span>
                 </div>
               </div>
 
               {/* Tile 3: Web Server Engine */}
-              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-sky-400/50 transition-all shadow-2xs group flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-sky-100/70 dark:bg-sky-500/20 border border-sky-200 dark:border-sky-500/30 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0 group-hover:scale-105 transition-transform">
-                  <Cpu className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">Web Engine</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-sm font-black font-mono text-slate-900 dark:text-white">Nginx 1.24.0</span>
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-                    </span>
+              <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:shadow-xs transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-600">
+                    <Cpu className="w-4 h-4" />
                   </div>
+                  <span className="inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 font-mono">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Online
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">Web Server Engine</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-xl font-black font-mono text-slate-900">Nginx 1.24.0</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                    <div className="bg-sky-500 h-full rounded-full w-full" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                    Event-driven async core • HTTP/2 • Gzip active
+                  </span>
                 </div>
               </div>
 
-              {/* Tile 4: OWASP WAF Defense */}
-              <div className="p-3.5 rounded-xl bg-slate-50/80 dark:bg-surface-800/80 border border-slate-200/90 dark:border-surface-700/80 hover:bg-white dark:hover:bg-surface-800 hover:border-indigo-400/50 transition-all shadow-2xs group flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-100/70 dark:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 group-hover:scale-105 transition-transform">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">OWASP WAF Shield</span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="text-sm font-black text-indigo-600 dark:text-indigo-300">L7 Protected</span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono">CC/SQLi/XSS</span>
+              {/* Tile 4: OWASP WAF Shield */}
+              <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-xs transition-all flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+                    <ShieldCheck className="w-4 h-4" />
                   </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 font-mono">
+                    L7 Armor
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">OWASP WAF & Quotas</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-xl font-black text-indigo-700">Protected</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                    <div className="bg-indigo-500 h-full rounded-full w-full" />
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                    Anti-CC • SQLi / XSS filter • cgroups v2 isolated
+                  </span>
                 </div>
               </div>
             </div>
@@ -1069,34 +1153,36 @@ export default function WebsitesPage() {
         </div>
 
         {/* =========================================================================
-            2. TOP PROJECT RUNTIME NAVIGATION TABS (With Live Badges)
+            2. TOP PROJECT RUNTIME NAVIGATION TABS (Solid Pure White Strip)
             ========================================================================= */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 gap-3">
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 dark:bg-slate-800/70 rounded-xl overflow-x-auto no-scrollbar max-w-full">
+        <div className="bg-white border border-slate-200 rounded-2xl p-2 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar max-w-full">
             {[
-              { id: 'php', label: 'PHP Project', count: projectCounts.php, color: 'text-indigo-600 dark:text-indigo-400' },
-              { id: 'nodejs', label: 'Node.js Project', count: projectCounts.nodejs, color: 'text-emerald-600 dark:text-emerald-400' },
-              { id: 'proxy', label: 'Proxy Project', count: projectCounts.proxy, color: 'text-sky-600 dark:text-sky-400' },
-              { id: 'go', label: 'Go Project', count: projectCounts.go, color: 'text-cyan-600 dark:text-cyan-400' },
-              { id: 'python', label: 'Python Project', count: projectCounts.python, color: 'text-amber-600 dark:text-amber-400' },
+              { id: 'php', label: 'PHP Project', count: projectCounts.php },
+              { id: 'nodejs', label: 'Node.js Project', count: projectCounts.nodejs },
+              { id: 'proxy', label: 'Proxy Project', count: projectCounts.proxy },
+              { id: 'go', label: 'Go Project', count: projectCounts.go },
+              { id: 'python', label: 'Python Project', count: projectCounts.python },
             ].map((tab) => (
               <button
                 key={tab.id}
                 role="tab"
                 data-tab="true"
                 onClick={() => setActiveTab(tab.id as ProjectTab)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none flex items-center gap-1.5 shrink-0 ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none flex items-center gap-2 shrink-0 ${
                   activeTab === tab.id
-                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-emerald-500/20'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-700/40'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
                 }`}
               >
                 <span>{tab.label}</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                  activeTab === tab.id
-                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-slate-200/80 dark:bg-surface-700 text-slate-500 dark:text-slate-400'
-                }`}>
+                <span
+                  className={`text-[10px] px-2 py-0.2 rounded-full font-mono font-bold ${
+                    activeTab === tab.id
+                      ? 'bg-emerald-800 text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
                   {tab.count}
                 </span>
               </button>
@@ -1105,13 +1191,10 @@ export default function WebsitesPage() {
 
           {/* Right Enterprise Edition Badge */}
           <div className="hidden sm:flex items-center gap-2 text-xs shrink-0">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-xs tracking-wide">
-              <ShieldCheck className="w-3.5 h-3.5" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs shadow-2xs">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
               <span>ENTERPRISE</span>
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Active</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
             </span>
           </div>
         </div>
