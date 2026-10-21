@@ -85,10 +85,14 @@ export const FileContextMenu: React.FC<FileContextMenuProps> = ({
   }, [onClose]);
 
   // Adjust coordinates if menu overflows window
-  const menuWidth = 220;
+  const menuWidth = 224;
   const menuHeight = 440;
-  const adjustedX = Math.min(x, window.innerWidth - menuWidth - 10);
-  const adjustedY = Math.min(y, window.innerHeight - menuHeight - 10);
+  const adjustedX = typeof window !== 'undefined'
+    ? Math.max(10, Math.min(x, window.innerWidth - menuWidth - 16))
+    : x;
+  const adjustedY = typeof window !== 'undefined'
+    ? Math.max(10, Math.min(y, window.innerHeight - menuHeight - 16))
+    : y;
 
   const ext = (item.extension || '').toLowerCase().replace(/^\./, '') || item.name.split('.').pop()?.toLowerCase() || '';
   const isArchive = ['zip', 'tar', 'gz', 'bz2', 'rar', '7z'].includes(ext);

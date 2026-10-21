@@ -99,11 +99,22 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <Header />
-        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 lg:p-8 w-full bg-white dark:bg-[#0B1120]">
-          <div className="w-full max-w-[1600px] mx-auto space-y-6">
-            {children}
-          </div>
-        </main>
+        {(() => {
+          const isFullBleed = pathname === '/files';
+          return (
+            <main
+              className={`flex-1 w-full bg-white dark:bg-[#0B1120] ${
+                isFullBleed
+                  ? 'overflow-hidden p-0'
+                  : 'overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 lg:p-8'
+              }`}
+            >
+              <div className={isFullBleed ? 'w-full h-full' : 'w-full max-w-[1600px] mx-auto space-y-6'}>
+                {children}
+              </div>
+            </main>
+          );
+        })()}
       </div>
     </div>
   );

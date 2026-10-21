@@ -20,6 +20,7 @@ import {
   Tag,
   RefreshCw,
   FolderPlus,
+  ChevronLeft,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 
@@ -84,6 +85,8 @@ interface QuickAccessSidebarProps {
   isTrashActive: boolean;
   onDropItem?: (targetPath: string, isTrash?: boolean) => void;
   onDeleteFolder?: (path: string) => void;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
@@ -98,6 +101,8 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
   isTrashActive,
   onDropItem,
   onDeleteFolder,
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
   const [data, setData] = useState<QuickAccessData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -371,12 +376,12 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
       )}
 
       <aside
-        className={`fixed md:static inset-y-0 left-0 z-50 w-72 md:w-64 lg:w-72 bg-white dark:bg-surface-900 border-r border-slate-200 dark:border-surface-800 flex flex-col transition-transform duration-200 ease-in-out shrink-0 ${
-          isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
-        }`}
+        className={`fixed md:static inset-y-0 left-0 z-50 bg-white dark:bg-surface-900 border-r border-slate-200 dark:border-surface-800 flex flex-col transition-all duration-200 ease-in-out shrink-0 overflow-hidden ${
+          isMobileOpen ? 'translate-x-0 w-72' : '-translate-x-full md:translate-x-0'
+        } ${isCollapsed ? 'md:w-0 md:opacity-0 md:border-0 md:pointer-events-none' : 'w-72 md:w-60 lg:w-64 xl:w-72 md:opacity-100'}`}
       >
         {/* Sidebar Header & Quick Filter */}
-        <div className="p-3 border-b border-slate-200 dark:border-surface-800">
+        <div className="p-3 border-b border-slate-200 dark:border-surface-800 min-w-[240px]">
           <div className="flex items-center justify-between mb-2.5">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
@@ -395,10 +400,20 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
                 type="button"
                 onClick={fetchQuickAccess}
                 title="Refresh Quick Access"
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               </button>
+              {onToggleCollapse && (
+                <button
+                  type="button"
+                  onClick={onToggleCollapse}
+                  title="Collapse Sidebar"
+                  className="hidden md:flex p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={onCloseMobile}
