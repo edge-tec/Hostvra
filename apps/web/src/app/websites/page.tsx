@@ -39,6 +39,15 @@ import {
   Terminal,
   Server as ServerIcon,
   Database as DatabaseIcon,
+  Activity,
+  Radio,
+  HardDrive,
+  Sparkles,
+  ArrowUpRight,
+  LockKeyhole,
+  Wifi,
+  Calendar,
+  Flame,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
@@ -679,28 +688,85 @@ export default function WebsitesPage() {
     }
   };
 
-  // Sparkline Generator
-  const renderSparkline = (points?: number[]) => {
+  // HUD Telemetry State
+  const [hudExpanded, setHudExpanded] = useState(true);
+  const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
+
+  const handleCopyText = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedTarget(text);
+    showToast(`${label} copied to clipboard`);
+    setTimeout(() => setCopiedTarget(null), 2000);
+  };
+
+  // High-performance metrics computation
+  const metrics = useMemo(() => {
+    const total = websites.length;
+    const active = websites.filter((s) => s.status === 'active').length;
+    const sslSecured = websites.filter((s) => s.ssl_days_left && s.ssl_days_left > 0).length;
+    const wafSecured = websites.filter((s) => s.waf_status === 'Active').length;
+    const totalRequests = websites.reduce((acc, s) => acc + (s.requests_count || 0), 0);
+    const sslPercent = total > 0 ? Math.round((sslSecured / total) * 100) : 100;
+    return { total, active, sslSecured, wafSecured, totalRequests, sslPercent };
+  }, [websites]);
+
+  // Project Tab Counts computation
+  const projectCounts = useMemo(() => {
+    let php = 0, nodejs = 0, proxy = 0, go = 0, python = 0;
+    for (const s of websites) {
+      const t = s.app_type?.toLowerCase() || 'php';
+      if (t === 'php' || t === 'static' || t === 'wordpress') php++;
+      else if (t === 'nodejs') nodejs++;
+      else if (t === 'proxy') proxy++;
+      else if (t === 'go') go++;
+      else if (t === 'python') python++;
+      else php++;
+    }
+    return { php, nodejs, proxy, go, python, total: websites.length };
+  }, [websites]);
+
+  // Futuristic Neon Sparkline Generator
+  const renderSparkline = (points?: number[], id: string = 'traffic') => {
     const data = points && points.length > 0 ? points : [4, 6, 8, 5, 9, 14, 8, 12, 18, 10, 15];
     const max = Math.max(...data, 1);
-    const width = 80;
-    const height = 18;
+    const width = 84;
+    const height = 22;
     const step = width / (data.length - 1);
     const coords = data.map((val, idx) => {
       const x = idx * step;
-      const y = height - (val / max) * (height - 4) - 2;
-      return `${x},${y}`;
+      const y = height - (val / max) * (height - 6) - 3;
+      return [x, y];
     });
+    const pointsStr = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+    const areaStr = `${pointsStr} ${width},${height} 0,${height}`;
+    const gradId = `sparkline-grad-${id.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
     return (
-      <svg className="w-20 h-4.5 overflow-visible" viewBox={`0 0 ${width} ${height}`}>
+      <svg className="w-21 h-5 overflow-visible" viewBox={`0 0 ${width} ${height}`}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <polygon points={areaStr} fill={`url(#${gradId})`} />
         <polyline
           fill="none"
-          stroke="#20a53a"
-          strokeWidth="1.5"
+          stroke="#10b981"
+          strokeWidth="1.8"
           strokeLinecap="round"
           strokeLinejoin="round"
-          points={coords.join(' ')}
+          points={pointsStr}
         />
+        {coords.length > 0 && (
+          <circle
+            cx={coords[coords.length - 1][0]}
+            cy={coords[coords.length - 1][1]}
+            r="2.2"
+            fill="#10b981"
+            className="animate-pulse"
+          />
+        )}
       </svg>
     );
   };
@@ -729,47 +795,161 @@ export default function WebsitesPage() {
 
       <div className="space-y-4 font-sans text-slate-900 dark:text-slate-100">
         {/* =========================================================================
-            1. TOP PROJECT RUNTIME NAVIGATION TABS
+            1. FUTURISTIC CLUSTER TELEMETRY HUD (Collapsible Cockpit Overview)
+            ========================================================================= */}
+        <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-surface-900 to-slate-950 text-white p-3.5 sm:p-4 border border-slate-800 shadow-xl relative overflow-hidden">
+          {/* Subtle Cyberpunk Mesh Glow */}
+          <div className="absolute -top-12 -right-12 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+
+          {/* HUD Header */}
+          <div className="flex items-center justify-between mb-3 relative z-10">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <Radio className="w-3.5 h-3.5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Hostvra Web Server Control Matrix
+                  </h3>
+                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono font-bold">
+                    LIVE
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Ubuntu 24.04 LTS • High-Performance VirtualHost Clustering
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setHudExpanded(!hudExpanded)}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 font-semibold transition cursor-pointer"
+              >
+                <span>{hudExpanded ? 'Hide Telemetry' : 'Show Telemetry'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${hudExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* HUD 4-Tile Grid */}
+          {hudExpanded && (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 text-xs relative z-10 pt-1">
+              {/* Tile 1: VirtualHosts */}
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">VirtualHosts</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base font-black font-mono text-white">{metrics.active} / {metrics.total}</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">Running</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tile 2: SSL Matrix */}
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-teal-500/20 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">SSL Encryption</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base font-black font-mono text-teal-300">{metrics.sslPercent}%</span>
+                    <span className="text-[10px] text-slate-400 truncate">TLS 1.3 Active</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tile 3: Web Server Engine */}
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">Web Engine</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold font-mono text-white">Nginx 1.24.0</span>
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tile 4: OWASP WAF Defense */}
+              <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 backdrop-blur-xs flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 font-semibold block uppercase tracking-wider">OWASP WAF Shield</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-indigo-300">L7 Protected</span>
+                    <span className="text-[10px] text-slate-400 font-mono">CC/SQLi/XSS</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* =========================================================================
+            2. TOP PROJECT RUNTIME NAVIGATION TABS (With Live Badges)
             ========================================================================= */}
         <div className="flex flex-wrap items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 gap-3">
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl">
+          <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 dark:bg-slate-800/70 rounded-xl overflow-x-auto no-scrollbar max-w-full">
             {[
-              { id: 'php', label: 'PHP Project' },
-              { id: 'nodejs', label: 'Node.js Project' },
-              { id: 'proxy', label: 'Proxy Project' },
-              { id: 'go', label: 'Go Project' },
-              { id: 'python', label: 'Python Project' },
+              { id: 'php', label: 'PHP Project', count: projectCounts.php, color: 'text-indigo-600 dark:text-indigo-400' },
+              { id: 'nodejs', label: 'Node.js Project', count: projectCounts.nodejs, color: 'text-emerald-600 dark:text-emerald-400' },
+              { id: 'proxy', label: 'Proxy Project', count: projectCounts.proxy, color: 'text-sky-600 dark:text-sky-400' },
+              { id: 'go', label: 'Go Project', count: projectCounts.go, color: 'text-cyan-600 dark:text-cyan-400' },
+              { id: 'python', label: 'Python Project', count: projectCounts.python, color: 'text-amber-600 dark:text-amber-400' },
             ].map((tab) => (
               <button
                 key={tab.id}
                 role="tab"
                 data-tab="true"
                 onClick={() => setActiveTab(tab.id as ProjectTab)}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer select-none flex items-center gap-1.5 shrink-0 ${
                   activeTab === tab.id
-                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-emerald-500/20'
                     : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-700/40'
                 }`}
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                  activeTab === tab.id
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-slate-200/80 dark:bg-surface-700 text-slate-500 dark:text-slate-400'
+                }`}>
+                  {tab.count}
+                </span>
               </button>
             ))}
           </div>
 
           {/* Right Enterprise Edition Badge */}
-          <div className="hidden sm:flex items-center gap-2 text-xs">
+          <div className="hidden sm:flex items-center gap-2 text-xs shrink-0">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-xs tracking-wide">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>ENTERPRISE</span>
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40">
-              Active
+            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Active</span>
             </span>
           </div>
         </div>
 
         {/* =========================================================================
-            2. RESPONSIVE ACTION TOOLBAR (Clean Light / Dark Adaptive)
+            3. RESPONSIVE ACTION TOOLBAR (Futuristic Light & Dark Adaptive)
             ========================================================================= */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
           {/* Action Buttons Group */}
@@ -777,7 +957,7 @@ export default function WebsitesPage() {
             {/* Add site Primary Green Button */}
             <button
               onClick={() => setAddSiteOpen(true)}
-              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0 hover:ring-2 hover:ring-emerald-500/30"
             >
               <Plus className="w-3.5 h-3.5 text-white" />
               <span>Add site</span>
@@ -788,10 +968,13 @@ export default function WebsitesPage() {
               onClick={handleSyncDomains}
               disabled={syncingDomains}
               title="Automatically sync domains added in Hostvra into active Websites"
-              className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 font-semibold transition shadow-2xs flex items-center gap-1.5 cursor-pointer flex-shrink-0 disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/50 font-semibold transition shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncingDomains ? 'animate-spin' : ''}`} />
               <span>{syncingDomains ? 'Syncing...' : 'Sync Domains'}</span>
+              {availableDomains.some((d) => !d.has_website) && (
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+              )}
             </button>
 
             {/* Advanced Setup Dropdown */}
@@ -801,7 +984,7 @@ export default function WebsitesPage() {
                   e.stopPropagation();
                   setAdvancedSetupOpen(!advancedSetupOpen);
                 }}
-                className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1 flex-shrink-0"
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1 shrink-0"
               >
                 <span>Advanced Setup</span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
@@ -810,43 +993,47 @@ export default function WebsitesPage() {
               {advancedSetupOpen && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute left-0 top-full mt-1.5 w-48 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold animate-fadeIn"
+                  className="absolute left-0 top-full mt-1.5 w-52 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-xl py-1.5 z-40 text-xs font-semibold animate-fadeIn"
                 >
                   <button
                     onClick={() => {
                       setAdvancedSetupOpen(false);
                       showToast('Default Virtual Host set to standard 404 handler');
                     }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
                   >
-                    Default site
+                    <Globe className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Default site</span>
                   </button>
                   <button
                     onClick={() => {
                       setAdvancedSetupOpen(false);
                       showToast('Global SSL certificates loaded');
                     }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
                   >
-                    Certificate management
+                    <Lock className="w-3.5 h-3.5 text-teal-600" />
+                    <span>Certificate management</span>
                   </button>
                   <button
                     onClick={() => {
                       setAdvancedSetupOpen(false);
                       showToast('PHP-FPM global pools verified healthy');
                     }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
                   >
-                    PHP-FPM configuration
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
+                    <span>PHP-FPM configuration</span>
                   </button>
                   <button
                     onClick={() => {
                       setAdvancedSetupOpen(false);
                       setNginxControlOpen(true);
                     }}
-                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200"
+                    className="w-full text-left px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-200 flex items-center gap-2"
                   >
-                    Web Server status
+                    <Cpu className="w-3.5 h-3.5 text-sky-500" />
+                    <span>Web Server status</span>
                   </button>
                 </div>
               )}
@@ -855,7 +1042,7 @@ export default function WebsitesPage() {
             {/* Statistics */}
             <button
               onClick={() => setStatsOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1.5 flex-shrink-0"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1.5 shrink-0"
             >
               <BarChart2 className="w-3.5 h-3.5 text-slate-500" />
               <span>Statistics</span>
@@ -864,7 +1051,7 @@ export default function WebsitesPage() {
             {/* Nginx Status / Engine Control */}
             <button
               onClick={() => setNginxControlOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-mono flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer flex-shrink-0"
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-mono flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer shrink-0"
             >
               <span className="font-semibold">Nginx 1.24.0</span>
               <Play className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 fill-emerald-600 dark:fill-emerald-400" />
@@ -873,7 +1060,7 @@ export default function WebsitesPage() {
             {/* Feedback */}
             <button
               onClick={() => setFeedbackOpen(true)}
-              className="px-2.5 py-1.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 font-bold transition flex items-center gap-1 cursor-pointer flex-shrink-0"
+              className="px-2.5 py-1.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 font-bold transition flex items-center gap-1 cursor-pointer shrink-0"
             >
               <Edit3 className="w-3.5 h-3.5" />
               <span>Feedback</span>
@@ -932,7 +1119,7 @@ export default function WebsitesPage() {
         {availableDomains.some((d) => !d.has_website) && (
           <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-emerald-900/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs animate-fadeIn">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-emerald-600/10 dark:bg-emerald-400/10 flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-600/10 dark:bg-emerald-400/10 flex items-center justify-center shrink-0">
                 <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               </div>
               <div>
@@ -972,15 +1159,15 @@ export default function WebsitesPage() {
         )}
 
         {/* =========================================================================
-            3. HIGH-CONTRAST WEBSITES TABLE (aaPanel Style with Live Controls)
+            4. FUTURISTIC HIGH-USABILITY WEBSITES TABLE
             ========================================================================= */}
-        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden shadow-2xs">
+        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-collapse min-w-[920px]">
               <thead>
-                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-850 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px] tracking-wider select-none">
+                <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50/90 dark:bg-surface-850 text-slate-700 dark:text-slate-300 font-bold uppercase text-[10px] tracking-wider select-none">
                   {/* Select All Checkbox */}
-                  <th className="px-3 py-3 w-8 text-center">
+                  <th className="px-3.5 py-3 w-8 text-center">
                     <input
                       type="checkbox"
                       checked={allSelected}
@@ -990,31 +1177,31 @@ export default function WebsitesPage() {
                   </th>
 
                   {colVisible.siteName && (
-                    <th className="px-3 py-3 font-bold min-w-[170px]">Site name ↓</th>
+                    <th className="px-3 py-3 font-bold min-w-[200px]">Site name ↓</th>
                   )}
                   {colVisible.status && (
-                    <th className="px-3 py-3 font-bold min-w-[70px]">Status ↓</th>
+                    <th className="px-3 py-3 font-bold min-w-[95px]">Status ↓</th>
                   )}
                   {colVisible.backup && (
-                    <th className="px-3 py-3 font-bold min-w-[120px]">Backup / Restore</th>
+                    <th className="px-3 py-3 font-bold min-w-[125px]">Backup / Restore</th>
                   )}
                   {colVisible.quickAction && (
-                    <th className="px-3 py-3 font-bold min-w-[140px]">Quick action</th>
+                    <th className="px-3 py-3 font-bold min-w-[270px]">Quick Action Cockpit</th>
                   )}
                   {colVisible.expiration && (
                     <th className="px-3 py-3 font-bold min-w-[90px]">Expiration ↓</th>
                   )}
                   {colVisible.ssl && (
-                    <th className="px-3 py-3 font-bold min-w-[90px]">SSL ↓</th>
+                    <th className="px-3 py-3 font-bold min-w-[100px]">SSL ↓</th>
                   )}
                   {colVisible.requests && (
-                    <th className="px-3 py-3 font-bold min-w-[150px]">Requests ? ↓</th>
+                    <th className="px-3 py-3 font-bold min-w-[140px]">Requests ? ↓</th>
                   )}
                   {colVisible.waf && (
-                    <th className="px-3 py-3 font-bold min-w-[70px]">WAF</th>
+                    <th className="px-3 py-3 font-bold min-w-[85px]">WAF</th>
                   )}
                   {colVisible.operate && (
-                    <th className="px-3 py-3 font-bold min-w-[140px] text-right">Operate</th>
+                    <th className="px-3 py-3 font-bold min-w-[110px] text-right">Operate</th>
                   )}
                 </tr>
               </thead>
@@ -1055,16 +1242,18 @@ export default function WebsitesPage() {
                   filteredWebsites.map((site) => {
                     const isSelected = selectedIds.includes(site.id);
                     const isApache = site.web_server_type === 'apache';
+                    const docRoot = site.document_root || `/var/www/${site.primary_domain}/public_html`;
+                    const isCopied = copiedTarget === docRoot;
 
                     return (
                       <tr
                         key={site.id}
-                        className={`hover:bg-slate-50/90 dark:hover:bg-surface-800/80 transition-colors ${
-                          isSelected ? 'bg-emerald-50/60 dark:bg-emerald-950/20' : ''
+                        className={`group hover:bg-slate-50/95 dark:hover:bg-surface-850/80 transition-colors duration-150 ${
+                          isSelected ? 'bg-emerald-50/70 dark:bg-emerald-950/25' : ''
                         }`}
                       >
                         {/* Checkbox */}
-                        <td className="px-3 py-2.5 text-center">
+                        <td className="px-3.5 py-3 text-center">
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -1081,25 +1270,25 @@ export default function WebsitesPage() {
 
                         {/* Site Name & Engine Icon */}
                         {colVisible.siteName && (
-                          <td className="px-3 py-2.5">
-                            <div className="flex items-start gap-2">
-                              {/* Web Server Logo */}
+                          <td className="px-3 py-3">
+                            <div className="flex items-start gap-2.5">
+                              {/* Web Server Modern Logo */}
                               <div
-                                className={`w-5 h-5 rounded flex items-center justify-center font-bold text-[10px] mt-0.5 flex-shrink-0 ${
+                                className={`w-7 h-7 rounded-xl flex items-center justify-center font-bold font-mono text-[11px] mt-0.5 shrink-0 shadow-2xs transition-transform group-hover:scale-105 ${
                                   isApache
-                                    ? 'bg-red-500/10 text-red-500 border border-red-500/20'
-                                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                    ? 'bg-gradient-to-br from-red-500/20 to-rose-500/10 text-red-600 dark:text-red-400 border border-red-500/30'
+                                    : 'bg-gradient-to-br from-emerald-500/20 to-teal-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
                                 }`}
-                                title={isApache ? 'Apache HTTP Server' : 'Nginx Server'}
+                                title={isApache ? 'Apache HTTP Server' : 'Nginx High-Speed Server'}
                               >
                                 {isApache ? 'A' : 'N'}
                               </div>
 
-                              <div className="flex flex-col min-w-0">
-                                <div className="flex items-center gap-1.5">
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <button
                                     onClick={() => openSiteModal(site, 'domain')}
-                                    className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 transition truncate text-left cursor-pointer"
+                                    className="font-bold text-slate-900 dark:text-white hover:text-emerald-600 dark:hover:text-emerald-400 transition truncate text-left cursor-pointer text-xs"
                                     title={`Click to open Site modification [${site.primary_domain}]`}
                                   >
                                     {site.primary_domain}
@@ -1111,41 +1300,61 @@ export default function WebsitesPage() {
                                     title="Open website in new tab"
                                     className="text-slate-400 hover:text-emerald-500 transition p-0.5"
                                   >
-                                    <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
                                   </a>
                                   {site.app_type === 'wordpress' && (
                                     <button
                                       onClick={() => openSiteModal(site, 'wordpress')}
-                                      className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition-colors cursor-pointer flex items-center gap-1"
+                                      className="px-1.5 py-0.2 rounded text-[10px] font-black bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 hover:bg-purple-500/25 transition cursor-pointer flex items-center gap-1"
                                       title="Open WordPress Manager"
                                     >
-                                      <span className="font-black">W</span> WP
+                                      <span>W</span>
+                                      <span>WP</span>
                                     </button>
                                   )}
                                 </div>
-                                <span className="text-[11px] text-slate-500 truncate">
-                                  {site.remarks || site.primary_domain.split('.')[0]}
-                                </span>
+
+                                {/* Remarks & 1-Click Copy Document Root */}
+                                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-mono mt-0.5">
+                                  <span className="truncate max-w-[120px]">
+                                    {site.remarks || site.primary_domain.split('.')[0]}
+                                  </span>
+                                  <span className="text-slate-300 dark:text-surface-700">•</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyText(docRoot, 'Document Root')}
+                                    className="hover:text-emerald-600 dark:hover:text-emerald-400 transition flex items-center gap-1 text-[10px] truncate max-w-[160px]"
+                                    title={`Click to copy: ${docRoot}`}
+                                  >
+                                    <span className="truncate">{docRoot}</span>
+                                    {isCopied ? <Check className="w-2.5 h-2.5 text-emerald-600 shrink-0" /> : <Copy className="w-2.5 h-2.5 opacity-60 shrink-0" />}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </td>
                         )}
 
-                        {/* Status (Play / Pause Circle) */}
+                        {/* Status (Futuristic Beacon Pill) */}
                         {colVisible.status && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-3 py-3">
                             <button
                               onClick={(e) => handleToggleStatus(site, e)}
-                              title={site.status === 'active' ? 'Click to Stop / Suspend' : 'Click to Start'}
-                              className="p-1 rounded-full hover:bg-slate-200 dark:hover:bg-surface-700 transition cursor-pointer"
+                              title={site.status === 'active' ? 'Running (Click to Stop)' : 'Suspended (Click to Start)'}
+                              className="cursor-pointer"
                             >
                               {site.status === 'active' ? (
-                                <div className="w-5 h-5 rounded-full border border-emerald-500 flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:scale-105 transition">
-                                  <Play className="w-2.5 h-2.5 fill-emerald-600 dark:fill-emerald-400" />
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] hover:bg-emerald-500/20 transition shadow-2xs">
+                                  <span className="relative flex h-2 w-2 shrink-0">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                                  </span>
+                                  <span>Running</span>
                                 </div>
                               ) : (
-                                <div className="w-5 h-5 rounded-full border border-amber-500 flex items-center justify-center text-amber-500 hover:scale-105 transition">
-                                  <Pause className="w-2.5 h-2.5 fill-amber-500" />
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 font-bold text-[11px] hover:bg-amber-500/20 transition shadow-2xs">
+                                  <span className="inline-flex rounded-full h-2 w-2 bg-amber-500 shrink-0" />
+                                  <span>Paused</span>
                                 </div>
                               )}
                             </button>
@@ -1154,16 +1363,17 @@ export default function WebsitesPage() {
 
                         {/* Backup / Restore */}
                         {colVisible.backup && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-3 py-3">
                             <button
                               onClick={() => openBackupModal(site)}
                               className="flex items-center gap-2 group text-left cursor-pointer"
+                              title="Click to view backups or create snapshot"
                             >
-                              <div className="w-6 h-6 rounded bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-center text-slate-500 group-hover:text-emerald-600 transition">
+                              <div className="w-7 h-7 rounded-xl bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-center text-slate-500 group-hover:text-emerald-600 group-hover:border-emerald-500/30 transition shrink-0 shadow-2xs">
                                 <CloudDownload className="w-3.5 h-3.5" />
                               </div>
                               <div className="flex flex-col">
-                                <span className="text-amber-600 dark:text-amber-500 font-bold group-hover:underline">
+                                <span className="text-amber-600 dark:text-amber-400 font-bold text-xs group-hover:underline">
                                   {site.backup_count || 0} Backup
                                 </span>
                                 <span className="text-[10px] text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300">
@@ -1174,17 +1384,17 @@ export default function WebsitesPage() {
                           </td>
                         )}
 
-                        {/* Quick Action Icons */}
+                        {/* Quick Action Cockpit Toolbar */}
                         {colVisible.quickAction && (
-                          <td className="px-3 py-2.5">
-                            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
+                          <td className="px-3 py-3">
+                            <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-100/80 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700/80 shrink-0 w-max shadow-2xs">
                               {/* 1. File Manager (Prominent One-Click Action) */}
                               <a
                                 href={`/files?domain=${encodeURIComponent(site.primary_domain)}&path=${encodeURIComponent(site.document_root)}`}
                                 title={`Open File Manager (${site.document_root || `/var/www/${site.primary_domain}/public_html`})`}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold shadow-xs transition"
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs"
                               >
-                                <Folder className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <Folder className="w-3.5 h-3.5 text-white" />
                                 <span>File Manager</span>
                               </a>
 
@@ -1192,7 +1402,7 @@ export default function WebsitesPage() {
                               <button
                                 onClick={() => openConfModal(site)}
                                 title="Virtual Host Configuration"
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                                className="p-1 rounded-lg hover:bg-white dark:hover:bg-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <Settings className="w-3.5 h-3.5" />
                               </button>
@@ -1201,7 +1411,7 @@ export default function WebsitesPage() {
                               <button
                                 onClick={() => openLogsModal(site)}
                                 title="Site Access & Error Logs"
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                                className="p-1 rounded-lg hover:bg-white dark:hover:bg-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <FileText className="w-3.5 h-3.5" />
                               </button>
@@ -1210,7 +1420,7 @@ export default function WebsitesPage() {
                               <a
                                 href={`/terminal?cwd=${encodeURIComponent(site.document_root)}`}
                                 title={`Open Terminal at ${site.document_root}`}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                                className="p-1 rounded-lg hover:bg-white dark:hover:bg-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <Terminal className="w-3.5 h-3.5" />
                               </a>
@@ -1219,25 +1429,25 @@ export default function WebsitesPage() {
                               <a
                                 href={`/databases?search=${encodeURIComponent(site.primary_domain.split('.')[0])}`}
                                 title={`Databases for ${site.primary_domain}`}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                                className="p-1 rounded-lg hover:bg-white dark:hover:bg-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <DatabaseIcon className="w-3.5 h-3.5" />
                               </a>
 
-                              {/* 5. Directory & Permissions */}
+                              {/* 6. Directory & Permissions */}
                               <button
                                 onClick={() => openSiteModal(site, 'directory')}
                                 title="Directory & Folder Permissions"
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                                className="p-1 rounded-lg hover:bg-white dark:hover:bg-surface-700 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <Lock className="w-3.5 h-3.5" />
                               </button>
 
-                              {/* 6. PHP Version Switch Pill */}
+                              {/* 7. PHP Version Switch Pill */}
                               <button
                                 onClick={() => openPhpSwitchModal(site)}
                                 title="Click to Switch PHP Version"
-                                className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 hover:border-emerald-500 text-slate-800 dark:text-slate-200 text-[10px] font-mono font-bold transition cursor-pointer"
+                                className="px-1.5 py-0.5 rounded-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 hover:border-emerald-500 text-slate-800 dark:text-slate-200 text-[10px] font-mono font-bold transition cursor-pointer"
                               >
                                 {site.php_version || '8.2'}
                               </button>
@@ -1247,67 +1457,93 @@ export default function WebsitesPage() {
 
                         {/* Expiration */}
                         {colVisible.expiration && (
-                          <td className="px-3 py-2.5 text-slate-600 dark:text-slate-400 font-medium">
-                            <span>{site.expiration || 'Perpetual'}</span>
+                          <td className="px-3 py-3 text-slate-600 dark:text-slate-400 font-medium">
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <Calendar className="w-3 h-3 text-slate-400" />
+                              <span>{site.expiration || 'Perpetual'}</span>
+                            </div>
                           </td>
                         )}
 
                         {/* SSL */}
                         {colVisible.ssl && (
-                          <td className="px-3 py-2.5">
-                            <button
-                              onClick={() => openSslModal(site)}
-                              className="font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                            >
-                              {site.ssl_days_left ? `${site.ssl_days_left} Days` : 'Issue SSL'}
-                            </button>
+                          <td className="px-3 py-3">
+                            {site.ssl_days_left && site.ssl_days_left > 0 ? (
+                              <button
+                                onClick={() => openSslModal(site)}
+                                className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer text-xs"
+                                title="SSL Certificate Valid (Click to manage)"
+                              >
+                                <LockKeyhole className="w-3 h-3 text-emerald-600" />
+                                <span>{site.ssl_days_left} Days</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => openSslModal(site)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100 transition cursor-pointer text-[11px]"
+                                title="Click to issue Let's Encrypt / ZeroSSL"
+                              >
+                                <Zap className="w-2.5 h-2.5" />
+                                <span>Issue SSL</span>
+                              </button>
+                            )}
                           </td>
                         )}
 
-                        {/* Requests & Sparkline */}
+                        {/* Requests & Futuristic Neon Sparkline */}
                         {colVisible.requests && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-3 py-3">
                             <div className="flex flex-col gap-0.5">
-                              <span className="font-mono font-bold text-slate-900 dark:text-slate-100">
-                                {(site.requests_count || 0).toLocaleString()}
-                              </span>
-                              {renderSparkline(site.traffic_history)}
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono font-bold text-slate-900 dark:text-slate-100 text-xs">
+                                  {(site.requests_count || 0).toLocaleString()}
+                                </span>
+                                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold">reqs</span>
+                              </div>
+                              {renderSparkline(site.traffic_history, site.id)}
                             </div>
                           </td>
                         )}
 
                         {/* WAF */}
                         {colVisible.waf && (
-                          <td className="px-3 py-2.5">
+                          <td className="px-3 py-3">
                             <button
                               onClick={(e) => handleToggleWaf(site, e)}
-                              className={`font-bold text-xs hover:underline cursor-pointer ${
-                                site.waf_status === 'Active'
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-slate-400'
-                              }`}
+                              className="cursor-pointer"
+                              title="Click to toggle Layer-7 OWASP WAF"
                             >
-                              {site.waf_status || 'Active'}
+                              {site.waf_status === 'Active' ? (
+                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-400 font-bold text-[11px] shadow-2xs">
+                                  <ShieldCheck className="w-3 h-3" />
+                                  <span>Active</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-400 text-[11px]">
+                                  <Shield className="w-3 h-3" />
+                                  <span>Disabled</span>
+                                </div>
+                              )}
                             </button>
                           </td>
                         )}
 
                         {/* Operate Column (Conf, Log, 3-dots) */}
                         {colVisible.operate && (
-                          <td className="px-3 py-2.5 text-right">
-                            <div className="flex items-center justify-end gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                          <td className="px-3 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
                               <button
                                 onClick={() => openConfModal(site)}
-                                className="hover:text-emerald-700 hover:underline cursor-pointer"
+                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer"
+                                title="VirtualHost Configuration"
                               >
                                 Conf
                               </button>
 
-                              <span className="text-slate-300 dark:text-surface-700">|</span>
-
                               <button
                                 onClick={() => openLogsModal(site)}
-                                className="hover:text-emerald-700 hover:underline cursor-pointer"
+                                className="px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 transition cursor-pointer"
+                                title="Realtime Access / Error Log"
                               >
                                 Log
                               </button>
@@ -1323,17 +1559,17 @@ export default function WebsitesPage() {
                                   } else {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     const spaceBelow = window.innerHeight - rect.bottom;
-                                    const openUp = spaceBelow < 320;
+                                    const openUp = spaceBelow < 340;
                                     setDropdownPos({
                                       top: openUp ? rect.top - 6 : rect.bottom + 6,
-                                      left: Math.max(10, rect.right - 192),
+                                      left: Math.max(10, rect.right - 210),
                                       openUp,
                                     });
                                     setOpenDropdownId(site.id);
                                     setActiveDropdownSite(site);
                                   }
                                 }}
-                                className={`p-1 rounded transition cursor-pointer ${
+                                className={`p-1.5 rounded-lg transition cursor-pointer ${
                                   openDropdownId === site.id
                                     ? 'bg-slate-200 dark:bg-surface-700 text-slate-900 dark:text-white'
                                     : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800'
@@ -2692,8 +2928,21 @@ export default function WebsitesPage() {
               left: `${dropdownPos.left}px`,
               zIndex: 99999,
             }}
-            className="w-52 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-xl shadow-2xl py-1.5 text-xs font-semibold text-slate-800 dark:text-slate-100 text-left animate-fadeIn select-none ring-1 ring-black/5"
+            className="w-56 bg-white/95 dark:bg-surface-900/95 backdrop-blur-md border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl py-2 text-xs font-semibold text-slate-800 dark:text-slate-100 text-left animate-fadeIn select-none ring-1 ring-black/10"
           >
+            {/* Header info */}
+            <div className="px-3.5 pb-1.5 border-b border-slate-100 dark:border-surface-800 mb-1">
+              <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-bold">Manage Website</span>
+              <span className="font-bold text-slate-900 dark:text-white truncate block text-[11px]">
+                {activeDropdownSite.primary_domain}
+              </span>
+            </div>
+
+            {/* Section 1: Core Configuration */}
+            <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Core Configuration
+            </div>
+
             <button
               onClick={() => {
                 const s = activeDropdownSite;
@@ -2701,7 +2950,7 @@ export default function WebsitesPage() {
                 setActiveDropdownSite(null);
                 openSiteModal(s, 'domain');
               }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-bold"
+              className="w-full px-3.5 py-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-bold transition"
             >
               <Settings className="w-3.5 h-3.5" />
               <span>Site modification</span>
@@ -2714,10 +2963,10 @@ export default function WebsitesPage() {
                 setActiveDropdownSite(null);
                 openSiteModal(s, 'rewrite');
               }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+              className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200 transition"
             >
               <Code2 className="w-3.5 h-3.5 text-slate-400" />
-              <span>Rewrite rules</span>
+              <span>Rewrite rules (URL)</span>
             </button>
 
             <button
@@ -2727,9 +2976,9 @@ export default function WebsitesPage() {
                 setActiveDropdownSite(null);
                 openSiteModal(s, 'ssl');
               }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+              className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200 transition"
             >
-              <Lock className="w-3.5 h-3.5 text-slate-400" />
+              <Lock className="w-3.5 h-3.5 text-teal-500" />
               <span>SSL Certificate</span>
             </button>
 
@@ -2740,78 +2989,91 @@ export default function WebsitesPage() {
                 setActiveDropdownSite(null);
                 openSiteModal(s, 'php');
               }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
+              className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200 transition"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+              <SlidersHorizontal className="w-3.5 h-3.5 text-amber-500" />
               <span>PHP Version</span>
             </button>
 
-            <button
-              onClick={() => {
-                const s = activeDropdownSite;
-                setOpenDropdownId(null);
-                setActiveDropdownSite(null);
-                openSiteModal(s, 'limit');
-              }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200"
-            >
-              <Shield className="w-3.5 h-3.5 text-slate-400" />
-              <span>Limit access & WAF</span>
-            </button>
+            {/* Section 2: Security & Limits */}
+            <div className="border-t border-slate-100 dark:border-surface-800 my-1 pt-1">
+              <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Security & Limits
+              </div>
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  openSiteModal(s, 'limit');
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-200 transition"
+              >
+                <Shield className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Limit access & WAF</span>
+              </button>
 
-            <button
-              onClick={() => {
-                const s = activeDropdownSite;
-                setOpenDropdownId(null);
-                setActiveDropdownSite(null);
-                openIsolationModal(s);
-              }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>cgroups v2 limits</span>
-            </button>
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  openIsolationModal(s);
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold transition"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>cgroups v2 limits</span>
+              </button>
+            </div>
 
-            <button
-              onClick={() => {
-                const s = activeDropdownSite;
-                setOpenDropdownId(null);
-                setActiveDropdownSite(null);
-                if (s) openSiteModal(s, 'wordpress');
-              }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400 font-semibold"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>WordPress Manager</span>
-            </button>
+            {/* Section 3: Applications & CMS */}
+            <div className="border-t border-slate-100 dark:border-surface-800 my-1 pt-1">
+              <div className="px-3.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Applications & CMS
+              </div>
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  if (s) openSiteModal(s, 'wordpress');
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-purple-50 dark:hover:bg-purple-950/30 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400 font-semibold transition"
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>WordPress Manager</span>
+              </button>
 
-            <button
-              onClick={() => {
-                const s = activeDropdownSite;
-                setOpenDropdownId(null);
-                setActiveDropdownSite(null);
-                setAppModalSite(s);
-              }}
-              className="w-full px-3.5 py-2 hover:bg-slate-50 dark:hover:bg-surface-800 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>1-Click App Installer</span>
-            </button>
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  setAppModalSite(s);
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 flex items-center gap-2 cursor-pointer text-indigo-600 dark:text-indigo-400 font-semibold transition"
+              >
+                <Zap className="w-3.5 h-3.5 text-indigo-500" />
+                <span>1-Click App Installer</span>
+              </button>
+            </div>
 
-            <div className="border-t border-slate-100 dark:border-surface-800 my-1" />
-
-            <button
-              onClick={() => {
-                const s = activeDropdownSite;
-                setOpenDropdownId(null);
-                setActiveDropdownSite(null);
-                handleDeleteWebsite(s);
-              }}
-              className="w-full px-3.5 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 flex items-center gap-2 cursor-pointer font-semibold"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete</span>
-            </button>
+            {/* Section 4: Danger Zone */}
+            <div className="border-t border-slate-100 dark:border-surface-800 my-1 pt-1">
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  handleDeleteWebsite(s);
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-400 flex items-center gap-2 cursor-pointer font-bold transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete website</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
