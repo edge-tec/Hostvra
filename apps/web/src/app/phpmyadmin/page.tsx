@@ -51,7 +51,14 @@ import {
   ArrowUpDown,
   SortAsc,
   SortDesc,
-  DatabaseZap
+  DatabaseZap,
+  RotateCcw,
+  Sparkles,
+  Activity,
+  HardDrive,
+  ListFilter,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Database } from '@/lib/api';
@@ -223,6 +230,10 @@ function PhpMyAdminCore() {
   const [loadingTableDetails, setLoadingTableDetails] = useState<boolean>(false);
   const [selectedTableNames, setSelectedTableNames] = useState<string[]>([]);
   const [tableFilterWord, setTableFilterWord] = useState<string>('');
+  const [tableSortCol, setTableSortCol] = useState<'name' | 'rows' | 'engine' | 'collation' | 'size'>('name');
+  const [tableSortOrder, setTableSortOrder] = useState<'ASC' | 'DESC'>('ASC');
+  const [treeFilterType, setTreeFilterType] = useState<'all' | 'tables' | 'views'>('all');
+  const [hudExpanded, setHudExpanded] = useState<boolean>(true);
 
   // Table Structure State
   const [tableStructure, setTableStructure] = useState<TableStructureData | null>(null);
@@ -352,7 +363,7 @@ function PhpMyAdminCore() {
   const [newUserPassword, setNewUserPassword] = useState('');
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, _isError?: boolean) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
@@ -1352,17 +1363,28 @@ function PhpMyAdminCore() {
 
   // Filtered tree nodes
   const filteredTreeNodes = useMemo(() => {
-    if (!treeSearch.trim()) return treeNodes;
-    const term = treeSearch.toLowerCase();
+    const term = treeSearch.trim().toLowerCase();
     return treeNodes
       .map((node) => {
-        const matchDb = node.name.toLowerCase().includes(term);
-        const matchTables = (node.tables || []).filter((t) => t.name.toLowerCase().includes(term));
-        const matchViews = (node.views || []).filter((v) => v.toLowerCase().includes(term));
-        const matchProcs = (node.procedures || []).filter((p) => p.toLowerCase().includes(term));
-        const matchFuncs = (node.functions || []).filter((f) => f.toLowerCase().includes(term));
-        const matchEvents = (node.events || []).filter((e) => e.toLowerCase().includes(term));
-        const matchTriggers = (node.triggers || []).filter((tr) => tr.name.toLowerCase().includes(term));
+        const matchDb = !term || node.name.toLowerCase().includes(term);
+        const matchTables = (treeFilterType === 'views' ? [] : (node.tables || [])).filter(
+          (t) => !term || matchDb || t.name.toLowerCase().includes(term)
+        );
+        const matchViews = (treeFilterType === 'tables' ? [] : (node.views || [])).filter(
+          (v) => !term || matchDb || v.toLowerCase().includes(term)
+        );
+        const matchProcs = (treeFilterType !== 'all' ? [] : (node.procedures || [])).filter(
+          (p) => !term || matchDb || p.toLowerCase().includes(term)
+        );
+        const matchFuncs = (treeFilterType !== 'all' ? [] : (node.functions || [])).filter(
+          (f) => !term || matchDb || f.toLowerCase().includes(term)
+        );
+        const matchEvents = (treeFilterType !== 'all' ? [] : (node.events || [])).filter(
+          (e) => !term || matchDb || e.toLowerCase().includes(term)
+        );
+        const matchTriggers = (treeFilterType !== 'all' ? [] : (node.triggers || [])).filter(
+          (tr) => !term || matchDb || tr.name.toLowerCase().includes(term)
+        );
 
         if (
           matchDb ||
@@ -1386,16 +1408,112 @@ function PhpMyAdminCore() {
         return null;
       })
       .filter((n): n is DatabaseTreeNode => n !== null);
-  }, [treeNodes, treeSearch]);
+  }, [treeNodes, treeSearch, treeFilterType]);
+
+  // Sorted and filtered table details for Table Overview
+  const sortedTableDetails = useMemo(() => {
+    return [...tableDetails]
+      .filter((t) => t.name.toLowerCase().includes(tableFilterWord.toLowerCase()))
+      .sort((a, b) => {
+        let cmp = 0;
+        if (tableSortCol === 'name') cmp = a.name.localeCompare(b.name);
+        else if (tableSortCol === 'rows') cmp = (a.rows || 0) - (b.rows || 0);
+        else if (tableSortCol === 'engine') cmp = (a.engine || a.type || '').localeCompare(b.engine || b.type || '');
+        else if (tableSortCol === 'collation') cmp = (a.collation || '').localeCompare(b.collation || '');
+        else if (tableSortCol === 'size') cmp = (a.total_size_kb || 0) - (b.total_size_kb || 0);
+        return tableSortOrder === 'ASC' ? cmp : -cmp;
+      });
+  }, [tableDetails, tableFilterWord, tableSortCol, tableSortOrder]);
+
+  // Aggregate database statistics
+  const dbMetrics = useMemo(() => {
+    const count = tableDetails.length;
+    const rows = tableDetails.reduce((sum, t) => sum + (t.rows || 0), 0);
+    const sizeKb = tableDetails.reduce((sum, t) => sum + (t.total_size_kb || 0), 0);
+    const sizeFormatted = sizeKb >= 1024 ? `${(sizeKb / 1024).toFixed(1)} MB` : `${sizeKb.toLocaleString()} KB`;
+    const defaultCollation = tableDetails.length > 0 ? tableDetails[0].collation : 'utf8mb4_unicode_ci';
+    return { count, rows, sizeKb, sizeFormatted, defaultCollation };
+  }, [tableDetails]);
+
+  // Realtime Database-Wide Optimization
+  const handleOptimizeAllTables = async () => {
+    if (!currentDb || tableDetails.length === 0) return;
+    try {
+      showToast(`Optimizing all ${tableDetails.length} tables in '${currentDb}'...`);
+      const sql = `OPTIMIZE TABLE ${tableDetails.map((t) => '`' + t.name + '`').join(',')};`;
+      await handleExecuteSql(sql);
+      await fetchTableDetails(currentDb);
+      showToast(`Successfully optimized all tables in '${currentDb}'!`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to optimize tables', true);
+    }
+  };
+
+  // Realtime Database-Wide Check
+  const handleCheckAllTables = async () => {
+    if (!currentDb || tableDetails.length === 0) return;
+    try {
+      showToast(`Running integrity check across all tables in '${currentDb}'...`);
+      const sql = `CHECK TABLE ${tableDetails.map((t) => '`' + t.name + '`').join(',')};`;
+      await handleExecuteSql(sql);
+      showToast(`Table integrity check completed for '${currentDb}'.`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to check tables', true);
+    }
+  };
+
+  // Realtime Database-Wide Repair
+  const handleRepairAllTables = async () => {
+    if (!currentDb || tableDetails.length === 0) return;
+    try {
+      showToast(`Repairing tables in '${currentDb}'...`);
+      const sql = `REPAIR TABLE ${tableDetails.map((t) => '`' + t.name + '`').join(',')};`;
+      await handleExecuteSql(sql);
+      await fetchTableDetails(currentDb);
+      showToast(`Repair routine finished for '${currentDb}'.`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to repair tables', true);
+    }
+  };
+
+  // Realtime Bulk Operations for Selected Tables
+  const handleEmptySelectedTables = async () => {
+    if (selectedTableNames.length === 0) return;
+    if (!confirm(`TRUNCATE ${selectedTableNames.length} selected tables in '${currentDb}'? All data will be deleted.`)) return;
+    try {
+      for (const t of selectedTableNames) {
+        await handleExecuteSql(`TRUNCATE TABLE \`${t}\`;`);
+      }
+      await fetchTableDetails(currentDb);
+      setSelectedTableNames([]);
+      showToast(`Successfully truncated ${selectedTableNames.length} tables.`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to truncate tables', true);
+    }
+  };
+
+  const handleDropSelectedTables = async () => {
+    if (selectedTableNames.length === 0) return;
+    if (!confirm(`DROP ${selectedTableNames.length} selected tables in '${currentDb}'? This cannot be undone!`)) return;
+    try {
+      await handleExecuteSql(`DROP TABLE IF EXISTS ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+      await fetchTableDetails(currentDb);
+      await fetchTree();
+      setSelectedTableNames([]);
+      showToast(`Dropped ${selectedTableNames.length} tables successfully.`);
+    } catch (err: any) {
+      showToast(err.message || 'Failed to drop tables', true);
+    }
+  };
 
   return (
     <DashboardShell>
       {/* Full-page drag overlay */}
       {isDraggingOverPage && (
-        <div className="fixed inset-0 z-[100] bg-amber-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="bg-white dark:bg-surface-900 rounded-3xl p-10 shadow-2xl border-4 border-dashed border-amber-500 text-center animate-pulse">
+        <div className="fixed inset-0 z-[100] bg-amber-500/20 backdrop-blur-xs flex items-center justify-center pointer-events-none">
+          <div className="bg-white rounded-3xl p-10 shadow-2xl border-4 border-dashed border-amber-500 text-center animate-pulse">
             <Upload className="w-16 h-16 mx-auto mb-4 text-amber-500" />
-            <p className="text-xl font-bold text-slate-900 dark:text-white">Drop your SQL file here</p>
+            <p className="text-xl font-bold text-slate-900">Drop your SQL file here</p>
             <p className="text-sm text-slate-500 mt-2">Release to import into <code className="font-mono text-amber-600">{currentDb || 'database'}</code></p>
           </div>
         </div>
@@ -1409,30 +1527,91 @@ function PhpMyAdminCore() {
         </div>
       )}
 
-      {/* phpMyAdmin Top Navigation Header */}
-      <div className="mb-4 flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-3.5 shadow-2xs">
-          {/* Breadcrumb Path */}
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
-            <Server className="w-4 h-4 text-amber-500" />
-            <span>localhost</span>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-            <DatabaseIcon className="w-4 h-4 text-emerald-500" />
-            <span className="font-mono font-bold text-slate-900 dark:text-white">
-              {currentDb || 'No Database Selected'}
-            </span>
-            {selectedTable && (
-              <>
-                <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                <Table className="w-4 h-4 text-blue-500" />
-                <span className="font-mono font-bold text-slate-900 dark:text-white">{selectedTable}</span>
-              </>
-            )}
+      {/* =========================================================================
+          1. ADVANCED EXECUTIVE DATABASE TELEMETRY HUD (Pure Solid White - Zero Blur)
+          ========================================================================= */}
+      <div className="rounded-2xl bg-white text-slate-900 p-5 sm:p-6 border border-slate-200 shadow-xs mb-4">
+        {/* Header Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-2xs shrink-0">
+              <DatabaseIcon className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-sm font-black uppercase tracking-wider text-slate-900 font-mono">
+                  Hostvra Database Control Center
+                </h1>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+                  LIVE CONNECTED
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] bg-slate-100 text-slate-700 border border-slate-200 font-mono font-bold">
+                  MySQL 8.0 / MariaDB • Port 3306
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                InnoDB ACID Engine • utf8mb4 Multi-byte Collation • Zero-Downtime Replication
+              </p>
+            </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2">
+          {/* Quick Cockpit Action Buttons & Database Switcher */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Database Switcher dropdown */}
+            <div className="relative">
+              <select
+                value={currentDb}
+                onChange={(e) => {
+                  const dbName = e.target.value;
+                  if (dbName && dbName !== currentDb) {
+                    handleSwitchDb(dbName);
+                  }
+                }}
+                className="pl-3 pr-8 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-900 border border-slate-200 text-xs font-mono font-bold cursor-pointer transition shadow-2xs focus:outline-none focus:border-amber-500 appearance-none"
+              >
+                <option value="" disabled>Select Database...</option>
+                {treeNodes.map((n) => (
+                  <option key={n.name} value={n.name}>
+                    {n.name} ({n.tables?.length || 0} tbls)
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2.5 pointer-events-none" />
+            </div>
+
             <button
+              type="button"
+              onClick={() => setCreateTableModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+              title="Create new database table"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create Table</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOptimizeAllTables}
+              className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Run OPTIMIZE TABLE on all tables in active database"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>Optimize DB</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleRepairAllTables}
+              className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Run REPAIR TABLE on tables in active database"
+            >
+              <Zap className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Repair</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 fetchTree();
                 if (currentDb) {
@@ -1444,175 +1623,364 @@ function PhpMyAdminCore() {
                 }
                 showToast('Refreshed database metadata from host.');
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold cursor-pointer transition"
+              className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
               title="Refresh Schema"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
               <span>Refresh</span>
             </button>
+
             <Link
               href="/databases"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-surface-700 hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold transition"
+              className="px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
             >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Hostvra Databases</span>
+              <ArrowLeft className="w-3.5 h-3.5 text-slate-500" />
+              <span>Databases</span>
             </Link>
+
+            <button
+              type="button"
+              onClick={() => setHudExpanded(!hudExpanded)}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 text-xs font-semibold flex items-center gap-1 transition cursor-pointer shadow-2xs"
+            >
+              <span>{hudExpanded ? 'Hide' : 'Stats'}</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${hudExpanded ? 'rotate-180' : ''}`} />
+            </button>
           </div>
         </div>
 
-        {/* phpMyAdmin Main Tabs */}
-        <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-surface-950 p-1.5 rounded-2xl border border-slate-200 dark:border-surface-800 text-xs font-semibold">
+        {/* 4-Tile Live Database Metrics Grid */}
+        {hudExpanded && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-4">
+            {/* Tile 1: Active Database */}
+            <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-amber-500 hover:shadow-xs transition-all flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-9 h-9 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
+                  <DatabaseIcon className="w-4 h-4" />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (currentDb) {
+                      navigator.clipboard.writeText(currentDb);
+                      showToast(`Copied database '${currentDb}' to clipboard`);
+                    }
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold border border-amber-200 font-mono flex items-center gap-1 cursor-pointer transition"
+                  title="Copy database name"
+                >
+                  <Copy className="w-2.5 h-2.5" />
+                  <span>Copy</span>
+                </button>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">Active Database</span>
+                <div className="flex items-baseline gap-2 mt-0.5 truncate">
+                  <span className="text-xl font-black font-mono text-slate-900 truncate">{currentDb || 'None'}</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                  <div className="bg-amber-500 h-full rounded-full w-full" />
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                  Charset: {dbMetrics.defaultCollation}
+                </span>
+              </div>
+            </div>
+
+            {/* Tile 2: Live Tables */}
+            <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-emerald-500 hover:shadow-xs transition-all flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-9 h-9 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                  <Table className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-bold border border-emerald-200 font-mono">
+                  {dbMetrics.count} Tables
+                </span>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">Tables in Schema</span>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="text-2xl font-black font-mono text-slate-900">{dbMetrics.count}</span>
+                  <span className="text-xs text-slate-500 font-medium">Relational Tables</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                  <div className="bg-emerald-500 h-full rounded-full w-full" />
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                  Views: {views.length} • Routines: {routines.length}
+                </span>
+              </div>
+            </div>
+
+            {/* Tile 3: Total Records / Rows */}
+            <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-sky-500 hover:shadow-xs transition-all flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-9 h-9 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-600">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 font-bold border border-sky-200 font-mono">
+                  Realtime Count
+                </span>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">Total Records / Rows</span>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="text-2xl font-black font-mono text-slate-900">{dbMetrics.rows.toLocaleString()}</span>
+                  <span className="text-xs text-slate-500 font-medium">Rows</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                  <div className="bg-sky-500 h-full rounded-full w-full" />
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                  Aggregate table cardinality
+                </span>
+              </div>
+            </div>
+
+            {/* Tile 4: Storage Footprint */}
+            <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-indigo-500 hover:shadow-xs transition-all flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600">
+                  <HardDrive className="w-4 h-4" />
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 font-mono">
+                  Disk Footprint
+                </span>
+              </div>
+              <div>
+                <span className="text-[11px] text-slate-500 font-bold block uppercase tracking-wider">Data + Index Storage</span>
+                <div className="flex items-baseline gap-2 mt-0.5">
+                  <span className="text-2xl font-black font-mono text-indigo-700">{dbMetrics.sizeFormatted}</span>
+                </div>
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-2.5">
+                  <div className="bg-indigo-500 h-full rounded-full w-full" />
+                </div>
+                <span className="text-[10px] text-slate-500 font-medium block mt-1.5">
+                  Allocated MySQL tablespace
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* =========================================================================
+          2. TOP PHPMYADMIN NAVIGATION TABS (Solid Pure White Strip)
+          ========================================================================= */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-2 shadow-2xs mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar max-w-full">
           {selectedTable && (
             <button
               onClick={() => setActiveTab('browse')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
                 activeTab === 'browse'
-                  ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
               }`}
             >
-              <Eye className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Browse</span>
+              <Eye className="w-3.5 h-3.5" />
+              <span>Browse: {selectedTable}</span>
             </button>
           )}
 
           <button
             onClick={() => setActiveTab('structure')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'structure'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Columns className="w-3.5 h-3.5 text-blue-500" />
+            <Columns className="w-3.5 h-3.5" />
             <span>Structure</span>
           </button>
 
           <button
             onClick={() => setActiveTab('sql')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'sql'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Terminal className="w-3.5 h-3.5 text-amber-500" />
-            <span>SQL</span>
+            <Terminal className="w-3.5 h-3.5" />
+            <span>SQL Console</span>
           </button>
 
           <button
             onClick={() => setActiveTab('export')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'export'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Download className="w-3.5 h-3.5 text-teal-500" />
+            <Download className="w-3.5 h-3.5" />
             <span>Export</span>
           </button>
 
           <button
             onClick={() => setActiveTab('import')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'import'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Upload className="w-3.5 h-3.5 text-indigo-500" />
+            <Upload className="w-3.5 h-3.5" />
             <span>Import</span>
           </button>
 
           <button
             onClick={() => setActiveTab('operations')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'operations'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Sliders className="w-3.5 h-3.5 text-orange-500" />
+            <Sliders className="w-3.5 h-3.5" />
             <span>Operations</span>
           </button>
 
           <button
             onClick={() => setActiveTab('routines')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'routines'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Code2 className="w-3.5 h-3.5 text-purple-500" />
+            <Code2 className="w-3.5 h-3.5" />
             <span>Routines ({routines.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('events')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'events'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Clock className="w-3.5 h-3.5 text-rose-500" />
+            <Clock className="w-3.5 h-3.5" />
             <span>Events ({events.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('triggers')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'triggers'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <Zap className="w-3.5 h-3.5" />
             <span>Triggers ({triggers.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('views')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'views'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Layers className="w-3.5 h-3.5 text-cyan-500" />
+            <Layers className="w-3.5 h-3.5" />
             <span>Views ({views.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('privileges')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
               activeTab === 'privileges'
-                ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white shadow-2xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80'
             }`}
           >
-            <Shield className="w-3.5 h-3.5 text-red-500" />
+            <Shield className="w-3.5 h-3.5" />
             <span>Privileges</span>
           </button>
+        </div>
+
+        {/* Current Database Indicator */}
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 pr-2 hidden md:flex">
+          <Server className="w-3.5 h-3.5 text-amber-500" />
+          <span>localhost</span>
+          <ChevronRight className="w-3 h-3 text-slate-400" />
+          <DatabaseIcon className="w-3.5 h-3.5 text-emerald-500" />
+          <span className="font-mono font-bold text-slate-900">{currentDb || 'none'}</span>
+          {selectedTable && (
+            <>
+              <ChevronRight className="w-3 h-3 text-slate-400" />
+              <Table className="w-3.5 h-3.5 text-blue-500" />
+              <span className="font-mono font-bold text-slate-900">{selectedTable}</span>
+            </>
+          )}
         </div>
       </div>
 
       {/* Main Two-Column Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* Left Column: Authentic Database Hierarchy Tree Navigator */}
-        <div className="lg:col-span-3 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-4 shadow-2xs space-y-3 sticky top-4">
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-surface-800 pb-2.5">
+        {/* Left Column: Authentic Database Hierarchy Tree Navigator (Pure Solid White) */}
+        <div className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 sticky top-4">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
             <div className="flex items-center gap-2">
-              <FolderTree className="w-4 h-4 text-amber-500" />
-              <span className="font-bold text-xs text-slate-900 dark:text-white">Database Tree</span>
+              <div className="w-7 h-7 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-2xs shrink-0">
+                <FolderTree className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-bold text-xs text-slate-900 block leading-tight">Database Tree</span>
+                <span className="text-[10px] text-slate-400 font-mono leading-none mt-0.5 block">{treeNodes.length} databases</span>
+              </div>
             </div>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => fetchTree()}
+                className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition cursor-pointer"
+                title="Refresh database tree from MySQL"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setCreateDbModalOpen(true)}
+                className="p-1 rounded-lg hover:bg-emerald-50 text-emerald-600 hover:text-emerald-700 transition cursor-pointer"
+                title="Create New Database"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Filter Segment Tabs: All / Tables / Views */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-xl text-[11px] font-semibold">
             <button
-              onClick={() => setCreateDbModalOpen(true)}
-              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-800 text-emerald-600 cursor-pointer"
-              title="Create New Database"
+              type="button"
+              onClick={() => setTreeFilterType('all')}
+              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                treeFilterType === 'all' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
+              }`}
             >
-              <Plus className="w-4 h-4" />
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => setTreeFilterType('tables')}
+              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                treeFilterType === 'tables' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Tables
+            </button>
+            <button
+              type="button"
+              onClick={() => setTreeFilterType('views')}
+              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                treeFilterType === 'views' ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
+              }`}
+            >
+              Views
             </button>
           </div>
 
@@ -1624,7 +1992,7 @@ function PhpMyAdminCore() {
               value={treeSearch}
               onChange={(e) => setTreeSearch(e.target.value)}
               placeholder="Search tables & databases..."
-              className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 text-xs font-mono focus:outline-none focus:border-amber-500"
+              className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:bg-white transition"
             />
             {treeSearch && (
               <button
@@ -1653,8 +2021,8 @@ function PhpMyAdminCore() {
                     <div
                       className={`flex items-center justify-between px-2.5 py-1.5 rounded-xl transition group ${
                         isCurrent
-                          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold'
-                          : 'hover:bg-slate-50 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300'
+                          ? 'bg-amber-50 text-amber-900 font-bold border border-amber-200/70 shadow-2xs'
+                          : 'hover:bg-slate-50 text-slate-700'
                       }`}
                     >
                       <div
@@ -1667,12 +2035,12 @@ function PhpMyAdminCore() {
                         <span className="text-slate-400 font-mono text-[10px]">
                           {isExpanded ? '[-]' : '[+]'}
                         </span>
-                        <DatabaseIcon className={`w-3.5 h-3.5 ${isCurrent ? 'text-amber-500' : 'text-slate-400'}`} />
+                        <DatabaseIcon className={`w-3.5 h-3.5 shrink-0 ${isCurrent ? 'text-amber-600' : 'text-slate-400'}`} />
                         <span className="truncate font-mono">{node.name}</span>
                       </div>
 
                       <div className="flex items-center gap-1 flex-shrink-0">
-                        <span className="text-[10px] font-mono px-1.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-500">
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 shadow-2xs">
                           {node.tables?.length || 0}
                         </span>
 
@@ -1682,7 +2050,7 @@ function PhpMyAdminCore() {
                               e.stopPropagation();
                               handleDropDatabase(node.name);
                             }}
-                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                            className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                             title={`Drop database ${node.name}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1693,12 +2061,12 @@ function PhpMyAdminCore() {
 
                     {/* Expanded Database Hierarchy */}
                     {isExpanded && (
-                      <div className="pl-4 space-y-0.5 border-l border-slate-200 dark:border-surface-800 ml-2.5 my-1">
+                      <div className="pl-3.5 space-y-0.5 border-l-2 border-slate-200 ml-2.5 my-1">
                         {/* New Table button inside active database */}
                         {isCurrent && (
                           <button
                             onClick={() => setCreateTableModalOpen(true)}
-                            className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 font-bold text-[11px] cursor-pointer"
+                            className="w-full flex items-center gap-1.5 px-2 py-1 rounded-lg text-emerald-700 hover:bg-emerald-50 font-bold text-[11px] cursor-pointer transition mb-1"
                           >
                             <Plus className="w-3 h-3" />
                             <span>New Table</span>
@@ -1715,17 +2083,57 @@ function PhpMyAdminCore() {
                                 if (currentDb !== node.name) handleSwitchDb(node.name);
                                 handleOpenTableBrowse(tbl.name);
                               }}
-                              className={`flex items-center justify-between px-2 py-1 rounded-lg cursor-pointer transition text-xs font-mono ${
+                              className={`group flex items-center justify-between px-2 py-1 rounded-lg cursor-pointer transition text-xs font-mono ${
                                 isTblActive
-                                  ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold'
-                                  : 'hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400'
+                                  ? 'bg-emerald-50 text-emerald-800 font-bold border border-emerald-200/60 shadow-2xs'
+                                  : 'hover:bg-slate-100 text-slate-600 hover:text-slate-900'
                               }`}
                             >
-                              <div className="flex items-center gap-1.5 truncate">
-                                <Table className={`w-3 h-3 ${isTblActive ? 'text-emerald-500' : 'text-slate-400'}`} />
+                              <div className="flex items-center gap-1.5 truncate flex-1 min-w-0 mr-1">
+                                <Table className={`w-3 h-3 shrink-0 ${isTblActive ? 'text-emerald-600' : 'text-slate-400 group-hover:text-emerald-500'}`} />
                                 <span className="truncate">{tbl.name}</span>
                               </div>
-                              <span className="text-[10px] text-slate-400">{tbl.rows}</span>
+
+                              {/* Hover Quick Action Buttons */}
+                              <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (currentDb !== node.name) handleSwitchDb(node.name);
+                                    handleOpenTableBrowse(tbl.name);
+                                  }}
+                                  className="p-1 rounded hover:bg-emerald-100 text-emerald-700"
+                                  title="Browse table rows"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (currentDb !== node.name) handleSwitchDb(node.name);
+                                    handleOpenTableStructure(tbl.name);
+                                  }}
+                                  className="p-1 rounded hover:bg-sky-100 text-sky-700"
+                                  title="View structure"
+                                >
+                                  <Columns className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(tbl.name);
+                                    showToast(`Copied table '${tbl.name}'`);
+                                  }}
+                                  className="p-1 rounded hover:bg-slate-200 text-slate-600"
+                                  title="Copy name"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                              </div>
+
+                              <span className="text-[10px] text-slate-400 group-hover:hidden shrink-0">
+                                {tbl.rows.toLocaleString()}
+                              </span>
                             </div>
                           );
                         })}
@@ -1746,7 +2154,7 @@ function PhpMyAdminCore() {
                                 }}
                                 className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-900 cursor-pointer truncate font-mono"
                               >
-                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500"></span>
                                 <span className="truncate">{v}</span>
                               </div>
                             ))}
@@ -1769,7 +2177,7 @@ function PhpMyAdminCore() {
                                 }}
                                 className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-purple-600 cursor-pointer truncate font-mono"
                               >
-                                <span className="text-[10px] text-purple-500 font-bold">P</span>
+                                <span className="text-[10px] text-purple-600 font-bold">P</span>
                                 <span className="truncate">{p}</span>
                               </div>
                             ))}
@@ -1782,7 +2190,7 @@ function PhpMyAdminCore() {
                                 }}
                                 className="flex items-center gap-1.5 px-2 py-0.5 text-xs text-slate-500 hover:text-purple-600 cursor-pointer truncate font-mono"
                               >
-                                <span className="text-[10px] text-purple-500 font-bold">F</span>
+                                <span className="text-[10px] text-purple-600 font-bold">F</span>
                                 <span className="truncate">{f}</span>
                               </div>
                             ))}
@@ -1801,28 +2209,28 @@ function PhpMyAdminCore() {
         <div className="lg:col-span-9 space-y-4">
           {/* TAB 1: STRUCTURE VIEW */}
           {activeTab === 'structure' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
               {/* If a specific table is selected, show its full Column, Index, FK structure */}
               {selectedTable ? (
                 <div className="p-5 space-y-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-surface-800 pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
                     <div>
-                      <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                         <Table className="w-4 h-4 text-emerald-500" />
-                        <span>Table Structure: <code className="font-mono text-emerald-600 dark:text-emerald-400">{selectedTable}</code></span>
+                        <span>Table Structure: <code className="font-mono text-emerald-600">{selectedTable}</code></span>
                       </h2>
                       <p className="text-xs text-slate-500">Columns, data types, indexes, and foreign key constraints</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => handleOpenTableBrowse(selectedTable)}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-xs"
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-xs transition"
                       >
                         Browse Table Rows
                       </button>
                       <button
                         onClick={() => setAddColumnModalOpen(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs cursor-pointer"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs cursor-pointer transition"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Add Column</span>
@@ -1838,11 +2246,11 @@ function PhpMyAdminCore() {
                     <>
                       {/* Columns Table */}
                       <div className="space-y-2">
-                        <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Columns ({tableStructure.columns?.length || 0})</h3>
-                        <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                        <h3 className="font-bold text-xs text-slate-700">Columns ({tableStructure.columns?.length || 0})</h3>
+                        <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                           <table className="w-full text-left text-xs border-collapse">
                             <thead>
-                              <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                              <tr className="border-b border-slate-200 bg-slate-50 text-slate-700 font-bold text-[11px]">
                                 <th className="p-2.5">Field</th>
                                 <th className="p-2.5">Type</th>
                                 <th className="p-2.5">Collation</th>
@@ -1853,33 +2261,36 @@ function PhpMyAdminCore() {
                                 <th className="p-2.5 text-center">Action</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                            <tbody className="divide-y divide-slate-100 font-mono text-xs">
                               {tableStructure.columns.map((col) => (
-                                <tr key={col.field} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                    {col.key === 'PRI' && <Key className="w-3 h-3 text-amber-500" />}
+                                <tr key={col.field} className="hover:bg-slate-50 transition">
+                                  <td className="p-2.5 font-bold text-slate-900 flex items-center gap-1.5">
+                                    {col.key === 'PRI' && <Key className="w-3.5 h-3.5 text-amber-500" />}
                                     <span>{col.field}</span>
                                   </td>
-                                  <td className="p-2.5 text-emerald-600 dark:text-emerald-400">{col.type}</td>
+                                  <td className="p-2.5 text-emerald-600 font-bold">{col.type}</td>
                                   <td className="p-2.5 text-slate-500">{col.collation || '-'}</td>
                                   <td className="p-2.5">{col.null}</td>
                                   <td className="p-2.5 font-bold text-amber-600">{col.key}</td>
                                   <td className="p-2.5 text-slate-500">{col.default !== null && col.default !== undefined ? String(col.default) : <em className="text-slate-400">NULL</em>}</td>
                                   <td className="p-2.5 text-purple-600">{col.extra}</td>
                                   <td className="p-2.5 font-sans text-center">
-                                    <div className="flex items-center justify-center gap-2 text-xs font-semibold">
+                                    <div className="flex items-center justify-center gap-1.5">
                                       <button
                                         onClick={() => handleOpenModifyCol(col)}
-                                        className="text-blue-600 hover:underline cursor-pointer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition shadow-2xs cursor-pointer"
+                                        title={`Modify column ${col.field}`}
                                       >
-                                        Change
+                                        <Edit3 className="w-3 h-3 text-sky-600" />
+                                        <span>Change</span>
                                       </button>
-                                      <span className="text-slate-300">|</span>
                                       <button
                                         onClick={() => handleDropColumn(col.field)}
-                                        className="text-rose-600 hover:underline cursor-pointer"
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                                        title={`Drop column ${col.field}`}
                                       >
-                                        Drop
+                                        <Trash2 className="w-3 h-3 text-rose-600" />
+                                        <span>Drop</span>
                                       </button>
                                     </div>
                                   </td>
@@ -1893,18 +2304,19 @@ function PhpMyAdminCore() {
                       {/* Indexes Table */}
                       <div className="space-y-2 pt-2">
                         <div className="flex items-center justify-between">
-                          <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Indexes ({tableStructure.indexes?.length || 0})</h3>
+                          <h3 className="font-bold text-xs text-slate-700">Indexes ({tableStructure.indexes?.length || 0})</h3>
                           <button
                             onClick={() => setAddIndexModalOpen(true)}
-                            className="text-xs text-blue-600 hover:underline font-semibold cursor-pointer"
+                            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
                           >
-                            + Create Index
+                            <Plus className="w-3 h-3" />
+                            <span>Create Index</span>
                           </button>
                         </div>
-                        <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                        <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                           <table className="w-full text-left text-xs border-collapse">
                             <thead>
-                              <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
+                              <tr className="border-b border-slate-200 bg-slate-50 text-slate-700 font-bold text-[11px]">
                                 <th className="p-2.5">Key Name</th>
                                 <th className="p-2.5">Type</th>
                                 <th className="p-2.5">Unique</th>
@@ -1912,19 +2324,21 @@ function PhpMyAdminCore() {
                                 <th className="p-2.5 text-center">Action</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                            <tbody className="divide-y divide-slate-100 font-mono text-xs">
                               {tableStructure.indexes.map((idx, i) => (
-                                <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white">{idx.key_name}</td>
+                                <tr key={i} className="hover:bg-slate-50 transition">
+                                  <td className="p-2.5 font-bold text-slate-900">{idx.key_name}</td>
                                   <td className="p-2.5">{idx.index_type}</td>
                                   <td className="p-2.5">{idx.non_unique === 0 ? 'Yes' : 'No'}</td>
                                   <td className="p-2.5 text-amber-600">{idx.column_name}</td>
                                   <td className="p-2.5 font-sans text-center">
                                     <button
                                       onClick={() => handleDropIndex(idx.key_name)}
-                                      className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                                      title={`Drop index ${idx.key_name}`}
                                     >
-                                      Drop
+                                      <Trash2 className="w-3 h-3 text-rose-600" />
+                                      <span>Drop</span>
                                     </button>
                                   </td>
                                 </tr>
@@ -1937,11 +2351,11 @@ function PhpMyAdminCore() {
                       {/* Foreign Keys Table */}
                       {tableStructure.foreign_keys && tableStructure.foreign_keys.length > 0 && (
                         <div className="space-y-2 pt-2">
-                          <h3 className="font-bold text-xs text-slate-700 dark:text-slate-300">Foreign Keys</h3>
-                          <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                          <h3 className="font-bold text-xs text-slate-700">Foreign Keys</h3>
+                          <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                             <table className="w-full text-left text-xs border-collapse font-mono">
-                              <thead className="bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
-                                <tr className="border-b border-slate-200 dark:border-surface-800">
+                              <thead className="bg-slate-50 font-bold text-[11px]">
+                                <tr className="border-b border-slate-200">
                                   <th className="p-2.5">Constraint</th>
                                   <th className="p-2.5">Column</th>
                                   <th className="p-2.5">Ref Table</th>
@@ -1950,9 +2364,9 @@ function PhpMyAdminCore() {
                                   <th className="p-2.5">On Delete</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                              <tbody className="divide-y divide-slate-100">
                                 {tableStructure.foreign_keys.map((fk, i) => (
-                                  <tr key={i}>
+                                  <tr key={i} className="hover:bg-slate-50">
                                     <td className="p-2.5 font-bold">{fk.constraint_name}</td>
                                     <td className="p-2.5 text-amber-600">{fk.column_name}</td>
                                     <td className="p-2.5 text-emerald-600">{fk.ref_table}</td>
@@ -1970,197 +2384,442 @@ function PhpMyAdminCore() {
                   )}
                 </div>
               ) : (
-                /* Database-level Table Overview (Matches original phpMyAdmin overview) */
-                <div className="p-4 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                /* Database-level Table Overview (High-Tech Executive Cockpit) */
+                <div className="p-5 space-y-4 bg-white">
+                  {/* Top Header of Table Overview */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                     <div>
-                      <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <DatabaseIcon className="w-4 h-4 text-amber-500" />
-                        <span>Database: <code className="font-mono text-amber-600">{currentDb}</code></span>
-                      </h2>
-                      <p className="text-xs text-slate-500">Live tables, record counts, collation, and maintenance metrics</p>
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shadow-2xs">
+                          <DatabaseIcon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-base font-black text-slate-900 font-mono tracking-tight">
+                              {currentDb}
+                            </h2>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 font-mono">
+                              {sortedTableDetails.length} tables
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono">
+                              {dbMetrics.rows.toLocaleString()} rows
+                            </span>
+                            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 font-mono">
+                              {dbMetrics.sizeFormatted}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Realtime table schema, record telemetry, and storage metrics
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+
+                    <div className="flex items-center gap-2 flex-wrap">
                       <button
                         onClick={() => setCreateTableModalOpen(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Create Table</span>
                       </button>
 
+                      <button
+                        onClick={handleOptimizeAllTables}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition shadow-2xs cursor-pointer"
+                        title="Optimize all tables in database"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Optimize DB</span>
+                      </button>
+
                       {!['mysql', 'information_schema', 'performance_schema', 'sys'].includes((currentDb || '').toLowerCase()) && (
                         <button
                           onClick={() => handleDropDatabase(currentDb)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 dark:text-rose-400 border border-rose-200 dark:border-rose-800 text-xs font-bold transition shadow-xs cursor-pointer"
-                          title={`Drop database ${currentDb}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition shadow-2xs cursor-pointer"
+                          title={`Permanently drop database ${currentDb}`}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                           <span>Drop Database</span>
                         </button>
                       )}
                     </div>
                   </div>
 
-                  {/* Filter & Batch Bar */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                    <div className="relative w-72">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Filter tables..."
-                        value={tableFilterWord}
-                        onChange={(e) => setTableFilterWord(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 font-mono text-xs focus:outline-none focus:border-amber-500"
-                      />
+                  {/* Filter & Batch Actions Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                    <div className="flex items-center gap-2.5 flex-1 min-w-[280px]">
+                      <div className="relative flex-1 max-w-xs">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="Filter tables in database..."
+                          value={tableFilterWord}
+                          onChange={(e) => setTableFilterWord(e.target.value)}
+                          className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-slate-50 border border-slate-200 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-amber-500 focus:bg-white transition"
+                        />
+                        {tableFilterWord && (
+                          <button
+                            onClick={() => setTableFilterWord('')}
+                            className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[11px] font-semibold">
+                        <button
+                          type="button"
+                          onClick={() => setTableFilterWord('')}
+                          className={`px-2.5 py-1 rounded-lg transition cursor-pointer ${
+                            !tableFilterWord ? 'bg-white text-slate-900 shadow-2xs font-bold' : 'text-slate-500 hover:text-slate-900'
+                          }`}
+                        >
+                          All ({tableDetails.length})
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Batch Actions Toolbar when tables are selected */}
                     {selectedTableNames.length > 0 && (
-                      <div className="flex items-center gap-2 font-semibold">
-                        <span className="text-slate-500">{selectedTableNames.length} selected:</span>
+                      <div className="flex items-center gap-1.5 p-1 px-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-bold animate-fadeIn">
+                        <span className="text-amber-900 font-mono mr-1">
+                          {selectedTableNames.length} selected:
+                        </span>
                         <button
                           onClick={async () => {
-                            if (!confirm(`Optimize ${selectedTableNames.length} tables?`)) return;
+                            if (!confirm(`Optimize ${selectedTableNames.length} selected tables?`)) return;
                             await handleExecuteSql(`OPTIMIZE TABLE ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+                            await fetchTableDetails(currentDb);
+                            showToast(`Optimized ${selectedTableNames.length} tables.`);
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-bold hover:bg-emerald-200 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer transition"
                         >
                           Optimize
                         </button>
                         <button
                           onClick={async () => {
-                            if (!confirm(`CHECK ${selectedTableNames.length} tables?`)) return;
+                            if (!confirm(`CHECK ${selectedTableNames.length} selected tables?`)) return;
                             await handleExecuteSql(`CHECK TABLE ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
+                            showToast(`Table check finished.`);
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold hover:bg-blue-200 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-700 text-white shadow-2xs cursor-pointer transition"
                         >
                           Check
                         </button>
                         <button
-                          onClick={async () => {
-                            if (!confirm(`DROP ${selectedTableNames.length} tables? This cannot be undone!`)) return;
-                            await handleExecuteSql(`DROP TABLE IF EXISTS ${selectedTableNames.map((t) => '`' + t + '`').join(',')};`);
-                            setSelectedTableNames([]);
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-bold hover:bg-rose-200 cursor-pointer"
+                          onClick={handleEmptySelectedTables}
+                          className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-2xs cursor-pointer transition"
+                        >
+                          Empty (Truncate)
+                        </button>
+                        <button
+                          onClick={handleDropSelectedTables}
+                          className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white shadow-2xs cursor-pointer transition"
                         >
                           Drop
+                        </button>
+                        <button
+                          onClick={() => setSelectedTableNames([])}
+                          className="px-2 py-1 text-slate-500 hover:text-slate-800 cursor-pointer ml-1"
+                        >
+                          Clear
                         </button>
                       </div>
                     )}
                   </div>
 
                   {/* Database Tables Table */}
-                  <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
-                        <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                          <th className="p-2.5 w-8 text-center">
+                        <tr className="border-b border-slate-200 bg-slate-50 text-slate-700 font-bold text-[11px] select-none">
+                          <th className="p-3 w-10 text-center">
                             <input
                               type="checkbox"
-                              checked={selectedTableNames.length === tableDetails.length && tableDetails.length > 0}
+                              checked={selectedTableNames.length === sortedTableDetails.length && sortedTableDetails.length > 0}
                               onChange={(e) => {
-                                if (e.target.checked) setSelectedTableNames(tableDetails.map((t) => t.name));
+                                if (e.target.checked) setSelectedTableNames(sortedTableDetails.map((t) => t.name));
                                 else setSelectedTableNames([]);
                               }}
-                              className="rounded text-amber-500 focus:ring-amber-500"
+                              className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer w-4 h-4"
                             />
                           </th>
-                          <th className="p-2.5">Table</th>
-                          <th className="p-2.5 font-sans text-center">Action</th>
-                          <th className="p-2.5 text-right">Rows</th>
-                          <th className="p-2.5">Type</th>
-                          <th className="p-2.5">Collation</th>
-                          <th className="p-2.5 text-right">Size (KB)</th>
-                          <th className="p-2.5">Comment</th>
+                          <th
+                            onClick={() => {
+                              if (tableSortCol === 'name') setTableSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC');
+                              else { setTableSortCol('name'); setTableSortOrder('ASC'); }
+                            }}
+                            className="p-3 cursor-pointer hover:bg-slate-100 transition"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span>Table</span>
+                              {tableSortCol === 'name' ? (
+                                tableSortOrder === 'ASC' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="p-3 font-sans text-center">Action</th>
+                          <th
+                            onClick={() => {
+                              if (tableSortCol === 'rows') setTableSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC');
+                              else { setTableSortCol('rows'); setTableSortOrder('DESC'); }
+                            }}
+                            className="p-3 text-right cursor-pointer hover:bg-slate-100 transition"
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span>Rows</span>
+                              {tableSortCol === 'rows' ? (
+                                tableSortOrder === 'ASC' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            onClick={() => {
+                              if (tableSortCol === 'engine') setTableSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC');
+                              else { setTableSortCol('engine'); setTableSortOrder('ASC'); }
+                            }}
+                            className="p-3 cursor-pointer hover:bg-slate-100 transition"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span>Type</span>
+                              {tableSortCol === 'engine' ? (
+                                tableSortOrder === 'ASC' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            onClick={() => {
+                              if (tableSortCol === 'collation') setTableSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC');
+                              else { setTableSortCol('collation'); setTableSortOrder('ASC'); }
+                            }}
+                            className="p-3 cursor-pointer hover:bg-slate-100 transition"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span>Collation</span>
+                              {tableSortCol === 'collation' ? (
+                                tableSortOrder === 'ASC' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            onClick={() => {
+                              if (tableSortCol === 'size') setTableSortOrder(prev => prev === 'ASC' ? 'DESC' : 'ASC');
+                              else { setTableSortCol('size'); setTableSortOrder('DESC'); }
+                            }}
+                            className="p-3 text-right cursor-pointer hover:bg-slate-100 transition"
+                          >
+                            <div className="flex items-center justify-end gap-1.5">
+                              <span>Size</span>
+                              {tableSortCol === 'size' ? (
+                                tableSortOrder === 'ASC' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th className="p-3">Comment</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                      <tbody className="divide-y divide-slate-100 font-mono text-xs">
                         {loadingTableDetails ? (
                           <tr>
-                            <td colSpan={8} className="p-6 text-center text-slate-400 font-sans">
-                              Loading database tables...
+                            <td colSpan={8} className="p-10 text-center text-slate-400 font-sans">
+                              <div className="flex flex-col items-center justify-center gap-2">
+                                <DatabaseIcon className="w-6 h-6 text-amber-500 animate-spin" />
+                                <span>Loading database tables from MySQL...</span>
+                              </div>
                             </td>
                           </tr>
-                        ) : tableDetails.length === 0 ? (
+                        ) : sortedTableDetails.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="p-6 text-center text-slate-400 font-sans">
-                              No tables found in database `{currentDb}`. Click &quot;Create Table&quot; to begin.
+                            <td colSpan={8} className="p-10 text-center text-slate-400 font-sans">
+                              <p className="font-semibold text-slate-600">No tables match your filter criteria.</p>
+                              <p className="text-xs text-slate-400 mt-1">Click &quot;Create Table&quot; to add a new table to `{currentDb}`.</p>
                             </td>
                           </tr>
                         ) : (
-                          tableDetails
-                            .filter((t) => t.name.toLowerCase().includes(tableFilterWord.toLowerCase()))
-                            .map((t) => {
-                              const isChecked = selectedTableNames.includes(t.name);
-                              return (
-                                <tr key={t.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                                  <td className="p-2.5 text-center">
-                                    <input
-                                      type="checkbox"
-                                      checked={isChecked}
-                                      onChange={(e) => {
-                                        if (e.target.checked) setSelectedTableNames((prev) => [...prev, t.name]);
-                                        else setSelectedTableNames((prev) => prev.filter((n) => n !== t.name));
-                                      }}
-                                      className="rounded text-amber-500 focus:ring-amber-500"
-                                    />
-                                  </td>
-                                  <td className="p-2.5 font-bold text-slate-900 dark:text-white">
+                          sortedTableDetails.map((t) => {
+                            const isChecked = selectedTableNames.includes(t.name);
+                            return (
+                              <tr
+                                key={t.name}
+                                className={`group hover:bg-slate-50 transition ${
+                                  isChecked ? 'bg-amber-50/40' : ''
+                                }`}
+                              >
+                                <td className="p-2.5 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={(e) => {
+                                      if (e.target.checked) setSelectedTableNames((prev) => [...prev, t.name]);
+                                      else setSelectedTableNames((prev) => prev.filter((n) => n !== t.name));
+                                    }}
+                                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer w-4 h-4"
+                                  />
+                                </td>
+                                <td className="p-2.5 font-bold text-slate-900">
+                                  <div className="flex items-center gap-1.5">
                                     <button
                                       onClick={() => handleOpenTableBrowse(t.name)}
-                                      className="hover:underline text-left cursor-pointer flex items-center gap-1.5"
+                                      className="hover:text-emerald-700 text-left cursor-pointer flex items-center gap-1.5 transition group-hover:underline"
                                     >
-                                      <Table className="w-3.5 h-3.5 text-slate-400" />
-                                      <span>{t.name}</span>
+                                      <Table className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 shrink-0" />
+                                      <span className="font-bold">{t.name}</span>
                                     </button>
-                                  </td>
-                                  <td className="p-2.5 font-sans text-center">
-                                    <div className="flex items-center justify-center gap-2 text-[11px] font-semibold">
-                                      <button
-                                        onClick={() => handleOpenTableBrowse(t.name)}
-                                        className="text-emerald-600 hover:underline cursor-pointer"
-                                      >
-                                        Browse
-                                      </button>
-                                      <span className="text-slate-300">|</span>
-                                      <button
-                                        onClick={() => handleOpenTableStructure(t.name)}
-                                        className="text-blue-600 hover:underline cursor-pointer"
-                                      >
-                                        Structure
-                                      </button>
-                                      <span className="text-slate-300">|</span>
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm(`Empty (TRUNCATE) table \`${t.name}\`?`)) return;
-                                          await handleExecuteSql(`TRUNCATE TABLE \`${t.name}\`;`);
-                                        }}
-                                        className="text-amber-600 hover:underline cursor-pointer"
-                                      >
-                                        Empty
-                                      </button>
-                                      <span className="text-slate-300">|</span>
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm(`DROP table \`${t.name}\`?`)) return;
-                                          await handleExecuteSql(`DROP TABLE IF EXISTS \`${t.name}\`;`);
-                                        }}
-                                        className="text-rose-600 hover:underline cursor-pointer"
-                                      >
-                                        Drop
-                                      </button>
-                                    </div>
-                                  </td>
-                                  <td className="p-2.5 text-right font-bold">{t.rows.toLocaleString()}</td>
-                                  <td className="p-2.5 text-slate-500">{t.engine || t.type}</td>
-                                  <td className="p-2.5 text-slate-500">{t.collation}</td>
-                                  <td className="p-2.5 text-right">{t.total_size_kb.toLocaleString()}</td>
-                                  <td className="p-2.5 text-slate-400 truncate max-w-xs">{t.comment || '-'}</td>
-                                </tr>
-                              );
-                            })
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigator.clipboard.writeText(t.name);
+                                        showToast(`Copied table '${t.name}'`);
+                                      }}
+                                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-slate-700 rounded transition cursor-pointer"
+                                      title="Copy table name"
+                                    >
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="p-2.5 font-sans text-center">
+                                  <div className="flex items-center justify-center gap-1.5 flex-nowrap">
+                                    {/* Browse Pill */}
+                                    <button
+                                      onClick={() => handleOpenTableBrowse(t.name)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition shadow-2xs cursor-pointer"
+                                      title="Browse table rows"
+                                    >
+                                      <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Browse</span>
+                                    </button>
+
+                                    {/* Structure Pill */}
+                                    <button
+                                      onClick={() => handleOpenTableStructure(t.name)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 transition shadow-2xs cursor-pointer"
+                                      title="View table structure"
+                                    >
+                                      <Columns className="w-3.5 h-3.5 text-sky-600" />
+                                      <span>Structure</span>
+                                    </button>
+
+                                    {/* SQL Pill */}
+                                    <button
+                                      onClick={() => {
+                                        setSqlQuery(`SELECT * FROM \`${t.name}\` LIMIT 25;`);
+                                        setActiveTab('sql');
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 transition shadow-2xs cursor-pointer"
+                                      title="Query table in SQL console"
+                                    >
+                                      <Terminal className="w-3.5 h-3.5 text-indigo-600" />
+                                      <span>SQL</span>
+                                    </button>
+
+                                    {/* Empty Pill */}
+                                    <button
+                                      onClick={async () => {
+                                        if (!confirm(`Empty (TRUNCATE) table \`${t.name}\`? All rows will be permanently deleted.`)) return;
+                                        await handleExecuteSql(`TRUNCATE TABLE \`${t.name}\`;`);
+                                        await fetchTableDetails(currentDb);
+                                        showToast(`Table \`${t.name}\` emptied successfully.`);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition shadow-2xs cursor-pointer"
+                                      title="Truncate table (empty rows)"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                                      <span>Empty</span>
+                                    </button>
+
+                                    {/* Drop Pill */}
+                                    <button
+                                      onClick={async () => {
+                                        if (!confirm(`Are you sure you want to permanently DROP table \`${t.name}\`? Table structure and data will be destroyed.`)) return;
+                                        await handleExecuteSql(`DROP TABLE IF EXISTS \`${t.name}\`;`);
+                                        await fetchTableDetails(currentDb);
+                                        await fetchTree();
+                                        showToast(`Table \`${t.name}\` dropped.`);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                                      title="Drop table permanently"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                                      <span>Drop</span>
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="p-2.5 text-right font-mono">
+                                  {t.rows > 0 ? (
+                                    <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                      {t.rows.toLocaleString()}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">0</span>
+                                  )}
+                                </td>
+                                <td className="p-2.5">
+                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-slate-100 text-slate-700 border border-slate-200 font-medium">
+                                    {t.engine || t.type || 'InnoDB'}
+                                  </span>
+                                </td>
+                                <td className="p-2.5 text-slate-500 font-mono text-[11px]">{t.collation}</td>
+                                <td className="p-2.5 text-right font-mono font-medium">
+                                  {t.total_size_kb >= 1024 ? (
+                                    <span className="font-bold text-indigo-700">
+                                      {(t.total_size_kb / 1024).toFixed(2)} MB
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-600">
+                                      {t.total_size_kb.toLocaleString()} KB
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-2.5 text-slate-400 truncate max-w-xs">{t.comment || '-'}</td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
+                      {/* Aggregate Summary Footer */}
+                      {sortedTableDetails.length > 0 && (
+                        <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-mono text-xs text-slate-700">
+                          <tr>
+                            <td className="p-3 text-center">
+                              <CheckSquare className="w-4 h-4 text-slate-400 mx-auto" />
+                            </td>
+                            <td className="p-3 font-bold text-slate-900">
+                              Total: {sortedTableDetails.length} tables
+                            </td>
+                            <td className="p-3 text-center font-sans">
+                              <span className="text-slate-500 text-[11px]">
+                                {selectedTableNames.length > 0 ? `${selectedTableNames.length} selected` : 'Click rows to select'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right font-bold text-emerald-700">
+                              {dbMetrics.rows.toLocaleString()} rows
+                            </td>
+                            <td className="p-3 text-slate-500">
+                              InnoDB / MySQL 8.0
+                            </td>
+                            <td className="p-3 text-slate-500 text-[11px]">
+                              {dbMetrics.defaultCollation}
+                            </td>
+                            <td className="p-3 text-right font-bold text-indigo-700">
+                              {dbMetrics.sizeFormatted}
+                            </td>
+                            <td className="p-3 text-slate-400">-</td>
+                          </tr>
+                        </tfoot>
+                      )}
                     </table>
                   </div>
                 </div>
@@ -2170,11 +2829,11 @@ function PhpMyAdminCore() {
 
           {/* TAB 2: BROWSE ROWS */}
           {activeTab === 'browse' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-2xs overflow-hidden space-y-3">
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden space-y-3">
               {/* Browse Header */}
-              <div className="p-4 border-b border-slate-100 dark:border-surface-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                     <Eye className="w-4 h-4 text-emerald-500" />
                     <span>Browse: <code className="font-mono text-emerald-600">{currentDb}.{selectedTable}</code></span>
                   </h2>
@@ -2187,14 +2846,14 @@ function PhpMyAdminCore() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleOpenInsertRow}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Insert Row</span>
                   </button>
                   <button
                     onClick={() => handleOpenTableStructure(selectedTable)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs cursor-pointer"
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer transition"
                   >
                     View Structure
                   </button>
@@ -2213,7 +2872,7 @@ function PhpMyAdminCore() {
                       setBrowseSearch(e.target.value);
                       fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, browseSortCol, browseSortOrder, e.target.value);
                     }}
-                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 font-mono text-xs focus:outline-none focus:border-amber-500"
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -2225,7 +2884,7 @@ function PhpMyAdminCore() {
                       setBrowseLimit(newLim);
                       fetchBrowseRows(currentDb, selectedTable, 1, newLim, browseSortCol, browseSortOrder, browseSearch);
                     }}
-                    className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 font-mono text-xs"
+                    className="px-2 py-1 rounded-lg bg-slate-50 border border-slate-200 font-mono text-xs"
                   >
                     <option value={25}>25</option>
                     <option value={50}>50</option>
@@ -2239,8 +2898,8 @@ function PhpMyAdminCore() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse font-mono">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 font-bold text-[11px]">
-                      <th className="p-2.5 w-16 text-center font-sans">Action</th>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-slate-700 font-bold text-[11px]">
+                      <th className="p-2.5 w-24 text-center font-sans">Action</th>
                       {(browseData?.columns || []).map((col) => {
                         const isSorted = browseSortCol === col;
                         return (
@@ -2252,7 +2911,7 @@ function PhpMyAdminCore() {
                               setBrowseSortOrder(newOrder);
                               fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, col, newOrder, browseSearch);
                             }}
-                            className="p-2.5 whitespace-nowrap cursor-pointer hover:bg-slate-100 dark:hover:bg-surface-800 select-none"
+                            className="p-2.5 whitespace-nowrap cursor-pointer hover:bg-slate-100 select-none"
                           >
                             <div className="flex items-center gap-1">
                               <span>{col}</span>
@@ -2271,7 +2930,7 @@ function PhpMyAdminCore() {
                       })}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                  <tbody className="divide-y divide-slate-100">
                     {loadingBrowse ? (
                       <tr>
                         <td colSpan={(browseData?.columns.length || 0) + 1} className="p-8 text-center text-slate-400 font-sans">
@@ -2286,29 +2945,31 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       browseData.rows.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 text-center font-sans">
-                            <div className="flex items-center justify-center gap-2">
+                        <tr key={idx} className="hover:bg-slate-50 transition">
+                          <td className="p-2 text-center font-sans">
+                            <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => handleOpenEditRow(row)}
-                                className="text-blue-600 hover:text-blue-700 cursor-pointer p-0.5"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 cursor-pointer shadow-2xs transition"
                                 title="Edit row"
                               >
-                                <Edit3 className="w-3.5 h-3.5" />
+                                <Edit3 className="w-3 h-3 text-sky-600" />
+                                <span>Edit</span>
                               </button>
                               <button
                                 onClick={() => handleDeleteRow(row)}
-                                className="text-rose-600 hover:text-rose-700 cursor-pointer p-0.5"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 cursor-pointer shadow-2xs transition"
                                 title="Delete row"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3 h-3 text-rose-600" />
+                                <span>Delete</span>
                               </button>
                             </div>
                           </td>
                           {browseData.columns.map((col) => {
                             const val = row[col];
                             return (
-                              <td key={col} className="p-2.5 whitespace-nowrap text-slate-800 dark:text-slate-200">
+                              <td key={col} className="p-2.5 whitespace-nowrap text-slate-800">
                                 {val !== null && val !== undefined ? (
                                   String(val)
                                 ) : (
@@ -2326,7 +2987,7 @@ function PhpMyAdminCore() {
 
               {/* Pagination Controls */}
               {browseData && browseData.total_pages > 1 && (
-                <div className="p-3 bg-slate-50 dark:bg-surface-950 border-t border-slate-200 dark:border-surface-800 flex items-center justify-between text-xs font-semibold text-slate-500">
+                <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between text-xs font-semibold text-slate-500">
                   <span>
                     Page {browseData.page} of {browseData.total_pages}
                   </span>
@@ -2334,29 +2995,29 @@ function PhpMyAdminCore() {
                     <button
                       disabled={browseData.page <= 1}
                       onClick={() => fetchBrowseRows(currentDb, selectedTable, 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
-                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs transition"
                     >
                       &lt;&lt;
                     </button>
                     <button
                       disabled={browseData.page <= 1}
                       onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.page - 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
-                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs transition"
                     >
                       &lt;
                     </button>
-                    <span className="px-3 py-1 font-bold text-slate-900 dark:text-white">{browseData.page}</span>
+                    <span className="px-3 py-1 font-bold text-slate-900">{browseData.page}</span>
                     <button
                       disabled={browseData.page >= browseData.total_pages}
                       onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.page + 1, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
-                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs transition"
                     >
                       &gt;
                     </button>
                     <button
                       disabled={browseData.page >= browseData.total_pages}
                       onClick={() => fetchBrowseRows(currentDb, selectedTable, browseData.total_pages, browseLimit, browseSortCol, browseSortOrder, browseSearch)}
-                      className="px-2 py-1 rounded bg-white dark:bg-surface-800 border border-slate-200 dark:border-surface-700 disabled:opacity-40 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-40 cursor-pointer shadow-2xs transition"
                     >
                       &gt;&gt;
                     </button>
@@ -2368,32 +3029,32 @@ function PhpMyAdminCore() {
 
           {/* TAB 3: SQL CONSOLE */}
           {activeTab === 'sql' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <h2 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                     <Terminal className="w-4 h-4 text-amber-500" />
                     <span>SQL Query Console: <code className="font-mono text-amber-600">{currentDb}</code></span>
                   </h2>
-                  <p className="text-xs text-slate-500">Run native SQL commands against the database</p>
+                  <p className="text-xs text-slate-500">Run native SQL commands directly against the database engine</p>
                 </div>
                 {/* Quick query buttons */}
                 <div className="flex flex-wrap gap-1.5 text-xs font-mono">
                   <button
                     onClick={() => setSqlQuery(`SELECT * FROM \`${selectedTable || 'table'}\` LIMIT 50;`)}
-                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold cursor-pointer shadow-2xs transition"
                   >
                     SELECT *
                   </button>
                   <button
                     onClick={() => setSqlQuery(`SELECT COUNT(*) FROM \`${selectedTable || 'table'}\`;`)}
-                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold cursor-pointer shadow-2xs transition"
                   >
                     SELECT COUNT
                   </button>
                   <button
                     onClick={() => setSqlQuery(`SHOW CREATE TABLE \`${selectedTable || 'table'}\`;`)}
-                    className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 font-semibold cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold cursor-pointer shadow-2xs transition"
                   >
                     SHOW CREATE
                   </button>
@@ -2407,7 +3068,7 @@ function PhpMyAdminCore() {
                   value={sqlQuery}
                   onChange={(e) => setSqlQuery(e.target.value)}
                   placeholder="Enter your SQL query here... (e.g. SELECT * FROM users WHERE status = 'active';)"
-                  className="w-full p-3 font-mono text-xs bg-slate-900 text-emerald-400 rounded-xl border border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  className="w-full p-3 font-mono text-xs bg-slate-950 text-emerald-400 rounded-xl border border-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
 
@@ -2416,14 +3077,14 @@ function PhpMyAdminCore() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setSqlQuery('')}
-                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 text-xs font-bold cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 cursor-pointer shadow-2xs transition"
                   >
                     Clear
                   </button>
                   <button
                     onClick={() => handleExecuteSql()}
                     disabled={runningQuery}
-                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer shadow-xs disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold cursor-pointer shadow-xs disabled:opacity-50 transition"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span>{runningQuery ? 'Executing...' : 'Go / Execute'}</span>
@@ -2433,7 +3094,7 @@ function PhpMyAdminCore() {
 
               {/* Error banner */}
               {queryError && (
-                <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-800 dark:text-rose-300 text-xs flex items-start gap-2">
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 text-rose-500 mt-0.5" />
                   <div className="font-mono whitespace-pre-wrap">{queryError}</div>
                 </div>
@@ -2441,33 +3102,33 @@ function PhpMyAdminCore() {
 
               {/* Query Result */}
               {queryResult && (
-                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-surface-800">
+                <div className="space-y-2 pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between text-xs text-slate-500">
                     <span>
                       {queryResult.rows_affected} rows affected / returned ({queryResult.execution_time})
                     </span>
                   </div>
                   {queryResult.columns && queryResult.columns.length > 0 && queryResult.rows && (
-                    <div className="overflow-x-auto max-h-96 border border-slate-200 dark:border-surface-800 rounded-xl">
+                    <div className="overflow-x-auto max-h-96 border border-slate-200 rounded-xl shadow-2xs">
                       <table className="w-full text-left text-xs font-mono border-collapse">
-                        <thead className="bg-slate-50 dark:bg-surface-950 sticky top-0">
-                          <tr className="border-b border-slate-200 dark:border-surface-800">
+                        <thead className="bg-slate-50 sticky top-0">
+                          <tr className="border-b border-slate-200 text-slate-700 font-bold">
                             {queryResult.columns.map((c) => (
-                              <th key={c} className="p-2.5 whitespace-nowrap font-bold">
+                              <th key={c} className="p-2.5 whitespace-nowrap">
                                 {c}
                               </th>
                             ))}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-surface-800">
+                        <tbody className="divide-y divide-slate-100">
                           {queryResult.rows.map((r, i) => (
-                            <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
+                            <tr key={i} className="hover:bg-slate-50 transition">
                               {queryResult.columns.map((c) => (
-                                <td key={c} className="p-2.5 whitespace-nowrap">
+                                <td key={c} className="p-2.5 whitespace-nowrap text-slate-800">
                                   {r[c] !== null && r[c] !== undefined ? (
                                     String(r[c])
                                   ) : (
-                                    <em className="text-amber-500">NULL</em>
+                                    <em className="text-amber-500 font-serif">NULL</em>
                                   )}
                                 </td>
                               ))}
@@ -2484,9 +3145,9 @@ function PhpMyAdminCore() {
 
           {/* TAB 4: EXPORT */}
           {activeTab === 'export' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Export Database / Tables</h2>
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+              <div className="pb-3 border-b border-slate-100">
+                <h2 className="font-bold text-sm text-slate-900">Export Database / Tables</h2>
                 <p className="text-xs text-slate-500">
                   Generate and stream live database dumps from schema <code className="font-mono text-amber-600">{currentDb}</code>
                 </p>
@@ -2495,10 +3156,10 @@ function PhpMyAdminCore() {
               <div className="space-y-4 text-xs">
                 {/* Format selection */}
                 <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700 dark:text-slate-300 block">Export Format</label>
+                  <label className="font-bold text-slate-700 block">Export Format</label>
                   <div className="flex gap-4">
                     {(['sql', 'csv', 'json'] as const).map((fmt) => (
-                      <label key={fmt} className="flex items-center gap-2 cursor-pointer font-mono font-semibold">
+                      <label key={fmt} className="flex items-center gap-2 cursor-pointer font-mono font-semibold text-slate-700">
                         <input
                           type="radio"
                           name="format"
@@ -2516,7 +3177,7 @@ function PhpMyAdminCore() {
                 {/* Table selection */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <label className="font-bold text-slate-700 dark:text-slate-300">Select Tables to Export</label>
+                    <label className="font-bold text-slate-700">Select Tables to Export</label>
                     <button
                       type="button"
                       onClick={() => {
@@ -2528,9 +3189,9 @@ function PhpMyAdminCore() {
                       {exportSelectedTables.length === tableDetails.length ? 'Deselect All' : 'Select All'}
                     </button>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-3 border border-slate-200 dark:border-surface-800 rounded-xl bg-slate-50 dark:bg-surface-950 font-mono text-xs">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-3 border border-slate-200 rounded-xl bg-slate-50 font-mono text-xs">
                     {tableDetails.map((t) => (
-                      <label key={t.name} className="flex items-center gap-2 truncate cursor-pointer">
+                      <label key={t.name} className="flex items-center gap-2 truncate cursor-pointer text-slate-800 hover:text-emerald-700">
                         <input
                           type="checkbox"
                           checked={exportSelectedTables.includes(t.name)}
@@ -2549,7 +3210,7 @@ function PhpMyAdminCore() {
                 <div className="pt-2">
                   <button
                     onClick={handleTriggerExport}
-                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs"
+                    className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition"
                   >
                     <Download className="w-4 h-4" />
                     <span>Download {exportFormat.toUpperCase()} Export</span>
@@ -2561,9 +3222,9 @@ function PhpMyAdminCore() {
 
           {/* TAB 5: IMPORT */}
           {activeTab === 'import' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Import into Database</h2>
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+              <div className="pb-3 border-b border-slate-100">
+                <h2 className="font-bold text-sm text-slate-900">Import into Database</h2>
                 <p className="text-xs text-slate-500">
                   Restore SQL statements directly into schema <code className="font-mono text-amber-600">{currentDb}</code>
                 </p>
@@ -2598,16 +3259,16 @@ function PhpMyAdminCore() {
                   }}
                   className={`border-2 border-dashed rounded-2xl p-8 text-center transition cursor-pointer ${
                     isDraggingImport
-                      ? 'border-amber-500 bg-amber-500/10 scale-[1.01]'
+                      ? 'border-amber-500 bg-amber-50/50 scale-[1.01]'
                       : importFile
-                        ? 'border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20'
-                        : 'border-slate-300 dark:border-surface-700 bg-slate-50/50 dark:bg-surface-950 hover:border-amber-500'
+                        ? 'border-emerald-500 bg-emerald-50/40'
+                        : 'border-slate-300 bg-slate-50/60 hover:border-amber-500 hover:bg-slate-50'
                   }`}
                 >
                   <Upload className={`w-10 h-10 mx-auto mb-3 transition ${isDraggingImport ? 'text-amber-500 animate-bounce' : importFile ? 'text-emerald-500' : 'text-slate-400'}`} />
                   {importFile ? (
                     <>
-                      <p className="font-bold text-emerald-700 dark:text-emerald-400 text-sm">
+                      <p className="font-bold text-emerald-700 text-sm">
                         {importFile.name}
                       </p>
                       <p className="text-slate-500 mt-1">
@@ -2616,14 +3277,14 @@ function PhpMyAdminCore() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setImportFile(null); }}
-                        className="mt-2 inline-block px-3 py-1.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-bold hover:bg-red-100 cursor-pointer text-[11px]"
+                        className="mt-2 inline-block px-3 py-1.5 rounded-lg bg-red-50 border border-red-200 text-red-600 font-bold hover:bg-red-100 cursor-pointer text-[11px] transition shadow-2xs"
                       >
                         Remove File
                       </button>
                     </>
                   ) : (
                     <>
-                      <p className="font-bold text-slate-900 dark:text-white text-sm">
+                      <p className="font-bold text-slate-900 text-sm">
                         {isDraggingImport ? 'Drop your .sql file here' : 'Drag & drop .sql file here'}
                       </p>
                       <p className="text-[11px] text-slate-500 mt-1">Maximum upload size: 128 MB</p>
@@ -2643,7 +3304,7 @@ function PhpMyAdminCore() {
                   {!importFile && (
                     <label
                       htmlFor="sql-file-input"
-                      className="mt-3 inline-block px-5 py-2.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-bold hover:bg-slate-100 cursor-pointer text-slate-800 dark:text-slate-200 shadow-xs"
+                      className="mt-3 inline-block px-5 py-2.5 rounded-xl bg-white border border-slate-300 font-bold hover:bg-slate-50 cursor-pointer text-slate-800 shadow-2xs transition"
                     >
                       Browse File
                     </label>
@@ -2652,26 +3313,26 @@ function PhpMyAdminCore() {
 
                 {/* Or paste SQL */}
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">Or Paste Raw SQL Statements:</label>
+                  <label className="font-bold text-slate-700">Or Paste Raw SQL Statements:</label>
                   <textarea
                     rows={6}
                     value={importSqlText}
                     onChange={(e) => setImportSqlText(e.target.value)}
                     placeholder="CREATE TABLE ...; INSERT INTO ...;"
-                    className="w-full p-3 font-mono text-xs bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 rounded-xl focus:outline-none focus:border-amber-500"
+                    className="w-full p-3 font-mono text-xs bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:border-amber-500 text-slate-900"
                   />
                 </div>
 
                 {importing && (
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-2.5">
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
                     <div className="flex items-center justify-between text-xs font-bold">
                       <div className="flex items-center gap-2">
                         <RefreshCw className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                        <span className="text-slate-800 dark:text-slate-200">{importStatusText || 'Importing SQL dump into database...'}</span>
+                        <span className="text-slate-800">{importStatusText || 'Importing SQL dump into database...'}</span>
                       </div>
-                      <span className="text-amber-600 dark:text-amber-400 font-mono text-sm">{importProgress}%</span>
+                      <span className="text-amber-600 font-mono text-sm">{importProgress}%</span>
                     </div>
-                    <div className="w-full bg-slate-200 dark:bg-surface-800 h-2.5 rounded-full overflow-hidden">
+                    <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
                       <div
                         className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-500 h-full transition-all duration-300 rounded-full"
                         style={{ width: `${importProgress}%` }}
@@ -2684,36 +3345,36 @@ function PhpMyAdminCore() {
                 {importResult && (
                   <div className={`p-4 rounded-xl border space-y-2 ${
                     importResult.failed > 0
-                      ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
-                      : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                      ? 'bg-amber-50 border-amber-200 text-amber-800'
+                      : 'bg-emerald-50 border-emerald-200 text-emerald-800'
                   }`}>
                     <p className="font-bold flex items-center gap-2">
                       <span>Import Completed:</span>
                     </p>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                      <div className="p-2.5 rounded-lg bg-white border border-slate-200 shadow-2xs">
                         <span className="text-slate-500 block">Total Statements</span>
-                        <span className="font-mono font-bold text-sm">{importResult.total}</span>
+                        <span className="font-mono font-bold text-sm text-slate-900">{importResult.total}</span>
                       </div>
-                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                      <div className="p-2.5 rounded-lg bg-white border border-slate-200 shadow-2xs">
                         <span className="text-slate-500 block">Successful</span>
-                        <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">{importResult.successful}</span>
+                        <span className="font-mono font-bold text-sm text-emerald-600">{importResult.successful}</span>
                       </div>
-                      <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                      <div className="p-2.5 rounded-lg bg-white border border-slate-200 shadow-2xs">
                         <span className="text-slate-500 block">Failed</span>
-                        <span className="font-mono font-bold text-sm text-rose-600 dark:text-rose-400">{importResult.failed}</span>
+                        <span className="font-mono font-bold text-sm text-rose-600">{importResult.failed}</span>
                       </div>
                       {importResult.tables !== undefined && (
-                        <div className="p-2 rounded bg-white/60 dark:bg-black/20">
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200 shadow-2xs">
                           <span className="text-slate-500 block">Live Tables</span>
-                          <span className="font-mono font-bold text-sm text-cyan-600 dark:text-cyan-400">{importResult.tables}</span>
+                          <span className="font-mono font-bold text-sm text-cyan-600">{importResult.tables}</span>
                         </div>
                       )}
                     </div>
 
                     {importResult.errors && importResult.errors.length > 0 && (
-                      <div className="mt-3 text-xs bg-rose-50 dark:bg-rose-950/40 p-3 rounded-lg border border-rose-200 dark:border-rose-900 max-h-48 overflow-y-auto font-mono text-rose-700 dark:text-rose-300 space-y-1">
-                        <p className="font-bold text-rose-800 dark:text-rose-200">Execution Errors ({importResult.errors.length}):</p>
+                      <div className="mt-3 text-xs bg-rose-50 p-3 rounded-lg border border-rose-200 max-h-48 overflow-y-auto font-mono text-rose-700 space-y-1">
+                        <p className="font-bold text-rose-800">Execution Errors ({importResult.errors.length}):</p>
                         {importResult.errors.map((err, i) => (
                           <p key={i} className="break-all">• {err}</p>
                         ))}
@@ -2734,7 +3395,7 @@ function PhpMyAdminCore() {
                   {(importFile || importSqlText.trim()) && !importing && (
                     <button
                       onClick={() => { setImportFile(null); setImportSqlText(''); setImportResult(null); setImportProgress(0); setImportStatusText(''); }}
-                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-surface-800 hover:bg-slate-200 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200 dark:border-surface-700 cursor-pointer"
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border border-slate-200 cursor-pointer shadow-2xs transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
                       <span>Clear</span>
@@ -2747,30 +3408,30 @@ function PhpMyAdminCore() {
 
           {/* TAB 6: OPERATIONS */}
           {activeTab === 'operations' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 shadow-2xs space-y-6">
-              <div>
-                <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database &amp; Table Operations</h2>
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+              <div className="pb-3 border-b border-slate-100">
+                <h2 className="font-bold text-sm text-slate-900">Database &amp; Table Operations</h2>
                 <p className="text-xs text-slate-500">
                   Maintenance, collation alteration, table rename, copy, and optimization
                 </p>
               </div>
 
               {opMaintenanceMsg && (
-                <div className="p-4 rounded-xl bg-slate-900 text-emerald-400 font-mono text-xs whitespace-pre-wrap">
+                <div className="p-4 rounded-xl bg-slate-950 text-emerald-400 font-mono text-xs whitespace-pre-wrap border border-slate-800 shadow-2xs">
                   {opMaintenanceMsg}
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {/* Database Collation */}
-                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
-                  <h3 className="font-bold text-slate-900 dark:text-white">Database Collation</h3>
+                <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                  <h3 className="font-bold text-slate-900 text-sm">Database Collation</h3>
                   <p className="text-slate-500 text-[11px]">Alter default character collation for {currentDb}</p>
                   <div className="flex gap-2">
                     <select
                       value={opCollation}
                       onChange={(e) => setOpCollation(e.target.value)}
-                      className="px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-800 font-mono text-xs flex-1 focus:ring-1 focus:ring-emerald-500"
                     >
                       <option value="utf8mb4_unicode_ci">utf8mb4_unicode_ci</option>
                       <option value="utf8mb4_general_ci">utf8mb4_general_ci</option>
@@ -2780,7 +3441,7 @@ function PhpMyAdminCore() {
                     <button
                       onClick={() => handleTableOperation('collation')}
                       disabled={opRunning}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition"
                     >
                       Save
                     </button>
@@ -2789,35 +3450,35 @@ function PhpMyAdminCore() {
 
                 {/* Table Maintenance */}
                 {selectedTable && (
-                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
-                    <h3 className="font-bold text-slate-900 dark:text-white">Table Maintenance: `{selectedTable}`</h3>
+                  <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                    <h3 className="font-bold text-slate-900 text-sm">Table Maintenance: `{selectedTable}`</h3>
                     <p className="text-slate-500 text-[11px]">Defragment indexes and verify storage consistency</p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => handleTableOperation('optimize')}
                         disabled={opRunning}
-                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold cursor-pointer shadow-2xs transition"
                       >
                         Optimize Table
                       </button>
                       <button
                         onClick={() => handleTableOperation('check')}
                         disabled={opRunning}
-                        className="px-3 py-1.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold cursor-pointer shadow-sm"
+                        className="px-3.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 font-bold cursor-pointer shadow-2xs transition"
                       >
                         Check Table
                       </button>
                       <button
                         onClick={() => handleTableOperation('analyze')}
                         disabled={opRunning}
-                        className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-bold cursor-pointer shadow-2xs transition"
                       >
                         Analyze Table
                       </button>
                       <button
                         onClick={() => handleTableOperation('repair')}
                         disabled={opRunning}
-                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold cursor-pointer shadow-2xs transition"
                       >
                         Repair Table
                       </button>
@@ -2827,20 +3488,20 @@ function PhpMyAdminCore() {
 
                 {/* Table Rename */}
                 {selectedTable && (
-                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
-                    <h3 className="font-bold text-slate-900 dark:text-white">Rename Table to:</h3>
+                  <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                    <h3 className="font-bold text-slate-900 text-sm">Rename Table to:</h3>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         placeholder="new_table_name"
                         value={opRenameTable}
                         onChange={(e) => setOpRenameTable(e.target.value)}
-                        className="px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs flex-1"
+                        className="px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-800 font-mono text-xs flex-1 focus:ring-1 focus:ring-emerald-500"
                       />
                       <button
                         onClick={() => handleTableOperation('rename')}
                         disabled={opRunning || !opRenameTable.trim()}
-                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs disabled:opacity-50 transition"
                       >
                         Rename
                       </button>
@@ -2850,17 +3511,17 @@ function PhpMyAdminCore() {
 
                 {/* Table Copy */}
                 {selectedTable && (
-                  <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 space-y-3">
-                    <h3 className="font-bold text-slate-900 dark:text-white">Copy Table to:</h3>
+                  <div className="p-5 rounded-2xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                    <h3 className="font-bold text-slate-900 text-sm">Copy Table to:</h3>
                     <div className="space-y-2">
                       <input
                         type="text"
                         placeholder="copy_table_name"
                         value={opCopyTable}
                         onChange={(e) => setOpCopyTable(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 font-mono text-xs"
+                        className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-800 font-mono text-xs focus:ring-1 focus:ring-emerald-500"
                       />
-                      <label className="flex items-center gap-2 cursor-pointer font-semibold">
+                      <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
                         <input
                           type="checkbox"
                           checked={opCopyData}
@@ -2872,7 +3533,7 @@ function PhpMyAdminCore() {
                       <button
                         onClick={() => handleTableOperation('copy')}
                         disabled={opRunning || !opCopyTable.trim()}
-                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer disabled:opacity-50"
+                        className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs disabled:opacity-50 transition"
                       >
                         Copy Table
                       </button>
@@ -2882,20 +3543,20 @@ function PhpMyAdminCore() {
 
                 {/* Truncate / Drop Table */}
                 {selectedTable && (
-                  <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/50 dark:bg-rose-950/20 space-y-3 md:col-span-2">
-                    <h3 className="font-bold text-rose-800 dark:text-rose-300">Danger Zone: `{selectedTable}`</h3>
+                  <div className="p-5 rounded-2xl border border-rose-200 bg-rose-50/40 space-y-3 md:col-span-2">
+                    <h3 className="font-bold text-rose-800 text-sm">Danger Zone: `{selectedTable}`</h3>
                     <div className="flex flex-wrap gap-3">
                       <button
                         onClick={() => handleTableOperation('truncate')}
                         disabled={opRunning}
-                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
+                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold cursor-pointer shadow-xs transition"
                       >
                         Empty Table (TRUNCATE)
                       </button>
                       <button
                         onClick={() => handleTableOperation('drop')}
                         disabled={opRunning}
-                        className="px-4 py-2 rounded-xl bg-rose-800 hover:bg-rose-900 text-white font-bold cursor-pointer"
+                        className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-800 text-white font-bold cursor-pointer shadow-xs transition"
                       >
                         Delete Table (DROP)
                       </button>
@@ -2905,18 +3566,18 @@ function PhpMyAdminCore() {
 
                 {/* Database Danger Zone: Drop Entire Database */}
                 {!['mysql', 'information_schema', 'performance_schema', 'sys'].includes(currentDb.toLowerCase()) && (
-                  <div className="p-4 rounded-xl border border-red-300 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 space-y-3 md:col-span-2">
+                  <div className="p-5 rounded-2xl border border-red-300 bg-red-50/60 space-y-3 md:col-span-2">
                     <div className="flex items-center gap-2">
-                      <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
-                      <h3 className="font-bold text-red-900 dark:text-red-200">Database Danger Zone: `{currentDb}`</h3>
+                      <Trash2 className="w-4 h-4 text-red-600" />
+                      <h3 className="font-bold text-red-900 text-sm">Database Danger Zone: `{currentDb}`</h3>
                     </div>
-                    <p className="text-xs text-red-700 dark:text-red-300">
+                    <p className="text-xs text-red-700">
                       Permanently drop database <strong className="font-mono">{currentDb}</strong> and all of its tables, routines, and data from MySQL. This action is irreversible.
                     </p>
                     <button
                       onClick={() => handleDropDatabase(currentDb)}
                       disabled={opRunning}
-                      className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-2 transition-colors disabled:opacity-50"
+                      className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white font-bold text-xs shadow-xs cursor-pointer flex items-center gap-2 transition disabled:opacity-50"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Drop Database ({currentDb})</span>
@@ -2929,25 +3590,25 @@ function PhpMyAdminCore() {
 
           {/* TAB 7: ROUTINES */}
           {activeTab === 'routines' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Stored Procedures &amp; Functions</h2>
+                  <h2 className="font-bold text-sm text-slate-900">Stored Procedures &amp; Functions</h2>
                   <p className="text-xs text-slate-500">Manage database routines for {currentDb}</p>
                 </div>
                 <button
                   onClick={() => setAddRoutineModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Routine</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-[11px] text-slate-700">
                       <th className="p-2.5">Name</th>
                       <th className="p-2.5">Type</th>
                       <th className="p-2.5">Data Type</th>
@@ -2955,7 +3616,7 @@ function PhpMyAdminCore() {
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
                     {loadingEntities ? (
                       <tr>
                         <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
@@ -2970,32 +3631,35 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       routines.map((r) => (
-                        <tr key={r.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{r.name}</td>
+                        <tr key={r.name} className="hover:bg-slate-50 transition">
+                          <td className="p-2.5 font-bold text-slate-900">{r.name}</td>
                           <td className="p-2.5">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800">
                               {r.type}
                             </span>
                           </td>
                           <td className="p-2.5 text-slate-500">{r.data_type || '-'}</td>
                           <td className="p-2.5 text-slate-500">{r.security || 'DEFINER'}</td>
                           <td className="p-2.5 font-sans text-center">
-                            <div className="flex items-center justify-center gap-2 font-semibold">
+                            <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => {
                                   setSqlQuery(`CALL \`${r.name}\`();`);
                                   setActiveTab('sql');
                                 }}
-                                className="text-emerald-600 hover:underline cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition shadow-2xs cursor-pointer"
+                                title="Execute routine"
                               >
-                                Execute
+                                <Zap className="w-3 h-3 text-emerald-600" />
+                                <span>Execute</span>
                               </button>
-                              <span className="text-slate-300">|</span>
                               <button
                                 onClick={() => handleDropRoutine(r)}
-                                className="text-rose-600 hover:underline cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                                title="Drop routine"
                               >
-                                Drop
+                                <Trash2 className="w-3 h-3 text-rose-600" />
+                                <span>Drop</span>
                               </button>
                             </div>
                           </td>
@@ -3010,25 +3674,25 @@ function PhpMyAdminCore() {
 
           {/* TAB 8: EVENTS */}
           {activeTab === 'events' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Scheduled MySQL Events</h2>
+                  <h2 className="font-bold text-sm text-slate-900">Scheduled MySQL Events</h2>
                   <p className="text-xs text-slate-500">Cron-like background schedules executed by MySQL</p>
                 </div>
                 <button
                   onClick={() => setAddEventModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Event</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-[11px] text-slate-700">
                       <th className="p-2.5">Name</th>
                       <th className="p-2.5">Status</th>
                       <th className="p-2.5">Type</th>
@@ -3036,7 +3700,7 @@ function PhpMyAdminCore() {
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
                     {loadingEntities ? (
                       <tr>
                         <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
@@ -3051,10 +3715,10 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       events.map((ev) => (
-                        <tr key={ev.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{ev.name}</td>
+                        <tr key={ev.name} className="hover:bg-slate-50 transition">
+                          <td className="p-2.5 font-bold text-slate-900">{ev.name}</td>
                           <td className="p-2.5">
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                               {ev.status}
                             </span>
                           </td>
@@ -3063,9 +3727,11 @@ function PhpMyAdminCore() {
                           <td className="p-2.5 font-sans text-center">
                             <button
                               onClick={() => handleDropEvent(ev.name)}
-                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                              title="Drop event"
                             >
-                              Drop
+                              <Trash2 className="w-3 h-3 text-rose-600" />
+                              <span>Drop</span>
                             </button>
                           </td>
                         </tr>
@@ -3079,10 +3745,10 @@ function PhpMyAdminCore() {
 
           {/* TAB 9: TRIGGERS */}
           {activeTab === 'triggers' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Triggers</h2>
+                  <h2 className="font-bold text-sm text-slate-900">Database Triggers</h2>
                   <p className="text-xs text-slate-500">Automated triggers on INSERT, UPDATE, or DELETE</p>
                 </div>
                 <button
@@ -3090,17 +3756,17 @@ function PhpMyAdminCore() {
                     setTriggerTable(selectedTable || (tableDetails[0] ? tableDetails[0].name : ''));
                     setAddTriggerModalOpen(true);
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add Trigger</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-[11px] text-slate-700">
                       <th className="p-2.5">Name</th>
                       <th className="p-2.5">Table</th>
                       <th className="p-2.5">Timing</th>
@@ -3108,7 +3774,7 @@ function PhpMyAdminCore() {
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
                     {loadingEntities ? (
                       <tr>
                         <td colSpan={5} className="p-6 text-center text-slate-400 font-sans">
@@ -3123,17 +3789,19 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       triggers.map((trg) => (
-                        <tr key={trg.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{trg.name}</td>
+                        <tr key={trg.name} className="hover:bg-slate-50 transition">
+                          <td className="p-2.5 font-bold text-slate-900">{trg.name}</td>
                           <td className="p-2.5 text-amber-600">{trg.table}</td>
                           <td className="p-2.5">{trg.timing}</td>
                           <td className="p-2.5">{trg.event}</td>
                           <td className="p-2.5 font-sans text-center">
                             <button
                               onClick={() => handleDropTrigger(trg.name)}
-                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                              title="Drop trigger"
                             >
-                              Drop
+                              <Trash2 className="w-3 h-3 text-rose-600" />
+                              <span>Drop</span>
                             </button>
                           </td>
                         </tr>
@@ -3147,25 +3815,25 @@ function PhpMyAdminCore() {
 
           {/* TAB 10: VIEWS */}
           {activeTab === 'views' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">Database Views</h2>
+                  <h2 className="font-bold text-sm text-slate-900">Database Views</h2>
                   <p className="text-xs text-slate-500">Virtual tables defined by stored queries</p>
                 </div>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-[11px] text-slate-700">
                       <th className="p-2.5">View Name</th>
                       <th className="p-2.5">Updatable</th>
                       <th className="p-2.5">Security</th>
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
                     {loadingEntities ? (
                       <tr>
                         <td colSpan={4} className="p-6 text-center text-slate-400 font-sans">
@@ -3180,27 +3848,32 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       views.map((v) => (
-                        <tr key={v.name} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{v.name}</td>
+                        <tr key={v.name} className="hover:bg-slate-50 transition">
+                          <td className="p-2.5 font-bold text-slate-900">{v.name}</td>
                           <td className="p-2.5">{v.is_updatable}</td>
                           <td className="p-2.5 text-slate-500">{v.security_type}</td>
                           <td className="p-2.5 font-sans text-center">
-                            <div className="flex items-center justify-center gap-2 font-semibold">
+                            <div className="flex items-center justify-center gap-1.5">
                               <button
                                 onClick={() => handleOpenTableBrowse(v.name)}
-                                className="text-emerald-600 hover:underline cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition shadow-2xs cursor-pointer"
+                                title="Browse view rows"
                               >
-                                Browse
+                                <Eye className="w-3 h-3 text-emerald-600" />
+                                <span>Browse</span>
                               </button>
-                              <span className="text-slate-300">|</span>
                               <button
                                 onClick={async () => {
                                   if (!confirm(`DROP view \`${v.name}\`?`)) return;
                                   await handleExecuteSql(`DROP VIEW IF EXISTS \`${v.name}\`;`);
+                                  fetchAuxEntities(currentDb);
+                                  showToast(`View \`${v.name}\` dropped.`);
                                 }}
-                                className="text-rose-600 hover:underline cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                                title="Drop view"
                               >
-                                Drop
+                                <Trash2 className="w-3 h-3 text-rose-600" />
+                                <span>Drop</span>
                               </button>
                             </div>
                           </td>
@@ -3215,25 +3888,25 @@ function PhpMyAdminCore() {
 
           {/* TAB 11: PRIVILEGES */}
           {activeTab === 'privileges' && (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-5 shadow-2xs space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
-                  <h2 className="font-bold text-sm text-slate-900 dark:text-white">User Accounts &amp; Privileges</h2>
+                  <h2 className="font-bold text-sm text-slate-900">User Accounts &amp; Privileges</h2>
                   <p className="text-xs text-slate-500">MySQL user accounts and permissions</p>
                 </div>
                 <button
                   onClick={() => setAddUserModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Add User</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto border border-slate-200 dark:border-surface-800 rounded-xl">
+              <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 font-bold text-[11px]">
+                    <tr className="border-b border-slate-200 bg-slate-50 font-bold text-[11px] text-slate-700">
                       <th className="p-2.5">User</th>
                       <th className="p-2.5">Host</th>
                       <th className="p-2.5">Type</th>
@@ -3242,7 +3915,7 @@ function PhpMyAdminCore() {
                       <th className="p-2.5 text-center">Action</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-surface-800 font-mono text-xs">
+                  <tbody className="divide-y divide-slate-100 font-mono text-xs">
                     {loadingPrivileges ? (
                       <tr>
                         <td colSpan={6} className="p-6 text-center text-slate-400 font-sans">
@@ -3257,8 +3930,8 @@ function PhpMyAdminCore() {
                       </tr>
                     ) : (
                       privileges.map((p, i) => (
-                        <tr key={i} className="hover:bg-slate-50 dark:hover:bg-surface-800/50">
-                          <td className="p-2.5 font-bold text-slate-900 dark:text-white">{p.user}</td>
+                        <tr key={i} className="hover:bg-slate-50 transition">
+                          <td className="p-2.5 font-bold text-slate-900">{p.user}</td>
                           <td className="p-2.5 text-amber-600">{p.host}</td>
                           <td className="p-2.5">{p.type}</td>
                           <td className="p-2.5 text-slate-500">{p.privileges}</td>
@@ -3269,10 +3942,13 @@ function PhpMyAdminCore() {
                                 if (!confirm(`DROP user '${p.user}'@'${p.host}'?`)) return;
                                 await handleExecuteSql(`DROP USER '${p.user}'@'${p.host}';`);
                                 fetchPrivileges(currentDb);
+                                showToast(`User dropped.`);
                               }}
-                              className="text-rose-600 hover:underline font-semibold cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition shadow-2xs cursor-pointer"
+                              title="Drop user"
                             >
-                              Drop
+                              <Trash2 className="w-3 h-3 text-rose-600" />
+                              <span>Drop</span>
                             </button>
                           </td>
                         </tr>
@@ -3288,28 +3964,28 @@ function PhpMyAdminCore() {
 
       {/* MODAL 1: CREATE DATABASE */}
       {createDbModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create New Database</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Create New Database</h3>
             <p className="text-slate-500">Execute real `CREATE DATABASE` on MySQL engine</p>
             <form onSubmit={handleCreateDatabase} className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1">Database Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Database Name</label>
                 <input
                   type="text"
                   required
                   placeholder="new_db_name"
                   value={newDbName}
                   onChange={(e) => setNewDbName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Collation</label>
+                <label className="block font-semibold mb-1 text-slate-700">Collation</label>
                 <select
                   value={newDbCollation}
                   onChange={(e) => setNewDbCollation(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 >
                   <option value="utf8mb4_unicode_ci">utf8mb4_unicode_ci</option>
                   <option value="utf8mb4_general_ci">utf8mb4_general_ci</option>
@@ -3320,11 +3996,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setCreateDbModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create Database
                 </button>
               </div>
@@ -3335,30 +4011,30 @@ function PhpMyAdminCore() {
 
       {/* MODAL 2: CREATE TABLE */}
       {createTableModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Table in `{currentDb}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Create Table in `{currentDb}`</h3>
             <form onSubmit={handleCreateTable} className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1">Table Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Table Name</label>
                 <input
                   type="text"
                   required
                   placeholder="table_name"
                   value={newTableName}
                   onChange={(e) => setNewTableName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setCreateTableModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create Table
                 </button>
               </div>
@@ -3369,13 +4045,13 @@ function PhpMyAdminCore() {
 
       {/* MODAL 3: INSERT ROW */}
       {insertRowModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Insert Row into `{selectedTable}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-900">Insert Row into `{selectedTable}`</h3>
             <form onSubmit={handleSubmitInsertRow} className="space-y-3">
               {(browseData?.columns || []).map((col) => (
                 <div key={col}>
-                  <label className="block font-mono font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="block font-mono font-semibold text-slate-700 mb-1">
                     {col}
                   </label>
                   <input
@@ -3383,7 +4059,7 @@ function PhpMyAdminCore() {
                     placeholder="Value or leave blank for NULL/DEFAULT"
                     value={insertRowValues[col] || ''}
                     onChange={(e) => setInsertRowValues({ ...insertRowValues, [col]: e.target.value })}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
               ))}
@@ -3391,11 +4067,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setInsertRowModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Save Row
                 </button>
               </div>
@@ -3406,15 +4082,15 @@ function PhpMyAdminCore() {
 
       {/* MODAL 4: EDIT ROW */}
       {editRowModalOpen && editRowOriginal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Edit Row in `{selectedTable}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-900">Edit Row in `{selectedTable}`</h3>
             <form onSubmit={handleSubmitEditRow} className="space-y-3">
               {(browseData?.columns || []).map((col) => {
                 const isPk = browseData?.primary_key === col;
                 return (
                   <div key={col}>
-                    <label className="block font-mono font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                    <label className="block font-mono font-semibold text-slate-700 mb-1 flex items-center gap-1">
                       {isPk && <Key className="w-3 h-3 text-amber-500" />}
                       <span>{col}</span>
                       {isPk && <span className="text-[10px] text-amber-500 font-sans">(Primary Key)</span>}
@@ -3424,7 +4100,7 @@ function PhpMyAdminCore() {
                       disabled={isPk}
                       value={editRowValues[col] !== undefined ? editRowValues[col] : ''}
                       onChange={(e) => setEditRowValues({ ...editRowValues, [col]: e.target.value })}
-                      className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono disabled:opacity-60"
+                      className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono disabled:opacity-60 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                     />
                   </div>
                 );
@@ -3433,11 +4109,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setEditRowModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Update Row
                 </button>
               </div>
@@ -3448,61 +4124,61 @@ function PhpMyAdminCore() {
 
       {/* MODAL 5: ADD COLUMN */}
       {addColumnModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Column to `{selectedTable}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Add Column to `{selectedTable}`</h3>
             <form onSubmit={handleAddColumnSubmit} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Column Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Column Name</label>
                 <input
                   type="text"
                   required
                   placeholder="column_name"
                   value={newColName}
                   onChange={(e) => setNewColName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Type</label>
+                <label className="block font-semibold mb-1 text-slate-700">Type</label>
                 <input
                   type="text"
                   required
                   placeholder="varchar(255), int(11), text..."
                   value={newColType}
                   onChange={(e) => setNewColType(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold mb-1">Null</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Null</label>
                   <select
                     value={newColNull}
                     onChange={(e) => setNewColNull(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="YES">NULL</option>
                     <option value="NO">NOT NULL</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1">Default</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Default</label>
                   <input
                     type="text"
                     placeholder="NULL or default value"
                     value={newColDefault}
                     onChange={(e) => setNewColDefault(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
               </div>
               <div>
-                <label className="block font-semibold mb-1">After Column</label>
+                <label className="block font-semibold mb-1 text-slate-700">After Column</label>
                 <select
                   value={newColAfter}
                   onChange={(e) => setNewColAfter(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 >
                   <option value="">At End of Table</option>
                   {(tableStructure?.columns || []).map((c) => (
@@ -3514,11 +4190,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setAddColumnModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Add Column
                 </button>
               </div>
@@ -3529,49 +4205,49 @@ function PhpMyAdminCore() {
 
       {/* MODAL 6: MODIFY COLUMN */}
       {modifyColModalOpen && modColTarget && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Modify Column: `{modColTarget.field}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Modify Column: `{modColTarget.field}`</h3>
             <form onSubmit={handleModifyColumnSubmit} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Column Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Column Name</label>
                 <input
                   type="text"
                   required
                   value={modColName}
                   onChange={(e) => setModColName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Type</label>
+                <label className="block font-semibold mb-1 text-slate-700">Type</label>
                 <input
                   type="text"
                   required
                   value={modColType}
                   onChange={(e) => setModColType(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold mb-1">Null</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Null</label>
                   <select
                     value={modColNull}
                     onChange={(e) => setModColNull(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="YES">NULL</option>
                     <option value="NO">NOT NULL</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1">Default</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Default</label>
                   <input
                     type="text"
                     value={modColDefault}
                     onChange={(e) => setModColDefault(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
               </div>
@@ -3579,11 +4255,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setModifyColModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white font-bold shadow-sm">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Save Changes
                 </button>
               </div>
@@ -3594,26 +4270,26 @@ function PhpMyAdminCore() {
 
       {/* MODAL 7: ADD INDEX */}
       {addIndexModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Index to `{selectedTable}`</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Add Index to `{selectedTable}`</h3>
             <form onSubmit={handleAddIndexSubmit} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Index Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Index Name</label>
                 <input
                   type="text"
                   placeholder="idx_column_name"
                   value={newIndexName}
                   onChange={(e) => setNewIndexName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Index Type</label>
+                <label className="block font-semibold mb-1 text-slate-700">Index Type</label>
                 <select
                   value={newIndexType}
                   onChange={(e: any) => setNewIndexType(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 >
                   <option value="INDEX">INDEX</option>
                   <option value="UNIQUE">UNIQUE</option>
@@ -3622,10 +4298,10 @@ function PhpMyAdminCore() {
                 </select>
               </div>
               <div>
-                <label className="block font-semibold mb-1">Columns</label>
-                <div className="max-h-36 overflow-y-auto border border-slate-300 dark:border-surface-700 rounded-xl p-2 space-y-1 bg-slate-50 dark:bg-surface-950 font-mono">
+                <label className="block font-semibold mb-1 text-slate-700">Columns</label>
+                <div className="max-h-36 overflow-y-auto border border-slate-200 rounded-xl p-2.5 space-y-1 bg-slate-50 font-mono">
                   {(tableStructure?.columns || []).map((c) => (
-                    <label key={c.field} className="flex items-center gap-2 cursor-pointer">
+                    <label key={c.field} className="flex items-center gap-2 cursor-pointer text-slate-800 hover:text-emerald-700">
                       <input
                         type="checkbox"
                         checked={newIndexColumns.includes(c.field)}
@@ -3644,11 +4320,11 @@ function PhpMyAdminCore() {
                 <button
                   type="button"
                   onClick={() => setAddIndexModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create Index
                 </button>
               </div>
@@ -3659,28 +4335,28 @@ function PhpMyAdminCore() {
 
       {/* MODAL 8: ADD ROUTINE */}
       {addRoutineModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Stored Routine</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-lg bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Add Stored Routine</h3>
             <form onSubmit={handleCreateRoutine} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Routine Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Routine Name</label>
                 <input
                   type="text"
                   required
                   placeholder="routine_name"
                   value={routineName}
                   onChange={(e) => setRoutineName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold mb-1">Type</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Type</label>
                   <select
                     value={routineType}
                     onChange={(e: any) => setRoutineType(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="PROCEDURE">PROCEDURE</option>
                     <option value="FUNCTION">FUNCTION</option>
@@ -3688,45 +4364,45 @@ function PhpMyAdminCore() {
                 </div>
                 {routineType === 'FUNCTION' && (
                   <div>
-                    <label className="block font-semibold mb-1">Return Type</label>
+                    <label className="block font-semibold mb-1 text-slate-700">Return Type</label>
                     <input
                       type="text"
                       placeholder="INT, VARCHAR(255)..."
                       value={routineReturns}
                       onChange={(e) => setRoutineReturns(e.target.value)}
-                      className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                      className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                     />
                   </div>
                 )}
               </div>
               <div>
-                <label className="block font-semibold mb-1">Parameters (e.g. IN p_id INT, OUT p_cnt INT)</label>
+                <label className="block font-semibold mb-1 text-slate-700">Parameters (e.g. IN p_id INT, OUT p_cnt INT)</label>
                 <input
                   type="text"
                   placeholder="param list"
                   value={routineParams}
                   onChange={(e) => setRoutineParams(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Routine Body (SQL)</label>
+                <label className="block font-semibold mb-1 text-slate-700">Routine Body (SQL)</label>
                 <textarea
                   rows={6}
                   value={routineBody}
                   onChange={(e) => setRoutineBody(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono text-xs focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setAddRoutineModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Save Routine
                 </button>
               </div>
@@ -3737,50 +4413,50 @@ function PhpMyAdminCore() {
 
       {/* MODAL 9: ADD EVENT */}
       {addEventModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Scheduled Event</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Create Scheduled Event</h3>
             <form onSubmit={handleCreateEvent} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Event Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Event Name</label>
                 <input
                   type="text"
                   required
                   placeholder="event_name"
                   value={eventName}
                   onChange={(e) => setEventName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Schedule Expression</label>
+                <label className="block font-semibold mb-1 text-slate-700">Schedule Expression</label>
                 <input
                   type="text"
                   required
                   placeholder="EVERY 1 DAY"
                   value={eventSchedule}
                   onChange={(e) => setEventSchedule(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">SQL Body</label>
+                <label className="block font-semibold mb-1 text-slate-700">SQL Body</label>
                 <textarea
                   rows={4}
                   value={eventBody}
                   onChange={(e) => setEventBody(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono text-xs focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setAddEventModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create Event
                 </button>
               </div>
@@ -3791,27 +4467,27 @@ function PhpMyAdminCore() {
 
       {/* MODAL 10: ADD TRIGGER */}
       {addTriggerModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Create Trigger</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Create Trigger</h3>
             <form onSubmit={handleCreateTrigger} className="space-y-3">
               <div>
-                <label className="block font-semibold mb-1">Trigger Name</label>
+                <label className="block font-semibold mb-1 text-slate-700">Trigger Name</label>
                 <input
                   type="text"
                   required
                   placeholder="trigger_name"
                   value={triggerName}
                   onChange={(e) => setTriggerName(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Table</label>
+                <label className="block font-semibold mb-1 text-slate-700">Table</label>
                 <select
                   value={triggerTable}
                   onChange={(e) => setTriggerTable(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 >
                   {tableDetails.map((t) => (
                     <option key={t.name} value={t.name}>
@@ -3822,22 +4498,22 @@ function PhpMyAdminCore() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block font-semibold mb-1">Timing</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Timing</label>
                   <select
                     value={triggerTiming}
                     onChange={(e: any) => setTriggerTiming(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="BEFORE">BEFORE</option>
                     <option value="AFTER">AFTER</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block font-semibold mb-1">Event</label>
+                  <label className="block font-semibold mb-1 text-slate-700">Event</label>
                   <select
                     value={triggerEvent}
                     onChange={(e: any) => setTriggerEvent(e.target.value)}
-                    className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-800 border-slate-300 dark:border-surface-700 font-mono"
+                    className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   >
                     <option value="INSERT">INSERT</option>
                     <option value="UPDATE">UPDATE</option>
@@ -3846,23 +4522,23 @@ function PhpMyAdminCore() {
                 </div>
               </div>
               <div>
-                <label className="block font-semibold mb-1">Trigger SQL Body</label>
+                <label className="block font-semibold mb-1 text-slate-700">Trigger SQL Body</label>
                 <textarea
                   rows={4}
                   value={triggerBody}
                   onChange={(e) => setTriggerBody(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono text-xs"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono text-xs focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setAddTriggerModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create Trigger
                 </button>
               </div>
@@ -3873,9 +4549,9 @@ function PhpMyAdminCore() {
 
       {/* MODAL 11: ADD USER ACCOUNT */}
       {addUserModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-          <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white">Add Database User</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl p-6 text-xs space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Add Database User</h3>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -3902,46 +4578,46 @@ function PhpMyAdminCore() {
               className="space-y-3"
             >
               <div>
-                <label className="block font-semibold mb-1">Username</label>
+                <label className="block font-semibold mb-1 text-slate-700">Username</label>
                 <input
                   type="text"
                   required
                   placeholder="username"
                   value={newUsername}
                   onChange={(e) => setNewUsername(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Host</label>
+                <label className="block font-semibold mb-1 text-slate-700">Host</label>
                 <input
                   type="text"
                   required
                   value={newUserHost}
                   onChange={(e) => setNewUserHost(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div>
-                <label className="block font-semibold mb-1">Password</label>
+                <label className="block font-semibold mb-1 text-slate-700">Password</label>
                 <input
                   type="password"
                   required
                   placeholder="••••••••"
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
-                  className="w-full p-2 rounded-xl border bg-slate-50 dark:bg-surface-950 border-slate-300 dark:border-surface-700 font-mono"
+                  className="w-full p-2.5 rounded-xl border bg-white border-slate-300 text-slate-900 font-mono focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setAddUserModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200 cursor-pointer shadow-2xs transition"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">
+                <button type="submit" className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer shadow-xs transition">
                   Create User
                 </button>
               </div>
