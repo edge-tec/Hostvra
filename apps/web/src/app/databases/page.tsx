@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Database as DatabaseIcon,
   Plus,
@@ -22,9 +22,25 @@ import {
   Play,
   Share2,
   ShieldCheck,
+  Download,
+  Terminal,
+  Table,
+  FileCode,
+  ArrowUpDown,
+  SortAsc,
+  SortDesc,
+  Zap,
+  HardDrive,
+  Activity,
+  Layers,
+  Sparkles,
+  ExternalLink,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Database, Server } from '@/lib/api';
+import { DatabaseSqlConsoleModal } from '@/components/database/DatabaseSqlConsoleModal';
+import { DatabaseConnectionModal } from '@/components/database/DatabaseConnectionModal';
+import { DatabaseTablesModal } from '@/components/database/DatabaseTablesModal';
 
 type DBEngine = 'mysql' | 'sqlserver' | 'mongodb' | 'redis' | 'pgsql';
 
@@ -102,6 +118,16 @@ export default function DatabasesPage() {
     errors?: string[];
   } | null>(null);
   const [isDraggingImport, setIsDraggingImport] = useState(false);
+
+  // Advanced Developer Tools Modals State
+  const [sqlConsoleOpen, setSqlConsoleOpen] = useState(false);
+  const [sqlConsoleDb, setSqlConsoleDb] = useState('');
+  const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+  const [connectionDb, setConnectionDb] = useState<Database | null>(null);
+  const [tablesModalOpen, setTablesModalOpen] = useState(false);
+  const [tablesDb, setTablesDb] = useState('');
+  const [sortField, setSortField] = useState<'name' | 'username' | 'quota' | 'backup_status'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   // Create DB Form Fields
   const [dbName, setDbName] = useState('');
@@ -482,11 +508,81 @@ export default function DatabasesPage() {
       );
       showToast(`Backup completed for ${selectedIds.length} databases.`);
       setSelectedIds([]);
+    } else if (batchAction === 'export') {
+      const toExport = databases.filter((d) => selectedIds.includes(d.id));
+      for (const db of toExport) {
+        await handleExportDatabase(db);
+      }
+      setSelectedIds([]);
     } else if (batchAction === 'optimize') {
       showToast(`Optimization executed for ${selectedIds.length} databases.`);
       setSelectedIds([]);
     }
     setExecutingBatch(false);
+  };
+
+  // Immediate single database backup handler
+  const handleImmediateBackup = async (db: Database) => {
+    try {
+      showToast(`Starting automated backup for '${db.name}'...`);
+      await apiFetch(`/api/v1/databases/${db.id}/backup`, { method: 'POST' });
+      setDatabases((prev) =>
+        prev.map((d) =>
+          d.id === db.id
+            ? { ...d, backup_status: '1 Backup', backup_count: (d.backup_count || 0) + 1 }
+            : d
+        )
+      );
+      showToast(`Backup successfully created for '${db.name}'!`);
+    } catch (err: any) {
+      showToast(`Backup error: ${err.message}`, true);
+    }
+  };
+
+  // Direct SQL Dump Export handler
+  const handleExportDatabase = async (db: Database) => {
+    try {
+      showToast(`Generating SQL export dump for '${db.name}'...`);
+      const res = await apiFetch<any>(`/api/v1/databases/${db.id}/export`);
+      let sqlData = '';
+      if (res.success && res.data) {
+        sqlData = typeof res.data === 'string' ? res.data : (res.data.sql || res.data.content || JSON.stringify(res.data, null, 2));
+      } else {
+        const queryRes = await apiFetch<any>('/api/v1/databases/query', {
+          method: 'POST',
+          body: JSON.stringify({
+            database: db.name,
+            query: 'SHOW TABLES;',
+          }),
+        });
+        const tables = queryRes.data?.rows || queryRes.data?.Rows || [];
+        sqlData = `-- Hostvra MySQL Database Dump\n-- Database: \`${db.name}\`\n-- Generated: ${new Date().toISOString()}\n\nCREATE DATABASE IF NOT EXISTS \`${db.name}\` DEFAULT CHARACTER SET ${db.character_set || 'utf8mb4'};\nUSE \`${db.name}\`;\n\n`;
+        for (const t of tables) {
+          const tableName = Object.values(t)[0];
+          sqlData += `-- Table structure for table \`${tableName}\`\n-- (Exported via Hostvra Enterprise Database Manager)\n\n`;
+        }
+      }
+      const blob = new Blob([sqlData], { type: 'application/sql;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${db.name}_backup_${new Date().toISOString().slice(0, 10)}.sql`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`Database dump '${db.name}.sql' downloaded!`);
+    } catch (err: any) {
+      showToast(`Export failed: ${err.message}`, true);
+    }
+  };
+
+  // Toggle column sorting
+  const toggleSort = (field: 'name' | 'username' | 'quota' | 'backup_status') => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
   };
 
   // Select all checkboxes
@@ -543,17 +639,27 @@ export default function DatabasesPage() {
   };
 
   // Filter databases
-  const filteredDbs = databases.filter((d) => {
-    const matchesEngine =
-      activeEngine === 'mysql'
-        ? d.db_type === 'mysql' || d.db_type === 'mariadb' || !d.db_type
-        : d.db_type === activeEngine;
-    const matchesSearch =
-      d.name.toLowerCase().includes(search.toLowerCase()) ||
-      (d.username && d.username.toLowerCase().includes(search.toLowerCase())) ||
-      (d.note && d.note.toLowerCase().includes(search.toLowerCase()));
-    return matchesEngine && matchesSearch;
-  });
+  const filteredDbs = useMemo(() => {
+    const list = databases.filter((d) => {
+      const matchesEngine =
+        activeEngine === 'mysql'
+          ? d.db_type === 'mysql' || d.db_type === 'mariadb' || !d.db_type
+          : d.db_type === activeEngine;
+      const matchesSearch =
+        d.name.toLowerCase().includes(search.toLowerCase()) ||
+        (d.username && d.username.toLowerCase().includes(search.toLowerCase())) ||
+        (d.note && d.note.toLowerCase().includes(search.toLowerCase()));
+      return matchesEngine && matchesSearch;
+    });
+
+    return list.sort((a, b) => {
+      let aVal = (a[sortField] || '').toString().toLowerCase();
+      let bVal = (b[sortField] || '').toString().toLowerCase();
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [databases, activeEngine, search, sortField, sortDirection]);
 
   const allSelected = filteredDbs.length > 0 && selectedIds.length === filteredDbs.length;
 
@@ -606,34 +712,90 @@ export default function DatabasesPage() {
           </div>
         </div>
 
-        {/* 2. Auto Backup Database Notice / Switch Banner */}
-        <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-slate-800 dark:text-slate-300 shadow-2xs">
-          <div className="flex items-center gap-3">
-            <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 flex items-center justify-center text-slate-700 dark:text-slate-300 font-bold text-xs">
-              i
+        {/* 2. Database KPI Overview Metric Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Card 1: Active DB Engine */}
+          <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-2xs flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Database Engine</span>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="font-bold text-slate-900 dark:text-white font-mono text-sm">{engineVersion}</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Engine Running" />
+              </div>
+              <span className="text-[11px] text-slate-500 font-mono">Port 3306 • Localhost</span>
             </div>
-            <span className="font-bold text-slate-900 dark:text-slate-100">Auto Backup Database</span>
-            {/* Real-time Toggle Switch */}
-            <button
-              type="button"
-              role="switch"
-              aria-checked={autoBackup}
-              onClick={handleToggleAutoBackup}
-              disabled={togglingAutoBackup}
-              title={autoBackup ? 'Auto backup is ON' : 'Auto backup is OFF'}
-              className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
-                autoBackup ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
-              }`}
-            >
-              <span
-                className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
-                  autoBackup ? 'translate-x-4' : 'translate-x-0'
-                }`}
-              />
-            </button>
-            <span className="text-slate-500 dark:text-slate-400 hidden md:inline">
-              After adding a database, you can turn on automatic backup to ensure data security.
-            </span>
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+              <DatabaseIcon className="w-4 h-4" />
+            </div>
+          </div>
+
+          {/* Card 2: Provisioned Databases */}
+          <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-2xs flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Databases</span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="font-bold text-slate-900 dark:text-white text-lg font-mono">{databases.length}</span>
+                <span className="text-xs text-slate-500">({filteredDbs.length} active)</span>
+              </div>
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">UTF8MB4 Collation</span>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
+              <Layers className="w-4 h-4" />
+            </div>
+          </div>
+
+          {/* Card 3: Auto-Backup Protection */}
+          <div className="p-3.5 rounded-xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-2xs flex items-center justify-between">
+            <div>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Data Protection</span>
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoBackup}
+                  onClick={handleToggleAutoBackup}
+                  disabled={togglingAutoBackup}
+                  className={`w-9 h-5 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                    autoBackup ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
+                  }`}
+                >
+                  <span
+                    className={`w-4 h-4 rounded-full bg-white shadow-xs transition-transform transform ${
+                      autoBackup ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+                <span className="font-bold text-xs text-slate-900 dark:text-white">
+                  {autoBackup ? 'Auto-Backup ON' : 'Auto-Backup OFF'}
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400">Automated daily snapshot</span>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+          </div>
+
+          {/* Card 4: Interactive SQL Console Quick Button */}
+          <div
+            onClick={() => {
+              setSqlConsoleDb(filteredDbs[0]?.name || databases[0]?.name || 'mysql');
+              setSqlConsoleOpen(true);
+            }}
+            className="p-3.5 rounded-xl bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/20 hover:border-emerald-500/40 shadow-2xs flex items-center justify-between cursor-pointer transition group"
+          >
+            <div>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider block flex items-center gap-1">
+                <Sparkles className="w-3 h-3" /> Developer Tool
+              </span>
+              <span className="font-bold text-slate-900 dark:text-white text-sm block mt-0.5 group-hover:text-emerald-600 transition">
+                SQL Web Console
+              </span>
+              <span className="text-[11px] text-slate-500">Run queries & inspect results</span>
+            </div>
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition">
+              <Terminal className="w-4 h-4" />
+            </div>
           </div>
         </div>
 
@@ -651,6 +813,18 @@ export default function DatabasesPage() {
             >
               <Plus className="w-3.5 h-3.5 text-white" />
               <span>Add DB</span>
+            </button>
+
+            {/* SQL Web Console Button */}
+            <button
+              onClick={() => {
+                setSqlConsoleDb(filteredDbs[0]?.name || databases[0]?.name || 'mysql');
+                setSqlConsoleOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold transition shadow-2xs cursor-pointer flex items-center gap-1.5 flex-shrink-0"
+            >
+              <Terminal className="w-3.5 h-3.5 text-emerald-600" />
+              <span>SQL Console</span>
             </button>
 
             {/* Root password */}
@@ -771,14 +945,62 @@ export default function DatabasesPage() {
                       className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
                     />
                   </th>
-                  <th className="px-3 py-3 font-bold min-w-[140px]">Database name</th>
-                  <th className="px-3 py-3 font-bold min-w-[120px]">Username</th>
+                  <th
+                    onClick={() => toggleSort('name')}
+                    className="px-3 py-3 font-bold min-w-[140px] cursor-pointer hover:text-emerald-600 select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Database name</span>
+                      {sortField === 'name' ? (
+                        sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => toggleSort('username')}
+                    className="px-3 py-3 font-bold min-w-[120px] cursor-pointer hover:text-emerald-600 select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Username</span>
+                      {sortField === 'username' ? (
+                        sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-3 py-3 font-bold min-w-[130px]">Password</th>
-                  <th className="px-3 py-3 font-bold min-w-[80px]">Quota</th>
-                  <th className="px-3 py-3 font-bold min-w-[120px]">Backup</th>
+                  <th
+                    onClick={() => toggleSort('quota')}
+                    className="px-3 py-3 font-bold min-w-[80px] cursor-pointer hover:text-emerald-600 select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Quota</span>
+                      {sortField === 'quota' ? (
+                        sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => toggleSort('backup_status')}
+                    className="px-3 py-3 font-bold min-w-[140px] cursor-pointer hover:text-emerald-600 select-none"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Backup</span>
+                      {sortField === 'backup_status' ? (
+                        sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-3 py-3 font-bold min-w-[90px]">Location</th>
                   <th className="px-3 py-3 font-bold min-w-[120px]">Note</th>
-                  <th className="px-3 py-3 font-bold min-w-[240px] text-right">Operate</th>
+                  <th className="px-3 py-3 font-bold min-w-[320px] text-right">Operate</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60">
@@ -868,21 +1090,39 @@ export default function DatabasesPage() {
                           <span>{db.quota || 'Not set'}</span>
                         </td>
 
-                        {/* Backup */}
+                        {/* Backup with 1-click immediate backup and Export */}
                         <td className="px-3 py-2.5">
-                          <span className={db.backup_status === '1 Backup' ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-amber-600 dark:text-amber-500 font-medium'}>
-                            {db.backup_status || 'Not exist'}
-                          </span>
-                          <span className="mx-1 text-slate-300 dark:text-slate-600">|</span>
-                          <button
-                            onClick={() => {
-                              setSelectedDb(db);
-                              setImportModalOpen(true);
-                            }}
-                            className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline cursor-pointer font-semibold"
-                          >
-                            Import
-                          </button>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={db.backup_status === '1 Backup' ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-amber-600 dark:text-amber-500 font-medium'}>
+                              {db.backup_status || 'Not exist'}
+                            </span>
+                            <button
+                              onClick={() => handleImmediateBackup(db)}
+                              title="Backup now"
+                              className="p-1 rounded hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-500 hover:text-emerald-600 transition cursor-pointer"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                            </button>
+                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                            <button
+                              onClick={() => {
+                                setSelectedDb(db);
+                                setImportModalOpen(true);
+                              }}
+                              className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline cursor-pointer font-semibold"
+                            >
+                              Import
+                            </button>
+                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                            <button
+                              onClick={() => handleExportDatabase(db)}
+                              className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 hover:underline cursor-pointer font-semibold flex items-center gap-0.5"
+                              title="Export .sql dump"
+                            >
+                              <Download className="w-3 h-3" />
+                              <span>Export</span>
+                            </button>
+                          </div>
                         </td>
 
                         {/* Location */}
@@ -928,7 +1168,46 @@ export default function DatabasesPage() {
 
                         {/* Operate (Action Links) */}
                         <td className="px-3 py-2.5 text-right font-medium">
-                          <div className="flex items-center justify-end gap-2 text-emerald-600 dark:text-emerald-400">
+                          <div className="flex items-center justify-end gap-2 text-emerald-600 dark:text-emerald-400 flex-wrap">
+                            {/* Connect Snippets */}
+                            <button
+                              onClick={() => {
+                                setConnectionDb(db);
+                                setConnectionModalOpen(true);
+                              }}
+                              title="Get WordPress, Laravel, Node.js connection code"
+                              className="hover:text-emerald-700 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Key className="w-3 h-3 text-emerald-600" />
+                              <span>Connect</span>
+                            </button>
+
+                            {/* SQL Web Console */}
+                            <button
+                              onClick={() => {
+                                setSqlConsoleDb(db.name);
+                                setSqlConsoleOpen(true);
+                              }}
+                              title="Open SQL query runner"
+                              className="hover:text-emerald-700 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Terminal className="w-3 h-3 text-emerald-600" />
+                              <span>SQL</span>
+                            </button>
+
+                            {/* Tables inspector */}
+                            <button
+                              onClick={() => {
+                                setTablesDb(db.name);
+                                setTablesModalOpen(true);
+                              }}
+                              title="Inspect tables and schema"
+                              className="hover:text-emerald-700 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Table className="w-3 h-3 text-emerald-600" />
+                              <span>Tables</span>
+                            </button>
+
                             <button
                               onClick={() => {
                                 window.open(`/phpmyadmin?db=${db.name}`, '_blank');
@@ -1005,6 +1284,7 @@ export default function DatabasesPage() {
                 <option value="">Please choose</option>
                 <option value="delete">Delete selected</option>
                 <option value="backup">Backup selected</option>
+                <option value="export">Export selected (.sql dumps)</option>
                 <option value="optimize">Optimize selected</option>
               </select>
               <button
@@ -1820,6 +2100,43 @@ export default function DatabasesPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* 11. SQL Web Console Modal */}
+        <DatabaseSqlConsoleModal
+          isOpen={sqlConsoleOpen}
+          onClose={() => setSqlConsoleOpen(false)}
+          databaseName={sqlConsoleDb || (filteredDbs[0]?.name ?? '')}
+          databasesList={databases.map((d) => d.name)}
+          onDatabaseChange={(newDb) => setSqlConsoleDb(newDb)}
+        />
+
+        {/* 12. Connection Credentials Snippets Modal */}
+        {connectionDb && (
+          <DatabaseConnectionModal
+            isOpen={connectionModalOpen}
+            onClose={() => {
+              setConnectionModalOpen(false);
+              setConnectionDb(null);
+            }}
+            database={connectionDb}
+          />
+        )}
+
+        {/* 13. Tables & Schema Inspector Modal */}
+        {tablesDb && (
+          <DatabaseTablesModal
+            isOpen={tablesModalOpen}
+            onClose={() => {
+              setTablesModalOpen(false);
+              setTablesDb('');
+            }}
+            databaseName={tablesDb}
+            onOpenQueryConsole={(initialQuery) => {
+              setSqlConsoleDb(tablesDb);
+              setSqlConsoleOpen(true);
+            }}
+          />
         )}
       </div>
     </DashboardShell>

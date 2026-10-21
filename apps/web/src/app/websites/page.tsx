@@ -38,6 +38,7 @@ import {
   FolderTree,
   Terminal,
   Server as ServerIcon,
+  Database as DatabaseIcon,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
@@ -1212,6 +1213,15 @@ export default function WebsitesPage() {
                                 className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
                               >
                                 <Terminal className="w-3.5 h-3.5" />
+                              </a>
+
+                              {/* 5. Database */}
+                              <a
+                                href={`/databases?search=${encodeURIComponent(site.primary_domain.split('.')[0])}`}
+                                title={`Databases for ${site.primary_domain}`}
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition cursor-pointer"
+                              >
+                                <DatabaseIcon className="w-3.5 h-3.5" />
                               </a>
 
                               {/* 5. Directory & Permissions */}

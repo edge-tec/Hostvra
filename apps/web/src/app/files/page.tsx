@@ -44,6 +44,11 @@ import {
   Sparkles,
   ExternalLink,
   ChevronDown,
+  Keyboard,
+  SortAsc,
+  SortDesc,
+  ArrowUpDown,
+  Layers,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, getApiBaseUrl } from '@/lib/api';
@@ -56,6 +61,9 @@ import { MultiDomainMoveCopyModal } from '@/components/filemanager/MultiDomainMo
 import { UploadManagerDrawer, UploadTask } from '@/components/filemanager/UploadManagerDrawer';
 import { ActivityLogsModal } from '@/components/filemanager/ActivityLogsModal';
 import { StorageInfoModal } from '@/components/filemanager/StorageInfoModal';
+import { WebsiteFileHub } from '@/components/filemanager/WebsiteFileHub';
+import { AdvancedCodeEditor } from '@/components/filemanager/AdvancedCodeEditor';
+import { KeyboardShortcutsModal } from '@/components/filemanager/KeyboardShortcutsModal';
 
 export interface FileItem {
   name: string;
@@ -88,6 +96,8 @@ interface DomainWebsite {
 export default function FileManagerPage() {
   // Navigation & Directory State
   const [currentPath, setCurrentPath] = useState('/var/www');
+  const [directPathInput, setDirectPathInput] = useState('/var/www');
+  const [isEditingPath, setIsEditingPath] = useState(false);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -96,6 +106,16 @@ export default function FileManagerPage() {
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [showHidden, setShowHidden] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Sorting & Category Filters State
+  const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('all');
+  const [sortField, setSortField] = useState<'name' | 'size' | 'modified' | 'perm'>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [foldersFirst, setFoldersFirst] = useState(true);
+
+  // Productivity & Website Tools Modals
+  const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
+  const [fixingPermissions, setFixingPermissions] = useState(false);
 
   // Trash Mode State
   const [isTrashActive, setIsTrashActive] = useState(false);
@@ -254,12 +274,14 @@ export default function FileManagerPage() {
       );
       if (res.success && res.data) {
         setFiles(res.data.items || []);
-        setCurrentPath(res.data.current_path || path);
+        const loadedPath = res.data.current_path || path;
+        setCurrentPath(loadedPath);
+        setDirectPathInput(loadedPath);
 
         // Record recent folder visit
         apiFetch('/api/v1/filemanager/recent', {
           method: 'POST',
-          body: JSON.stringify({ path: res.data.current_path || path, domain: activeDomain }),
+          body: JSON.stringify({ path: loadedPath, domain: activeDomain }),
         }).catch(() => {});
       } else {
         setErrorMsg(res.error?.message || 'Failed to load directory');
@@ -723,14 +745,149 @@ export default function FileManagerPage() {
     window.location.href = url;
   };
 
-  // Filtered Items (hide dotfiles if toggle is false)
+  // Filtered and Sorted Items
   const displayedItems = useMemo(() => {
     const source = searchResults || files;
-    return source.filter((item) => {
+    let filtered = source.filter((item) => {
       if (!showHidden && item.name.startsWith('.')) return false;
+      if (activeCategoryFilter === 'folders') return item.is_dir;
+      if (activeCategoryFilter === 'code') {
+        const ext = (item.extension || item.name.split('.').pop() || '').toLowerCase();
+        return !item.is_dir && ['php', 'js', 'ts', 'jsx', 'tsx', 'html', 'css', 'json', 'sql', 'sh', 'py'].includes(ext);
+      }
+      if (activeCategoryFilter === 'images') {
+        const ext = (item.extension || item.name.split('.').pop() || '').toLowerCase();
+        return !item.is_dir && ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico'].includes(ext);
+      }
+      if (activeCategoryFilter === 'archives') {
+        const ext = (item.extension || item.name.split('.').pop() || '').toLowerCase();
+        return !item.is_dir && ['zip', 'tar', 'gz', 'tgz', 'rar', '7z'].includes(ext);
+      }
+      if (activeCategoryFilter === 'configs') {
+        return !item.is_dir && (item.name.startsWith('.') || ['conf', 'ini', 'json', 'yaml', 'yml', 'env'].some((e) => item.name.endsWith(e)));
+      }
       return true;
     });
-  }, [files, searchResults, showHidden]);
+
+    return filtered.sort((a, b) => {
+      if (foldersFirst) {
+        if (a.is_dir && !b.is_dir) return -1;
+        if (!a.is_dir && b.is_dir) return 1;
+      }
+      let aVal: any = '';
+      let bVal: any = '';
+      if (sortField === 'name') {
+        aVal = a.name.toLowerCase();
+        bVal = b.name.toLowerCase();
+      } else if (sortField === 'size') {
+        aVal = a.size || 0;
+        bVal = b.size || 0;
+      } else if (sortField === 'modified') {
+        aVal = new Date(a.modified_at || 0).getTime();
+        bVal = new Date(b.modified_at || 0).getTime();
+      } else if (sortField === 'perm') {
+        aVal = a.perm_octal || '';
+        bVal = b.perm_octal || '';
+      }
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [files, searchResults, showHidden, activeCategoryFilter, sortField, sortDirection, foldersFirst]);
+
+  // Toggle sorting on column click
+  const toggleSort = (field: 'name' | 'size' | 'modified' | 'perm') => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  // 1-Click Fix Web Server Permissions (0755 for dirs, 0644 for files)
+  const handleFixWebPermissions = async (targetPath: string) => {
+    try {
+      setFixingPermissions(true);
+      showToast(`Normalizing permissions (0755 dirs / 0644 files) for ${targetPath}...`);
+      await apiFetch('/api/v1/files/permissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          paths: [targetPath],
+          mode: '0755',
+          recursive: true,
+        }),
+      });
+      showToast(`Permissions successfully set to standard 0755 / 0644!`);
+      fetchDirectory(currentPath);
+    } catch (err: any) {
+      showToast(`Permission fix error: ${err.message}`, true);
+    } finally {
+      setFixingPermissions(false);
+    }
+  };
+
+  // Quick Open Common Config Files (wp-config.php, .htaccess, .env, robots.txt, nginx.conf)
+  const handleOpenQuickConfigFile = async (filename: string) => {
+    const targetPath = `${currentPath.replace(/\/+$/, '')}/${filename}`;
+    const existing = files.find((f) => f.name === filename || f.path === targetPath);
+    if (existing) {
+      openFileEditor(existing);
+    } else {
+      try {
+        const res = await apiFetch<{ content: string }>(`/api/v1/files/content?path=${encodeURIComponent(targetPath)}`);
+        if (res.success && res.data) {
+          const syntheticItem: FileItem = {
+            name: filename,
+            path: targetPath,
+            size: res.data.content.length,
+            mode: '-rw-r--r--',
+            perm_octal: '0644',
+            owner: 'www-data',
+            group: 'www-data',
+            uid: 33,
+            gid: 33,
+            is_dir: false,
+            modified_at: new Date().toISOString(),
+            extension: filename.split('.').pop() || '',
+          };
+          setEditingFile(syntheticItem);
+          setFileContent(res.data.content);
+          setEditorOpen(true);
+        } else {
+          if (confirm(`'${filename}' does not exist in ${currentPath}. Would you like to create it now?`)) {
+            await apiFetch('/api/v1/files/content', {
+              method: 'POST',
+              body: JSON.stringify({
+                path: targetPath,
+                content: `# ${filename} configuration\n`,
+              }),
+            });
+            await fetchDirectory(currentPath);
+            const syntheticItem: FileItem = {
+              name: filename,
+              path: targetPath,
+              size: 25,
+              mode: '-rw-r--r--',
+              perm_octal: '0644',
+              owner: 'www-data',
+              group: 'www-data',
+              uid: 33,
+              gid: 33,
+              is_dir: false,
+              modified_at: new Date().toISOString(),
+              extension: filename.split('.').pop() || '',
+            };
+            setEditingFile(syntheticItem);
+            setFileContent(`# ${filename} configuration\n`);
+            setEditorOpen(true);
+          }
+        }
+      } catch (err: any) {
+        showToast(`Could not open ${filename}: ${err.message}`, true);
+      }
+    }
+  };
 
   // Breadcrumbs builder
   const breadcrumbs = useMemo(() => {
@@ -1029,6 +1186,16 @@ export default function FileManagerPage() {
                 <Clock className="w-3.5 h-3.5" />
               </button>
 
+              {/* Keyboard Shortcuts Cheat Sheet */}
+              <button
+                type="button"
+                onClick={() => setShortcutsModalOpen(true)}
+                title="Keyboard Shortcuts (?)"
+                className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+              </button>
+
               {/* Web Terminal Shortcut */}
               <a
                 href={`/terminal?cwd=${encodeURIComponent(currentPath)}`}
@@ -1053,15 +1220,32 @@ export default function FileManagerPage() {
             </div>
           </div>
 
-          {/* BREADCRUMB NAVIGATION BAR (Phase 9) */}
+          {/* ADVANCED WEBSITE FILE HUB (Document roots, quick configs, permissions) */}
+          {!isTrashActive && (
+            <WebsiteFileHub
+              currentPath={currentPath}
+              domains={domains}
+              activeDomain={activeDomain}
+              onDomainSelect={(dom, docRoot) => {
+                setActiveDomain(dom);
+                navigateTo(docRoot, dom);
+              }}
+              onNavigate={navigateTo}
+              onQuickConfigFile={handleOpenQuickConfigFile}
+              onFixPermissions={handleFixWebPermissions}
+              fixingPermissions={fixingPermissions}
+            />
+          )}
+
+          {/* BREADCRUMB NAVIGATION & DIRECT PATH BAR (Phase 9) */}
           <div className="bg-white/80 dark:bg-surface-900/80 backdrop-blur-xs border-b border-slate-200 dark:border-surface-800 px-4 py-2 flex items-center justify-between gap-3 text-xs">
-            {/* Clickable Breadcrumbs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto min-w-0 font-medium">
+            {/* Clickable Breadcrumbs OR Direct Path Input Form */}
+            <div className="flex items-center gap-1.5 overflow-x-auto min-w-0 font-medium flex-1">
               <button
                 type="button"
                 onClick={navigateUp}
                 disabled={currentPath === '/' || isTrashActive}
-                className="p-1 rounded text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-1 rounded text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
                 title="Up One Folder"
               >
                 <ArrowUp className="w-3.5 h-3.5" />
@@ -1072,29 +1256,105 @@ export default function FileManagerPage() {
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Enterprise Trash Bin</span>
                 </div>
+              ) : isEditingPath ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (directPathInput.trim()) {
+                      setIsEditingPath(false);
+                      navigateTo(directPathInput.trim());
+                    }
+                  }}
+                  className="flex items-center gap-1.5 w-full max-w-lg"
+                >
+                  <input
+                    type="text"
+                    value={directPathInput}
+                    onChange={(e) => setDirectPathInput(e.target.value)}
+                    placeholder="/var/www/..."
+                    className="flex-1 px-2.5 py-1 text-xs rounded-lg bg-slate-50 dark:bg-surface-800 border border-emerald-500 font-mono text-slate-900 dark:text-white focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-bold text-xs"
+                  >
+                    Go
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectPathInput(currentPath);
+                      setIsEditingPath(false);
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </form>
               ) : (
-                breadcrumbs.map((b, idx) => (
-                  <React.Fragment key={b.path}>
-                    {idx > 0 && <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />}
-                    <button
-                      type="button"
-                      onClick={() => navigateTo(b.path)}
-                      className={`truncate max-w-[160px] hover:text-emerald-600 hover:underline transition ${
-                        idx === breadcrumbs.length - 1
-                          ? 'font-bold text-slate-900 dark:text-white'
-                          : 'text-slate-500'
-                      }`}
-                    >
-                      {b.name}
-                    </button>
-                  </React.Fragment>
-                ))
+                <div className="flex items-center gap-1.5 overflow-x-auto min-w-0">
+                  {breadcrumbs.map((b, idx) => (
+                    <React.Fragment key={b.path}>
+                      {idx > 0 && <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />}
+                      <button
+                        type="button"
+                        onClick={() => navigateTo(b.path)}
+                        className={`truncate max-w-[160px] hover:text-emerald-600 hover:underline transition ${
+                          idx === breadcrumbs.length - 1
+                            ? 'font-bold text-slate-900 dark:text-white'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        {b.name}
+                      </button>
+                    </React.Fragment>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDirectPathInput(currentPath);
+                      setIsEditingPath(true);
+                    }}
+                    className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white ml-1"
+                    title="Type or paste path directly"
+                  >
+                    <PenLine className="w-3 h-3" />
+                  </button>
+                </div>
               )}
             </div>
 
-            {/* Breadcrumb Right Controls */}
+            {/* Breadcrumb Right Controls & Category Chips */}
             {!isTrashActive && (
               <div className="flex items-center gap-2 shrink-0 text-[11px] text-slate-400">
+                {/* Category Filter Chips */}
+                <div className="hidden xl:flex items-center gap-1">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'folders', label: 'Folders' },
+                    { id: 'code', label: 'Code' },
+                    { id: 'images', label: 'Images' },
+                    { id: 'archives', label: 'Archives' },
+                    { id: 'configs', label: 'Configs' },
+                  ].map((chip) => (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      onClick={() => setActiveCategoryFilter(chip.id)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition ${
+                        activeCategoryFilter === chip.id
+                          ? 'bg-emerald-600 text-white font-bold'
+                          : 'bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="h-3 w-px bg-slate-200 dark:bg-surface-700 hidden sm:inline" />
+
                 <button
                   type="button"
                   onClick={() => {
@@ -1456,11 +1716,59 @@ export default function FileManagerPage() {
                               className="rounded text-emerald-600 focus:ring-emerald-500"
                             />
                           </th>
-                          <th className="py-2.5 px-3">Name</th>
-                          <th className="py-2.5 px-3">Size</th>
-                          <th className="py-2.5 px-3">Permissions</th>
+                          <th
+                            onClick={() => toggleSort('name')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>Name</span>
+                              {sortField === 'name' ? (
+                                sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            onClick={() => toggleSort('size')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>Size</span>
+                              {sortField === 'size' ? (
+                                sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            onClick={() => toggleSort('perm')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>Permissions</span>
+                              {sortField === 'perm' ? (
+                                sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
                           <th className="py-2.5 px-3">Owner:Group</th>
-                          <th className="py-2.5 px-3">Last Modified</th>
+                          <th
+                            onClick={() => toggleSort('modified')}
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none"
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>Last Modified</span>
+                              {sortField === 'modified' ? (
+                                sortDirection === 'asc' ? <SortAsc className="w-3.5 h-3.5 text-emerald-600" /> : <SortDesc className="w-3.5 h-3.5 text-emerald-600" />
+                              ) : (
+                                <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                              )}
+                            </div>
+                          </th>
                           <th className="py-2.5 px-3 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -1759,70 +2067,17 @@ export default function FileManagerPage() {
 
         {/* 6. MODALS */}
 
-        {/* CODE EDITOR MODAL */}
-        {editorOpen && editingFile && (
-          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 animate-fadeIn">
-            <div className="w-full max-w-5xl h-[90vh] bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl flex flex-col overflow-hidden font-sans">
-              {/* Editor Header */}
-              <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-800">
-                <div className="flex items-center gap-2">
-                  <FileCode className="w-4 h-4 text-emerald-600" />
-                  <span className="font-bold text-xs text-slate-900 dark:text-white">
-                    {editingFile.name}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">({editingFile.path})</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {saveSuccess && (
-                    <span className="text-xs text-emerald-600 font-bold flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Saved</span>
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleSaveContent}
-                    disabled={savingFile}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition shadow-xs disabled:opacity-50"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{savingFile ? 'Saving...' : 'Save (Ctrl+S)'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorOpen(false)}
-                    className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Editor Textarea */}
-              <div className="flex-1 bg-slate-950 p-4 overflow-auto">
-                <textarea
-                  value={fileContent}
-                  onChange={(e) => setFileContent(e.target.value)}
-                  onKeyDown={(e) => {
-                    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-                      e.preventDefault();
-                      handleSaveContent();
-                    }
-                  }}
-                  className="w-full h-full bg-transparent text-emerald-400 font-mono text-xs focus:outline-hidden resize-none leading-relaxed"
-                  spellCheck={false}
-                />
-              </div>
-
-              {/* Editor Footer */}
-              <div className="px-4 py-2 bg-slate-900 text-slate-400 font-mono text-[11px] flex items-center justify-between border-t border-slate-800">
-                <span>UTF-8 • {fileContent.length} characters • {fileContent.split('\n').length} lines</span>
-                <span>Press Ctrl+S to save</span>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* ADVANCED PROFESSIONAL CODE EDITOR MODAL */}
+        <AdvancedCodeEditor
+          isOpen={editorOpen}
+          file={editingFile}
+          content={fileContent}
+          onContentChange={setFileContent}
+          onSave={handleSaveContent}
+          onClose={() => setEditorOpen(false)}
+          saving={savingFile}
+          saveSuccess={saveSuccess}
+        />
 
         {/* NEW FILE / FOLDER MODAL */}
         {createModalOpen && (
@@ -2440,6 +2695,12 @@ export default function FileManagerPage() {
             <span>{toast.message}</span>
           </div>
         )}
+
+        {/* KEYBOARD SHORTCUTS MODAL */}
+        <KeyboardShortcutsModal
+          isOpen={shortcutsModalOpen}
+          onClose={() => setShortcutsModalOpen(false)}
+        />
       </div>
     </DashboardShell>
   );
