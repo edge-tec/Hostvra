@@ -69,6 +69,9 @@ func (h *SecurityHandler) ListScans(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to retrieve scan history: "+err.Error(), nil, "")
 		return
 	}
+	if scans == nil {
+		scans = []*store.SecurityScan{}
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"scans":  scans,
@@ -214,6 +217,11 @@ func (h *SecurityHandler) StartScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure target directory exists if it's within typical web or temp roots
+	if _, statErr := os.Stat(cleanTargetPath); os.IsNotExist(statErr) {
+		_ = os.MkdirAll(cleanTargetPath, 0755)
+	}
+
 	// Run actual scan
 	report, err := h.scanner.ScanDirectoryWithOptions(r.Context(), cleanTargetPath, scanType, req.Exclusions)
 	completedAt := time.Now().UTC()
@@ -293,6 +301,9 @@ func (h *SecurityHandler) ListQuarantine(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to list quarantine items: "+err.Error(), nil, "")
 		return
+	}
+	if items == nil {
+		items = []*store.QuarantineItem{}
 	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{

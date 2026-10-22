@@ -84,15 +84,31 @@ export default function SecurityPage() {
       }
 
       // 2. Scan History
-      const scansRes = await apiFetch<SecurityScan[]>('/api/v1/security/scans');
+      const scansRes = await apiFetch<any>('/api/v1/security/scans');
       if (scansRes.success && scansRes.data) {
-        setScans(scansRes.data);
+        const raw = scansRes.data;
+        const list: SecurityScan[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw.scans)
+          ? raw.scans
+          : [];
+        setScans(list);
+      } else {
+        setScans([]);
       }
 
       // 3. Quarantine Vault
-      const quaranRes = await apiFetch<QuarantineItem[]>('/api/v1/security/quarantine');
+      const quaranRes = await apiFetch<any>('/api/v1/security/quarantine');
       if (quaranRes.success && quaranRes.data) {
-        setQuarantineItems(quaranRes.data);
+        const raw = quaranRes.data;
+        const list: QuarantineItem[] = Array.isArray(raw)
+          ? raw
+          : Array.isArray(raw.items)
+          ? raw.items
+          : [];
+        setQuarantineItems(list);
+      } else {
+        setQuarantineItems([]);
       }
     } catch (err: any) {
       showNotification(err.message || 'Failed to load security telemetry', true);
@@ -106,14 +122,15 @@ export default function SecurityPage() {
     loadData(false);
   }, [loadData]);
 
-  // Periodic polling for active running scans
+  // Real-time periodic polling for active running scans and live telemetry updates
   useEffect(() => {
-    const hasRunningScan = scans.some((s) => s.status === 'running' || s.status === 'pending');
-    if (!hasRunningScan) return;
+    const safeScansList = Array.isArray(scans) ? scans : [];
+    const hasRunningScan = safeScansList.some((s) => s.status === 'running' || s.status === 'pending');
+    const intervalMs = hasRunningScan ? 3000 : 15000;
 
     const interval = setInterval(() => {
       loadData(false);
-    }, 3000);
+    }, intervalMs);
     return () => clearInterval(interval);
   }, [scans, loadData]);
 
@@ -246,18 +263,22 @@ export default function SecurityPage() {
     return `${(diff / 1000).toFixed(1)}s`;
   };
 
+  // Safe array guards
+  const safeScans = Array.isArray(scans) ? scans : [];
+  const safeQuarantine = Array.isArray(quarantineItems) ? quarantineItems : [];
+
   // Filtering
-  const filteredScans = scans.filter(
+  const filteredScans = safeScans.filter(
     (s) =>
-      s.target_path.toLowerCase().includes(search.toLowerCase()) ||
-      s.id.toLowerCase().includes(search.toLowerCase()) ||
-      s.status.toLowerCase().includes(search.toLowerCase())
+      (s.target_path || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.id || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.status || '').toLowerCase().includes(search.toLowerCase())
   );
 
-  const filteredQuarantine = quarantineItems.filter(
+  const filteredQuarantine = safeQuarantine.filter(
     (q) =>
-      q.original_path.toLowerCase().includes(search.toLowerCase()) ||
-      q.threat_name.toLowerCase().includes(search.toLowerCase())
+      (q.original_path || '').toLowerCase().includes(search.toLowerCase()) ||
+      (q.threat_name || '').toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -370,11 +391,11 @@ export default function SecurityPage() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-950 dark:text-white text-sm">Total Scans Run</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
-                  {scans.length}
+                  {safeScans.length}
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-                {scans.filter((s) => s.status === 'running').length > 0
+                {safeScans.filter((s) => s.status === 'running').length > 0
                   ? 'A scan is currently running'
                   : 'All background scans completed'}
               </p>
@@ -390,7 +411,7 @@ export default function SecurityPage() {
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-950 dark:text-white text-sm">Quarantine Vault</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
-                  {quarantineItems.length} threats isolated
+                  {safeQuarantine.length} threats isolated
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
@@ -411,7 +432,7 @@ export default function SecurityPage() {
             }`}
           >
             <FolderSearch className="w-4 h-4" />
-            <span>Scan Jobs &amp; History ({scans.length})</span>
+            <span>Scan Jobs &amp; History ({safeScans.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('quarantine')}
@@ -422,7 +443,7 @@ export default function SecurityPage() {
             }`}
           >
             <Lock className="w-4 h-4" />
-            <span>Quarantine Vault ({quarantineItems.length})</span>
+            <span>Quarantine Vault ({safeQuarantine.length})</span>
           </button>
         </div>
 
@@ -466,7 +487,7 @@ export default function SecurityPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60 font-medium">
-                  {loading && scans.length === 0 ? (
+                  {loading && safeScans.length === 0 ? (
                     <tr>
                       <td colSpan={8} className="py-12 text-center text-slate-400">
                         <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-600" />
@@ -569,7 +590,7 @@ export default function SecurityPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60 font-medium">
-                  {loading && quarantineItems.length === 0 ? (
+                  {loading && safeQuarantine.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-12 text-center text-slate-400">
                         <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-emerald-600" />
@@ -667,6 +688,30 @@ export default function SecurityPage() {
                   <p className="text-[11px] text-slate-400 font-normal mt-1">
                     Path traversal protection is enforced. Directory must reside within authorized hosting roots.
                   </p>
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    <span className="text-[10px] text-slate-400 font-medium">Quick Presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetPath('/var/www/vhosts')}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 transition cursor-pointer font-medium"
+                    >
+                      All Websites (/var/www/vhosts)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetPath('/var/www')}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 transition cursor-pointer font-medium"
+                    >
+                      Webroot (/var/www)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetPath('/tmp')}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-slate-700 dark:text-slate-300 hover:text-emerald-600 transition cursor-pointer font-medium"
+                    >
+                      Temp Uploads (/tmp)
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
