@@ -281,6 +281,68 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// VerifyIntegrity runs an on-demand cryptographic and structural integrity drill on a backup archive.
+func (h *BackupHandler) VerifyIntegrity(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Backup ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyBackupOwnership(r.Context(), claims, id); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	report, err := h.manager.VerifyBackupIntegrity(id)
+	if err != nil {
+		h.audit.Log(r.Context(), r, "backup.verify_integrity", "backup", id, "failure", err.Error(), nil)
+		response.Error(w, http.StatusInternalServerError, "VERIFICATION_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "backup.verify_integrity", "backup", id, "success", "", map[string]interface{}{
+		"status":        report.Status,
+		"sha256_match":  report.SHA256Match,
+		"archive_valid": report.ArchiveValid,
+		"item_count":    report.ItemCount,
+	})
+
+	response.JSON(w, http.StatusOK, report, nil)
+}
+
+// PreflightRestore performs safety and resource pre-flight checks before restoring a workload.
+func (h *BackupHandler) PreflightRestore(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Backup ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if _, err := h.verifyBackupOwnership(r.Context(), claims, id); err != nil {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+		return
+	}
+
+	report, err := h.manager.PreflightRestore(id)
+	if err != nil {
+		h.audit.Log(r.Context(), r, "backup.preflight_restore", "backup", id, "failure", err.Error(), nil)
+		response.Error(w, http.StatusInternalServerError, "PREFLIGHT_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "backup.preflight_restore", "backup", id, "success", "", map[string]interface{}{
+		"preflight_ok":         report.PreflightOK,
+		"disk_space_required":  report.DiskSpaceRequired,
+		"disk_space_available": report.DiskSpaceAvailable,
+		"conflict_risk":        report.TargetConflictRisk,
+	})
+
+	response.JSON(w, http.StatusOK, report, nil)
+}
+
 // Destination endpoints
 
 func (h *BackupHandler) ListDestinations(w http.ResponseWriter, r *http.Request) {

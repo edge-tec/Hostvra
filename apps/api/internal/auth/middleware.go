@@ -147,3 +147,9 @@ func GetClaims(ctx context.Context) (*Claims, bool) {
 	claims, ok := ctx.Value(UserContextKey).(*Claims)
 	return claims, ok
 }
+
+// WithClaims injects authenticated claims into the context.
+func WithClaims(ctx context.Context, claims *Claims) context.Context {
+	return context.WithValue(ctx, UserContextKey, claims)
+}
+

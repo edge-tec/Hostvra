@@ -33,6 +33,7 @@ import {
   WordPressPlugin,
   WordPressTheme,
   PopularPlugin,
+  WordPressStagingRecord,
   getWordPressDetails,
   toggleWordPressMaintenance,
   toggleWordPressDebug,
@@ -48,6 +49,10 @@ import {
   updateWordPressCore,
   getPopularWordPressPlugins,
   installWordPress,
+  getWordPressStaging,
+  createWordPressStaging,
+  pushWordPressStagingToLive,
+  deleteWordPressStaging,
 } from '@/lib/api';
 
 interface WordPressManagerTabProps {
@@ -63,8 +68,99 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState<string | null>(null);
 
-  // Active sub-tab: overview, plugins, themes, security
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'plugins' | 'themes' | 'security'>('overview');
+  // Active sub-tab: overview, plugins, themes, security, staging
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'plugins' | 'themes' | 'security' | 'staging'>('overview');
+
+  // Staging environment state
+  const [staging, setStaging] = useState<WordPressStagingRecord | null>(null);
+  const [stagingLoading, setStagingLoading] = useState(false);
+  const [creatingStaging, setCreatingStaging] = useState(false);
+  const [pushingLive, setPushingLive] = useState(false);
+  const [stagingSubdomain, setStagingSubdomain] = useState('staging');
+  const [stagingAuthUser, setStagingAuthUser] = useState('stg_admin');
+  const [stagingAuthPass, setStagingAuthPass] = useState('StagingPass2026!');
+  const [showStagingModal, setShowStagingModal] = useState(false);
+  const [pushSuccessBackup, setPushSuccessBackup] = useState<string | null>(null);
+
+  const fetchStaging = useCallback(async () => {
+    if (!website?.id) return;
+    setStagingLoading(true);
+    try {
+      const res = await getWordPressStaging(website.id);
+      if (res.success && res.data) {
+        setStaging(res.data);
+      } else {
+        setStaging(null);
+      }
+    } catch {
+      // Ignored
+    } finally {
+      setStagingLoading(false);
+    }
+  }, [website?.id]);
+
+  useEffect(() => {
+    if (activeSubTab === 'staging') {
+      fetchStaging();
+    }
+  }, [activeSubTab, fetchStaging]);
+
+  const handleCreateStaging = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingStaging(true);
+    try {
+      const res = await createWordPressStaging(website.id, {
+        staging_subdomain: stagingSubdomain.trim() || 'staging',
+        auth_user: stagingAuthUser.trim() || 'stg_admin',
+        auth_password: stagingAuthPass.trim() || 'StagingPass2026!',
+      });
+      if (res.success) {
+        showToast('WordPress staging environment created successfully!');
+        setShowStagingModal(false);
+        fetchStaging();
+      } else {
+        showToast(res.error?.message || 'Failed to create staging environment');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to create staging environment');
+    } finally {
+      setCreatingStaging(false);
+    }
+  };
+
+  const handlePushToLive = async () => {
+    if (!confirm('Promote staging changes to PRODUCTION? An automated pre-flight safety backup of production will be taken before overwrite.')) return;
+    setPushingLive(true);
+    try {
+      const res = await pushWordPressStagingToLive(website.id);
+      if (res.success && res.data) {
+        setPushSuccessBackup(res.data.backup_path);
+        showToast('Staging pushed to live production successfully!');
+        fetchStaging();
+      } else {
+        showToast(res.error?.message || 'Failed to push to live');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Push to live failed');
+    } finally {
+      setPushingLive(false);
+    }
+  };
+
+  const handleDeleteStaging = async () => {
+    if (!confirm('Delete this staging environment? All staging files and database clone will be removed.')) return;
+    try {
+      const res = await deleteWordPressStaging(website.id);
+      if (res.success) {
+        setStaging(null);
+        showToast('Staging environment deleted.');
+      } else {
+        showToast(res.error?.message || 'Failed to delete staging');
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete staging');
+    }
+  };
 
   // Search filter for plugins
   const [pluginSearch, setPluginSearch] = useState('');
@@ -839,6 +935,16 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
           <Shield className="w-3.5 h-3.5 inline mr-1.5" />
           Security & Admin
         </button>
+        <button
+          onClick={() => setActiveSubTab('staging')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeSubTab === 'staging'
+              ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+              : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+            }`}
+        >
+          <RefreshCw className="w-3.5 h-3.5 inline mr-1.5" />
+          Staging & Cloning
+        </button>
       </div>
 
       {/* 3. Sub-Tab Content: OVERVIEW */}
@@ -1236,6 +1342,262 @@ export function WordPressManagerTab({ website, showToast }: WordPressManagerTabP
                 >
                   <Key className="w-3.5 h-3.5" />
                   {submitting === 'reset-pwd' ? 'Updating...' : 'Reset Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 7. Sub-Tab Content: STAGING & CLONING */}
+      {activeSubTab === 'staging' && (
+        <div className="space-y-5">
+          {/* Header Banner */}
+          <div className="p-4 rounded-xl bg-purple-50/50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/30 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-purple-600 text-white shadow-sm">
+                <RefreshCw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  1-Click Staging & Safe Cutover Engine
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30">
+                    Serialization-Aware
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Spin up an isolated staging environment with cloned database, serialized URL replacement, and HTTP Basic Auth protection.
+                </p>
+              </div>
+            </div>
+
+            {!staging && (
+              <button
+                onClick={() => setShowStagingModal(true)}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-500/20 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create Staging</span>
+              </button>
+            )}
+          </div>
+
+          {/* Safety Backup Alert Banner after Push to Live */}
+          {pushSuccessBackup && (
+            <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-300 dark:border-emerald-800 flex items-start gap-3 text-xs text-emerald-800 dark:text-emerald-200">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">Production Updated Successfully!</p>
+                <p className="text-[11px] mt-0.5">
+                  Automated pre-flight production safety backup created at:{' '}
+                  <code className="bg-emerald-100 dark:bg-emerald-900/50 px-1 py-0.5 rounded font-mono font-semibold">
+                    {pushSuccessBackup}
+                  </code>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {stagingLoading ? (
+            <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+              <RefreshCw className="w-8 h-8 animate-spin mb-3 text-purple-500" />
+              <p className="text-xs font-mono">Loading staging environment details...</p>
+            </div>
+          ) : staging ? (
+            <div className="p-5 rounded-2xl border border-slate-200 dark:border-surface-800 bg-white dark:bg-surface-900 space-y-5">
+              {/* Staging Info Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Staging Domain</span>
+                  <div className="flex items-center justify-between">
+                    <a
+                      href={`https://${staging.staging_domain}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 truncate text-xs"
+                    >
+                      <span>{staging.staging_domain}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Staging Document Root</span>
+                  <span className="font-mono text-xs text-slate-700 dark:text-slate-300 truncate block">
+                    {staging.staging_doc_root}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">HTTP Basic Auth Access</span>
+                  <div className="flex items-center gap-2 text-xs font-mono text-slate-700 dark:text-slate-300">
+                    <Lock className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>User: <strong>{staging.auth_user}</strong></span>
+                    <span className="text-slate-300 dark:text-slate-700">•</span>
+                    <span>Pass: {staging.auth_password || '••••••••'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Safeguards Summary */}
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 space-y-2">
+                <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                  Active Staging Safeguards
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Search Indexing Blocked (noindex)</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Outbound Emails Disabled</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Password Gate (.htpasswd)</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex items-center justify-between border-t border-slate-200 dark:border-surface-800">
+                <div className="text-xs text-slate-400">
+                  {staging.last_sync_at ? (
+                    <span>Last Pushed to Live: {staging.last_sync_at.replace('T', ' ').slice(0, 19)}</span>
+                  ) : (
+                    <span>Not pushed to live yet.</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleDeleteStaging}
+                    className="px-3.5 py-2 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 font-bold text-xs transition cursor-pointer"
+                  >
+                    Delete Staging
+                  </button>
+
+                  <button
+                    onClick={handlePushToLive}
+                    disabled={pushingLive}
+                    className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md shadow-purple-500/20 transition cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <Zap className={`w-3.5 h-3.5 ${pushingLive ? 'animate-spin' : ''}`} />
+                    <span>{pushingLive ? 'Promoting to Live...' : '1-Click Push to Live'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-10 rounded-2xl border border-dashed border-slate-300 dark:border-surface-700 text-center space-y-3">
+              <RefreshCw className="w-10 h-10 mx-auto text-purple-400 opacity-40" />
+              <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm">
+                No Staging Environment Created
+              </h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Create a password-protected staging copy with automated PHP serialized string replacement in database options and posts.
+              </p>
+              <button
+                onClick={() => setShowStagingModal(true)}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md transition cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create WordPress Staging Environment</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Create Staging Modal */}
+      {showStagingModal && (
+        <div className="fixed inset-0 z-60 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="w-full max-w-lg bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-fadeIn">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0B1120]">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 text-purple-500" />
+                Create WordPress Staging Clone
+              </h3>
+              <button
+                onClick={() => setShowStagingModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateStaging} className="p-5 space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Staging Subdomain
+                </label>
+                <div className="flex items-center gap-2 font-mono">
+                  <input
+                    type="text"
+                    value={stagingSubdomain}
+                    onChange={(e) => setStagingSubdomain(e.target.value)}
+                    placeholder="staging"
+                    required
+                    className="flex-1 p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#131B2E] text-slate-900 dark:text-white font-bold"
+                  />
+                  <span className="text-slate-500 font-semibold">.{website.primary_domain}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    HTTP Basic Auth User
+                  </label>
+                  <input
+                    type="text"
+                    value={stagingAuthUser}
+                    onChange={(e) => setStagingAuthUser(e.target.value)}
+                    required
+                    className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#131B2E] text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    HTTP Basic Auth Password
+                  </label>
+                  <input
+                    type="text"
+                    value={stagingAuthPass}
+                    onChange={(e) => setStagingAuthPass(e.target.value)}
+                    required
+                    className="w-full p-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-[#131B2E] text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-900/30 text-[11px] text-purple-800 dark:text-purple-300 space-y-1">
+                <p className="font-bold">What happens next?</p>
+                <ul className="list-disc pl-4 space-y-0.5 text-slate-600 dark:text-slate-400">
+                  <li>Copies all live WordPress core files, themes, and uploads.</li>
+                  <li>Clones live database into isolated staging database.</li>
+                  <li>Performs PHP serialization-aware search-and-replace for domain URLs.</li>
+                  <li>Disables outbound emails and blocks web crawlers.</li>
+                </ul>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowStagingModal(false)}
+                  className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-400 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingStaging}
+                  className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition shadow-md cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {creatingStaging ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                  <span>{creatingStaging ? 'Cloning & Provisioning...' : 'Create Staging Clone'}</span>
                 </button>
               </div>
             </form>

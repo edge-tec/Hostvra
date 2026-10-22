@@ -670,6 +670,30 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persist default resource quota and initial provisioning event
+	_ = h.store.SaveWebsiteResourceQuota(r.Context(), &store.WebsiteResourceQuotaRecord{
+		WebsiteID:          site.ID,
+		Username:           site.SystemUser,
+		MemoryLimitMB:      limits.MemoryMaxMB,
+		MemoryHighMB:       limits.MemoryHighMB,
+		CPUQuotaPercent:    limits.CPUQuota,
+		CPUWeight:          limits.CPUWeight,
+		TasksMax:           limits.TasksMax,
+		IOReadIOPS:         limits.IOReadIOPS,
+		IOWriteIOPS:        limits.IOWriteIOPS,
+		OOMPolicy:          limits.OOMPolicy,
+		OpenBaseDirEnabled: limits.OpenBaseDir,
+	})
+	_ = h.store.RecordQuotaEvent(r.Context(), &store.ResourceQuotaEventRecord{
+		WebsiteID:      site.ID,
+		Username:       site.SystemUser,
+		EventType:      "quota_provisioned",
+		Severity:       "info",
+		Details:        fmt.Sprintf("Provisioned initial resource quota (RAM: %d MB, CPU: %d%%, Tasks: %d)", limits.MemoryMaxMB, limits.CPUQuota, limits.TasksMax),
+		MetricValue:    float64(limits.MemoryMaxMB),
+		ThresholdValue: float64(limits.MemoryMaxMB),
+	})
+
 	// Automatically deploy Nginx Virtual Host configuration
 	_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
 
@@ -969,6 +993,21 @@ func (h *WebsiteHandler) GetIsolation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Supplement with persisted database quota if present
+	if quota, qErr := h.store.GetWebsiteResourceQuota(r.Context(), siteID); qErr == nil && quota != nil {
+		info.Limits.MemoryMaxMB = quota.MemoryLimitMB
+		info.Limits.MemoryHighMB = quota.MemoryHighMB
+		info.Limits.CPUQuota = quota.CPUQuotaPercent
+		info.Limits.CPUWeight = quota.CPUWeight
+		info.Limits.TasksMax = quota.TasksMax
+		info.Limits.IOReadIOPS = quota.IOReadIOPS
+		info.Limits.IOWriteIOPS = quota.IOWriteIOPS
+		if quota.OOMPolicy != "" {
+			info.Limits.OOMPolicy = quota.OOMPolicy
+		}
+		info.Limits.OpenBaseDir = quota.OpenBaseDirEnabled
+	}
+
 	response.JSON(w, http.StatusOK, info, nil)
 }
 
@@ -997,11 +1036,20 @@ func (h *WebsiteHandler) UpdateIsolation(w http.ResponseWriter, r *http.Request)
 	if limits.MemoryMaxMB <= 0 {
 		limits.MemoryMaxMB = 512
 	}
+	if limits.MemoryHighMB <= 0 {
+		limits.MemoryHighMB = (limits.MemoryMaxMB * 9) / 10
+	}
 	if limits.CPUQuota <= 0 {
 		limits.CPUQuota = 100
 	}
+	if limits.CPUWeight <= 0 {
+		limits.CPUWeight = 100
+	}
 	if limits.TasksMax <= 0 {
 		limits.TasksMax = 100
+	}
+	if limits.OOMPolicy == "" {
+		limits.OOMPolicy = "kill"
 	}
 
 	username := site.SystemUser
@@ -1014,15 +1062,76 @@ func (h *WebsiteHandler) UpdateIsolation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Persist updated quota to store
+	quota := &store.WebsiteResourceQuotaRecord{
+		WebsiteID:          siteID,
+		Username:           username,
+		MemoryLimitMB:      limits.MemoryMaxMB,
+		MemoryHighMB:       limits.MemoryHighMB,
+		CPUQuotaPercent:    limits.CPUQuota,
+		CPUWeight:          limits.CPUWeight,
+		TasksMax:           limits.TasksMax,
+		IOReadIOPS:         limits.IOReadIOPS,
+		IOWriteIOPS:        limits.IOWriteIOPS,
+		OOMPolicy:          limits.OOMPolicy,
+		OpenBaseDirEnabled: limits.OpenBaseDir,
+	}
+	_ = h.store.SaveWebsiteResourceQuota(r.Context(), quota)
+
+	// Record quota update timeline event
+	_ = h.store.RecordQuotaEvent(r.Context(), &store.ResourceQuotaEventRecord{
+		WebsiteID:      siteID,
+		Username:       username,
+		EventType:      "quota_updated",
+		Severity:       "info",
+		Details:        fmt.Sprintf("Updated resource quota: RAM %d MB (High: %d MB), CPU %d%% (Weight: %d), TasksMax %d, OOM: %s", limits.MemoryMaxMB, limits.MemoryHighMB, limits.CPUQuota, limits.CPUWeight, limits.TasksMax, limits.OOMPolicy),
+		MetricValue:    float64(limits.MemoryMaxMB),
+		ThresholdValue: float64(limits.MemoryHighMB),
+	})
+
 	h.audit.Log(r.Context(), r, "website.isolation.update", "website", siteID.String(), "success", "", map[string]interface{}{
-		"username":      username,
-		"memory_max_mb": limits.MemoryMaxMB,
-		"cpu_quota":     limits.CPUQuota,
-		"tasks_max":     limits.TasksMax,
+		"username":        username,
+		"memory_max_mb":   limits.MemoryMaxMB,
+		"memory_high_mb":  limits.MemoryHighMB,
+		"cpu_quota":       limits.CPUQuota,
+		"cpu_weight":      limits.CPUWeight,
+		"tasks_max":       limits.TasksMax,
+		"oom_policy":      limits.OOMPolicy,
 	})
 
 	info, _ := h.isolationMgr.GetIsolationInfo(r.Context(), username)
+	if info != nil {
+		info.Limits = limits
+	}
 	response.JSON(w, http.StatusOK, info, nil)
+}
+
+// GetIsolationEvents returns recent cgroups quota events and alerts (OOM kills, throttles, quota updates).
+func (h *WebsiteHandler) GetIsolationEvents(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isAdmin) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	events, err := h.store.ListQuotaEvents(r.Context(), siteID, 50)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "EVENTS_LOOKUP_FAILED", err.Error(), nil, "")
+		return
+	}
+	if events == nil {
+		events = []*store.ResourceQuotaEventRecord{}
+	}
+
+	response.JSON(w, http.StatusOK, events, nil)
 }
 
 // GetConf returns the virtual host config for a website.

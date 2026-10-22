@@ -73,6 +73,7 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		r.Delete("/{id}", h.Delete)
 		r.Get("/{id}/isolation", h.GetIsolation)
 		r.Put("/{id}/isolation", h.UpdateIsolation)
+		r.Get("/{id}/isolation/events", h.GetIsolationEvents)
 		r.Post("/{id}/scan", h.ScanMalware)
 	})
 
@@ -107,6 +108,15 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 
 	siteID := res.Data.ID.String()
 
+	// Verify initial quota was persisted to store
+	initQuota, err := s.GetWebsiteResourceQuota(context.Background(), res.Data.ID)
+	if err != nil || initQuota == nil {
+		t.Fatalf("expected initial quota persisted in store, got err: %v", err)
+	}
+	if initQuota.MemoryLimitMB != 512 {
+		t.Errorf("expected default memory limit 512, got %d", initQuota.MemoryLimitMB)
+	}
+
 	// 2. Query Isolation and Live cgroups v2 telemetry
 	req = httptest.NewRequest("GET", "/api/v1/websites/"+siteID+"/isolation", nil)
 	rec = httptest.NewRecorder()
@@ -131,12 +141,17 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 		t.Errorf("expected non-empty PHPPoolSocket")
 	}
 
-	// 3. Update Resource Limits (cgroups)
+	// 3. Update Resource Limits (cgroups v2 + soft throttle + weight)
 	updateLimits := isolation.ResourceLimits{
-		MemoryMaxMB: 1024,
-		CPUQuota:    200,
-		TasksMax:    120,
-		OpenBaseDir: true,
+		MemoryMaxMB:  1024,
+		MemoryHighMB: 920,
+		CPUQuota:     200,
+		CPUWeight:    150,
+		TasksMax:     120,
+		IOReadIOPS:   1000,
+		IOWriteIOPS:  500,
+		OOMPolicy:    "kill",
+		OpenBaseDir:  true,
 	}
 	body, _ = json.Marshal(updateLimits)
 	req = httptest.NewRequest("PUT", "/api/v1/websites/"+siteID+"/isolation", bytes.NewReader(body))
@@ -156,8 +171,42 @@ func TestWebsiteHandler_IsolationAndCgroups(t *testing.T) {
 	if updatedIsoRes.Data.Limits.MemoryMaxMB != 1024 {
 		t.Errorf("expected MemoryMaxMB 1024, got %d", updatedIsoRes.Data.Limits.MemoryMaxMB)
 	}
+	if updatedIsoRes.Data.Limits.MemoryHighMB != 920 {
+		t.Errorf("expected MemoryHighMB 920, got %d", updatedIsoRes.Data.Limits.MemoryHighMB)
+	}
 	if updatedIsoRes.Data.Limits.CPUQuota != 200 {
 		t.Errorf("expected CPUQuota 200, got %d", updatedIsoRes.Data.Limits.CPUQuota)
+	}
+	if updatedIsoRes.Data.Limits.CPUWeight != 150 {
+		t.Errorf("expected CPUWeight 150, got %d", updatedIsoRes.Data.Limits.CPUWeight)
+	}
+
+	// Verify persistence in store
+	persistedQuota, err := s.GetWebsiteResourceQuota(context.Background(), res.Data.ID)
+	if err != nil || persistedQuota == nil {
+		t.Fatalf("expected persisted quota in store, got err: %v", err)
+	}
+	if persistedQuota.MemoryLimitMB != 1024 || persistedQuota.CPUWeight != 150 {
+		t.Errorf("unexpected persisted quota: %+v", persistedQuota)
+	}
+
+	// 3b. Query Isolation Events Timeline
+	req = httptest.NewRequest("GET", "/api/v1/websites/"+siteID+"/isolation/events", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get isolation events, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var eventsRes struct {
+		Success bool                             `json:"success"`
+		Data    []*store.ResourceQuotaEventRecord `json:"data"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&eventsRes)
+	if len(eventsRes.Data) < 2 {
+		t.Fatalf("expected at least 2 quota events, got %d", len(eventsRes.Data))
+	}
+	if eventsRes.Data[0].EventType != "quota_updated" {
+		t.Errorf("expected most recent event quota_updated, got %s", eventsRes.Data[0].EventType)
 	}
 
 	// 4. Test Malware Scan Endpoint

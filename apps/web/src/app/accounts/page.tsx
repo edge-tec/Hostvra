@@ -29,10 +29,15 @@ import {
   Clock,
   Layers,
   Sparkles,
+  Webhook,
+  Palette,
 } from 'lucide-react';
 import { apiFetch, HostingAccount, HostingPlan, Server as ServerType } from '@/lib/api';
+import { WebhookIntegrationsTab } from '@/components/accounts/WebhookIntegrationsTab';
+import { ResellerMultiTenancyTab } from '@/components/accounts/ResellerMultiTenancyTab';
 
 export default function AccountsPage() {
+  const [activeTab, setActiveTab] = useState<'accounts' | 'webhooks' | 'reseller'>('accounts');
   const [accounts, setAccounts] = useState<HostingAccount[]>([]);
   const [plans, setPlans] = useState<HostingPlan[]>([]);
   const [servers, setServers] = useState<ServerType[]>([]);
@@ -388,6 +393,45 @@ export default function AccountsPage() {
           </div>
         </div>
 
+        {/* Phase Three Navigation Tabs */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-4">
+          <button
+            onClick={() => setActiveTab('accounts')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'accounts'
+                ? 'bg-[#16A34A] text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Accounts & WHM ({accounts.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('webhooks')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'webhooks'
+                ? 'bg-[#16A34A] text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+            }`}
+          >
+            <Webhook className="w-4 h-4" />
+            <span>WHMCS / Blesta Webhooks</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('reseller')}
+            className={`px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center gap-2 transition-all ${
+              activeTab === 'reseller'
+                ? 'bg-[#16A34A] text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+            }`}
+          >
+            <Palette className="w-4 h-4" />
+            <span>Reseller Quotas & White-Label</span>
+          </button>
+        </div>
+
+        {activeTab === 'accounts' && (
+          <>
         {/* Action Toolbar & Search Bar */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
@@ -671,6 +715,18 @@ export default function AccountsPage() {
             </table>
           </div>
         </div>
+          </>
+        )}
+
+        {/* Phase Three: WHMCS / Blesta Webhooks Tab */}
+        {activeTab === 'webhooks' && (
+          <WebhookIntegrationsTab servers={servers} plans={plans} showNotify={showNotify} />
+        )}
+
+        {/* Phase Three: Reseller Quotas & White-Label Branding Tab */}
+        {activeTab === 'reseller' && (
+          <ResellerMultiTenancyTab showNotify={showNotify} />
+        )}
 
         {/* MODAL 1: CREATE NEW CLIENT ACCOUNT */}
         {createModalOpen && (

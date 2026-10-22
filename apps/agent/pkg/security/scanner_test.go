@@ -96,3 +96,88 @@ func TestScanner_ParseClamAVOutput(t *testing.T) {
 		t.Errorf("unexpected threat 1: %+v", threats[1])
 	}
 }
+
+func TestScanner_QuarantineAndRestoreLifecycle(t *testing.T) {
+	tempDir := t.TempDir()
+	quarantineDir := filepath.Join(tempDir, "quarantine")
+	siteDir := filepath.Join(tempDir, "public_html")
+	_ = os.MkdirAll(siteDir, 0755)
+
+	infectedFile := filepath.Join(siteDir, "malicious.php")
+	originalContent := "<?php eval(base64_decode('payload')); ?>"
+	if err := os.WriteFile(infectedFile, []byte(originalContent), 0644); err != nil {
+		t.Fatalf("failed to create test infected file: %v", err)
+	}
+
+	scanner := NewScannerWithQuarantineDir(quarantineDir)
+
+	// 1. Quarantine infected file
+	meta, err := scanner.QuarantineThreat(infectedFile, "PHP.Webshell.EvalBase64")
+	if err != nil {
+		t.Fatalf("QuarantineThreat failed: %v", err)
+	}
+
+	// 2. Original file must be gone
+	if _, err := os.Stat(infectedFile); !os.IsNotExist(err) {
+		t.Fatalf("expected infected file to be removed from original path")
+	}
+
+	// 3. Quarantined file must exist in quarantineDir
+	qPath := filepath.Join(quarantineDir, meta.QuarantineFilename)
+	if _, err := os.Stat(qPath); err != nil {
+		t.Fatalf("expected quarantined file to exist at %s: %v", qPath, err)
+	}
+
+	// 4. Restore file back to original location
+	if err := scanner.RestoreQuarantinedFile(meta.QuarantineFilename, infectedFile, meta.FileMode); err != nil {
+		t.Fatalf("RestoreQuarantinedFile failed: %v", err)
+	}
+
+	// 5. Original file must now exist with identical content
+	restoredContent, err := os.ReadFile(infectedFile)
+	if err != nil {
+		t.Fatalf("failed to read restored file: %v", err)
+	}
+	if string(restoredContent) != originalContent {
+		t.Fatalf("restored content mismatch: expected %s, got %s", originalContent, string(restoredContent))
+	}
+
+	// 6. Quarantined file should now be deleted from quarantineDir
+	if _, err := os.Stat(qPath); !os.IsNotExist(err) {
+		t.Fatalf("expected quarantined copy to be deleted after restoration")
+	}
+
+	// 7. Test DeleteQuarantinedFile
+	meta2, err := scanner.QuarantineThreat(infectedFile, "PHP.Webshell.EvalBase64")
+	if err != nil {
+		t.Fatalf("QuarantineThreat 2 failed: %v", err)
+	}
+	if err := scanner.DeleteQuarantinedFile(meta2.QuarantineFilename); err != nil {
+		t.Fatalf("DeleteQuarantinedFile failed: %v", err)
+	}
+	qPath2 := filepath.Join(quarantineDir, meta2.QuarantineFilename)
+	if _, err := os.Stat(qPath2); !os.IsNotExist(err) {
+		t.Fatalf("expected quarantined file to be permanently deleted")
+	}
+}
+
+func TestScanner_Exclusions(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "cache")
+	_ = os.MkdirAll(cacheDir, 0755)
+
+	cacheFile := filepath.Join(cacheDir, "cached_shell.php")
+	_ = os.WriteFile(cacheFile, []byte("<?php eval(base64_decode('test')); ?>"), 0644)
+
+	scanner := NewScanner()
+	// Scan with exclusion of cache directory
+	report, err := scanner.ScanDirectoryWithOptions(context.Background(), tempDir, "heuristic", []string{"cache"})
+	if err != nil {
+		t.Fatalf("ScanDirectoryWithOptions failed: %v", err)
+	}
+
+	if report.InfectedFiles != 0 {
+		t.Fatalf("expected 0 infected files due to exclusion, got %d", report.InfectedFiles)
+	}
+}
+

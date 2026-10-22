@@ -25,23 +25,33 @@ var (
 
 // ResourceLimits represents cgroups v2 resource quotas for a website user.
 type ResourceLimits struct {
-	MemoryMaxMB int  `json:"memory_max_mb"` // RAM limit in Megabytes (e.g. 512)
-	CPUQuota    int  `json:"cpu_quota"`     // CPU percentage (100 = 1 full core, 200 = 2 cores, 50 = 0.5 core)
-	TasksMax    int  `json:"tasks_max"`     // Maximum concurrent processes/threads (fork bomb guard)
-	IOReadMBps  int  `json:"io_read_mbps"`  // Read I/O limit in MB/s (0 = unlimited)
-	IOWriteMBps int  `json:"io_write_mbps"` // Write I/O limit in MB/s (0 = unlimited)
-	OpenBaseDir bool `json:"open_basedir"`  // Whether open_basedir PHP confinement is enforced
+	MemoryMaxMB  int    `json:"memory_max_mb"`  // Hard RAM limit in Megabytes (e.g. 512)
+	MemoryHighMB int    `json:"memory_high_mb"` // Soft throttle threshold in MB (defaults to 90% of MemoryMaxMB)
+	CPUQuota     int    `json:"cpu_quota"`      // CPU percentage (100 = 1 full core, 200 = 2 cores, 50 = 0.5 core)
+	CPUWeight    int    `json:"cpu_weight"`     // Fair scheduling weight (100 = default, 1-10000)
+	TasksMax     int    `json:"tasks_max"`      // Maximum concurrent processes/threads (fork bomb guard)
+	IOReadMBps   int    `json:"io_read_mbps"`   // Read I/O limit in MB/s (0 = unlimited)
+	IOWriteMBps  int    `json:"io_write_mbps"`  // Write I/O limit in MB/s (0 = unlimited)
+	IOReadIOPS   int    `json:"io_read_iops"`   // Max read operations per second
+	IOWriteIOPS  int    `json:"io_write_iops"`  // Max write operations per second
+	OOMPolicy    string `json:"oom_policy"`     // "kill", "throttle", "continue"
+	OpenBaseDir  bool   `json:"open_basedir"`   // Whether open_basedir PHP confinement is enforced
 }
 
 // DefaultResourceLimits returns sensible production defaults for a new website tenant.
 func DefaultResourceLimits() ResourceLimits {
 	return ResourceLimits{
-		MemoryMaxMB: 512,
-		CPUQuota:    100,
-		TasksMax:    100,
-		IOReadMBps:  50,
-		IOWriteMBps: 30,
-		OpenBaseDir: true,
+		MemoryMaxMB:  512,
+		MemoryHighMB: 460,
+		CPUQuota:     100,
+		CPUWeight:    100,
+		TasksMax:     100,
+		IOReadMBps:   50,
+		IOWriteMBps:  30,
+		IOReadIOPS:   1000,
+		IOWriteIOPS:  500,
+		OOMPolicy:    "kill",
+		OpenBaseDir:  true,
 	}
 }
 
@@ -59,8 +69,13 @@ type UserIsolationInfo struct {
 	SliceName      string         `json:"slice_name"`
 	Limits         ResourceLimits `json:"limits"`
 	MemoryUsedMB   float64        `json:"memory_used_mb"`
+	MemoryPeakMB   float64        `json:"memory_peak_mb"`
 	CPUUsagePerc   float64        `json:"cpu_usage_perc"`
 	TasksCurrent   int            `json:"tasks_current"`
+	OOMKills       int            `json:"oom_kills"`
+	OOMEvents      int            `json:"oom_events"`
+	HighEvents     int            `json:"high_events"`
+	ThrottledUsec  uint64         `json:"throttled_usec"`
 	IsSystemdSlice bool           `json:"is_systemd_slice"`
 	CreatedAt      time.Time      `json:"created_at"`
 }
@@ -253,10 +268,15 @@ func (m *Manager) GetIsolationInfo(ctx context.Context, username string) (*UserI
 	}
 
 	// Query live cgroups telemetry
-	memMB, cpuPerc, tasks := m.readLiveMetrics(ctx, username)
+	memMB, peakMB, cpuPerc, tasks, oomKills, oomEvents, highEvents, throttledUsec := m.readLiveMetrics(ctx, username)
 	info.MemoryUsedMB = memMB
+	info.MemoryPeakMB = peakMB
 	info.CPUUsagePerc = cpuPerc
 	info.TasksCurrent = tasks
+	info.OOMKills = oomKills
+	info.OOMEvents = oomEvents
+	info.HighEvents = highEvents
+	info.ThrottledUsec = throttledUsec
 
 	return &info, nil
 }
@@ -425,8 +445,34 @@ func (m *Manager) configureCgroupSlice(ctx context.Context, username string, lim
 	sliceName := fmt.Sprintf("hostvra-user-%s.slice", username)
 	slicePath := filepath.Join(m.systemdDir, sliceName)
 
+	if limits.MemoryMaxMB <= 0 {
+		limits.MemoryMaxMB = 512
+	}
+	if limits.MemoryHighMB <= 0 {
+		limits.MemoryHighMB = int(float64(limits.MemoryMaxMB) * 0.90)
+	}
+	if limits.CPUQuota <= 0 {
+		limits.CPUQuota = 100
+	}
+	if limits.CPUWeight <= 0 {
+		limits.CPUWeight = 100
+	}
+	if limits.TasksMax <= 0 {
+		limits.TasksMax = 100
+	}
+	if limits.OOMPolicy == "" {
+		limits.OOMPolicy = "kill"
+	}
+
 	memMaxBytes := int64(limits.MemoryMaxMB) * 1024 * 1024
-	memHighBytes := int64(float64(memMaxBytes) * 0.90) // Throttle at 90% before OOM killer
+	memHighBytes := int64(limits.MemoryHighMB) * 1024 * 1024
+
+	oomPolicySystemd := "stop"
+	if limits.OOMPolicy == "kill" {
+		oomPolicySystemd = "kill"
+	} else if limits.OOMPolicy == "continue" {
+		oomPolicySystemd = "continue"
+	}
 
 	sliceContent := fmt.Sprintf(`[Unit]
 Description=Hostvra Resource Isolation Slice for Website User [%s]
@@ -439,17 +485,23 @@ MemoryHigh=%d
 
 CPUAccounting=true
 CPUQuota=%d%%
+CPUWeight=%d
 
 TasksAccounting=true
 TasksMax=%d
 
 IOAccounting=true
+OOMPolicy=%s
+ManagedOOMMemoryPressure=kill
+ManagedOOMMemoryPressureLimit=90%%
 `,
 		username,
 		memMaxBytes,
 		memHighBytes,
 		limits.CPUQuota,
+		limits.CPUWeight,
 		limits.TasksMax,
+		oomPolicySystemd,
 	)
 
 	tmpFile := slicePath + ".tmp"
@@ -468,22 +520,47 @@ IOAccounting=true
 	return sliceName, nil
 }
 
-func (m *Manager) readLiveMetrics(ctx context.Context, username string) (float64, float64, int) {
+func (m *Manager) readLiveMetrics(ctx context.Context, username string) (float64, float64, float64, int, int, int, int, uint64) {
 	sliceName := fmt.Sprintf("hostvra-user-%s.slice", username)
-
-	if m.mockMode {
-		// Produce realistic dynamic resource readings for test/simulation
-		return 84.5, 3.2, 4
-	}
-
-	// Try reading directly from Linux cgroups v2 filesystem: /sys/fs/cgroup/<sliceName>
 	cgroupPath := filepath.Join(m.cgroupBaseDir, sliceName)
+
+	// Try reading directly from Linux cgroups v2 filesystem if present: /sys/fs/cgroup/<sliceName>
 	if fi, err := os.Stat(cgroupPath); err == nil && fi.IsDir() {
 		// Memory: memory.current
 		var memUsedMB float64
 		if data, err := os.ReadFile(filepath.Join(cgroupPath, "memory.current")); err == nil {
 			if bytes, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
 				memUsedMB = float64(bytes) / (1024 * 1024)
+			}
+		}
+
+		// Memory peak: memory.peak
+		var memPeakMB float64
+		if data, err := os.ReadFile(filepath.Join(cgroupPath, "memory.peak")); err == nil {
+			if bytes, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil {
+				memPeakMB = float64(bytes) / (1024 * 1024)
+			}
+		}
+		if memPeakMB < memUsedMB {
+			memPeakMB = memUsedMB
+		}
+
+		// Memory events: memory.events
+		var oomKills, oomEvents, highEvents int
+		if data, err := os.ReadFile(filepath.Join(cgroupPath, "memory.events")); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) == 2 {
+					val, _ := strconv.Atoi(fields[1])
+					switch fields[0] {
+					case "oom_kill":
+						oomKills = val
+					case "oom":
+						oomEvents = val
+					case "high":
+						highEvents = val
+					}
+				}
 			}
 		}
 
@@ -495,21 +572,26 @@ func (m *Manager) readLiveMetrics(ctx context.Context, username string) (float64
 
 		// CPU: cpu.stat
 		var cpuPerc float64
+		var throttledUsec uint64
 		if data, err := os.ReadFile(filepath.Join(cgroupPath, "cpu.stat")); err == nil {
-			cpuPerc = m.calculateCPUPercentage(username, string(data))
+			cpuPerc, throttledUsec = m.calculateCPUPercentageWithThrottle(username, string(data))
 		}
 
-		return memMB(memUsedMB), cpuPerc, tasks
+		return memMB(memUsedMB), memMB(memPeakMB), cpuPerc, tasks, oomKills, oomEvents, highEvents, throttledUsec
+	}
+
+	if m.mockMode {
+		return 84.5, 112.4, 3.2, 4, 0, 0, 0, 1200
 	}
 
 	// Fallback to systemctl show
 	out, err := exec.CommandContext(ctx, "systemctl", "show", sliceName,
-		"--property=MemoryCurrent,TasksCurrent").Output()
+		"--property=MemoryCurrent,MemoryPeak,TasksCurrent").Output()
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, 0, 0, 0, 0, 0
 	}
 
-	var memMB float64
+	var memMBVal, memPeakMBVal float64
 	var tasks int
 	lines := strings.Split(string(out), "\n")
 	for _, l := range lines {
@@ -519,7 +601,11 @@ func (m *Manager) readLiveMetrics(ctx context.Context, username string) (float64
 			v := strings.TrimSpace(parts[1])
 			if k == "MemoryCurrent" && v != "[not set]" {
 				if b, err := strconv.ParseInt(v, 10, 64); err == nil {
-					memMB = float64(b) / (1024 * 1024)
+					memMBVal = float64(b) / (1024 * 1024)
+				}
+			} else if k == "MemoryPeak" && v != "[not set]" {
+				if b, err := strconv.ParseInt(v, 10, 64); err == nil {
+					memPeakMBVal = float64(b) / (1024 * 1024)
 				}
 			} else if k == "TasksCurrent" && v != "[not set]" {
 				tasks, _ = strconv.Atoi(v)
@@ -527,7 +613,7 @@ func (m *Manager) readLiveMetrics(ctx context.Context, username string) (float64
 		}
 	}
 
-	return memMB, 2.5, tasks
+	return memMB(memMBVal), memMB(memPeakMBVal), 2.5, tasks, 0, 0, 0, 0
 }
 
 func (m *Manager) calculateCPUPercentage(username string, cpuStat string) float64 {
@@ -564,6 +650,21 @@ func (m *Manager) calculateCPUPercentage(username string, cpuStat string) float6
 	// CPU % = (delta microseconds / (delta seconds * 1,000,000)) * 100
 	cpuPercent := (float64(deltaUsec) / (deltaSec * 1000000.0)) * 100.0
 	return float64(int(cpuPercent*10)) / 10.0
+}
+
+func (m *Manager) calculateCPUPercentageWithThrottle(username string, cpuStat string) (float64, uint64) {
+	var throttledUsec uint64
+	lines := strings.Split(cpuStat, "\n")
+	for _, l := range lines {
+		parts := strings.Fields(l)
+		if len(parts) == 2 && parts[0] == "throttled_usec" {
+			throttledUsec, _ = strconv.ParseUint(parts[1], 10, 64)
+			break
+		}
+	}
+
+	cpuPerc := m.calculateCPUPercentage(username, cpuStat)
+	return cpuPerc, throttledUsec
 }
 
 func memMB(v float64) float64 {

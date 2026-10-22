@@ -393,3 +393,109 @@ func TestBackupManager_DatabaseFailureWithoutTools(t *testing.T) {
 		t.Errorf("expected error when dumping database without mysqldump/pg_dump, got nil")
 	}
 }
+
+func TestBackupManager_IntegrityVerificationAndPreflight(t *testing.T) {
+	t.Setenv("HOSTVRA_TEST_MODE", "1")
+	tempDir := t.TempDir()
+	backupDir := filepath.Join(tempDir, "backups")
+	configDir := filepath.Join(tempDir, "config")
+	webRootDir := filepath.Join(tempDir, "www")
+
+	siteDir := filepath.Join(webRootDir, "enterprise.org", "public_html")
+	if err := os.MkdirAll(siteDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	content := "Production Data for Enterprise Backup Testing"
+	if err := os.WriteFile(filepath.Join(siteDir, "app.js"), []byte(content), 0644); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+
+	mgr, err := NewManager(backupDir, configDir, webRootDir)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Create a website backup
+	bk, err := mgr.CreateBackup(ctx, CreateBackupRequest{
+		ServerID:   "srv-node-1",
+		Type:       "website",
+		TargetName: "enterprise.org",
+		Storage:    "local",
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup failed: %v", err)
+	}
+
+	// 2. Verify integrity of clean backup
+	report, err := mgr.VerifyBackupIntegrity(bk.ID)
+	if err != nil {
+		t.Fatalf("VerifyBackupIntegrity failed: %v", err)
+	}
+	if report.Status != "verified" {
+		t.Errorf("expected status verified, got %s (message: %s)", report.Status, report.Message)
+	}
+	if !report.SHA256Match {
+		t.Errorf("expected SHA256Match to be true")
+	}
+	if !report.ArchiveValid {
+		t.Errorf("expected ArchiveValid to be true")
+	}
+	if report.ItemCount <= 0 {
+		t.Errorf("expected ItemCount > 0, got %d", report.ItemCount)
+	}
+
+	// 3. Run Preflight restore check
+	preflight, err := mgr.PreflightRestore(bk.ID)
+	if err != nil {
+		t.Fatalf("PreflightRestore failed: %v", err)
+	}
+	if !preflight.PreflightOK {
+		t.Errorf("expected PreflightOK to be true, message: %s", preflight.Message)
+	}
+	if preflight.DiskSpaceRequired <= 0 {
+		t.Errorf("expected DiskSpaceRequired > 0, got %d", preflight.DiskSpaceRequired)
+	}
+	if preflight.DiskSpaceAvailable <= 0 {
+		t.Errorf("expected DiskSpaceAvailable > 0, got %d", preflight.DiskSpaceAvailable)
+	}
+	if len(preflight.Checks) < 3 {
+		t.Errorf("expected at least 3 preflight checks, got %d", len(preflight.Checks))
+	}
+
+	// 4. Test full_account backup and restore
+	acctBk, err := mgr.CreateBackup(ctx, CreateBackupRequest{
+		ServerID:   "srv-node-1",
+		Type:       "full_account",
+		TargetName: "enterprise.org",
+		Storage:    "local",
+	})
+	if err != nil {
+		t.Fatalf("CreateBackup full_account failed: %v", err)
+	}
+	if acctBk.Status != "completed" {
+		t.Errorf("expected full_account status completed, got %s", acctBk.Status)
+	}
+
+	// Mutate site file
+	_ = os.WriteFile(filepath.Join(siteDir, "app.js"), []byte("Corrupted content"), 0644)
+
+	// Restore full account
+	err = mgr.RestoreBackup(ctx, RestoreBackupRequest{
+		BackupID: acctBk.ID,
+		ServerID: "srv-node-1",
+	})
+	if err != nil {
+		t.Fatalf("RestoreBackup full_account failed: %v", err)
+	}
+
+	restored, err := os.ReadFile(filepath.Join(siteDir, "app.js"))
+	if err != nil {
+		t.Fatalf("read restored file failed: %v", err)
+	}
+	if string(restored) != content {
+		t.Errorf("expected restored content %q, got %q", content, string(restored))
+	}
+}
+

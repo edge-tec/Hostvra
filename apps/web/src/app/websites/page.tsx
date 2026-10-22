@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   RefreshCw,
   Search,
+  GitBranch,
   ExternalLink,
   Trash2,
   Play,
@@ -49,9 +50,11 @@ import {
   Calendar,
   Flame,
   Wrench,
+  Clock,
+  History,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits } from '@/lib/api';
+import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits, ResourceQuotaEvent } from '@/lib/api';
 import { OneClickAppModal } from '@/components/OneClickAppModal';
 import { SiteModificationModal, SiteModalTab } from '@/components/SiteModificationModal';
 
@@ -182,9 +185,17 @@ export default function WebsitesPage() {
   const [isolationLoading, setIsolationLoading] = useState(false);
   const [isolationSaving, setIsolationSaving] = useState(false);
   const [limitMem, setLimitMem] = useState(512);
+  const [limitMemHigh, setLimitMemHigh] = useState(460);
   const [limitCPU, setLimitCPU] = useState(100);
+  const [limitCPUWeight, setLimitCPUWeight] = useState(100);
   const [limitTasks, setLimitTasks] = useState(100);
+  const [limitIOReadIOPS, setLimitIOReadIOPS] = useState(0);
+  const [limitIOWriteIOPS, setLimitIOWriteIOPS] = useState(0);
+  const [limitOOMPolicy, setLimitOOMPolicy] = useState('kill');
   const [limitOpenBaseDir, setLimitOpenBaseDir] = useState(true);
+  const [isolationEvents, setIsolationEvents] = useState<ResourceQuotaEvent[]>([]);
+  const [isolationEventsLoading, setIsolationEventsLoading] = useState(false);
+  const [isolationTab, setIsolationTab] = useState<'quotas' | 'telemetry' | 'events'>('quotas');
 
   // Add Site Form State
   const [newDomain, setNewDomain] = useState('');
@@ -647,18 +658,33 @@ export default function WebsitesPage() {
     if (!isolationModalSite) return;
     setIsolationSaving(true);
     try {
-      showToast(`Applying cgroups v2 limits for '${isolationModalSite.primary_domain}'...`);
+      showToast(`Applying Linux cgroups v2 limits for '${isolationModalSite.primary_domain}'...`);
       const res = await apiFetch<any>(`/api/v1/websites/${isolationModalSite.id}/isolation`, {
         method: 'PUT',
         body: JSON.stringify({
           memory_max_mb: limitMem,
+          memory_high_mb: limitMemHigh || Math.round(limitMem * 0.9),
           cpu_quota: limitCPU,
+          cpu_weight: limitCPUWeight,
           tasks_max: limitTasks,
+          io_read_iops: limitIOReadIOPS,
+          io_write_iops: limitIOWriteIOPS,
+          oom_policy: limitOOMPolicy,
+          open_basedir: limitOpenBaseDir,
         }),
       });
       if (res.data) {
-        showToast(`cgroups v2 limits saved & active for '${isolationModalSite.primary_domain}'!`);
-        setIsolationModalSite(null);
+        showToast(`Cgroups v2 limits saved & active for '${isolationModalSite.primary_domain}'!`);
+        setIsolationInfo(res.data);
+        // Refresh events list
+        try {
+          const evRes = await apiFetch<ResourceQuotaEvent[]>(`/api/v1/websites/${isolationModalSite.id}/isolation/events`);
+          if (evRes.data) {
+            setIsolationEvents(evRes.data);
+          }
+        } catch {
+          // ignore
+        }
       } else {
         showToast(res.error?.message || 'Failed to update isolation quotas', true);
       }
@@ -787,19 +813,39 @@ export default function WebsitesPage() {
   const openIsolationModal = async (site: Website) => {
     setIsolationModalSite(site);
     setIsolationLoading(true);
+    setIsolationTab('quotas');
     try {
       const res = await apiFetch<UserIsolationInfo>(`/api/v1/websites/${site.id}/isolation`);
       if (res.success && res.data) {
         setIsolationInfo(res.data);
-        setLimitMem(res.data.limits.memory_max_mb || 512);
+        const mem = res.data.limits.memory_max_mb || 512;
+        setLimitMem(mem);
+        setLimitMemHigh(res.data.limits.memory_high_mb || Math.round(mem * 0.9));
         setLimitCPU(res.data.limits.cpu_quota || 100);
+        setLimitCPUWeight(res.data.limits.cpu_weight || 100);
         setLimitTasks(res.data.limits.tasks_max || 100);
+        setLimitIOReadIOPS(res.data.limits.io_read_iops || 0);
+        setLimitIOWriteIOPS(res.data.limits.io_write_iops || 0);
+        setLimitOOMPolicy(res.data.limits.oom_policy || 'kill');
         setLimitOpenBaseDir(res.data.limits.open_basedir !== false);
       }
     } catch (err) {
       console.error('Failed to load isolation info', err);
     } finally {
       setIsolationLoading(false);
+    }
+
+    // Load recent quota events
+    setIsolationEventsLoading(true);
+    try {
+      const evRes = await apiFetch<ResourceQuotaEvent[]>(`/api/v1/websites/${site.id}/isolation/events`);
+      if (evRes.data) {
+        setIsolationEvents(evRes.data);
+      }
+    } catch (err) {
+      console.error('Failed to load quota events', err);
+    } finally {
+      setIsolationEventsLoading(false);
     }
   };
 
@@ -2953,100 +2999,621 @@ export default function WebsitesPage() {
           </div>
         )}
 
-        {/* 14. cgroups v2 Limits Modal (Hostvra Advanced Linux Isolation) */}
+        {/* 14. cgroups v2 Limits Modal (Hostvra Advanced Linux Isolation Studio) */}
         {isolationModalSite && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
-              <button
-                onClick={() => setIsolationModalSite(null)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
-                  <Cpu className="w-5 h-5" />
+            <div className="w-full max-w-4xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-3xl shadow-2xl overflow-hidden relative flex flex-col max-h-[92vh]">
+              {/* Modal Header */}
+              <div className="p-6 pb-4 border-b border-slate-100 dark:border-surface-800 flex items-start justify-between">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                    <Cpu className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                        Linux Cgroups v2 & Systemd Process Isolation Studio
+                      </h2>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Kernel Enforced
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-500 flex-wrap">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">{isolationModalSite.primary_domain}</span>
+                      <span>•</span>
+                      <span className="font-mono text-[11px] bg-slate-100 dark:bg-surface-800 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400">
+                        {isolationInfo?.username ? `system-hostvra-${isolationInfo.username}.slice` : 'system.slice'}
+                      </span>
+                      {isolationInfo && (
+                        <>
+                          <span>•</span>
+                          <span className="font-mono text-[11px]">
+                            UID: {isolationInfo.uid} / GID: {isolationInfo.gid}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">cgroups v2 Resource Slicing</h2>
-                  <p className="text-xs text-slate-500">{isolationModalSite.primary_domain}</p>
-                </div>
+                <button
+                  onClick={() => setIsolationModalSite(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
               {isolationLoading ? (
-                <div className="py-10 text-center text-slate-500">
-                  <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
-                  Reading Linux cgroups v2 telemetry...
+                <div className="py-20 text-center text-slate-500">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto mb-3 text-indigo-500" />
+                  <p className="font-semibold text-sm">Reading live Linux cgroups v2 telemetry & quota tables...</p>
+                  <p className="text-xs text-slate-400 mt-1">Interrogating /sys/fs/cgroup controller hierarchy</p>
                 </div>
               ) : (
-                <div className="space-y-4 text-xs font-semibold">
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
-                      Max RAM Limit (MB): {limitMem} MB
-                    </label>
-                    <input
-                      type="range"
-                      min={64}
-                      max={4096}
-                      step={64}
-                      value={limitMem}
-                      onChange={(e) => setLimitMem(Number(e.target.value))}
-                      className="w-full accent-indigo-600"
-                    />
+                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                  {/* Live Telemetry Ribbon */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                    {/* RAM Gauge */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800/80 border border-slate-200/80 dark:border-surface-700">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                          RAM (Live / Max)
+                        </span>
+                        <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">
+                          {isolationInfo?.current_memory_mb || isolationInfo?.memory_used_mb || 0} / {limitMem} MB
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-surface-700 overflow-hidden relative">
+                        <div
+                          className="h-full bg-indigo-600 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, (((isolationInfo?.current_memory_mb || isolationInfo?.memory_used_mb || 0) / (limitMem || 1)) * 100))}%`,
+                          }}
+                        />
+                        {/* Soft Throttle marker */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-amber-500 z-10"
+                          style={{ left: `${Math.min(100, ((limitMemHigh || limitMem * 0.9) / (limitMem || 1)) * 100)}%` }}
+                          title={`Soft throttle: ${limitMemHigh} MB`}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-2 text-[11px] text-slate-500">
+                        <span>Peak: {isolationInfo?.memory_peak_mb || 0} MB</span>
+                        <span className="flex items-center gap-1">
+                          OOM Kills:
+                          <span
+                            className={`px-1.5 py-0.2 rounded font-mono font-bold ${
+                              (isolationInfo?.oom_kills || 0) > 0
+                                ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            }`}
+                          >
+                            {isolationInfo?.oom_kills || 0}
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* CPU Quota Gauge */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800/80 border border-slate-200/80 dark:border-surface-700">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                          <Gauge className="w-3.5 h-3.5 text-blue-500" />
+                          CPU Usage / Quota
+                        </span>
+                        <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">
+                          {(isolationInfo?.cpu_usage_percent || isolationInfo?.cpu_usage_perc || 0).toFixed(1)}% / {limitCPU}%
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-surface-700 overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, (((isolationInfo?.cpu_usage_percent || isolationInfo?.cpu_usage_perc || 0) / (limitCPU || 1)) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-2 text-[11px] text-slate-500">
+                        <span>Weight: {limitCPUWeight}</span>
+                        <span>
+                          Throttled: {((isolationInfo?.throttled_usec || 0) / 1000).toFixed(1)} ms
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Tasks / PIDs Gauge */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800/80 border border-slate-200/80 dark:border-surface-700">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                          Fork Bomb Guard (PIDs)
+                        </span>
+                        <span className="text-xs font-mono font-bold text-slate-900 dark:text-white">
+                          {isolationInfo?.current_pids || isolationInfo?.tasks_current || 0} / {limitTasks} max
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-surface-700 overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-600 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.min(100, (((isolationInfo?.current_pids || isolationInfo?.tasks_current || 0) / (limitTasks || 1)) * 100))}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-2 text-[11px] text-slate-500">
+                        <span className="truncate max-w-[170px]" title={isolationInfo?.php_pool_socket}>
+                          Socket: {isolationInfo?.php_pool_socket ? isolationInfo.php_pool_socket.split('/').pop() : 'active'}
+                        </span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Protected</span>
+                      </div>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
-                      CPU Quota (%): {limitCPU}%
-                    </label>
-                    <input
-                      type="range"
-                      min={10}
-                      max={400}
-                      step={10}
-                      value={limitCPU}
-                      onChange={(e) => setLimitCPU(Number(e.target.value))}
-                      className="w-full accent-indigo-600"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 mb-1">
-                      Max PIDs / Tasks: {limitTasks}
-                    </label>
-                    <input
-                      type="number"
-                      value={limitTasks}
-                      onChange={(e) => setLimitTasks(Number(e.target.value))}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-3 border-t border-slate-200 dark:border-surface-700">
+                  {/* Tabs Navigation */}
+                  <div className="flex items-center gap-2 border-b border-slate-200 dark:border-surface-700">
                     <button
-                      onClick={() => setIsolationModalSite(null)}
-                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold"
+                      onClick={() => setIsolationTab('quotas')}
+                      className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+                        isolationTab === 'quotas'
+                          ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20'
+                          : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
                     >
-                      Close
+                      <SlidersHorizontal className="w-3.5 h-3.5" />
+                      Resource Quotas & Presets
                     </button>
                     <button
-                      onClick={handleSaveIsolation}
-                      disabled={isolationSaving}
-                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                      onClick={() => setIsolationTab('telemetry')}
+                      className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+                        isolationTab === 'telemetry'
+                          ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20'
+                          : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
                     >
-                      {isolationSaving ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Saving...</span>
-                        </>
+                      <Terminal className="w-3.5 h-3.5" />
+                      Live Cgroups Telemetry
+                    </button>
+                    <button
+                      onClick={() => setIsolationTab('events')}
+                      className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center gap-1.5 ${
+                        isolationTab === 'events'
+                          ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/20'
+                          : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      Quota & OOM Events ({isolationEvents.length})
+                    </button>
+                  </div>
+
+                  {/* TAB 1: Resource Quotas & Presets */}
+                  {isolationTab === 'quotas' && (
+                    <div className="space-y-6">
+                      {/* Presets Grid */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2.5">
+                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                            Quick Allocation Presets
+                          </label>
+                          <span className="text-[11px] text-slate-500">Click a preset to configure recommended thresholds</span>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          {[
+                            { name: 'Starter', mem: 256, cpu: 50, weight: 100, tasks: 50, desc: 'Blogs / Static Sites' },
+                            { name: 'Standard', mem: 512, cpu: 100, weight: 100, tasks: 100, desc: 'WordPress / Small Store' },
+                            { name: 'Business', mem: 1024, cpu: 200, weight: 200, tasks: 200, desc: 'WooCommerce / APIs' },
+                            { name: 'Enterprise', mem: 2048, cpu: 400, weight: 300, tasks: 400, desc: 'High Traffic / Big DB' },
+                          ].map((preset) => {
+                            const isMatch = limitMem === preset.mem && limitCPU === preset.cpu && limitTasks === preset.tasks;
+                            return (
+                              <button
+                                key={preset.name}
+                                type="button"
+                                onClick={() => {
+                                  setLimitMem(preset.mem);
+                                  setLimitMemHigh(Math.round(preset.mem * 0.9));
+                                  setLimitCPU(preset.cpu);
+                                  setLimitCPUWeight(preset.weight);
+                                  setLimitTasks(preset.tasks);
+                                  showToast(`Applied '${preset.name}' quota preset`);
+                                }}
+                                className={`p-3 rounded-2xl border text-left transition-all ${
+                                  isMatch
+                                    ? 'bg-indigo-50/80 dark:bg-indigo-950/30 border-indigo-500 text-indigo-900 dark:text-indigo-200 ring-2 ring-indigo-500/20'
+                                    : 'bg-slate-50/60 dark:bg-surface-800/60 border-slate-200 dark:border-surface-700 hover:border-slate-300 dark:hover:border-surface-600'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="font-bold text-xs text-slate-900 dark:text-white">{preset.name}</span>
+                                  {isMatch && <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />}
+                                </div>
+                                <div className="text-[11px] text-slate-500">{preset.desc}</div>
+                                <div className="mt-2 text-[10px] font-mono text-slate-600 dark:text-slate-400">
+                                  {preset.mem}MB • {preset.cpu}% CPU
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Main Limits Config */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {/* Memory Max Hard Cap */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              Hard Memory Cap (<code className="font-mono text-indigo-600">memory.max</code>)
+                            </label>
+                            <span className="text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded">
+                              {limitMem} MB
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={64}
+                            max={4096}
+                            step={64}
+                            value={limitMem}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setLimitMem(val);
+                              if (limitMemHigh >= val) {
+                                setLimitMemHigh(Math.round(val * 0.9));
+                              }
+                            }}
+                            className="w-full accent-indigo-600 cursor-pointer"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Absolute ceiling. If the cgroup slice exceeds this limit, the kernel enforces the OOM policy.
+                          </p>
+                        </div>
+
+                        {/* Soft Throttle Memory High */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              Soft Throttle Reclaim (<code className="font-mono text-amber-600">memory.high</code>)
+                            </label>
+                            <span className="text-xs font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                              {limitMemHigh} MB
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={64}
+                            max={limitMem}
+                            step={32}
+                            value={limitMemHigh}
+                            onChange={(e) => setLimitMemHigh(Number(e.target.value))}
+                            className="w-full accent-amber-600 cursor-pointer"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Proactive kernel memory reclaim begins here. Processes are gently throttled rather than abruptly killed.
+                          </p>
+                        </div>
+
+                        {/* CPU Quota % */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              CPU Quota Bandwidth (<code className="font-mono text-blue-600">cpu.max</code>)
+                            </label>
+                            <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded">
+                              {limitCPU}% ({limitCPU >= 100 ? `${(limitCPU / 100).toFixed(1)} Core` : 'Sub-core'})
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={10}
+                            max={600}
+                            step={10}
+                            value={limitCPU}
+                            onChange={(e) => setLimitCPU(Number(e.target.value))}
+                            className="w-full accent-blue-600 cursor-pointer"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            100% = 1 full CPU core quota in CFS (Completely Fair Scheduler). 200% = 2 dedicated cores.
+                          </p>
+                        </div>
+
+                        {/* CPU Weight */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              CPU Proportional Weight (<code className="font-mono text-purple-600">cpu.weight</code>)
+                            </label>
+                            <span className="text-xs font-mono font-bold text-purple-600 dark:text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">
+                              {limitCPUWeight} (1..1000)
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={10}
+                            max={1000}
+                            step={10}
+                            value={limitCPUWeight}
+                            onChange={(e) => setLimitCPUWeight(Number(e.target.value))}
+                            className="w-full accent-purple-600 cursor-pointer"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Relative priority when the host CPU is under heavy contention. Default is 100.
+                          </p>
+                        </div>
+
+                        {/* TasksMax Fork Bomb Guard */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              Max Process / Thread Limit (<code className="font-mono text-emerald-600">pids.max</code>)
+                            </label>
+                            <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                              {limitTasks} PIDs
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={20}
+                            max={500}
+                            step={10}
+                            value={limitTasks}
+                            onChange={(e) => setLimitTasks(Number(e.target.value))}
+                            className="w-full accent-emerald-600 cursor-pointer"
+                          />
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Strict protection against rogue fork bombs and process exhaustion attacks across worker processes.
+                          </p>
+                        </div>
+
+                        {/* OOM Policy */}
+                        <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700">
+                          <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+                            Kernel Out-Of-Memory (OOM) Action
+                          </label>
+                          <select
+                            value={limitOOMPolicy}
+                            onChange={(e) => setLimitOOMPolicy(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-600 text-slate-900 dark:text-white text-xs font-semibold focus:outline-none"
+                          >
+                            <option value="kill">Immediate Kill (Kill worker exceeding slice cap)</option>
+                            <option value="throttle">Aggressive Throttle (Throttle CPU & force page reclaim)</option>
+                          </select>
+                          <p className="text-[11px] text-slate-500 mt-2">
+                            Determines systemd & cgroup behavior when memory limits are exceeded.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Security Jail & IOPS controls */}
+                      <div className="p-4 rounded-2xl bg-slate-50/70 dark:bg-surface-800/70 border border-slate-200/80 dark:border-surface-700 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                              PHP open_basedir Filesystem Jail
+                            </span>
+                            <span className="text-[11px] text-slate-500">
+                              Restricts PHP scripts to only read from the website document root and /tmp
+                            </span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={limitOpenBaseDir}
+                            onChange={(e) => setLimitOpenBaseDir(e.target.checked)}
+                            className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200 dark:border-surface-700">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Max Disk Read IOPS (0 = unlimited)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={50000}
+                              step={100}
+                              value={limitIOReadIOPS}
+                              onChange={(e) => setLimitIOReadIOPS(Number(e.target.value))}
+                              className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-600 text-xs font-mono text-slate-900 dark:text-white"
+                              placeholder="0"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                              Max Disk Write IOPS (0 = unlimited)
+                            </label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={50000}
+                              step={100}
+                              value={limitIOWriteIOPS}
+                              onChange={(e) => setLimitIOWriteIOPS(Number(e.target.value))}
+                              className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-600 text-xs font-mono text-slate-900 dark:text-white"
+                              placeholder="0"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: Live Cgroups Telemetry */}
+                  {isolationTab === 'telemetry' && (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-2xl bg-slate-950 text-slate-200 font-mono text-xs border border-slate-800 space-y-3">
+                        <div className="text-slate-400 font-bold border-b border-slate-800 pb-2 flex items-center justify-between">
+                          <span>SYSTEMD SLICE HIERARCHY</span>
+                          <span className="text-emerald-400">cgroups v2 active</span>
+                        </div>
+                        <div className="space-y-1 text-[11px]">
+                          <div><span className="text-indigo-400">Cgroup Path:</span> {isolationInfo?.cgroup_path || `/sys/fs/cgroup/system.slice/system-hostvra-${isolationInfo?.username || 'user'}.slice`}</div>
+                          <div><span className="text-indigo-400">Systemd Unit:</span> system-hostvra-{isolationInfo?.username || 'user'}.slice</div>
+                          <div><span className="text-indigo-400">POSIX Username:</span> {isolationInfo?.username} (UID: {isolationInfo?.uid}, GID: {isolationInfo?.gid})</div>
+                          <div><span className="text-indigo-400">Home Directory:</span> {isolationInfo?.home_dir}</div>
+                          <div><span className="text-indigo-400">PHP-FPM Socket:</span> {isolationInfo?.php_pool_socket}</div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 space-y-2">
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                            Live Memory Counters (memory.events)
+                          </h4>
+                          <div className="space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>Current Memory:</span>
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">{isolationInfo?.current_memory_mb || 0} MB</span>
+                            </div>
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>Peak Memory:</span>
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">{isolationInfo?.memory_peak_mb || 0} MB</span>
+                            </div>
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>OOM Kills (Kernel):</span>
+                              <span className={`font-mono font-bold ${(isolationInfo?.oom_kills || 0) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                                {isolationInfo?.oom_kills || 0}
+                              </span>
+                            </div>
+                            <div className="flex justify-between py-1">
+                              <span>Soft Throttle Reclaims:</span>
+                              <span className="font-mono font-bold text-amber-600">{isolationInfo?.high_events || 0}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 space-y-2">
+                          <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <Gauge className="w-3.5 h-3.5 text-blue-500" />
+                            Live CPU & Task Counters (cpu.stat)
+                          </h4>
+                          <div className="space-y-1.5 text-xs text-slate-600 dark:text-slate-400">
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>Active CPU Usage:</span>
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">{(isolationInfo?.cpu_usage_percent || 0).toFixed(2)}%</span>
+                            </div>
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>CPU Throttled Microseconds:</span>
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">{isolationInfo?.throttled_usec || 0} µs</span>
+                            </div>
+                            <div className="flex justify-between py-1 border-b border-slate-200/50 dark:border-surface-700/50">
+                              <span>Active Tasks / Processes:</span>
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">{isolationInfo?.current_pids || 0}</span>
+                            </div>
+                            <div className="flex justify-between py-1">
+                              <span>Systemd Slice Status:</span>
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 uppercase text-[11px]">{isolationInfo?.status || 'active'}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: Quota & OOM Events Timeline */}
+                  {isolationTab === 'events' && (
+                    <div className="space-y-3">
+                      {isolationEventsLoading ? (
+                        <div className="py-12 text-center text-slate-500">
+                          <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+                          <p className="text-xs">Loading quota events timeline...</p>
+                        </div>
+                      ) : isolationEvents.length === 0 ? (
+                        <div className="py-12 text-center text-slate-500 bg-slate-50 dark:bg-surface-800/50 rounded-2xl border border-slate-200 dark:border-surface-700">
+                          <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-emerald-500" />
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Clean Operational History</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            No OOM kills or throttle violations recorded for this website.
+                          </p>
+                        </div>
                       ) : (
-                        <span>Save Quotas</span>
+                        <div className="divide-y divide-slate-100 dark:divide-surface-800">
+                          {isolationEvents.map((ev) => {
+                            const isOOM = ev.event_type === 'oom_kill';
+                            const isHigh = ev.event_type === 'memory_high';
+                            const isUpdated = ev.event_type === 'quota_updated';
+                            return (
+                              <div key={ev.id} className="py-3 flex items-start gap-3">
+                                <div
+                                  className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                                    isOOM
+                                      ? 'bg-red-500/10 text-red-600 border border-red-500/20'
+                                      : isHigh
+                                      ? 'bg-amber-500/10 text-amber-600 border border-amber-500/20'
+                                      : isUpdated
+                                      ? 'bg-blue-500/10 text-blue-600 border border-blue-500/20'
+                                      : 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20'
+                                  }`}
+                                >
+                                  {isOOM ? (
+                                    <AlertTriangle className="w-3.5 h-3.5" />
+                                  ) : isHigh ? (
+                                    <Flame className="w-3.5 h-3.5" />
+                                  ) : isUpdated ? (
+                                    <SlidersHorizontal className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-bold text-slate-900 dark:text-white capitalize">
+                                      {ev.event_type.replace('_', ' ')}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      {new Date(ev.created_at).toLocaleString()}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">{ev.details}</p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Modal Footer */}
+              <div className="p-4 px-6 border-t border-slate-100 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-900/50 flex items-center justify-between">
+                <div className="text-[11px] text-slate-500 hidden sm:block">
+                  Target: <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{limitMem}MB RAM</span> •{' '}
+                  <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{limitCPU}% CPU</span> •{' '}
+                  <span className="font-mono font-bold text-slate-700 dark:text-slate-300">{limitTasks} Tasks</span>
+                </div>
+                <div className="flex items-center gap-3 ml-auto">
+                  <button
+                    onClick={() => setIsolationModalSite(null)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveIsolation}
+                    disabled={isolationSaving}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-indigo-600/20 cursor-pointer flex items-center gap-1.5 transition-all"
+                  >
+                    {isolationSaving ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Applying Cgroups v2...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Apply Cgroups v2 Quotas</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -3367,7 +3934,33 @@ export default function WebsitesPage() {
                 className="w-full px-3.5 py-1.5 hover:bg-purple-50 dark:hover:bg-purple-950/30 flex items-center gap-2 cursor-pointer text-purple-600 dark:text-purple-400 font-semibold transition"
               >
                 <Globe className="w-3.5 h-3.5" />
-                <span>WordPress Manager</span>
+                <span>WordPress & Staging</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  if (s) openSiteModal(s, 'appruntime');
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 flex items-center gap-2 cursor-pointer text-emerald-600 dark:text-emerald-400 font-semibold transition"
+              >
+                <Cpu className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Node.js & Python Studio</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const s = activeDropdownSite;
+                  setOpenDropdownId(null);
+                  setActiveDropdownSite(null);
+                  if (s) openSiteModal(s, 'git');
+                }}
+                className="w-full px-3.5 py-1.5 hover:bg-blue-50 dark:hover:bg-blue-950/30 flex items-center gap-2 cursor-pointer text-blue-600 dark:text-blue-400 font-semibold transition"
+              >
+                <GitBranch className="w-3.5 h-3.5 text-blue-500" />
+                <span>Git CI/CD Pipeline</span>
               </button>
 
               <button

@@ -47,6 +47,9 @@ import {
   Zap,
 } from 'lucide-react';
 import { EmailUserGuide } from '@/components/EmailUserGuide';
+import { SmtpRelayStudio } from '@/components/email/SmtpRelayStudio';
+import { SpamFilterStudio } from '@/components/email/SpamFilterStudio';
+import { ImapMigrationStudio } from '@/components/email/ImapMigrationStudio';
 
 interface EmailDomain {
   id: string;
@@ -347,8 +350,10 @@ function formatBytes(bytes?: number): string {
 
 export default function EmailHostingPage() {
   const [activeTab, setActiveTab] = useState<
-    'servers' | 'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester' | 'guide'
+    'servers' | 'mailboxes' | 'webmail' | 'domains' | 'health' | 'smtp' | 'spam' | 'migration' | 'queue' | 'logs' | 'suppressions' | 'services' | 'tester' | 'guide'
   >('servers');
+  const [smtpSubTab, setSmtpSubTab] = useState<'relays' | 'client_profiles'>('relays');
+  const [prefilledMigrationMailboxId, setPrefilledMigrationMailboxId] = useState<string | undefined>(undefined);
 
   const [selectedWebmailEmail, setSelectedWebmailEmail] = useState<string | undefined>(undefined);
   const [domains, setDomains] = useState<EmailDomain[]>([]);
@@ -1688,8 +1693,35 @@ export default function EmailHostingPage() {
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            <span>SMTP & Client Setup</span>
+            <Send className="w-4 h-4" />
+            <span>SMTP Relays &amp; Setup</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('spam')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all font-medium whitespace-nowrap ${
+              activeTab === 'spam'
+                ? 'bg-white dark:bg-surface-800 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Anti-Spam &amp; Quarantine</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+              Rspamd
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('migration')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all font-medium whitespace-nowrap ${
+              activeTab === 'migration'
+                ? 'bg-white dark:bg-surface-800 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <RotateCw className="w-4 h-4 text-indigo-500" />
+            <span>IMAP Migration</span>
           </button>
 
           <button
@@ -2181,6 +2213,16 @@ export default function EmailHostingPage() {
                                 <Layers className="w-4 h-4" />
                               </button>
                               <button
+                                onClick={() => {
+                                  setPrefilledMigrationMailboxId(mb.id);
+                                  setActiveTab('migration');
+                                }}
+                                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-500 hover:text-indigo-600 transition"
+                                title="Migrate Emails from External Host (cPanel / Gmail / IMAP)"
+                              >
+                                <RotateCw className="w-4 h-4" />
+                              </button>
+                              <button
                                 onClick={() => setShowPasswordModal(mb)}
                                 className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-surface-700 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition"
                                 title="Change Password"
@@ -2551,8 +2593,36 @@ export default function EmailHostingPage() {
         {/* Tab Content: SMTP & Client Settings */}
         {activeTab === 'smtp' && (
           <div className="space-y-4">
-            <div className="p-6 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-4 shadow-xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl w-fit">
+              <button
+                onClick={() => setSmtpSubTab('relays')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
+                  smtpSubTab === 'relays'
+                    ? 'bg-white dark:bg-surface-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>External SMTP Relays &amp; DNS Deliverability</span>
+              </button>
+              <button
+                onClick={() => setSmtpSubTab('client_profiles')}
+                className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 ${
+                  smtpSubTab === 'client_profiles'
+                    ? 'bg-white dark:bg-surface-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Mail Client Setup Parameters &amp; Profiles</span>
+              </button>
+            </div>
+
+            {smtpSubTab === 'relays' ? (
+              <SmtpRelayStudio domains={domains} />
+            ) : (
+              <div className="p-6 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 space-y-4 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Mail Client Configuration Parameters
@@ -2787,7 +2857,18 @@ export default function EmailHostingPage() {
                 </div>
               </div>
             </div>
-          </div>
+          )}
+        </div>
+      )}
+
+        {/* Tab Content: Anti-Spam & Quarantine Studio */}
+        {activeTab === 'spam' && (
+          <SpamFilterStudio domains={domains} />
+        )}
+
+        {/* Tab Content: IMAP Mailbox Migration Studio */}
+        {activeTab === 'migration' && (
+          <ImapMigrationStudio mailboxes={mailboxes} prefilledMailboxId={prefilledMigrationMailboxId} />
         )}
 
         {/* Tab Content: Mail Queue */}

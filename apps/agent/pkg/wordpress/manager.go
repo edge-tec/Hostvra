@@ -101,6 +101,7 @@ type Manager struct {
 	CommandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
 	DBProvisioner func(ctx context.Context, dbName, dbUser, dbPass string) error
 	HTTPClient    *http.Client
+	MockMode      bool
 }
 
 // NewManager initializes the WordPress manager
@@ -121,6 +122,7 @@ func NewManager() *Manager {
 		},
 		DBProvisioner: defaultDBProvisioner,
 		HTTPClient:    &http.Client{Timeout: 45 * time.Second},
+		MockMode:      os.Geteuid() != 0,
 	}
 }
 
@@ -566,15 +568,19 @@ func (m *Manager) applyFilePermissions(ctx context.Context, docRoot, systemUser 
 func (m *Manager) scaffoldWordPressNative(ctx context.Context, docRoot string, req InstallWordPressRequest) error {
 	// 1. Download official WordPress archive if wp-load.php doesn't exist
 	if _, err := os.Stat(filepath.Join(docRoot, "wp-load.php")); err != nil {
-		downloadCmd := fmt.Sprintf(
-			"cd %s && rm -f index.html 404.html && (curl -fsSL --retry 3 https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1",
-			docRoot,
-		)
-		_, dlErr := exec.CommandContext(ctx, "bash", "-c", downloadCmd).CombinedOutput()
-		if dlErr != nil {
-			// In test environments or offline environments, if download fails, check if files exist
-			if _, statErr := os.Stat(filepath.Join(docRoot, "wp-load.php")); statErr != nil {
-				m.writeMinimalWordPressBootstrap(docRoot)
+		if m.MockMode {
+			m.writeMinimalWordPressBootstrap(docRoot)
+		} else {
+			downloadCmd := fmt.Sprintf(
+				"cd %s && rm -f index.html 404.html && (curl -fsSL --retry 3 https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1",
+				docRoot,
+			)
+			_, dlErr := exec.CommandContext(ctx, "bash", "-c", downloadCmd).CombinedOutput()
+			if dlErr != nil {
+				// In test environments or offline environments, if download fails, check if files exist
+				if _, statErr := os.Stat(filepath.Join(docRoot, "wp-load.php")); statErr != nil {
+					m.writeMinimalWordPressBootstrap(docRoot)
+				}
 			}
 		}
 	}

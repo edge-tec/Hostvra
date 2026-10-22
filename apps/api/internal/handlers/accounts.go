@@ -13,6 +13,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
@@ -148,6 +149,34 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "PLAN_NOT_FOUND", "Selected hosting plan not found", nil, "")
 		return
+	}
+
+	// Reseller quota enforcement
+	if claims.Role == rbac.RoleReseller {
+		resellerProfile, pErr := h.store.GetResellerProfileByUserID(r.Context(), claims.UserID)
+		if pErr == nil && resellerProfile != nil {
+			if !resellerProfile.IsActive {
+				response.Error(w, http.StatusForbidden, "RESELLER_INACTIVE", "Reseller profile is inactive or suspended", nil, "")
+				return
+			}
+			usage, uErr := h.store.GetResellerUsage(r.Context(), claims.UserID)
+			if uErr == nil && usage != nil {
+				if usage.MaxAccounts > 0 && usage.UsedAccounts >= usage.MaxAccounts {
+					response.Error(w, http.StatusForbidden, "QUOTA_EXCEEDED", fmt.Sprintf("Reseller account limit (%d) reached", usage.MaxAccounts), nil, "")
+					return
+				}
+				if !resellerProfile.AllowOverselling {
+					if resellerProfile.AllocatedDiskMB > 0 && (usage.UsedDiskMB+plan.DiskSpaceMB) > resellerProfile.AllocatedDiskMB {
+						response.Error(w, http.StatusForbidden, "QUOTA_EXCEEDED", fmt.Sprintf("Reseller disk allocation pool (%d MB) exceeded", resellerProfile.AllocatedDiskMB), nil, "")
+						return
+					}
+					if resellerProfile.AllocatedBandwidthMB > 0 && (usage.UsedBandwidthMB+plan.BandwidthMB) > resellerProfile.AllocatedBandwidthMB {
+						response.Error(w, http.StatusForbidden, "QUOTA_EXCEEDED", fmt.Sprintf("Reseller bandwidth allocation pool (%d MB) exceeded", resellerProfile.AllocatedBandwidthMB), nil, "")
+						return
+					}
+				}
+			}
+		}
 	}
 
 	var serverUUID *uuid.UUID

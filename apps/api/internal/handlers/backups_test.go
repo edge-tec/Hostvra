@@ -164,7 +164,52 @@ func TestBackupHandler_API(t *testing.T) {
 		t.Fatalf("expected 200 on save schedule, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	// 7. Delete Backup
+	// 7. Test Verify Integrity Drill
+	r.Post("/api/v1/backups/{id}/verify-integrity", h.VerifyIntegrity)
+	r.Post("/api/v1/backups/{id}/preflight-restore", h.PreflightRestore)
+
+	req = httptest.NewRequest("POST", "/api/v1/backups/"+res.Data.ID+"/verify-integrity", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on verify integrity, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var verifyRes struct {
+		Success bool                   `json:"success"`
+		Data    backup.IntegrityReport `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&verifyRes); err != nil {
+		t.Fatalf("failed to decode verify integrity response: %v", err)
+	}
+	if verifyRes.Data.Status != "verified" {
+		t.Errorf("expected status verified, got %s", verifyRes.Data.Status)
+	}
+	if !verifyRes.Data.SHA256Match {
+		t.Errorf("expected sha256_match to be true")
+	}
+
+	// 8. Test Preflight Restore Safety Check
+	req = httptest.NewRequest("POST", "/api/v1/backups/"+res.Data.ID+"/preflight-restore", nil)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on preflight restore, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var preflightRes struct {
+		Success bool                          `json:"success"`
+		Data    backup.PreflightRestoreReport `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&preflightRes); err != nil {
+		t.Fatalf("failed to decode preflight restore response: %v", err)
+	}
+	if !preflightRes.Data.PreflightOK {
+		t.Errorf("expected preflight_ok to be true, message: %s", preflightRes.Data.Message)
+	}
+	if preflightRes.Data.DiskSpaceRequired <= 0 {
+		t.Errorf("expected disk_space_required > 0, got %d", preflightRes.Data.DiskSpaceRequired)
+	}
+
+	// 9. Delete Backup
 	req = httptest.NewRequest("DELETE", "/api/v1/backups/"+res.Data.ID, nil)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
@@ -172,3 +217,4 @@ func TestBackupHandler_API(t *testing.T) {
 		t.Fatalf("expected 200 on delete backup, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+

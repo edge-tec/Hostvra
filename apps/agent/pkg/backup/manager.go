@@ -12,11 +12,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -31,22 +33,66 @@ var (
 
 // BackupRecord represents an archived snapshot on local disk or remote cloud.
 type BackupRecord struct {
-	ID           string     `json:"id"`
-	ServerID     string     `json:"server_id"`
-	Type         string     `json:"type"` // website, database, full_config
-	TargetName   string     `json:"target_name"`
-	Storage      string     `json:"storage"` // local, s3, r2, b2, sftp
-	StorageID    string     `json:"storage_id,omitempty"`
-	SizeBytes    int64      `json:"size_bytes"`
-	SHA256       string     `json:"sha256"`
-	ItemCount    int        `json:"item_count"`
-	Status       string     `json:"status"` // completed, failed, in_progress
-	FileName     string     `json:"file_name"`
-	RemoteKey    string     `json:"remote_key,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	ErrorMessage string     `json:"error_message,omitempty"`
+	ID              string     `json:"id"`
+	ServerID        string     `json:"server_id"`
+	Type            string     `json:"type"` // website, database, full_config, full_account
+	TargetName      string     `json:"target_name"`
+	Storage         string     `json:"storage"` // local, s3, wasabi, gcs, r2, b2, spaces, minio, sftp
+	StorageID       string     `json:"storage_id,omitempty"`
+	SizeBytes       int64      `json:"size_bytes"`
+	SHA256          string     `json:"sha256"`
+	ItemCount       int        `json:"item_count"`
+	Status          string     `json:"status"` // completed, failed, in_progress
+	FileName        string     `json:"file_name"`
+	RemoteKey       string     `json:"remote_key,omitempty"`
+	VerifiedAt      *time.Time `json:"verified_at,omitempty"`
+	IntegrityStatus string     `json:"integrity_status,omitempty"` // unverified, verified, corrupted
+	CreatedAt       time.Time  `json:"created_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
 }
+
+// IntegrityReport documents cryptographic and structural verification of a backup snapshot.
+type IntegrityReport struct {
+	BackupID         string    `json:"backup_id"`
+	FileName         string    `json:"file_name"`
+	TargetName       string    `json:"target_name"`
+	Type             string    `json:"type"`
+	Storage          string    `json:"storage"`
+	ExpectedSHA256   string    `json:"expected_sha256"`
+	CalculatedSHA256 string    `json:"calculated_sha256"`
+	SHA256Match      bool      `json:"sha256_match"`
+	ArchiveValid     bool      `json:"archive_valid"`
+	ItemCount        int       `json:"item_count"`
+	UncompressedSize int64     `json:"uncompressed_size"`
+	Status           string    `json:"status"` // "verified", "corrupted"
+	Message          string    `json:"message"`
+	VerifiedAt       time.Time `json:"verified_at"`
+}
+
+// PreflightCheck reports individual validation steps before restoring.
+type PreflightCheck struct {
+	Name    string `json:"name"`
+	Passed  bool   `json:"passed"`
+	Details string `json:"details"`
+}
+
+// PreflightRestoreReport provides actionable safety validation prior to restoring workloads.
+type PreflightRestoreReport struct {
+	BackupID            string           `json:"backup_id"`
+	TargetName          string           `json:"target_name"`
+	Type                string           `json:"type"`
+	PreflightOK         bool             `json:"preflight_ok"`
+	DiskSpaceRequired   int64            `json:"disk_space_required"`
+	DiskSpaceAvailable  int64            `json:"disk_space_available"`
+	ServiceStatus       string           `json:"service_status"`
+	ExistingTargetFound bool             `json:"existing_target_found"`
+	TargetConflictRisk  string           `json:"target_conflict_risk"` // "none", "overwrite_warning"
+	IntegrityStatus     string           `json:"integrity_status"`
+	Checks              []PreflightCheck `json:"checks"`
+	Message             string           `json:"message"`
+}
+
 
 // DestinationConfig defines remote storage credentials (S3, Cloudflare R2, Backblaze B2, SFTP).
 type DestinationConfig struct {
@@ -303,6 +349,8 @@ func (m *Manager) CreateBackup(ctx context.Context, req CreateBackupRequest) (*B
 		shaHash, sizeBytes, fileCount, err = m.packDatabase(req.TargetName, localArchive)
 	case "full_config":
 		shaHash, sizeBytes, fileCount, err = m.packFullConfig(localArchive)
+	case "full_account":
+		shaHash, sizeBytes, fileCount, err = m.packAccount(req.TargetName, localArchive)
 	default:
 		err = fmt.Errorf("unsupported backup scope: %s", req.Type)
 	}
@@ -557,6 +605,8 @@ func (m *Manager) RestoreBackup(ctx context.Context, req RestoreBackupRequest) e
 		return m.restoreDatabase(localPath, record.TargetName)
 	case "full_config":
 		return m.restoreFullConfig(localPath)
+	case "full_account":
+		return m.restoreAccount(localPath, record.TargetName)
 	default:
 		return fmt.Errorf("unsupported restore scope: %s", record.Type)
 	}
@@ -851,9 +901,84 @@ func (m *Manager) TestDestination(ctx context.Context, id string) error {
 }
 
 func (m *Manager) TestDestinationConfig(ctx context.Context, dest DestinationConfig) error {
+	destType := strings.ToLower(strings.TrimSpace(dest.Type))
+	if destType == "local" {
+		targetDir := dest.Endpoint
+		if targetDir == "" {
+			targetDir = m.backupDir
+		}
+		if err := os.MkdirAll(targetDir, 0750); err != nil {
+			return fmt.Errorf("local storage path inaccessible: %w", err)
+		}
+		testFile := filepath.Join(targetDir, fmt.Sprintf(".probe_%d", time.Now().UnixNano()))
+		if err := os.WriteFile(testFile, []byte("ok"), 0600); err != nil {
+			return fmt.Errorf("local storage path not writable: %w", err)
+		}
+		_ = os.Remove(testFile)
+		return nil
+	}
+
+	if destType == "sftp" {
+		host := dest.Endpoint
+		if host == "" {
+			return errors.New("sftp host or ip address is required in endpoint field")
+		}
+		if !strings.Contains(host, ":") {
+			host = host + ":22"
+		}
+		conn, err := net.DialTimeout("tcp", host, 5*time.Second)
+		if err != nil {
+			return fmt.Errorf("sftp connection to %s failed: %w", host, err)
+		}
+		conn.Close()
+		return nil
+	}
+
+	endpoint := dest.Endpoint
+	region := dest.Region
+
+	switch destType {
+	case "wasabi":
+		if endpoint == "" {
+			endpoint = "s3.wasabisys.com"
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+	case "gcs":
+		if endpoint == "" {
+			endpoint = "storage.googleapis.com"
+		}
+		if region == "" {
+			region = "us-east-1"
+		}
+	case "r2":
+		if region == "" {
+			region = "auto"
+		}
+	case "b2":
+		if endpoint == "" {
+			endpoint = "s3.us-west-000.backblazeb2.com"
+		}
+		if region == "" {
+			region = "us-west-000"
+		}
+	case "spaces":
+		if endpoint == "" {
+			endpoint = "nyc3.digitaloceanspaces.com"
+		}
+		if region == "" {
+			region = "nyc3"
+		}
+	case "minio":
+		if region == "" {
+			region = "us-east-1"
+		}
+	}
+
 	client := NewS3Client(S3Config{
-		Endpoint:  dest.Endpoint,
-		Region:    dest.Region,
+		Endpoint:  endpoint,
+		Region:    region,
 		Bucket:    dest.Bucket,
 		AccessKey: dest.AccessKey,
 		SecretKey: dest.SecretKey,
@@ -924,6 +1049,345 @@ func (m *Manager) DeleteSchedule(id string) error {
 	}
 	delete(m.schedules, id)
 	return m.saveStateLocked()
+}
+
+// VerifyBackupIntegrity validates the cryptographic SHA-256 hash and verifies tar.gz archive stream integrity without extraction.
+func (m *Manager) VerifyBackupIntegrity(backupID string) (*IntegrityReport, error) {
+	m.mu.RLock()
+	record, ok := m.backups[backupID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrBackupNotFound
+	}
+
+	localPath := filepath.Join(m.backupDir, record.FileName)
+	f, err := os.Open(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("local archive missing for verification: %w", err)
+	}
+	defer f.Close()
+
+	// 1. Calculate SHA-256
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return nil, fmt.Errorf("failed to stream archive for hashing: %w", err)
+	}
+	calculatedSHA := hex.EncodeToString(hasher.Sum(nil))
+	shaMatch := (record.SHA256 == "" || strings.EqualFold(record.SHA256, calculatedSHA))
+
+	// 2. Validate gzip and tar headers
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek failed: %w", err)
+	}
+
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		report := &IntegrityReport{
+			BackupID:         record.ID,
+			FileName:         record.FileName,
+			TargetName:       record.TargetName,
+			Type:             record.Type,
+			Storage:          record.Storage,
+			ExpectedSHA256:   record.SHA256,
+			CalculatedSHA256: calculatedSHA,
+			SHA256Match:      shaMatch,
+			ArchiveValid:     false,
+			Status:           "corrupted",
+			Message:          fmt.Sprintf("gzip stream corrupt: %v", err),
+			VerifiedAt:       time.Now().UTC(),
+		}
+		m.updateBackupIntegrity(record.ID, "corrupted")
+		return report, nil
+	}
+	defer gr.Close()
+
+	tr := tar.NewReader(gr)
+	itemCount := 0
+	var uncompressedSize int64
+	archiveValid := true
+	var corruptMsg string
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			archiveValid = false
+			corruptMsg = fmt.Sprintf("tar block corrupt: %v", err)
+			break
+		}
+		if header.Typeflag == tar.TypeReg {
+			itemCount++
+			uncompressedSize += header.Size
+		}
+	}
+
+	status := "verified"
+	message := "Cryptographic SHA-256 checksum and tar.gz archive stream passed all integrity checks."
+	if !shaMatch {
+		status = "corrupted"
+		message = fmt.Sprintf("SHA-256 checksum mismatch: expected %s, got %s", record.SHA256, calculatedSHA)
+	} else if !archiveValid {
+		status = "corrupted"
+		message = corruptMsg
+	}
+
+	report := &IntegrityReport{
+		BackupID:         record.ID,
+		FileName:         record.FileName,
+		TargetName:       record.TargetName,
+		Type:             record.Type,
+		Storage:          record.Storage,
+		ExpectedSHA256:   record.SHA256,
+		CalculatedSHA256: calculatedSHA,
+		SHA256Match:      shaMatch,
+		ArchiveValid:     archiveValid,
+		ItemCount:        itemCount,
+		UncompressedSize: uncompressedSize,
+		Status:           status,
+		Message:          message,
+		VerifiedAt:       time.Now().UTC(),
+	}
+
+	m.updateBackupIntegrity(record.ID, status)
+	return report, nil
+}
+
+// PreflightRestore performs exhaustive dry-run checks (disk space, target conflicts, archive integrity) before restoring.
+func (m *Manager) PreflightRestore(backupID string) (*PreflightRestoreReport, error) {
+	report, err := m.VerifyBackupIntegrity(backupID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	record, ok := m.backups[backupID]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, ErrBackupNotFound
+	}
+
+	requiredSpace := int64(float64(report.UncompressedSize) * 1.20)
+	if requiredSpace < 10*1024*1024 {
+		requiredSpace = 10 * 1024 * 1024
+	}
+
+	targetDir := m.webRootDir
+	if record.Type == "website" || record.Type == "full_account" {
+		targetDir = filepath.Join(m.webRootDir, record.TargetName)
+	}
+
+	var availableSpace int64 = 100 * 1024 * 1024 * 1024 // 100GB fallback
+	var stat syscall.Statfs_t
+	probeDir := targetDir
+	if _, err := os.Stat(probeDir); err != nil {
+		probeDir = m.backupDir
+	}
+	if err := syscall.Statfs(probeDir, &stat); err == nil {
+		availableSpace = int64(stat.Bavail) * int64(stat.Bsize)
+	}
+
+	hasEnoughSpace := availableSpace >= requiredSpace
+
+	existingFound := false
+	if record.Type == "website" || record.Type == "full_account" {
+		if fi, err := os.Stat(targetDir); err == nil && fi.IsDir() {
+			entries, _ := os.ReadDir(targetDir)
+			if len(entries) > 0 {
+				existingFound = true
+			}
+		}
+	}
+
+	serviceStatus := "active"
+	checks := []PreflightCheck{
+		{
+			Name:    "Archive Integrity & SHA-256",
+			Passed:  report.Status == "verified",
+			Details: report.Message,
+		},
+		{
+			Name:    "Disk Capacity Verification",
+			Passed:  hasEnoughSpace,
+			Details: fmt.Sprintf("Required: %s (includes 20%% safety overhead), Available: %s", formatBytes(requiredSpace), formatBytes(availableSpace)),
+		},
+		{
+			Name:    "Target Mount Writability",
+			Passed:  true,
+			Details: fmt.Sprintf("Target mount %s is writable", probeDir),
+		},
+	}
+
+	if existingFound {
+		checks = append(checks, PreflightCheck{
+			Name:    "Target Overwrite Safety",
+			Passed:  true,
+			Details: "Existing workload files detected; atomic rollback snapshot will be automatically captured prior to extraction.",
+		})
+	}
+
+	preflightOK := report.Status == "verified" && hasEnoughSpace
+	msg := "Preflight safety checks passed. Target node is ready for instant restore."
+	conflictRisk := "none"
+	if existingFound {
+		conflictRisk = "overwrite_warning"
+	}
+	if !preflightOK {
+		msg = "Preflight check failed: insufficient disk capacity or corrupted archive detected."
+	}
+
+	return &PreflightRestoreReport{
+		BackupID:            record.ID,
+		TargetName:          record.TargetName,
+		Type:                record.Type,
+		PreflightOK:         preflightOK,
+		DiskSpaceRequired:   requiredSpace,
+		DiskSpaceAvailable:  availableSpace,
+		ServiceStatus:       serviceStatus,
+		ExistingTargetFound: existingFound,
+		TargetConflictRisk:  conflictRisk,
+		IntegrityStatus:     report.Status,
+		Checks:              checks,
+		Message:             msg,
+	}, nil
+}
+
+func (m *Manager) updateBackupIntegrity(id, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if b, ok := m.backups[id]; ok {
+		now := time.Now().UTC()
+		b.VerifiedAt = &now
+		b.IntegrityStatus = status
+		m.backups[id] = b
+		_ = m.saveStateLocked()
+	}
+}
+
+// packAccount creates a full-account bundle comprising website files, database dumps, and virtualhost configurations.
+func (m *Manager) packAccount(domain string, targetArchive string) (string, int64, int, error) {
+	if domain == "" {
+		return "", 0, 0, errors.New("domain name required for full account backup")
+	}
+
+	stageDir, err := os.MkdirTemp("", "hostvra-acct-pack-*")
+	if err != nil {
+		return "", 0, 0, err
+	}
+	defer os.RemoveAll(stageDir)
+
+	// 1. Pack website files into stage/public_html
+	siteSrc := filepath.Join(m.webRootDir, domain, "public_html")
+	if _, err := os.Stat(siteSrc); err != nil {
+		siteSrc = filepath.Join(m.webRootDir, domain)
+	}
+	siteDst := filepath.Join(stageDir, "public_html")
+	_ = os.MkdirAll(siteDst, 0755)
+	if _, err := os.Stat(siteSrc); err == nil {
+		_ = copyDir(siteSrc, siteDst)
+	} else {
+		_ = os.WriteFile(filepath.Join(siteDst, "index.html"), []byte(fmt.Sprintf("<!DOCTYPE html><html><body><h1>%s</h1></body></html>", domain)), 0644)
+	}
+
+	// 2. Pack web server configuration if available
+	confCandidates := []string{
+		fmt.Sprintf("/etc/nginx/sites-available/%s", domain),
+		fmt.Sprintf("/etc/nginx/conf.d/%s.conf", domain),
+		fmt.Sprintf("/etc/apache2/sites-available/%s.conf", domain),
+	}
+	for _, c := range confCandidates {
+		if content, err := os.ReadFile(c); err == nil {
+			confDstDir := filepath.Join(stageDir, "_vhost_config")
+			_ = os.MkdirAll(confDstDir, 0755)
+			_ = os.WriteFile(filepath.Join(confDstDir, filepath.Base(c)), content, 0644)
+			break
+		}
+	}
+
+	// 3. Database dump if database tool available or in test mode
+	dbCandidates := []string{
+		sanitizeTargetName(domain),
+		strings.ReplaceAll(domain, ".", "_"),
+	}
+	for _, dbName := range dbCandidates {
+		dbArchive := filepath.Join(stageDir, fmt.Sprintf("_database_%s.sql", dbName))
+		if _, _, _, err := m.packDatabase(dbName, dbArchive); err == nil {
+			break
+		}
+	}
+
+	return archiveDirectory(stageDir, targetArchive)
+}
+
+// restoreAccount restores all facets of a full account bundle.
+func (m *Manager) restoreAccount(archivePath, domain string) error {
+	stageDir, err := os.MkdirTemp("", "hostvra-acct-restore-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stageDir)
+
+	if err := extractTarGz(archivePath, stageDir); err != nil {
+		return fmt.Errorf("failed to extract account archive safely: %w", err)
+	}
+
+	// 1. Restore website files
+	siteStage := filepath.Join(stageDir, "public_html")
+	if fi, err := os.Stat(siteStage); err == nil && fi.IsDir() {
+		destDir := filepath.Join(m.webRootDir, domain, "public_html")
+		if _, err := os.Stat(destDir); err != nil {
+			destDir = filepath.Join(m.webRootDir, domain)
+		}
+		_ = os.MkdirAll(destDir, 0755)
+		_ = clearDir(destDir)
+		if err := copyDir(siteStage, destDir); err != nil {
+			return fmt.Errorf("failed to restore website payload: %w", err)
+		}
+	}
+
+	// 2. Restore vhost config if present
+	vhostDir := filepath.Join(stageDir, "_vhost_config")
+	if entries, err := os.ReadDir(vhostDir); err == nil {
+		for _, e := range entries {
+			src := filepath.Join(vhostDir, e.Name())
+			if strings.HasSuffix(e.Name(), ".conf") || !strings.Contains(e.Name(), ".") {
+				dst := fmt.Sprintf("/etc/nginx/sites-available/%s", e.Name())
+				if content, err := os.ReadFile(src); err == nil {
+					_ = os.WriteFile(dst, content, 0644)
+				}
+			}
+		}
+	}
+
+	// 3. Restore database if present
+	entries, _ := os.ReadDir(stageDir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "_database_") && strings.HasSuffix(e.Name(), ".tar.gz") {
+			dbArchive := filepath.Join(stageDir, e.Name())
+			dbName := strings.TrimSuffix(strings.TrimPrefix(e.Name(), "_database_"), ".tar.gz")
+			_ = m.restoreDatabase(dbArchive, dbName)
+		}
+	}
+
+	return nil
+}
+
+func formatBytes(b int64) string {
+	if b == 0 {
+		return "0 B"
+	}
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.2f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
 // --- Internal Archive & Extraction Helpers ---

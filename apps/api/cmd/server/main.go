@@ -99,6 +99,7 @@ func main() {
 	// Initialize Handlers
 	authHandler := handlers.NewAuthHandler(cfg, dataStore, auditLogger, emailService)
 	serverHandler := handlers.NewServerHandler(cfg, dataStore, auditLogger)
+	crossNodeMigrationHandler := handlers.NewCrossNodeMigrationHandler(cfg, dataStore, auditLogger)
 	agentHandler := handlers.NewAgentHandler(cfg, dataStore, auditLogger)
 	websiteHandler := handlers.NewWebsiteHandler(cfg, dataStore, auditLogger)
 	databaseHandler := handlers.NewDatabaseHandler(cfg, dataStore, auditLogger)
@@ -112,6 +113,7 @@ func main() {
 	dnsHandler := handlers.NewDNSHandler(cfg, dnsService, auditLogger)
 	alertHandler := handlers.NewAlertHandler(cfg, alertEngine, auditLogger)
 	backupHandler := handlers.NewBackupHandler(cfg, dataStore, auditLogger)
+	incrementalBackupHandler := handlers.NewIncrementalBackupHandler(cfg, dataStore, auditLogger)
 	licenseHandler := handlers.NewLicenseHandler(cfg, licenseManager, auditLogger)
 	teamHandler := handlers.NewTeamHandler(cfg, dataStore, auditLogger)
 	apiKeyHandler := handlers.NewAPIKeyHandler(cfg, dataStore, auditLogger)
@@ -129,11 +131,17 @@ func main() {
 	dockerHandler := handlers.NewDockerHandler(cfg, dataStore, auditLogger)
 	ftpHandler := handlers.NewFTPHandler(cfg, dataStore, auditLogger)
 	wafHandler := handlers.NewWAFHandler(cfg, dataStore, auditLogger)
+	securityHandler := handlers.NewSecurityHandler(cfg, dataStore, auditLogger)
 	sslHandler := handlers.NewSSLHandler(cfg, dataStore, auditLogger)
 	installerHandler := handlers.NewInstallerHandler(cfg, dataStore, auditLogger)
 	wordPressHandler := handlers.NewWordPressHandler(cfg, dataStore, auditLogger)
+	developerHandler := handlers.NewDeveloperHandler(cfg, dataStore, auditLogger)
+	cachingDatabaseHandler := handlers.NewCachingDatabaseHandler(cfg, dataStore, auditLogger)
+	emailDeliverabilityHandler := handlers.NewEmailDeliverabilityHandler(cfg, dataStore, auditLogger)
 	billingHandler := handlers.NewBillingHandler(cfg, dataStore, auditLogger)
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
+	provisioningHandler := handlers.NewProvisioningHandler(cfg, dataStore, auditLogger)
+	resellerHandler := handlers.NewResellerHandler(cfg, dataStore, auditLogger)
 
 	// Initialize ResellerClub Client & Domain Subsystem
 	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
@@ -364,6 +372,7 @@ func main() {
 
 			loginLimiter := auth.NewLoginRateLimiter(5, 60*time.Second) // 5 login attempts per minute per IP
 			r.With(loginLimiter.RateLimitMiddleware).Post("/login", authHandler.Login)
+			r.With(loginLimiter.RateLimitMiddleware).Post("/2fa/verify", authHandler.Verify2FAChallenge)
 			r.With(loginLimiter.RateLimitMiddleware).Post("/webmail", webmailHandler.DirectAuth)
 
 			// Password Reset & Email Verification Flows
@@ -379,6 +388,13 @@ func main() {
 				r.Get("/me", authHandler.Me)
 				r.Post("/change-password", authHandler.ChangePassword)
 				r.Post("/change-email", authHandler.ChangeEmail)
+
+				// TOTP Two-Factor Authentication Management
+				r.Get("/2fa/status", authHandler.Get2FAStatus)
+				r.Post("/2fa/setup", authHandler.Setup2FA)
+				r.Post("/2fa/enable", authHandler.Enable2FA)
+				r.Post("/2fa/disable", authHandler.Disable2FA)
+				r.Post("/2fa/recovery-codes", authHandler.RegenerateRecoveryCodes)
 			})
 		})
 
@@ -394,6 +410,18 @@ func main() {
 		r.Get("/billing/trial-settings", billingHandler.GetTrialSettings)
 		r.Post("/billing/webhooks/{gateway}", billingHandler.HandleWebhook)
 		r.Post("/billing/webhook/{gateway}", billingHandler.HandleWebhook)
+
+		// Public Provisioning Webhooks (WHMCS, Blesta, Custom)
+		r.Post("/billing/provisioning/webhook", provisioningHandler.HandleWebhook)
+		r.Post("/billing/provisioning/webhook/{provider}", provisioningHandler.HandleWebhook)
+		r.Post("/provisioning/webhook", provisioningHandler.HandleWebhook)
+		r.Post("/provisioning/webhook/{provider}", provisioningHandler.HandleWebhook)
+
+		// Public Git CI/CD Signed Webhook
+		r.Post("/websites/{id}/git/webhook", developerHandler.HandleWebhook)
+
+		// Public Dynamic White-Label Branding Endpoint
+		r.Get("/branding", resellerHandler.GetBranding)
 
 		// Public Domain Search, Whois & TLD Pricing
 		r.Get("/domains/search", domainRegistrarHandler.SearchDomains)
@@ -518,8 +546,25 @@ func main() {
 			r.Route("/servers", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/", serverHandler.ListServers)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/enrollment-tokens", serverHandler.CreateEnrollmentToken)
+
+				// Cross-Node Migrations
+				r.Route("/migrations", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/preflight", crossNodeMigrationHandler.PreflightCheck)
+					r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/", crossNodeMigrationHandler.CreateMigration)
+					r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/", crossNodeMigrationHandler.ListMigrations)
+					r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}", crossNodeMigrationHandler.GetMigration)
+					r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/cutover", crossNodeMigrationHandler.CutoverMigration)
+					r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/rollback", crossNodeMigrationHandler.RollbackMigration)
+				})
+
+				// Server Operations & Telemetry
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}", serverHandler.GetServer)
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/metrics", serverHandler.GetServerMetrics)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/maintenance", serverHandler.ToggleMaintenance)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/drain", serverHandler.DrainNode)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/workloads", serverHandler.GetWorkloadSummary)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/rotate-key", serverHandler.RotateAgentKey)
+				r.With(rbac.RequirePermission(rbac.PermServersDelete)).Delete("/{id}", serverHandler.DeleteServer)
 
 				// PHP Management Subsystem per Server
 				r.Route("/{serverID}/php", func(r chi.Router) {
@@ -600,6 +645,7 @@ func main() {
 				// Per-Website User Isolation & cgroups v2
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/isolation", websiteHandler.GetIsolation)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Put("/{id}/isolation", websiteHandler.UpdateIsolation)
+				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/isolation/events", websiteHandler.GetIsolationEvents)
 
 				// Per-Website 1-Click Application Installer (WordPress, Laravel, Next.js, Drupal, phpMyAdmin)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/app", installerHandler.GetWebsiteApp)
@@ -623,7 +669,51 @@ func main() {
 					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/themes/activate", wordPressHandler.ActivateTheme)
 					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/update-core", wordPressHandler.UpdateCore)
 				})
+
+				// Per-Website Managed Applications (Node.js & Python Supervision)
+				r.Route("/{id}/app-runtime", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", developerHandler.GetManagedApp)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/", developerHandler.SaveManagedApp)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/control", developerHandler.ControlManagedApp)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/status", developerHandler.GetAppStatus)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Delete("/", developerHandler.DeleteManagedApp)
+				})
+
+				// Per-Website Git-Based CI/CD Engine
+				r.Route("/{id}/git", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", developerHandler.GetGitRepo)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/", developerHandler.SaveGitRepo)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Delete("/", developerHandler.DeleteGitRepo)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/deploy", developerHandler.TriggerDeploy)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/deployments", developerHandler.ListDeployments)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/rollback/{deploymentId}", developerHandler.RollbackDeployment)
+				})
+
+				// Per-Website WordPress Staging & Cloning Engine
+				r.Route("/{id}/staging", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", developerHandler.GetStaging)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/", developerHandler.CreateStaging)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/push-to-live", developerHandler.PushToLive)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Delete("/", developerHandler.DeleteStaging)
+				})
+
+				// Per-Website Caching Engine (Redis & Memcached)
+				r.Route("/{id}/caching", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", cachingDatabaseHandler.GetCacheConfig)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/", cachingDatabaseHandler.SaveCacheConfig)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Delete("/", cachingDatabaseHandler.DisableCache)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/metrics", cachingDatabaseHandler.GetCacheMetrics)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/flush", cachingDatabaseHandler.FlushCache)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Post("/benchmark", cachingDatabaseHandler.BenchmarkCache)
+					r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/wp-object-cache", cachingDatabaseHandler.ConfigureWPObjectCache)
+				})
 			})
+
+			// Host Caching Daemon Discovery
+			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/caching/services", cachingDatabaseHandler.DetectCacheServices)
+
+			// Host Runtime Discovery (Node.js & Python Detection)
+			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/runtimes", developerHandler.DetectRuntimes)
 
 			// WordPress Recommended Plugins Catalog
 			r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/wordpress/catalog", wordPressHandler.GetCatalog)
@@ -677,6 +767,23 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/routines", databaseHandler.ListRoutines)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/events", databaseHandler.ListEvents)
 				r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/triggers", databaseHandler.ListTriggers)
+
+				// Remote Database Access Engine
+				r.Route("/{id}/remote-access", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/", cachingDatabaseHandler.ListRemoteAccess)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/", cachingDatabaseHandler.GrantRemoteAccess)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesDelete)).Delete("/{grantId}", cachingDatabaseHandler.RevokeRemoteAccess)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Post("/test", cachingDatabaseHandler.TestRemoteAccess)
+				})
+
+				// Database Maintenance Engine (Health, Fragmentation, 1-Click Optimize & Check)
+				r.Route("/{id}/maintenance", func(r chi.Router) {
+					r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/health", cachingDatabaseHandler.GetDatabaseHealth)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/check", cachingDatabaseHandler.CheckDatabaseIntegrity)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/optimize", cachingDatabaseHandler.OptimizeDatabase)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesCreate)).Post("/analyze", cachingDatabaseHandler.AnalyzeDatabase)
+					r.With(rbac.RequirePermission(rbac.PermDatabasesView)).Get("/logs", cachingDatabaseHandler.ListMaintenanceLogs)
+				})
 			})
 
 			// Audit Logs
@@ -714,6 +821,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/restore", backupHandler.Restore)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/{id}", backupHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/download/{id}", backupHandler.Download)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/{id}/verify-integrity", backupHandler.VerifyIntegrity)
+				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/{id}/preflight-restore", backupHandler.PreflightRestore)
 
 				// Cloud Destinations
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/destinations", backupHandler.ListDestinations)
@@ -725,6 +834,29 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/schedules", backupHandler.ListSchedules)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/schedules", backupHandler.SaveSchedule)
 				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/schedules/{id}", backupHandler.DeleteSchedule)
+
+				// Incremental Repositories
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/repositories", incrementalBackupHandler.ListRepositories)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/repositories", incrementalBackupHandler.CreateRepository)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/repositories/{id}", incrementalBackupHandler.GetRepository)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Put("/repositories/{id}", incrementalBackupHandler.UpdateRepository)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Delete("/repositories/{id}", incrementalBackupHandler.DeleteRepository)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/repositories/{id}/check", incrementalBackupHandler.CheckIntegrity)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/repositories/{id}/prune", incrementalBackupHandler.PruneSnapshots)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/repositories/{id}/retention", incrementalBackupHandler.GetRetentionPolicy)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/repositories/{id}/retention", incrementalBackupHandler.SaveRetentionPolicy)
+
+				// Incremental Snapshots & Restorations
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/snapshots", incrementalBackupHandler.ListSnapshots)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/snapshots", incrementalBackupHandler.CreateSnapshot)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/snapshots/{id}", incrementalBackupHandler.GetSnapshot)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Get("/snapshots/{id}/tree", incrementalBackupHandler.ListSnapshotFiles)
+				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/snapshots/{id}/restore-file", incrementalBackupHandler.RestoreFiles)
+				r.With(rbac.RequirePermission(rbac.PermBackupsRestore)).Post("/snapshots/{id}/restore-full", incrementalBackupHandler.RestoreFullAccount)
+
+				// Disaster Recovery & Verified Destination Testing
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/disaster-recovery/runbook", incrementalBackupHandler.GenerateDisasterRecoveryRunbook)
+				r.With(rbac.RequirePermission(rbac.PermBackupsCreate)).Post("/destinations/verify", incrementalBackupHandler.TestBackupDestination)
 			})
 
 			// Commercial & Licensing
@@ -823,6 +955,18 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWAFView)).Get("/websites/{domain}", wafHandler.GetWebsiteWAF)
 				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/websites/{domain}", wafHandler.UpdateWebsiteWAF)
 				r.With(rbac.RequirePermission(rbac.PermWAFManage)).Post("/probe", wafHandler.SimulateProbe)
+			})
+
+			// Malware Scanner & Quarantine Subsystem
+			r.Route("/security", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermSecurityView)).Get("/engine/status", securityHandler.GetEngineStatus)
+				r.With(rbac.RequirePermission(rbac.PermSecurityView)).Get("/scans", securityHandler.ListScans)
+				r.With(rbac.RequirePermission(rbac.PermSecurityView)).Get("/scans/{id}", securityHandler.GetScan)
+				r.With(rbac.RequirePermission(rbac.PermSecurityManage)).Post("/scans", securityHandler.StartScan)
+				r.With(rbac.RequirePermission(rbac.PermSecurityView)).Get("/quarantine", securityHandler.ListQuarantine)
+				r.With(rbac.RequirePermission(rbac.PermSecurityManage)).Post("/quarantine", securityHandler.QuarantineFile)
+				r.With(rbac.RequirePermission(rbac.PermSecurityManage)).Post("/quarantine/{id}/restore", securityHandler.RestoreQuarantine)
+				r.With(rbac.RequirePermission(rbac.PermSecurityManage)).Delete("/quarantine/{id}", securityHandler.DeleteQuarantine)
 			})
 
 			// SSL Certificates & Wildcard DNS-01
@@ -994,6 +1138,32 @@ func main() {
 
 				// Test Tool
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test", emailHandler.SendTestEmail)
+
+				// Phase Eight: External SMTP Relay
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/relays", emailDeliverabilityHandler.ListRelays)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/relays", emailDeliverabilityHandler.CreateRelay)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/relays/{id}", emailDeliverabilityHandler.GetRelay)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Put("/relays/{id}", emailDeliverabilityHandler.UpdateRelay)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/relays/{id}", emailDeliverabilityHandler.DeleteRelay)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/relays/{id}/test", emailDeliverabilityHandler.TestRelayConnection)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/relays/{id}/verify-dns", emailDeliverabilityHandler.VerifyDomainDeliverability)
+
+				// Phase Eight: Anti-Spam Filtering & Quarantine
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/spam/settings", emailDeliverabilityHandler.GetSpamSettings)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Put("/spam/settings", emailDeliverabilityHandler.UpdateSpamSettings)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/spam/telemetry", emailDeliverabilityHandler.GetSpamTelemetry)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/spam/quarantine", emailDeliverabilityHandler.ListQuarantine)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/spam/quarantine/{id}/release", emailDeliverabilityHandler.ReleaseQuarantineItem)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/spam/quarantine/{id}/learn-ham", emailDeliverabilityHandler.LearnHamQuarantineItem)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/spam/quarantine/{id}", emailDeliverabilityHandler.DeleteQuarantineItem)
+
+				// Phase Eight: IMAP Mailbox Migrations
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/migrations", emailDeliverabilityHandler.ListMigrations)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/migrations", emailDeliverabilityHandler.StartMigration)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/migrations/{id}", emailDeliverabilityHandler.GetMigration)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Post("/migrations/{id}/cancel", emailDeliverabilityHandler.CancelMigration)
+				r.With(rbac.RequirePermission(rbac.PermEmailMailboxManage)).Delete("/migrations/{id}", emailDeliverabilityHandler.DeleteMigration)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/migrations/test-source", emailDeliverabilityHandler.TestSourceIMAP)
 			})
 
 			// Enterprise Mail Server Subsystem (/api/v1/mail)
@@ -1110,6 +1280,28 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/change-plan", accountHandler.ChangePlan)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/login-token", accountHandler.GenerateLoginToken)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Delete("/{id}", accountHandler.DeleteAccount)
+			})
+
+			// WHMCS & Blesta Provisioning Integrations Engine
+			r.Route("/provisioning", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermProvisioningView)).Get("/integrations", provisioningHandler.ListIntegrations)
+				r.With(rbac.RequirePermission(rbac.PermProvisioningManage)).Post("/integrations", provisioningHandler.CreateIntegration)
+				r.With(rbac.RequirePermission(rbac.PermProvisioningManage)).Delete("/integrations/{id}", provisioningHandler.DeleteIntegration)
+				r.With(rbac.RequirePermission(rbac.PermProvisioningView)).Get("/logs", provisioningHandler.ListWebhookLogs)
+				r.With(rbac.RequirePermission(rbac.PermProvisioningManage)).Post("/logs/{id}/replay", provisioningHandler.ReplayWebhookLog)
+			})
+
+			// Reseller Multi-Tenancy & Quota Pooling Engine
+			r.Route("/reseller", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermResellerManage)).Post("/profiles", resellerHandler.CreateProfile)
+				r.With(rbac.RequirePermission(rbac.PermResellerManage)).Get("/profiles", resellerHandler.ListProfiles)
+				r.Get("/profile", resellerHandler.GetProfile)
+				r.Get("/profile/me", resellerHandler.GetProfile)
+				r.Get("/profile/{id}", resellerHandler.GetProfile)
+				r.With(rbac.RequirePermission(rbac.PermResellerManage)).Put("/profile/{id}", resellerHandler.UpdateProfile)
+				r.Get("/usage", resellerHandler.GetUsage)
+				r.Get("/branding", resellerHandler.GetBranding)
+				r.Put("/branding", resellerHandler.UpdateBranding)
 			})
 
 			// Domain Reseller & Management Subsystem (Customer Endpoints)

@@ -77,6 +77,7 @@ const adminNavGroups: NavGroup[] = [
     items: [
       { label: 'Firewall & Access', href: '/firewall', icon: Shield },
       { label: 'WAF / ModSecurity', href: '/waf', icon: ShieldAlert, badge: 'OWASP', badgeColor: 'blue' },
+      { label: 'Malware & Quarantine', href: '/security', icon: ShieldCheck, badge: 'ClamAV', badgeColor: 'emerald' },
       { label: 'Audit & Response Logs', href: '/audit-logs', icon: ScrollText },
       { label: 'Alerts & Incidents', href: '/alerts', icon: Bell },
     ],

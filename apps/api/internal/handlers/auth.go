@@ -253,6 +253,30 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		userRole = "customer"
 	}
 
+	// Check if Two-Factor Authentication (TOTP) is enabled
+	if user.TwoFactorEnabled {
+		challengeToken, err := auth.GenerateTwoFactorChallengeToken(
+			user.ID, user.DefaultOrgID, user.Email, userRole, user.IsSuperAdmin, h.cfg.JWTSecret,
+		)
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "TOKEN_ERROR", "Failed to initiate two-factor challenge", nil, "")
+			return
+		}
+
+		h.audit.Log(r.Context(), r, "auth.login_2fa_challenge", "user", user.ID.String(), "pending", "", map[string]interface{}{
+			"email": user.Email,
+			"role":  userRole,
+		})
+
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"two_factor_required": true,
+			"temp_token":          challengeToken,
+			"user_id":             user.ID,
+			"email":               user.Email,
+		}, nil)
+		return
+	}
+
 	tokens, _, err := auth.GenerateTokenPair(
 		user.ID, user.DefaultOrgID, user.Email, userRole, user.IsSuperAdmin,
 		h.cfg.JWTSecret, h.cfg.JWTElementsHours, h.cfg.RefreshTokenDays,

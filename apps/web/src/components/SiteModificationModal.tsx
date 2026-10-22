@@ -35,10 +35,15 @@ import {
 } from 'lucide-react';
 import { Website, apiFetch } from '@/lib/api';
 import { WordPressManagerTab } from '@/components/WordPressManagerTab';
+import { GitCicdTab } from '@/components/GitCicdTab';
+import { AppRuntimeTab } from '@/components/AppRuntimeTab';
+import { CachingTab } from '@/components/CachingTab';
 
 export type SiteModalTab =
   | 'domain'
   | 'wordpress'
+  | 'appruntime'
+  | 'caching'
   | 'directory'
   | 'limit'
   | 'rewrite'
@@ -92,6 +97,7 @@ interface SiteModificationModalProps {
 const SIDEBAR_TABS = [
   { id: 'domain', label: 'Domain Manager', icon: Globe },
   { id: 'wordpress', label: 'WordPress', icon: Globe },
+  { id: 'appruntime', label: 'Node.js & Python', icon: Cpu },
   { id: 'directory', label: 'Directory', icon: Folder },
   { id: 'limit', label: 'Limit access', icon: Shield },
   { id: 'rewrite', label: 'URL rewrite', icon: FileCode },
@@ -100,7 +106,8 @@ const SIDEBAR_TABS = [
   { id: 'ssl', label: 'SSL', icon: Lock },
   { id: 'php', label: 'PHP version', icon: Cpu },
   { id: 'webserver', label: 'Web Server', icon: Server },
-  { id: 'git', label: 'Git Manager', icon: GitBranch },
+  { id: 'caching', label: 'Caching & Redis', icon: Zap },
+  { id: 'git', label: 'Git CI/CD', icon: GitBranch },
   { id: 'composer', label: 'Composer', icon: Terminal },
   { id: 'redirect', label: 'Redirect', icon: CornerDownRight },
   { id: 'proxy', label: 'Reverse proxy', icon: Radio },
@@ -887,6 +894,11 @@ server {
             {/* 0. WORDPRESS MANAGER */}
             {activeTab === 'wordpress' && website && (
               <WordPressManagerTab website={website} showToast={showToast} />
+            )}
+
+            {/* 0.1 NODE.JS & PYTHON PROCESS STUDIO */}
+            {activeTab === 'appruntime' && website && (
+              <AppRuntimeTab website={website} showToast={showToast} />
             )}
 
             {/* 1. DOMAIN MANAGER */}
@@ -1684,75 +1696,14 @@ server {
               </div>
             )}
 
-            {/* 10. GIT MANAGER */}
-            {activeTab === 'git' && (
-              <div className="space-y-4 text-xs">
-                <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Git Repository & Auto-Deploy</h3>
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Repository URL</label>
-                    <input
-                      type="text"
-                      value={gitRepoUrl}
-                      onChange={(e) => setGitRepoUrl(e.target.value)}
-                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
-                    />
-                  </div>
+            {/* 10. GIT CI/CD & ATOMIC DEPLOYMENTS */}
+            {activeTab === 'git' && website && (
+              <GitCicdTab website={website} showToast={showToast} />
+            )}
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Branch</label>
-                      <input
-                        type="text"
-                        value={gitBranch}
-                        onChange={(e) => setGitBranch(e.target.value)}
-                        className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Webhook URL</label>
-                      <div className="flex gap-1">
-                        <input
-                          type="text"
-                          readOnly
-                          value={`https://${website.primary_domain}/api/v1/webhook?secret=hv_${website.id}`}
-                          className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 font-mono text-[11px]"
-                        />
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(`https://${website.primary_domain}/api/v1/webhook?secret=hv_${website.id}`);
-                            showToast('Webhook URL copied to clipboard!');
-                          }}
-                          className="px-2.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-white transition cursor-pointer"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Post-deployment Script</label>
-                    <textarea
-                      rows={3}
-                      value={gitScript}
-                      onChange={(e) => setGitScript(e.target.value)}
-                      className="w-full p-2 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-emerald-400 font-mono text-[11px]"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button
-                    onClick={handlePullGit}
-                    disabled={isPullingGit}
-                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold flex items-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
-                  >
-                    {isPullingGit ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
-                    <span>{isPullingGit ? 'Pulling from origin...' : 'Pull & Deploy Now'}</span>
-                  </button>
-                </div>
-              </div>
+            {/* CACHING & REDIS OBJECT CACHE */}
+            {activeTab === 'caching' && website && (
+              <CachingTab website={website} showToast={showToast} />
             )}
 
             {/* 11. COMPOSER */}

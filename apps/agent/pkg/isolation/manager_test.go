@@ -140,3 +140,60 @@ func TestManager_Lifecycle(t *testing.T) {
 		t.Errorf("expected pool config to be removed after deprovision")
 	}
 }
+
+func TestManager_CgroupsV2TelemetryAndEvents(t *testing.T) {
+	tempDir := t.TempDir()
+	cgroupBaseDir := filepath.Join(tempDir, "cgroup")
+	sliceName := "hostvra-user-u_test_io.slice"
+	sliceDir := filepath.Join(cgroupBaseDir, sliceName)
+	if err := os.MkdirAll(sliceDir, 0755); err != nil {
+		t.Fatalf("failed to create fake cgroup dir: %v", err)
+	}
+
+	// Write mock cgroups v2 files
+	_ = os.WriteFile(filepath.Join(sliceDir, "memory.current"), []byte("268435456\n"), 0644) // 256 MB
+	_ = os.WriteFile(filepath.Join(sliceDir, "memory.peak"), []byte("314572800\n"), 0644)    // 300 MB
+	_ = os.WriteFile(filepath.Join(sliceDir, "memory.events"), []byte("low 0\nhigh 2\nmax 0\noom 1\noom_kill 1\n"), 0644)
+	_ = os.WriteFile(filepath.Join(sliceDir, "pids.current"), []byte("14\n"), 0644)
+	_ = os.WriteFile(filepath.Join(sliceDir, "cpu.stat"), []byte("usage_usec 5000000\nthrottled_usec 150000\n"), 0644)
+
+	mgr, err := NewManager(Config{
+		WebRootDir:    filepath.Join(tempDir, "www"),
+		PHPConfigDir:  filepath.Join(tempDir, "php"),
+		SystemdDir:    filepath.Join(tempDir, "systemd"),
+		CgroupBaseDir: cgroupBaseDir,
+		MockMode:      false, // test real file reading logic
+	})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	ctx := context.Background()
+	info, err := mgr.GetIsolationInfo(ctx, "u_test_io")
+	if err != nil {
+		t.Fatalf("GetIsolationInfo failed: %v", err)
+	}
+
+	if info.MemoryUsedMB != 256.0 {
+		t.Errorf("expected MemoryUsedMB 256.0, got %f", info.MemoryUsedMB)
+	}
+	if info.MemoryPeakMB != 300.0 {
+		t.Errorf("expected MemoryPeakMB 300.0, got %f", info.MemoryPeakMB)
+	}
+	if info.TasksCurrent != 14 {
+		t.Errorf("expected TasksCurrent 14, got %d", info.TasksCurrent)
+	}
+	if info.OOMKills != 1 {
+		t.Errorf("expected OOMKills 1, got %d", info.OOMKills)
+	}
+	if info.OOMEvents != 1 {
+		t.Errorf("expected OOMEvents 1, got %d", info.OOMEvents)
+	}
+	if info.HighEvents != 2 {
+		t.Errorf("expected HighEvents 2, got %d", info.HighEvents)
+	}
+	if info.ThrottledUsec != 150000 {
+		t.Errorf("expected ThrottledUsec 150000, got %d", info.ThrottledUsec)
+	}
+}
+

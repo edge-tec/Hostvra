@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/smtp"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ func SendTestEmail(smtpHost string, smtpPort int, username, password, from, to, 
 		smtpPort = 25
 	}
 
-	addr := fmt.Sprintf("%s:%d", smtpHost, smtpPort)
+	addr := net.JoinHostPort(smtpHost, strconv.Itoa(smtpPort))
 	res.Trace = append(res.Trace, fmt.Sprintf("Connecting to SMTP server at %s...", addr))
 
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
@@ -220,9 +221,10 @@ func TestMailboxCredentials(smtpHost string, smtpPort int, imapHost string, imap
 	}
 
 	// 1. Test SMTP Auth
-	res.Trace = append(res.Trace, fmt.Sprintf("Testing SMTP auth at %s:%d...", smtpHost, smtpPort))
+	smtpAddr := net.JoinHostPort(smtpHost, strconv.Itoa(smtpPort))
+	res.Trace = append(res.Trace, fmt.Sprintf("Testing SMTP auth at %s...", smtpAddr))
 	auth := smtp.PlainAuth("", email, password, smtpHost)
-	smtpClient, err := smtp.Dial(fmt.Sprintf("%s:%d", smtpHost, smtpPort))
+	smtpClient, err := smtp.Dial(smtpAddr)
 	if err != nil {
 		res.Trace = append(res.Trace, fmt.Sprintf("SMTP Connect failed: %v", err))
 	} else {
@@ -240,9 +242,10 @@ func TestMailboxCredentials(smtpHost string, smtpPort int, imapHost string, imap
 	}
 
 	// 2. Test IMAP Auth
-	res.Trace = append(res.Trace, fmt.Sprintf("Testing IMAP connection at %s:%d...", imapHost, imapPort))
+	imapAddr := net.JoinHostPort(imapHost, strconv.Itoa(imapPort))
+	res.Trace = append(res.Trace, fmt.Sprintf("Testing IMAP connection at %s...", imapAddr))
 	tlsConfig := &tls.Config{InsecureSkipVerify: true, ServerName: imapHost}
-	imapConn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", fmt.Sprintf("%s:%d", imapHost, imapPort), tlsConfig)
+	imapConn, err := tls.DialWithDialer(&net.Dialer{Timeout: 5 * time.Second}, "tcp", imapAddr, tlsConfig)
 	if err != nil {
 		res.Trace = append(res.Trace, fmt.Sprintf("IMAP TLS connect failed: %v", err))
 	} else {

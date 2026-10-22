@@ -35,12 +35,15 @@ import {
   Layers,
   Sparkles,
   ExternalLink,
+  Globe,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, Database, Server } from '@/lib/api';
 import { DatabaseSqlConsoleModal } from '@/components/database/DatabaseSqlConsoleModal';
 import { DatabaseConnectionModal } from '@/components/database/DatabaseConnectionModal';
 import { DatabaseTablesModal } from '@/components/database/DatabaseTablesModal';
+import { DatabaseRemoteAccessModal } from '@/components/database/DatabaseRemoteAccessModal';
+import { DatabaseMaintenanceModal } from '@/components/database/DatabaseMaintenanceModal';
 
 type DBEngine = 'mysql' | 'sqlserver' | 'mongodb' | 'redis' | 'pgsql';
 
@@ -128,6 +131,10 @@ export default function DatabasesPage() {
   const [tablesDb, setTablesDb] = useState('');
   const [sortField, setSortField] = useState<'name' | 'username' | 'quota' | 'backup_status'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // Phase 7: Remote Access & Maintenance Modals
+  const [remoteAccessDb, setRemoteAccessDb] = useState<Database | null>(null);
+  const [maintenanceDb, setMaintenanceDb] = useState<Database | null>(null);
 
   // Create DB Form Fields
   const [dbName, setDbName] = useState('');
@@ -846,12 +853,19 @@ export default function DatabasesPage() {
               phpMyAdmin
             </button>
 
-            {/* Remote DB */}
+            {/* Remote DB Access Studio */}
             <button
-              onClick={() => setRemoteDbOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex-shrink-0"
+              onClick={() => {
+                if (databases.length > 0) {
+                  setRemoteAccessDb(databases[0]);
+                } else {
+                  showToast('Please create a database first to manage remote access grants', true);
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-semibold transition shadow-2xs cursor-pointer flex items-center gap-1.5 flex-shrink-0"
             >
-              Remote DB
+              <Globe className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Remote Access</span>
             </button>
 
             {/* Advanced Setup */}
@@ -1226,6 +1240,24 @@ export default function DatabasesPage() {
                               className="hover:text-emerald-700 hover:underline cursor-pointer font-semibold"
                             >
                               Permission
+                            </button>
+
+                            <button
+                              onClick={() => setRemoteAccessDb(db)}
+                              title="Manage remote IP grants and firewall rules"
+                              className="hover:text-indigo-600 dark:hover:text-indigo-400 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Globe className="w-3 h-3 text-indigo-500" />
+                              <span>Remote IP</span>
+                            </button>
+
+                            <button
+                              onClick={() => setMaintenanceDb(db)}
+                              title="Database health inspection, 1-click table optimization, and integrity check"
+                              className="hover:text-emerald-700 dark:hover:text-emerald-400 hover:underline cursor-pointer font-semibold flex items-center gap-1"
+                            >
+                              <Activity className="w-3 h-3 text-emerald-500" />
+                              <span>Health & Optimize</span>
                             </button>
 
                             <button
@@ -1943,45 +1975,7 @@ export default function DatabasesPage() {
           </div>
         )}
 
-        {/* 8. Remote DB Modal */}
-        {remoteDbOpen && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
-            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative text-xs">
-              <button
-                onClick={() => setRemoteDbOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-2 mb-3">
-                <Share2 className="w-5 h-5 text-indigo-500" />
-                <h2 className="text-base font-bold text-slate-900 dark:text-white">Remote Database Connectivity</h2>
-              </div>
-              <p className="text-slate-500 dark:text-slate-400 mb-4 leading-relaxed font-medium">
-                Connect your websites directly to a dedicated external MySQL cluster or allow remote developers to query databases.
-              </p>
-
-              <div className="p-3 bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 rounded-xl space-y-2 mb-4 font-mono text-[11px] text-slate-800 dark:text-slate-300">
-                <div>Bind Address: <span className="text-emerald-600 dark:text-emerald-400 font-bold">0.0.0.0:3306</span></div>
-                <div>Firewall Port: <span className="text-emerald-600 dark:text-emerald-400 font-bold">3306 / TCP ALLOWED</span></div>
-                <div>Grant: <span className="text-indigo-600 dark:text-indigo-400">GRANT ALL ON *.* TO &apos;user&apos;@&apos;%&apos;</span></div>
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  onClick={() => {
-                    setRemoteDbOpen(false);
-                    showToast('Remote database access configuration saved.');
-                  }}
-                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold shadow-sm"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* 8. Remote DB Modal (Redirected to enterprise Remote Access Modal) */}
 
         {/* 9. Advanced Setup Modal */}
         {advancedSetupOpen && (
@@ -2136,6 +2130,24 @@ export default function DatabasesPage() {
               setSqlConsoleDb(tablesDb);
               setSqlConsoleOpen(true);
             }}
+          />
+        )}
+
+        {/* 14. Phase 7: Remote Database Access Modal */}
+        {remoteAccessDb && (
+          <DatabaseRemoteAccessModal
+            database={remoteAccessDb}
+            onClose={() => setRemoteAccessDb(null)}
+            showToast={(msg) => showToast(msg)}
+          />
+        )}
+
+        {/* 15. Phase 7: Database Health & Maintenance Modal */}
+        {maintenanceDb && (
+          <DatabaseMaintenanceModal
+            database={maintenanceDb}
+            onClose={() => setMaintenanceDb(null)}
+            showToast={(msg, isErr) => showToast(msg, isErr)}
           />
         )}
       </div>

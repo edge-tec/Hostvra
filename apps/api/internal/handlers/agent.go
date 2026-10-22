@@ -33,24 +33,28 @@ func NewAgentHandler(cfg *config.Config, s store.Store, a *audit.Logger) *AgentH
 }
 
 type AgentEnrollRequest struct {
-	EnrollmentToken string `json:"enrollment_token"`
-	Name            string `json:"name"`
-	Hostname        string `json:"hostname"`
-	IPAddress       string `json:"ip_address"`
-	OSName          string `json:"os_name"`
-	OSVersion       string `json:"os_version"`
-	Architecture    string `json:"architecture"`
-	KernelVersion   string `json:"kernel_version"`
-	AgentVersion    string `json:"agent_version"`
-	CPUCores        int    `json:"cpu_cores"`
-	CPUModel        string `json:"cpu_model"`
-	RAMTotalMB      int64  `json:"ram_total_mb"`
-	DiskTotalGB     int64  `json:"disk_total_gb"`
+	EnrollmentToken string                    `json:"enrollment_token"`
+	Name            string                    `json:"name"`
+	Hostname        string                    `json:"hostname"`
+	IPAddress       string                    `json:"ip_address"`
+	OSName          string                    `json:"os_name"`
+	OSVersion       string                    `json:"os_version"`
+	Architecture    string                    `json:"architecture"`
+	KernelVersion   string                    `json:"kernel_version"`
+	AgentVersion    string                    `json:"agent_version"`
+	CPUCores        int                       `json:"cpu_cores"`
+	CPUModel        string                    `json:"cpu_model"`
+	RAMTotalMB      int64                     `json:"ram_total_mb"`
+	DiskTotalGB     int64                     `json:"disk_total_gb"`
+	Capabilities    *store.ServerCapabilities `json:"capabilities,omitempty"`
+	MaxWebsites     int                       `json:"max_websites,omitempty"`
+	MaxDatabases    int                       `json:"max_databases,omitempty"`
 }
 
 type AgentHeartbeatRequest struct {
-	UptimeSeconds int64                `json:"uptime_seconds"`
-	Metric        *store.ServerMetric  `json:"metric"`
+	UptimeSeconds int64                     `json:"uptime_seconds"`
+	Metric        *store.ServerMetric       `json:"metric"`
+	Capabilities  *store.ServerCapabilities `json:"capabilities,omitempty"`
 }
 
 func (h *AgentHandler) Enroll(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +93,24 @@ func (h *AgentHandler) Enroll(w http.ResponseWriter, r *http.Request) {
 		serverName = "Node-" + req.IPAddress
 	}
 
+	caps := store.ServerCapabilities{
+		WebServers:  []string{"nginx"},
+		PHPVersions: []string{"8.1", "8.2", "8.3"},
+		Databases:   []string{"mysql", "mariadb"},
+		Services:    []string{"fail2ban", "clamav", "cron"},
+	}
+	if req.Capabilities != nil {
+		caps = *req.Capabilities
+	}
+	maxWebsites := req.MaxWebsites
+	if maxWebsites <= 0 {
+		maxWebsites = 100
+	}
+	maxDatabases := req.MaxDatabases
+	if maxDatabases <= 0 {
+		maxDatabases = 100
+	}
+
 	server := &store.Server{
 		ID:             uuid.New(),
 		OrganizationID: enrToken.OrganizationID,
@@ -106,6 +128,9 @@ func (h *AgentHandler) Enroll(w http.ResponseWriter, r *http.Request) {
 		RAMTotalMB:     req.RAMTotalMB,
 		DiskTotalGB:    req.DiskTotalGB,
 		AgentTokenHash: agentKeyHash,
+		Capabilities:   caps,
+		MaxWebsites:    maxWebsites,
+		MaxDatabases:   maxDatabases,
 	}
 
 	if err := h.store.CreateServer(r.Context(), server); err != nil {
@@ -197,6 +222,10 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = h.store.CreateServer(r.Context(), recoveredServer)
 		_ = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
+	}
+
+	if req.Capabilities != nil {
+		_ = h.store.UpdateServerCapabilities(r.Context(), serverID, *req.Capabilities)
 	}
 
 	if req.Metric != nil {

@@ -15,6 +15,7 @@ const (
 	RoleDeveloper = "developer"
 	RoleViewer    = "viewer"
 	RoleCustomer  = "customer"
+	RoleReseller  = "reseller"
 	RoleUser      = "user"
 )
 
@@ -51,6 +52,8 @@ const (
 	PermAuditView       = "audit.view"
 	PermWAFView         = "waf.view"
 	PermWAFManage       = "waf.manage"
+	PermSecurityView    = "security.view"
+	PermSecurityManage  = "security.manage"
 
 	// Email & Mail Server Permissions
 	PermEmailView          = "email.view"
@@ -95,6 +98,11 @@ const (
 	// Client Hosting Accounts (WHM Multi-Tenancy)
 	PermAccountsView   = "accounts.view"
 	PermAccountsManage = "accounts.manage"
+
+	// Reseller Multi-Tenancy & External Provisioning (WHMCS, Blesta)
+	PermResellerManage     = "reseller.manage"
+	PermProvisioningView   = "provisioning.view"
+	PermProvisioningManage = "provisioning.manage"
 )
 
 // RolePermissionMatrix defines default entitlements per role
@@ -103,7 +111,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermServersView, PermServersManage, PermServersDelete,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
-		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
+		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage, PermSecurityView, PermSecurityManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermLicensesManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage, PermMailServerManage,
@@ -112,12 +120,13 @@ var RolePermissionMatrix = map[string][]string{
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
 		PermBillingView, PermBillingManage,
 		PermAccountsView, PermAccountsManage,
+		PermResellerManage, PermProvisioningView, PermProvisioningManage,
 	},
 	RoleAdmin: {
-		PermServersView, PermServersManage,
+		PermServersView, PermServersManage, PermServersDelete,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
 		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
-		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage,
+		PermSSLView, PermSSLManage, PermFirewallView, PermFirewallManage, PermWAFView, PermWAFManage, PermSecurityView, PermSecurityManage,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage, PermTerminalAccess,
 		PermBackupsCreate, PermBackupsRestore, PermDNSManage, PermAlertsManage, PermUsersManage, PermAuditView,
 		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView, PermEmailQueueManage, PermMailServerManage,
@@ -126,12 +135,13 @@ var RolePermissionMatrix = map[string][]string{
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,
 		PermBillingView, PermBillingManage,
 		PermAccountsView, PermAccountsManage,
+		PermResellerManage, PermProvisioningView, PermProvisioningManage,
 	},
 	RoleManager: {
 		PermServersView,
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage,
 		PermDatabasesView, PermDatabasesCreate,
-		PermSSLView, PermSSLManage, PermFirewallView,
+		PermSSLView, PermSSLManage, PermFirewallView, PermSecurityView,
 		PermCronView, PermCronManage, PermDockerManage, PermFilesBrowse, PermFilesEdit,
 		PermBackupsCreate, PermAuditView,
 		PermEmailView, PermEmailMailboxManage, PermEmailAliasManage, PermEmailLogsView,
@@ -175,6 +185,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermPHPView, PermPHPHealthCheck,
 		PermWebServerView,
 		PermBillingView,
+		PermSecurityView, PermSecurityManage,
 	},
 	RoleUser: {
 		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
@@ -188,6 +199,23 @@ var RolePermissionMatrix = map[string][]string{
 		PermPHPView, PermPHPHealthCheck,
 		PermWebServerView,
 		PermBillingView,
+	},
+	RoleReseller: {
+		PermAccountsView, PermAccountsManage,
+		PermWebsitesView, PermWebsitesCreate, PermWebsitesManage, PermWebsitesDelete,
+		PermDatabasesView, PermDatabasesCreate, PermDatabasesDelete,
+		PermSSLView, PermSSLManage,
+		PermFilesBrowse, PermFilesEdit, PermFilesDelete, PermFilesManage,
+		PermCronView, PermCronManage,
+		PermBackupsCreate, PermBackupsRestore,
+		PermDNSManage,
+		PermEmailView, PermEmailDomainManage, PermEmailMailboxManage, PermEmailAliasManage,
+		PermPHPView, PermPHPHealthCheck,
+		PermWebServerView,
+		PermBillingView,
+		PermSecurityView, PermSecurityManage,
+		PermResellerManage,
+		PermProvisioningView,
 	},
 }
 

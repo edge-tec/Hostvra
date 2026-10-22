@@ -51,6 +51,23 @@ type Store interface {
 	InvalidateUserPasswordResetTokens(ctx context.Context, userID uuid.UUID) error
 	RecordEmailDelivery(ctx context.Context, delivery *EmailDelivery) (bool, error)
 
+	// Two-Factor Authentication (TOTP & Recovery)
+	UpdateUserTwoFactor(ctx context.Context, userID uuid.UUID, enabled bool, secret string) error
+	GetUserTwoFactorSecret(ctx context.Context, userID uuid.UUID) (string, bool, error)
+	SaveTwoFactorRecoveryCodes(ctx context.Context, userID uuid.UUID, codeHashes []string) error
+	VerifyAndConsumeTwoFactorRecoveryCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error)
+	CountValidTwoFactorRecoveryCodes(ctx context.Context, userID uuid.UUID) (int, error)
+
+	// Security Scans & Malware Quarantine
+	CreateSecurityScan(ctx context.Context, scan *SecurityScan) error
+	UpdateSecurityScan(ctx context.Context, scan *SecurityScan) error
+	GetSecurityScan(ctx context.Context, id uuid.UUID) (*SecurityScan, error)
+	ListSecurityScans(ctx context.Context, orgID uuid.UUID, limit, offset int) ([]*SecurityScan, int, error)
+	CreateQuarantineItem(ctx context.Context, item *QuarantineItem) error
+	GetQuarantineItem(ctx context.Context, id uuid.UUID) (*QuarantineItem, error)
+	ListQuarantineItems(ctx context.Context, orgID uuid.UUID, status string) ([]*QuarantineItem, error)
+	UpdateQuarantineStatus(ctx context.Context, id uuid.UUID, status string) error
+
 	// User Plan Overrides
 	GetUserPlanOverride(ctx context.Context, userID uuid.UUID) (*UserPlanOverride, error)
 	UpsertUserPlanOverride(ctx context.Context, override *UserPlanOverride) error
@@ -62,6 +79,18 @@ type Store interface {
 	ListServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*Server, error)
 	UpdateServerHeartbeat(ctx context.Context, id uuid.UUID, uptime int64) error
 	UpdateServerIP(ctx context.Context, id uuid.UUID, ip string) error
+	UpdateServerMaintenance(ctx context.Context, id uuid.UUID, isMaintenance bool) error
+	UpdateServerDraining(ctx context.Context, id uuid.UUID, draining bool) error
+	UpdateServerCapabilities(ctx context.Context, id uuid.UUID, caps ServerCapabilities) error
+	DeleteServer(ctx context.Context, id uuid.UUID) error
+	ForceDeleteServer(ctx context.Context, id uuid.UUID) error
+	GetServerWorkloadSummary(ctx context.Context, id uuid.UUID) (*ServerDrainSummary, error)
+
+	// Cross-Node Migrations
+	CreateCrossNodeMigration(ctx context.Context, m *CrossNodeMigration) error
+	GetCrossNodeMigration(ctx context.Context, id uuid.UUID) (*CrossNodeMigration, error)
+	ListCrossNodeMigrations(ctx context.Context, orgID uuid.UUID) ([]*CrossNodeMigration, error)
+	UpdateCrossNodeMigration(ctx context.Context, m *CrossNodeMigration) error
 
 	// Enrollment Tokens
 	CreateEnrollmentToken(ctx context.Context, token *ServerEnrollmentToken) error
@@ -383,6 +412,136 @@ type Store interface {
 	RecordFileManagerActivityLog(ctx context.Context, log *FileManagerActivityLog) error
 	ListFileManagerActivityLogs(ctx context.Context, domain string, limit int) ([]*FileManagerActivityLog, error)
 
+	// Reseller Profiles & Multi-Tenancy Quotas
+	CreateResellerProfile(ctx context.Context, profile *ResellerProfile) error
+	GetResellerProfileByUserID(ctx context.Context, userID uuid.UUID) (*ResellerProfile, error)
+	GetResellerProfileByID(ctx context.Context, id uuid.UUID) (*ResellerProfile, error)
+	ListResellerProfiles(ctx context.Context, orgID uuid.UUID) ([]*ResellerProfile, error)
+	UpdateResellerProfile(ctx context.Context, profile *ResellerProfile) error
+	GetResellerUsage(ctx context.Context, resellerUserID uuid.UUID) (*ResellerUsageSummary, error)
+
+	// Provisioning Integrations & Webhooks (WHMCS, Blesta)
+	CreateProvisioningIntegration(ctx context.Context, integration *ProvisioningIntegration) error
+	GetProvisioningIntegrationByID(ctx context.Context, id uuid.UUID) (*ProvisioningIntegration, error)
+	ListProvisioningIntegrations(ctx context.Context, orgID uuid.UUID) ([]*ProvisioningIntegration, error)
+	UpdateProvisioningIntegration(ctx context.Context, integration *ProvisioningIntegration) error
+	DeleteProvisioningIntegration(ctx context.Context, id uuid.UUID) error
+	LogProvisioningWebhook(ctx context.Context, log *ProvisioningWebhookLog) error
+	ListProvisioningWebhookLogs(ctx context.Context, orgID uuid.UUID, limit int) ([]*ProvisioningWebhookLog, error)
+	GetProvisioningWebhookLogByID(ctx context.Context, id uuid.UUID) (*ProvisioningWebhookLog, error)
+
+	// Enterprise Backup & Disaster Recovery
+	CreateBackupDestination(ctx context.Context, dest *BackupDestinationRecord) error
+	GetBackupDestinationByID(ctx context.Context, id uuid.UUID) (*BackupDestinationRecord, error)
+	ListBackupDestinations(ctx context.Context, orgID uuid.UUID) ([]*BackupDestinationRecord, error)
+	UpdateBackupDestination(ctx context.Context, dest *BackupDestinationRecord) error
+	DeleteBackupDestination(ctx context.Context, id uuid.UUID) error
+
+	CreateBackupSnapshot(ctx context.Context, snap *BackupSnapshotRecord) error
+	GetBackupSnapshotByID(ctx context.Context, id uuid.UUID) (*BackupSnapshotRecord, error)
+	ListBackupSnapshots(ctx context.Context, orgID uuid.UUID, serverID *uuid.UUID) ([]*BackupSnapshotRecord, error)
+	UpdateBackupSnapshot(ctx context.Context, snap *BackupSnapshotRecord) error
+	DeleteBackupSnapshot(ctx context.Context, id uuid.UUID) error
+
+	CreateBackupSchedule(ctx context.Context, sched *BackupScheduleRecord) error
+	GetBackupScheduleByID(ctx context.Context, id uuid.UUID) (*BackupScheduleRecord, error)
+	ListBackupSchedules(ctx context.Context, orgID uuid.UUID) ([]*BackupScheduleRecord, error)
+	UpdateBackupSchedule(ctx context.Context, sched *BackupScheduleRecord) error
+	DeleteBackupSchedule(ctx context.Context, id uuid.UUID) error
+
+	CreateBackupRestoreJob(ctx context.Context, job *BackupRestoreJobRecord) error
+	GetBackupRestoreJobByID(ctx context.Context, id uuid.UUID) (*BackupRestoreJobRecord, error)
+	ListBackupRestoreJobs(ctx context.Context, orgID uuid.UUID, limit int) ([]*BackupRestoreJobRecord, error)
+	UpdateBackupRestoreJob(ctx context.Context, job *BackupRestoreJobRecord) error
+
+	// Resource Quotas & Cgroups Isolation
+	GetWebsiteResourceQuota(ctx context.Context, websiteID uuid.UUID) (*WebsiteResourceQuotaRecord, error)
+	SaveWebsiteResourceQuota(ctx context.Context, quota *WebsiteResourceQuotaRecord) error
+	RecordQuotaEvent(ctx context.Context, event *ResourceQuotaEventRecord) error
+	ListQuotaEvents(ctx context.Context, websiteID uuid.UUID, limit int) ([]*ResourceQuotaEventRecord, error)
+
+	// Developer Applications (Node.js & Python)
+	GetManagedApp(ctx context.Context, id uuid.UUID) (*ManagedAppRecord, error)
+	GetManagedAppByWebsite(ctx context.Context, websiteID uuid.UUID) (*ManagedAppRecord, error)
+	SaveManagedApp(ctx context.Context, app *ManagedAppRecord) error
+	DeleteManagedApp(ctx context.Context, id uuid.UUID) error
+
+	// Git-Based CI/CD
+	GetGitRepository(ctx context.Context, websiteID uuid.UUID) (*GitRepositoryRecord, error)
+	SaveGitRepository(ctx context.Context, repo *GitRepositoryRecord) error
+	DeleteGitRepository(ctx context.Context, websiteID uuid.UUID) error
+	CreateGitDeployment(ctx context.Context, dep *GitDeploymentRecord) error
+	UpdateGitDeployment(ctx context.Context, dep *GitDeploymentRecord) error
+	GetGitDeployment(ctx context.Context, id uuid.UUID) (*GitDeploymentRecord, error)
+	ListGitDeployments(ctx context.Context, websiteID uuid.UUID, limit int) ([]*GitDeploymentRecord, error)
+
+	// WordPress Staging & Cloning
+	GetWordPressStaging(ctx context.Context, websiteID uuid.UUID) (*WordPressStagingRecord, error)
+	SaveWordPressStaging(ctx context.Context, staging *WordPressStagingRecord) error
+	DeleteWordPressStaging(ctx context.Context, websiteID uuid.UUID) error
+
+	// Caching Engine (Redis & Memcached)
+	GetWebsiteCacheConfig(ctx context.Context, websiteID uuid.UUID) (*WebsiteCacheConfigRecord, error)
+	SaveWebsiteCacheConfig(ctx context.Context, cfg *WebsiteCacheConfigRecord) error
+	DeleteWebsiteCacheConfig(ctx context.Context, websiteID uuid.UUID) error
+
+	// Remote Database Access
+	ListDatabaseRemoteAccess(ctx context.Context, databaseID uuid.UUID) ([]*DatabaseRemoteAccessRecord, error)
+	GetDatabaseRemoteAccessByID(ctx context.Context, id uuid.UUID) (*DatabaseRemoteAccessRecord, error)
+	CreateDatabaseRemoteAccess(ctx context.Context, rec *DatabaseRemoteAccessRecord) error
+	UpdateDatabaseRemoteAccess(ctx context.Context, rec *DatabaseRemoteAccessRecord) error
+	DeleteDatabaseRemoteAccess(ctx context.Context, id uuid.UUID) error
+
+	// Database Maintenance Logs
+	RecordDatabaseMaintenanceLog(ctx context.Context, log *DatabaseMaintenanceLogRecord) error
+	ListDatabaseMaintenanceLogs(ctx context.Context, databaseID uuid.UUID, limit int) ([]*DatabaseMaintenanceLogRecord, error)
+
+	// External SMTP Relay
+	ListEmailSMTPRelays(ctx context.Context, orgID uuid.UUID, domainID *uuid.UUID) ([]*EmailSMTPRelayRecord, error)
+	GetEmailSMTPRelayByID(ctx context.Context, id uuid.UUID) (*EmailSMTPRelayRecord, error)
+	CreateEmailSMTPRelay(ctx context.Context, relay *EmailSMTPRelayRecord) error
+	UpdateEmailSMTPRelay(ctx context.Context, relay *EmailSMTPRelayRecord) error
+	DeleteEmailSMTPRelay(ctx context.Context, id uuid.UUID) error
+
+	// Spam Filtering & Quarantine
+	GetEmailSpamSettings(ctx context.Context, orgID uuid.UUID, domainID *uuid.UUID) (*EmailSpamFilterSettingsRecord, error)
+	SaveEmailSpamSettings(ctx context.Context, settings *EmailSpamFilterSettingsRecord) error
+	ListSpamQuarantineItems(ctx context.Context, orgID uuid.UUID, domainID *uuid.UUID, limit int) ([]*EmailSpamQuarantineItemRecord, error)
+	GetSpamQuarantineItemByID(ctx context.Context, id uuid.UUID) (*EmailSpamQuarantineItemRecord, error)
+	CreateSpamQuarantineItem(ctx context.Context, item *EmailSpamQuarantineItemRecord) error
+	UpdateSpamQuarantineItemStatus(ctx context.Context, id uuid.UUID, status string) error
+	DeleteSpamQuarantineItem(ctx context.Context, id uuid.UUID) error
+
+	// IMAP Mailbox Migrations
+	CreateIMAPMigration(ctx context.Context, migration *EmailIMAPMigrationRecord) error
+	GetIMAPMigrationByID(ctx context.Context, id uuid.UUID) (*EmailIMAPMigrationRecord, error)
+	ListIMAPMigrations(ctx context.Context, orgID uuid.UUID, limit int) ([]*EmailIMAPMigrationRecord, error)
+	UpdateIMAPMigration(ctx context.Context, migration *EmailIMAPMigrationRecord) error
+	DeleteIMAPMigration(ctx context.Context, id uuid.UUID) error
+
+	// Phase Nine: Incremental Backups & Disaster Recovery (Restic/Borg/Native)
+	CreateBackupRepository(ctx context.Context, repo *BackupRepositoryRecord) error
+	GetBackupRepositoryByID(ctx context.Context, id uuid.UUID) (*BackupRepositoryRecord, error)
+	ListBackupRepositories(ctx context.Context, orgID uuid.UUID) ([]*BackupRepositoryRecord, error)
+	UpdateBackupRepository(ctx context.Context, repo *BackupRepositoryRecord) error
+	DeleteBackupRepository(ctx context.Context, id uuid.UUID) error
+
+	CreateIncrementalSnapshot(ctx context.Context, s *BackupIncrementalSnapshotRecord) error
+	GetIncrementalSnapshotByID(ctx context.Context, id uuid.UUID) (*BackupIncrementalSnapshotRecord, error)
+	ListIncrementalSnapshots(ctx context.Context, orgID uuid.UUID, repoID *uuid.UUID, limit int) ([]*BackupIncrementalSnapshotRecord, error)
+	UpdateIncrementalSnapshot(ctx context.Context, s *BackupIncrementalSnapshotRecord) error
+	DeleteIncrementalSnapshot(ctx context.Context, id uuid.UUID) error
+
+	CreateBackupRetentionPolicy(ctx context.Context, p *BackupRetentionPolicyRecord) error
+	GetBackupRetentionPolicyByRepoID(ctx context.Context, repoID uuid.UUID) (*BackupRetentionPolicyRecord, error)
+	UpdateBackupRetentionPolicy(ctx context.Context, p *BackupRetentionPolicyRecord) error
+	ListBackupRetentionPolicies(ctx context.Context, orgID uuid.UUID) ([]*BackupRetentionPolicyRecord, error)
+
+	CreateFileRestoreRequest(ctx context.Context, req *BackupFileRestoreRequestRecord) error
+	GetFileRestoreRequestByID(ctx context.Context, id uuid.UUID) (*BackupFileRestoreRequestRecord, error)
+	ListFileRestoreRequests(ctx context.Context, orgID uuid.UUID, limit int) ([]*BackupFileRestoreRequestRecord, error)
+	UpdateFileRestoreRequest(ctx context.Context, req *BackupFileRestoreRequestRecord) error
+
 	// Close
 	Close() error
 }
@@ -465,6 +624,37 @@ type MemoryStore struct {
 	emailVerifyTokens   map[string]*EmailVerificationToken // key: tokenHash
 	passwordResetTokens map[string]*PasswordResetToken     // key: tokenHash
 	emailDeliveries     map[string]*EmailDelivery          // key: eventType:eventKey
+	twoFactorSecrets        map[uuid.UUID]string
+	twoFactorRecoveryCodes  map[uuid.UUID][]string
+	securityScans           map[uuid.UUID]*SecurityScan
+	quarantineItems         map[uuid.UUID]*QuarantineItem
+	crossNodeMigrations     map[uuid.UUID]*CrossNodeMigration
+	resellerProfiles        map[uuid.UUID]*ResellerProfile
+	resellerProfilesByUser  map[uuid.UUID]uuid.UUID
+	provisioningIntegrations map[uuid.UUID]*ProvisioningIntegration
+	provisioningWebhookLogs []*ProvisioningWebhookLog
+	backupDestinations       map[uuid.UUID]*BackupDestinationRecord
+	backupSnapshots          map[uuid.UUID]*BackupSnapshotRecord
+	backupSchedules          map[uuid.UUID]*BackupScheduleRecord
+	backupRestoreJobs        map[uuid.UUID]*BackupRestoreJobRecord
+	websiteResourceQuotas    map[uuid.UUID]*WebsiteResourceQuotaRecord
+	resourceQuotaEvents      []*ResourceQuotaEventRecord
+	managedApps              map[uuid.UUID]*ManagedAppRecord
+	managedAppsByWebsite     map[uuid.UUID]uuid.UUID
+	gitRepositories          map[uuid.UUID]*GitRepositoryRecord
+	gitDeployments           map[uuid.UUID]*GitDeploymentRecord
+	wordpressStagings        map[uuid.UUID]*WordPressStagingRecord
+	websiteCacheConfigs      map[uuid.UUID]*WebsiteCacheConfigRecord
+	databaseRemoteAccess     map[uuid.UUID]*DatabaseRemoteAccessRecord
+	databaseMaintenanceLogs  []*DatabaseMaintenanceLogRecord
+	emailSMTPRelays          map[uuid.UUID]*EmailSMTPRelayRecord
+	emailSpamSettings        map[string]*EmailSpamFilterSettingsRecord
+	emailSpamQuarantineItems map[uuid.UUID]*EmailSpamQuarantineItemRecord
+	emailIMAPMigrations      map[uuid.UUID]*EmailIMAPMigrationRecord
+	backupRepositories       map[uuid.UUID]*BackupRepositoryRecord
+	backupIncrementalSnapshots map[uuid.UUID]*BackupIncrementalSnapshotRecord
+	backupRetentionPolicies  map[uuid.UUID]*BackupRetentionPolicyRecord
+	backupFileRestoreRequests map[uuid.UUID]*BackupFileRestoreRequestRecord
 	filePath            string
 }
 
@@ -527,6 +717,32 @@ type memoryDumpData struct {
 	CannedResponses      []CannedResponse                       `json:"canned_responses,omitempty"`
 	SystemSettings       *SystemSettings                        `json:"system_settings,omitempty"`
 	UserPlanOverrides    map[uuid.UUID]*UserPlanOverride        `json:"user_plan_overrides,omitempty"`
+	CrossNodeMigrations  map[uuid.UUID]*CrossNodeMigration      `json:"cross_node_migrations,omitempty"`
+	ResellerProfiles     map[uuid.UUID]*ResellerProfile         `json:"reseller_profiles,omitempty"`
+	ProvisioningIntegrations map[uuid.UUID]*ProvisioningIntegration `json:"provisioning_integrations,omitempty"`
+	ProvisioningWebhookLogs []*ProvisioningWebhookLog           `json:"provisioning_webhook_logs,omitempty"`
+	BackupDestinations       map[uuid.UUID]*BackupDestinationRecord `json:"backup_destinations,omitempty"`
+	BackupSnapshots          map[uuid.UUID]*BackupSnapshotRecord    `json:"backup_snapshots,omitempty"`
+	BackupSchedules          map[uuid.UUID]*BackupScheduleRecord    `json:"backup_schedules,omitempty"`
+	BackupRestoreJobs        map[uuid.UUID]*BackupRestoreJobRecord  `json:"backup_restore_jobs,omitempty"`
+	WebsiteResourceQuotas    map[uuid.UUID]*WebsiteResourceQuotaRecord `json:"website_resource_quotas,omitempty"`
+	ResourceQuotaEvents      []*ResourceQuotaEventRecord            `json:"resource_quota_events,omitempty"`
+	ManagedApps              map[uuid.UUID]*ManagedAppRecord        `json:"managed_apps,omitempty"`
+	ManagedAppsByWebsite     map[uuid.UUID]uuid.UUID                `json:"managed_apps_by_website,omitempty"`
+	GitRepositories          map[uuid.UUID]*GitRepositoryRecord     `json:"git_repositories,omitempty"`
+	GitDeployments           map[uuid.UUID]*GitDeploymentRecord     `json:"git_deployments,omitempty"`
+	WordPressStagings        map[uuid.UUID]*WordPressStagingRecord  `json:"wordpress_stagings,omitempty"`
+	WebsiteCacheConfigs      map[uuid.UUID]*WebsiteCacheConfigRecord `json:"website_cache_configs,omitempty"`
+	DatabaseRemoteAccess     map[uuid.UUID]*DatabaseRemoteAccessRecord `json:"database_remote_access,omitempty"`
+	DatabaseMaintenanceLogs  []*DatabaseMaintenanceLogRecord        `json:"database_maintenance_logs,omitempty"`
+	EmailSMTPRelays          map[uuid.UUID]*EmailSMTPRelayRecord          `json:"email_smtp_relays,omitempty"`
+	EmailSpamSettings        map[string]*EmailSpamFilterSettingsRecord   `json:"email_spam_settings,omitempty"`
+	EmailSpamQuarantineItems map[uuid.UUID]*EmailSpamQuarantineItemRecord `json:"email_spam_quarantine_items,omitempty"`
+	EmailIMAPMigrations      map[uuid.UUID]*EmailIMAPMigrationRecord      `json:"email_imap_migrations,omitempty"`
+	BackupRepositories       map[uuid.UUID]*BackupRepositoryRecord        `json:"backup_repositories,omitempty"`
+	BackupIncrementalSnapshots map[uuid.UUID]*BackupIncrementalSnapshotRecord `json:"backup_incremental_snapshots,omitempty"`
+	BackupRetentionPolicies  map[uuid.UUID]*BackupRetentionPolicyRecord   `json:"backup_retention_policies,omitempty"`
+	BackupFileRestoreRequests map[uuid.UUID]*BackupFileRestoreRequestRecord `json:"backup_file_restore_requests,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -615,6 +831,32 @@ func (m *MemoryStore) saveToDiskLocked() {
 		CannedResponses:      m.cannedResponses,
 		SystemSettings:       m.systemSettings,
 		UserPlanOverrides:    m.userPlanOverrides,
+		CrossNodeMigrations:  m.crossNodeMigrations,
+		ResellerProfiles:     m.resellerProfiles,
+		ProvisioningIntegrations: m.provisioningIntegrations,
+		ProvisioningWebhookLogs:  m.provisioningWebhookLogs,
+		BackupDestinations:       m.backupDestinations,
+		BackupSnapshots:          m.backupSnapshots,
+		BackupSchedules:          m.backupSchedules,
+		BackupRestoreJobs:        m.backupRestoreJobs,
+		WebsiteResourceQuotas:    m.websiteResourceQuotas,
+		ResourceQuotaEvents:      m.resourceQuotaEvents,
+		ManagedApps:              m.managedApps,
+		ManagedAppsByWebsite:     m.managedAppsByWebsite,
+		GitRepositories:          m.gitRepositories,
+		GitDeployments:           m.gitDeployments,
+		WordPressStagings:        m.wordpressStagings,
+		WebsiteCacheConfigs:      m.websiteCacheConfigs,
+		DatabaseRemoteAccess:     m.databaseRemoteAccess,
+		DatabaseMaintenanceLogs:  m.databaseMaintenanceLogs,
+		EmailSMTPRelays:          m.emailSMTPRelays,
+		EmailSpamSettings:        m.emailSpamSettings,
+		EmailSpamQuarantineItems: m.emailSpamQuarantineItems,
+		EmailIMAPMigrations:      m.emailIMAPMigrations,
+		BackupRepositories:       m.backupRepositories,
+		BackupIncrementalSnapshots: m.backupIncrementalSnapshots,
+		BackupRetentionPolicies:  m.backupRetentionPolicies,
+		BackupFileRestoreRequests: m.backupFileRestoreRequests,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -817,6 +1059,87 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.UserPlanOverrides != nil {
 		m.userPlanOverrides = data.UserPlanOverrides
 	}
+	if data.CrossNodeMigrations != nil {
+		m.crossNodeMigrations = data.CrossNodeMigrations
+	}
+	if data.ResellerProfiles != nil {
+		m.resellerProfiles = data.ResellerProfiles
+		for _, rp := range m.resellerProfiles {
+			m.resellerProfilesByUser[rp.UserID] = rp.ID
+		}
+	}
+	if data.ProvisioningIntegrations != nil {
+		m.provisioningIntegrations = data.ProvisioningIntegrations
+	}
+	if data.ProvisioningWebhookLogs != nil {
+		m.provisioningWebhookLogs = data.ProvisioningWebhookLogs
+	}
+	if data.BackupDestinations != nil {
+		m.backupDestinations = data.BackupDestinations
+	}
+	if data.BackupSnapshots != nil {
+		m.backupSnapshots = data.BackupSnapshots
+	}
+	if data.BackupSchedules != nil {
+		m.backupSchedules = data.BackupSchedules
+	}
+	if data.BackupRestoreJobs != nil {
+		m.backupRestoreJobs = data.BackupRestoreJobs
+	}
+	if data.WebsiteResourceQuotas != nil {
+		m.websiteResourceQuotas = data.WebsiteResourceQuotas
+	}
+	if data.ResourceQuotaEvents != nil {
+		m.resourceQuotaEvents = data.ResourceQuotaEvents
+	}
+	if data.ManagedApps != nil {
+		m.managedApps = data.ManagedApps
+	}
+	if data.ManagedAppsByWebsite != nil {
+		m.managedAppsByWebsite = data.ManagedAppsByWebsite
+	}
+	if data.GitRepositories != nil {
+		m.gitRepositories = data.GitRepositories
+	}
+	if data.GitDeployments != nil {
+		m.gitDeployments = data.GitDeployments
+	}
+	if data.WordPressStagings != nil {
+		m.wordpressStagings = data.WordPressStagings
+	}
+	if data.WebsiteCacheConfigs != nil {
+		m.websiteCacheConfigs = data.WebsiteCacheConfigs
+	}
+	if data.DatabaseRemoteAccess != nil {
+		m.databaseRemoteAccess = data.DatabaseRemoteAccess
+	}
+	if data.DatabaseMaintenanceLogs != nil {
+		m.databaseMaintenanceLogs = data.DatabaseMaintenanceLogs
+	}
+	if data.EmailSMTPRelays != nil {
+		m.emailSMTPRelays = data.EmailSMTPRelays
+	}
+	if data.EmailSpamSettings != nil {
+		m.emailSpamSettings = data.EmailSpamSettings
+	}
+	if data.EmailSpamQuarantineItems != nil {
+		m.emailSpamQuarantineItems = data.EmailSpamQuarantineItems
+	}
+	if data.EmailIMAPMigrations != nil {
+		m.emailIMAPMigrations = data.EmailIMAPMigrations
+	}
+	if data.BackupRepositories != nil {
+		m.backupRepositories = data.BackupRepositories
+	}
+	if data.BackupIncrementalSnapshots != nil {
+		m.backupIncrementalSnapshots = data.BackupIncrementalSnapshots
+	}
+	if data.BackupRetentionPolicies != nil {
+		m.backupRetentionPolicies = data.BackupRetentionPolicies
+	}
+	if data.BackupFileRestoreRequests != nil {
+		m.backupFileRestoreRequests = data.BackupFileRestoreRequests
+	}
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -903,8 +1226,39 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		fmActivityLogs:      make([]*FileManagerActivityLog, 0),
 		userPlanOverrides:   make(map[uuid.UUID]*UserPlanOverride),
 		emailVerifyTokens:   make(map[string]*EmailVerificationToken),
-		passwordResetTokens: make(map[string]*PasswordResetToken),
-		emailDeliveries:     make(map[string]*EmailDelivery),
+		passwordResetTokens:    make(map[string]*PasswordResetToken),
+		emailDeliveries:        make(map[string]*EmailDelivery),
+		twoFactorSecrets:       make(map[uuid.UUID]string),
+		twoFactorRecoveryCodes: make(map[uuid.UUID][]string),
+		securityScans:          make(map[uuid.UUID]*SecurityScan),
+		quarantineItems:        make(map[uuid.UUID]*QuarantineItem),
+		crossNodeMigrations:    make(map[uuid.UUID]*CrossNodeMigration),
+		resellerProfiles:        make(map[uuid.UUID]*ResellerProfile),
+		resellerProfilesByUser:  make(map[uuid.UUID]uuid.UUID),
+		provisioningIntegrations: make(map[uuid.UUID]*ProvisioningIntegration),
+		provisioningWebhookLogs: make([]*ProvisioningWebhookLog, 0),
+		backupDestinations:       make(map[uuid.UUID]*BackupDestinationRecord),
+		backupSnapshots:          make(map[uuid.UUID]*BackupSnapshotRecord),
+		backupSchedules:          make(map[uuid.UUID]*BackupScheduleRecord),
+		backupRestoreJobs:        make(map[uuid.UUID]*BackupRestoreJobRecord),
+		websiteResourceQuotas:    make(map[uuid.UUID]*WebsiteResourceQuotaRecord),
+		resourceQuotaEvents:      make([]*ResourceQuotaEventRecord, 0),
+		managedApps:              make(map[uuid.UUID]*ManagedAppRecord),
+		managedAppsByWebsite:     make(map[uuid.UUID]uuid.UUID),
+		gitRepositories:          make(map[uuid.UUID]*GitRepositoryRecord),
+		gitDeployments:           make(map[uuid.UUID]*GitDeploymentRecord),
+		wordpressStagings:        make(map[uuid.UUID]*WordPressStagingRecord),
+		websiteCacheConfigs:      make(map[uuid.UUID]*WebsiteCacheConfigRecord),
+		databaseRemoteAccess:     make(map[uuid.UUID]*DatabaseRemoteAccessRecord),
+		databaseMaintenanceLogs:  make([]*DatabaseMaintenanceLogRecord, 0),
+		emailSMTPRelays:          make(map[uuid.UUID]*EmailSMTPRelayRecord),
+		emailSpamSettings:        make(map[string]*EmailSpamFilterSettingsRecord),
+		emailSpamQuarantineItems: make(map[uuid.UUID]*EmailSpamQuarantineItemRecord),
+		emailIMAPMigrations:      make(map[uuid.UUID]*EmailIMAPMigrationRecord),
+		backupRepositories:       make(map[uuid.UUID]*BackupRepositoryRecord),
+		backupIncrementalSnapshots: make(map[uuid.UUID]*BackupIncrementalSnapshotRecord),
+		backupRetentionPolicies:  make(map[uuid.UUID]*BackupRetentionPolicyRecord),
+		backupFileRestoreRequests: make(map[uuid.UUID]*BackupFileRestoreRequestRecord),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
@@ -1933,41 +2287,75 @@ func (p *PostgresStore) RecordEmailDelivery(ctx context.Context, delivery *Email
 
 func (p *PostgresStore) CreateServer(ctx context.Context, server *Server) error {
 	query := `
-		INSERT INTO servers (id, organization_id, name, hostname, ip_address, os_name, os_version, architecture, kernel_version, agent_version, status, cpu_cores, cpu_model, ram_total_mb, disk_total_gb, agent_token_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		INSERT INTO servers (
+			id, organization_id, name, hostname, ip_address, os_name, os_version,
+			architecture, kernel_version, agent_version, status, cpu_cores, cpu_model,
+			ram_total_mb, disk_total_gb, agent_token_hash, capabilities, is_maintenance, draining, max_websites, max_databases
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+		)
 		RETURNING created_at, updated_at
 	`
 	if server.ID == uuid.Nil {
 		server.ID = uuid.New()
 	}
+	if server.MaxWebsites <= 0 {
+		server.MaxWebsites = 100
+	}
+	if server.MaxDatabases <= 0 {
+		server.MaxDatabases = 100
+	}
+	capsJSON, _ := json.Marshal(server.Capabilities)
+
 	return p.db.QueryRowContext(ctx, query,
 		server.ID, server.OrganizationID, server.Name, server.Hostname, server.IPAddress,
 		server.OSName, server.OSVersion, server.Architecture, server.KernelVersion,
 		server.AgentVersion, server.Status, server.CPUCores, server.CPUModel,
-		server.RAMTotalMB, server.DiskTotalGB, server.AgentTokenHash,
+		server.RAMTotalMB, server.DiskTotalGB, server.AgentTokenHash, capsJSON,
+		server.IsMaintenance, server.Draining, server.MaxWebsites, server.MaxDatabases,
 	).Scan(&server.CreatedAt, &server.UpdatedAt)
 }
 
 func (p *PostgresStore) GetServerByID(ctx context.Context, id uuid.UUID) (*Server, error) {
 	query := `
-		SELECT id, organization_id, name, hostname, ip_address, os_name, os_version, architecture, kernel_version, agent_version, status, cpu_cores, cpu_model, ram_total_mb, disk_total_gb, last_heartbeat_at, uptime_seconds, created_at, updated_at
+		SELECT id, organization_id, name, hostname, ip_address, os_name, os_version,
+		       architecture, kernel_version, agent_version, status, cpu_cores, cpu_model,
+		       ram_total_mb, disk_total_gb, last_heartbeat_at, uptime_seconds,
+		       capabilities, is_maintenance, draining, max_websites, max_databases,
+		       created_at, updated_at
 		FROM servers WHERE id = $1 AND deleted_at IS NULL
 	`
 	s := &Server{}
+	var capsJSON []byte
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
 		&s.ID, &s.OrganizationID, &s.Name, &s.Hostname, &s.IPAddress, &s.OSName, &s.OSVersion,
 		&s.Architecture, &s.KernelVersion, &s.AgentVersion, &s.Status, &s.CPUCores, &s.CPUModel,
-		&s.RAMTotalMB, &s.DiskTotalGB, &s.LastHeartbeatAt, &s.UptimeSeconds, &s.CreatedAt, &s.UpdatedAt,
+		&s.RAMTotalMB, &s.DiskTotalGB, &s.LastHeartbeatAt, &s.UptimeSeconds,
+		&capsJSON, &s.IsMaintenance, &s.Draining, &s.MaxWebsites, &s.MaxDatabases,
+		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	if len(capsJSON) > 0 {
+		_ = json.Unmarshal(capsJSON, &s.Capabilities)
+	}
+	if s.LastHeartbeatAt != nil && time.Since(*s.LastHeartbeatAt) > 3*time.Minute && s.Status == "online" && !s.IsMaintenance {
+		s.Status = "offline"
+	}
+	return s, nil
 }
 
 func (p *PostgresStore) ListServersByOrg(ctx context.Context, orgID uuid.UUID) ([]*Server, error) {
 	query := `
-		SELECT id, organization_id, name, hostname, ip_address, os_name, os_version, architecture, kernel_version, agent_version, status, cpu_cores, cpu_model, ram_total_mb, disk_total_gb, last_heartbeat_at, uptime_seconds, created_at, updated_at
+		SELECT id, organization_id, name, hostname, ip_address, os_name, os_version,
+		       architecture, kernel_version, agent_version, status, cpu_cores, cpu_model,
+		       ram_total_mb, disk_total_gb, last_heartbeat_at, uptime_seconds,
+		       capabilities, is_maintenance, draining, max_websites, max_databases,
+		       created_at, updated_at
 		FROM servers WHERE organization_id = $1 AND deleted_at IS NULL
 		ORDER BY created_at DESC
 	`
@@ -1980,13 +2368,22 @@ func (p *PostgresStore) ListServersByOrg(ctx context.Context, orgID uuid.UUID) (
 	servers := make([]*Server, 0)
 	for rows.Next() {
 		s := &Server{}
+		var capsJSON []byte
 		err := rows.Scan(
 			&s.ID, &s.OrganizationID, &s.Name, &s.Hostname, &s.IPAddress, &s.OSName, &s.OSVersion,
 			&s.Architecture, &s.KernelVersion, &s.AgentVersion, &s.Status, &s.CPUCores, &s.CPUModel,
-			&s.RAMTotalMB, &s.DiskTotalGB, &s.LastHeartbeatAt, &s.UptimeSeconds, &s.CreatedAt, &s.UpdatedAt,
+			&s.RAMTotalMB, &s.DiskTotalGB, &s.LastHeartbeatAt, &s.UptimeSeconds,
+			&capsJSON, &s.IsMaintenance, &s.Draining, &s.MaxWebsites, &s.MaxDatabases,
+			&s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if len(capsJSON) > 0 {
+			_ = json.Unmarshal(capsJSON, &s.Capabilities)
+		}
+		if s.LastHeartbeatAt != nil && time.Since(*s.LastHeartbeatAt) > 3*time.Minute && s.Status == "online" && !s.IsMaintenance {
+			s.Status = "offline"
 		}
 		servers = append(servers, s)
 	}

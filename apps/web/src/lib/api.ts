@@ -49,6 +49,13 @@ export interface Organization {
   max_websites: number;
 }
 
+export interface ServerCapabilities {
+  web_servers?: string[];
+  php_versions?: string[];
+  databases?: string[];
+  services?: string[];
+}
+
 export interface Server {
   id: string;
   organization_id: string;
@@ -65,9 +72,67 @@ export interface Server {
   cpu_model?: string;
   ram_total_mb: number;
   disk_total_gb: number;
+  capabilities?: ServerCapabilities;
+  is_maintenance?: boolean;
+  draining?: boolean;
+  max_websites?: number;
+  max_databases?: number;
   last_heartbeat_at?: string;
   uptime_seconds?: number;
   created_at: string;
+}
+
+export interface ServerWorkloadSummary {
+  server_id: string;
+  status: string;
+  websites_count: number;
+  databases_count: number;
+  mailboxes_count: number;
+  active_workloads: number;
+  can_decommission: boolean;
+}
+
+export interface MigrationLogItem {
+  timestamp: string;
+  level: string;
+  message: string;
+}
+
+export interface CrossNodeMigration {
+  id: string;
+  organization_id: string;
+  source_server_id: string;
+  destination_server_id: string;
+  website_id?: string;
+  database_id?: string;
+  status: 'pending' | 'validating' | 'snapshotting' | 'transferring' | 'verifying' | 'restoring' | 'cutover_ready' | 'completed' | 'failed' | 'rolled_back';
+  progress: number;
+  current_step: string;
+  source_checksum?: string;
+  destination_checksum?: string;
+  transferred_bytes: number;
+  total_bytes: number;
+  error_message?: string;
+  logs: MigrationLogItem[];
+  created_by?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreflightCheckItem {
+  name: string;
+  status: 'pass' | 'warn' | 'fail';
+  message: string;
+}
+
+export interface PreflightCheckResponse {
+  compatible: boolean;
+  checks: PreflightCheckItem[];
+  estimated_size_mb: number;
+  source_server_name: string;
+  dest_server_name: string;
 }
 
 export interface EnrollmentTokenResponse {
@@ -630,6 +695,66 @@ export interface BannedIPItem {
   banned_at: string;
 }
 
+export interface ThreatItem {
+  file_path: string;
+  threat_name: string;
+  line_number?: number;
+  severity: 'critical' | 'high' | 'medium';
+  quarantined?: boolean;
+}
+
+export interface SecurityScan {
+  id: string;
+  organization_id: string;
+  server_id?: string;
+  website_id?: string;
+  scan_type: 'clamav' | 'heuristic' | 'combined';
+  target_path: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  total_files: number;
+  infected_files: number;
+  findings: ThreatItem[];
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface QuarantineItem {
+  id: string;
+  scan_id?: string;
+  organization_id: string;
+  server_id?: string;
+  website_id?: string;
+  original_path: string;
+  quarantine_filename: string;
+  file_size: number;
+  file_mode: string;
+  file_owner: string;
+  file_group: string;
+  sha256_hash: string;
+  threat_name: string;
+  status: 'quarantined' | 'restored' | 'deleted';
+  restored_at?: string;
+  deleted_at?: string;
+  quarantined_at: string;
+}
+
+export interface SecurityEngineStatus {
+  heuristic_active: boolean;
+  heuristic_rules: number;
+  clamav_installed: boolean;
+  clamav_daemon: boolean;
+  clamav_binary?: string;
+  clamav_db_updated_at?: string;
+  quarantine_dir: string;
+}
+
+export interface TwoFactorStatus {
+  two_factor_enabled: boolean;
+  recovery_codes_remaining: number;
+}
+
 export interface CronDaemonStatus {
   is_active: boolean;
   daemon: string;
@@ -727,9 +852,9 @@ export interface FTPUser {
 export interface BackupRecord {
   id: string;
   server_id: string;
-  type: 'website' | 'database' | 'full_config';
+  type: 'website' | 'database' | 'full_config' | 'full_account';
   target_name: string;
-  storage: 'local' | 's3' | 'r2' | 'b2' | 'sftp';
+  storage: 'local' | 's3' | 'wasabi' | 'gcs' | 'r2' | 'b2' | 'spaces' | 'minio' | 'sftp';
   storage_id?: string;
   size_bytes: number;
   sha256?: string;
@@ -737,6 +862,8 @@ export interface BackupRecord {
   status: 'completed' | 'failed' | 'in_progress';
   file_name: string;
   remote_key?: string;
+  verified_at?: string;
+  integrity_status?: 'unverified' | 'verified' | 'corrupted';
   created_at: string;
   completed_at?: string;
   error_message?: string;
@@ -745,7 +872,7 @@ export interface BackupRecord {
 export interface BackupDestination {
   id: string;
   name: string;
-  type: 's3' | 'r2' | 'b2' | 'sftp' | 'local';
+  type: 's3' | 'wasabi' | 'gcs' | 'r2' | 'b2' | 'spaces' | 'minio' | 'sftp' | 'local';
   endpoint: string;
   region: string;
   bucket: string;
@@ -760,7 +887,7 @@ export interface BackupDestination {
 export interface BackupSchedule {
   id: string;
   name: string;
-  scope: 'website' | 'database' | 'full_config';
+  scope: 'website' | 'database' | 'full_config' | 'full_account';
   target_name: string;
   destination_id: string;
   frequency: 'daily' | 'weekly' | 'monthly' | 'cron';
@@ -772,31 +899,97 @@ export interface BackupSchedule {
   created_at: string;
 }
 
+export interface IntegrityReport {
+  backup_id: string;
+  file_name: string;
+  target_name: string;
+  type: string;
+  storage: string;
+  expected_sha256: string;
+  calculated_sha256: string;
+  sha256_match: boolean;
+  archive_valid: boolean;
+  item_count: number;
+  uncompressed_size: number;
+  status: 'verified' | 'corrupted';
+  message: string;
+  verified_at: string;
+}
+
+export interface PreflightCheck {
+  name: string;
+  passed: boolean;
+  details: string;
+}
+
+export interface PreflightRestoreReport {
+  backup_id: string;
+  target_name: string;
+  type: string;
+  preflight_ok: boolean;
+  disk_space_required: number;
+  disk_space_available: number;
+  service_status: string;
+  existing_target_found: boolean;
+  target_conflict_risk: 'none' | 'overwrite_warning';
+  integrity_status: string;
+  checks: PreflightCheck[];
+  message: string;
+}
+
+
 export interface ResourceLimits {
   memory_max_mb: number;
+  memory_high_mb?: number;
   cpu_quota: number;
+  cpu_weight?: number;
   tasks_max: number;
+  io_read_iops?: number;
+  io_write_iops?: number;
   io_read_mbps?: number;
   io_write_mbps?: number;
+  oom_policy?: 'kill' | 'throttle' | string;
   open_basedir: boolean;
 }
 
 export interface UserIsolationInfo {
   username: string;
-  group_name: string;
+  group_name?: string;
   uid: number;
   gid: number;
   home_dir: string;
-  document_root: string;
-  php_version: string;
+  document_root?: string;
+  php_version?: string;
   php_pool_socket: string;
-  php_pool_config: string;
-  slice_name: string;
+  php_pool_config?: string;
+  cgroup_path?: string;
+  slice_name?: string;
   limits: ResourceLimits;
-  memory_used_mb: number;
-  cpu_usage_perc: number;
-  tasks_current: number;
-  is_systemd_slice: boolean;
+  current_memory_mb?: number;
+  memory_used_mb?: number;
+  memory_peak_mb?: number;
+  cpu_usage_percent?: number;
+  cpu_usage_perc?: number;
+  current_pids?: number;
+  tasks_current?: number;
+  throttled_usec?: number;
+  oom_kills?: number;
+  oom_events?: number;
+  high_events?: number;
+  is_systemd_slice?: boolean;
+  status?: string;
+  created_at?: string;
+}
+
+export interface ResourceQuotaEvent {
+  id: string;
+  website_id: string;
+  username: string;
+  event_type: 'oom_kill' | 'memory_high' | 'cpu_throttled' | 'quota_provisioned' | 'quota_updated' | string;
+  severity: 'info' | 'warning' | 'critical' | string;
+  details: string;
+  metric_value: number;
+  threshold_value: number;
   created_at: string;
 }
 
@@ -933,6 +1126,403 @@ export interface PopularPlugin {
   description: string;
   category: string;
   icon: string;
+}
+
+// ============================================================================
+// Developer & Application Management (Phase 6)
+// ============================================================================
+
+export interface ManagedAppRecord {
+  id: string;
+  website_id: string;
+  organization_id: string;
+  name: string;
+  app_type: 'nodejs' | 'python';
+  runtime_version: string;
+  app_root: string;
+  entrypoint: string;
+  start_command: string;
+  port: number;
+  system_user: string;
+  env_vars: Record<string, string>;
+  status: 'running' | 'stopped' | 'failed';
+  restart_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppProcessStatus {
+  id: string;
+  status: 'running' | 'stopped' | 'failed' | 'not_configured';
+  pid?: number;
+  port?: number;
+  uptime_sec?: number;
+  memory_mb?: number;
+  cpu_percent?: number;
+  restart_count?: number;
+  last_log_tail?: string;
+}
+
+export interface RuntimeInfo {
+  language: 'nodejs' | 'python';
+  version: string;
+  binary: string;
+  pkg_mgr: string;
+  features: string[];
+}
+
+export interface GitRepositoryRecord {
+  id: string;
+  website_id: string;
+  organization_id: string;
+  provider: 'github' | 'gitlab' | 'custom';
+  repo_url: string;
+  branch: string;
+  webhook_secret: string;
+  deploy_key_pub: string;
+  deploy_key_priv?: string;
+  auto_deploy: boolean;
+  build_command: string;
+  deploy_path: string;
+  release_keep_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GitDeploymentRecord {
+  id: string;
+  repository_id: string;
+  website_id: string;
+  commit_hash: string;
+  commit_message: string;
+  author: string;
+  status: 'queued' | 'cloning' | 'building' | 'success' | 'failed' | 'rolled_back';
+  build_logs: string;
+  release_path: string;
+  duration_seconds: number;
+  created_at: string;
+}
+
+export interface WordPressStagingRecord {
+  id: string;
+  website_id: string;
+  organization_id: string;
+  staging_domain: string;
+  staging_doc_root: string;
+  staging_db_name: string;
+  staging_db_user: string;
+  auth_enabled: boolean;
+  auth_user: string;
+  auth_password?: string;
+  status: 'active' | 'syncing' | 'deleted';
+  last_sync_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================================
+// PHASE SEVEN: CACHING ENGINE, REMOTE DB ACCESS, DATABASE MAINTENANCE
+// ============================================================================
+
+export interface WebsiteCacheConfig {
+  id?: string;
+  website_id: string;
+  organization_id?: string;
+  cache_type: 'redis' | 'memcached' | 'none';
+  connection_type: 'socket' | 'tcp';
+  socket_path?: string;
+  host: string;
+  port: number;
+  password?: string;
+  max_memory_mb: number;
+  eviction_policy: string;
+  wp_object_cache_enabled: boolean;
+  status: 'active' | 'disabled' | 'failed';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CacheServiceStatus {
+  service_type: 'redis' | 'memcached';
+  installed: boolean;
+  running: boolean;
+  version: string;
+  binary_path: string;
+  port: number;
+  socket_path: string;
+  error?: string;
+}
+
+export interface CacheMetrics {
+  cache_type: string;
+  running: boolean;
+  uptime_seconds?: number;
+  connected_clients?: number;
+  used_memory_bytes?: number;
+  used_memory_human?: string;
+  max_memory_bytes?: number;
+  total_keys?: number;
+  hits?: number;
+  misses?: number;
+  hit_rate_percent?: number;
+}
+
+export interface CacheBenchmarkResult {
+  cache_type: string;
+  operations: number;
+  total_duration_ms: number;
+  avg_latency_ms: number;
+  min_latency_ms: number;
+  max_latency_ms: number;
+  ops_per_sec: number;
+}
+
+export interface DatabaseRemoteAccess {
+  id: string;
+  database_id: string;
+  organization_id: string;
+  db_user: string;
+  authorized_ip: string;
+  granted_privileges: string;
+  firewall_rule_applied: boolean;
+  status: 'active' | 'revoked';
+  notes?: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TableHealthInfo {
+  table_name: string;
+  engine: string;
+  rows: number;
+  data_size_bytes: number;
+  index_size_bytes: number;
+  data_free_bytes: number;
+  fragmentation_percent: number;
+}
+
+export interface DatabaseHealthReport {
+  database_name: string;
+  total_size_bytes: number;
+  total_data_bytes: number;
+  total_index_bytes: number;
+  total_data_free_bytes: number;
+  overall_fragmentation_percent: number;
+  table_count: number;
+  fragmented_tables_count: number;
+  tables: TableHealthInfo[];
+}
+
+export interface TableCheckResult {
+  table_name: string;
+  status: 'OK' | 'warning' | 'error';
+  message: string;
+}
+
+export interface DatabaseMaintenanceResult {
+  operation: 'check' | 'optimize' | 'analyze';
+  database_name: string;
+  tables_processed: number;
+  bytes_reclaimed: number;
+  duration_ms: number;
+  status: 'success' | 'warning' | 'failed';
+  details: string;
+  table_results?: TableCheckResult[];
+}
+
+export interface DatabaseMaintenanceLog {
+  id: string;
+  database_id: string;
+  organization_id: string;
+  operation: 'check' | 'optimize' | 'analyze' | 'repair';
+  status: 'success' | 'warning' | 'failed';
+  tables_processed: number;
+  bytes_reclaimed: number;
+  duration_ms: number;
+  details: string;
+  initiated_by: string;
+  created_at: string;
+}
+
+// ============================================================================
+// PHASE EIGHT: EMAIL DELIVERABILITY, SPAM & MIGRATION TYPES
+// ============================================================================
+
+export interface EmailDomain {
+  id: string;
+  domain: string;
+  mail_hostname: string;
+  status: string;
+  storage_limit_bytes: number;
+  storage_used_bytes: number;
+  mailbox_count: number;
+  alias_count: number;
+  dkim_selector: string;
+  is_dns_verified?: boolean;
+  dns_verified_at?: string;
+  created_at: string;
+}
+
+export interface EmailMailbox {
+  id: string;
+  domain_id: string;
+  email: string;
+  local_part: string;
+  name: string;
+  quota_bytes: number;
+  used_bytes: number;
+  rate_limit_per_hour?: number;
+  rate_limit_per_day?: number;
+  is_active: boolean;
+  is_suspended: boolean;
+}
+
+export interface EmailSMTPRelay {
+  id: string;
+  organization_id: string;
+  domain_id?: string;
+  name: string;
+  provider: 'ses' | 'sendgrid' | 'mailgun' | 'brevo' | 'postmark' | 'custom' | string;
+  host: string;
+  port: number;
+  username: string;
+  password_encrypted?: string;
+  auth_type: string;
+  encryption: 'starttls' | 'ssl' | 'none' | string;
+  sender_domain: string;
+  is_verified: boolean;
+  verified_at?: string;
+  status: 'active' | 'disabled' | 'error' | string;
+  rate_limit_per_second: number;
+  rate_limit_per_day: number;
+  last_test_at?: string;
+  last_test_status: 'pending' | 'success' | 'failed' | string;
+  last_test_error?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RelayConnectionTestResult {
+  success: boolean;
+  banner: string;
+  tls_version?: string;
+  tls_cipher?: string;
+  cert_issuer?: string;
+  cert_expiry?: string;
+  auth_succeeded: boolean;
+  latency_ms: number;
+  error?: string;
+  trace?: string[];
+}
+
+export interface DeliverabilityRecordStatus {
+  record_type: 'SPF' | 'DKIM' | 'DMARC' | 'MX' | string;
+  domain: string;
+  found: boolean;
+  expected_value: string;
+  actual_values: string[];
+  status: 'valid' | 'missing' | 'mismatch' | 'warning' | string;
+  instructions: string;
+}
+
+export interface DeliverabilityAuditResult {
+  domain: string;
+  provider: string;
+  is_fully_verified: boolean;
+  records: DeliverabilityRecordStatus[];
+  recommendations: string[];
+  checked_at: string;
+}
+
+export interface EmailSpamSettings {
+  id?: string;
+  organization_id?: string;
+  domain_id?: string;
+  reject_score: number;
+  add_header_score: number;
+  greylist_score: number;
+  greylist_enabled: boolean;
+  bayes_enabled: boolean;
+  fuzzy_enabled: boolean;
+  dmarc_reporting_enabled: boolean;
+  custom_rules?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface RspamdTelemetry {
+  scanned: number;
+  clean: number;
+  greylisted: number;
+  spam: number;
+  rejected: number;
+  learned_ham: number;
+  learned_spam: number;
+  uptime_seconds: number;
+  version: string;
+  is_alive: boolean;
+}
+
+export interface SpamQuarantineItem {
+  id: string;
+  organization_id: string;
+  domain_id?: string;
+  message_id: string;
+  sender: string;
+  recipient: string;
+  subject: string;
+  score: number;
+  symbols: string[];
+  action_taken: string;
+  mail_path: string;
+  status: 'quarantined' | 'released' | 'learned_ham' | 'deleted' | string;
+  created_at: string;
+}
+
+export interface SourceConnectionOptions {
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  use_ssl: boolean;
+  skip_ssl_verify?: boolean;
+  auth_type?: string;
+  exclude_folders?: string[];
+  batch_size?: number;
+  max_concurrency?: number;
+}
+
+export interface IMAPMigration {
+  id: string;
+  organization_id: string;
+  destination_mailbox_id: string;
+  destination_email: string;
+  source_host: string;
+  source_port: number;
+  source_username: string;
+  source_password_encrypted?: string;
+  source_use_ssl: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | string;
+  total_folders: number;
+  current_folder: string;
+  total_messages: number;
+  synced_messages: number;
+  skipped_duplicates: number;
+  failed_messages: number;
+  bytes_transferred: number;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IMAPTestResult {
+  success: boolean;
+  greeting?: string;
+  folders_found?: string[];
+  error?: string;
 }
 
 export interface HostingPlan {
@@ -1804,4 +2394,912 @@ export async function getPopularWordPressPlugins(): Promise<ApiResponse<PopularP
   return apiFetch<PopularPlugin[]>(`/api/v1/wordpress/catalog`);
 }
 
+// --- Multi-Server Fleet Management & Cross-Node Migrations ---
+export async function toggleServerMaintenance(serverId: string, enabled: boolean): Promise<ApiResponse<Server>> {
+  return apiFetch<Server>(`/api/v1/servers/${serverId}/maintenance`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
 
+export async function drainServerNode(serverId: string, enabled: boolean): Promise<ApiResponse<{ server_id: string; draining: boolean; workload_summary: ServerWorkloadSummary; message: string }>> {
+  return apiFetch(`/api/v1/servers/${serverId}/drain`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function getServerWorkloads(serverId: string): Promise<ApiResponse<ServerWorkloadSummary>> {
+  return apiFetch<ServerWorkloadSummary>(`/api/v1/servers/${serverId}/workloads`);
+}
+
+export async function deleteServer(serverId: string, force: boolean = false): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch(`/api/v1/servers/${serverId}${force ? '?force=true' : ''}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function rotateServerAgentKey(serverId: string): Promise<ApiResponse<{ server_id: string; agent_key: string; message: string }>> {
+  return apiFetch(`/api/v1/servers/${serverId}/rotate-key`, {
+    method: 'POST',
+  });
+}
+
+export async function preflightMigration(payload: {
+  source_server_id: string;
+  destination_server_id: string;
+  website_id?: string;
+  database_id?: string;
+}): Promise<ApiResponse<PreflightCheckResponse>> {
+  return apiFetch<PreflightCheckResponse>('/api/v1/servers/migrations/preflight', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createCrossNodeMigration(payload: {
+  source_server_id: string;
+  destination_server_id: string;
+  website_id?: string;
+  database_id?: string;
+}): Promise<ApiResponse<CrossNodeMigration>> {
+  return apiFetch<CrossNodeMigration>('/api/v1/servers/migrations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listCrossNodeMigrations(): Promise<ApiResponse<CrossNodeMigration[]>> {
+  return apiFetch<CrossNodeMigration[]>('/api/v1/servers/migrations');
+}
+
+export async function getCrossNodeMigration(migrationId: string): Promise<ApiResponse<CrossNodeMigration>> {
+  return apiFetch<CrossNodeMigration>(`/api/v1/servers/migrations/${migrationId}`);
+}
+
+export async function cutoverMigration(migrationId: string): Promise<ApiResponse<CrossNodeMigration>> {
+  return apiFetch<CrossNodeMigration>(`/api/v1/servers/migrations/${migrationId}/cutover`, {
+    method: 'POST',
+  });
+}
+
+export async function rollbackMigration(migrationId: string): Promise<ApiResponse<CrossNodeMigration>> {
+  return apiFetch<CrossNodeMigration>(`/api/v1/servers/migrations/${migrationId}/rollback`, {
+    method: 'POST',
+  });
+}
+
+// ============================================================================
+// PHASE THREE: WHMCS/BLESTA WEBHOOKS & RESELLER MULTI-TENANCY ENGINE
+// ============================================================================
+
+export interface ProvisioningIntegration {
+  id: string;
+  organization_id: string;
+  provider: 'whmcs' | 'blesta' | 'custom';
+  name: string;
+  secret_key_hash?: string;
+  raw_secret_key?: string;
+  default_server_id?: string;
+  default_plan_id?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProvisioningWebhookLog {
+  id: string;
+  organization_id: string;
+  integration_id?: string;
+  provider: string;
+  action: string;
+  username?: string;
+  domain?: string;
+  payload: any;
+  status: 'success' | 'failed' | 'replayed';
+  http_status: number;
+  response_body?: string;
+  error_message?: string;
+  ip_address?: string;
+  created_at: string;
+}
+
+export interface ResellerProfile {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  max_accounts: number;
+  allocated_disk_mb: number;
+  allocated_bandwidth_mb: number;
+  allow_overselling: boolean;
+  brand_name: string;
+  brand_logo_url?: string;
+  custom_nameservers: string[];
+  custom_email_sender: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResellerUsageSummary {
+  max_accounts: number;
+  used_accounts: number;
+  allocated_disk_mb: number;
+  used_disk_mb: number;
+  allocated_bandwidth_mb: number;
+  used_bandwidth_mb: number;
+  allow_overselling: boolean;
+}
+
+export interface BrandingInfo {
+  brand_name: string;
+  brand_logo_url: string;
+  custom_nameservers: string[];
+  custom_email_sender: string;
+}
+
+export async function listProvisioningIntegrations(): Promise<ApiResponse<ProvisioningIntegration[]>> {
+  return apiFetch<ProvisioningIntegration[]>('/api/v1/provisioning/integrations');
+}
+
+export async function createProvisioningIntegration(payload: {
+  provider: string;
+  name: string;
+  default_server_id?: string;
+  default_plan_id?: string;
+  is_active?: boolean;
+}): Promise<ApiResponse<ProvisioningIntegration>> {
+  return apiFetch<ProvisioningIntegration>('/api/v1/provisioning/integrations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProvisioningIntegration(id: string): Promise<ApiResponse<{ status: string }>> {
+  return apiFetch<{ status: string }>(`/api/v1/provisioning/integrations/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listProvisioningWebhookLogs(): Promise<ApiResponse<ProvisioningWebhookLog[]>> {
+  return apiFetch<ProvisioningWebhookLog[]>('/api/v1/provisioning/logs');
+}
+
+export async function replayWebhookLog(id: string): Promise<ApiResponse<{ status: string; message: string; result: any }>> {
+  return apiFetch<{ status: string; message: string; result: any }>(`/api/v1/provisioning/logs/${id}/replay`, {
+    method: 'POST',
+  });
+}
+
+export async function listResellerProfiles(): Promise<ApiResponse<ResellerProfile[]>> {
+  return apiFetch<ResellerProfile[]>('/api/v1/reseller/profiles');
+}
+
+export async function getResellerProfile(id?: string): Promise<ApiResponse<ResellerProfile>> {
+  return apiFetch<ResellerProfile>(`/api/v1/reseller/profile${id ? `/${id}` : ''}`);
+}
+
+export async function updateResellerProfile(id: string, payload: Partial<ResellerProfile>): Promise<ApiResponse<ResellerProfile>> {
+  return apiFetch<ResellerProfile>(`/api/v1/reseller/profile/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getResellerUsage(userId?: string): Promise<ApiResponse<ResellerUsageSummary>> {
+  return apiFetch<ResellerUsageSummary>(`/api/v1/reseller/usage${userId ? `?user_id=${userId}` : ''}`);
+}
+
+export async function getBranding(resellerId?: string): Promise<ApiResponse<BrandingInfo>> {
+  return apiFetch<BrandingInfo>(`/api/v1/branding${resellerId ? `?reseller_id=${resellerId}` : ''}`);
+}
+
+export async function updateResellerBranding(payload: Partial<BrandingInfo>): Promise<ApiResponse<BrandingInfo>> {
+  return apiFetch<BrandingInfo>('/api/v1/reseller/branding', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+// ============================================================================
+// Developer & Application Management API Functions (Phase 6)
+// ============================================================================
+
+export async function getManagedApp(websiteId: string): Promise<ApiResponse<ManagedAppRecord | null>> {
+  return apiFetch<ManagedAppRecord | null>(`/api/v1/websites/${websiteId}/app-runtime`);
+}
+
+export async function saveManagedApp(websiteId: string, payload: {
+  name: string;
+  app_type: 'nodejs' | 'python';
+  runtime_version: string;
+  app_root?: string;
+  entrypoint?: string;
+  start_command?: string;
+  port?: number;
+  env_vars?: Record<string, string>;
+}): Promise<ApiResponse<ManagedAppRecord>> {
+  return apiFetch<ManagedAppRecord>(`/api/v1/websites/${websiteId}/app-runtime`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function controlManagedApp(websiteId: string, action: 'start' | 'stop' | 'restart'): Promise<ApiResponse<{
+  success: boolean;
+  action: string;
+  status: string;
+  metrics?: AppProcessStatus;
+}>> {
+  return apiFetch<{ success: boolean; action: string; status: string; metrics?: AppProcessStatus }>(
+    `/api/v1/websites/${websiteId}/app-runtime/control`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }
+  );
+}
+
+export async function getManagedAppStatus(websiteId: string): Promise<ApiResponse<AppProcessStatus>> {
+  return apiFetch<AppProcessStatus>(`/api/v1/websites/${websiteId}/app-runtime/status`);
+}
+
+export async function deleteManagedApp(websiteId: string): Promise<ApiResponse<{ deleted: boolean }>> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/websites/${websiteId}/app-runtime`, {
+    method: 'DELETE',
+  });
+}
+
+export async function detectRuntimes(): Promise<ApiResponse<RuntimeInfo[]>> {
+  return apiFetch<RuntimeInfo[]>('/api/v1/runtimes');
+}
+
+export async function getGitRepo(websiteId: string): Promise<ApiResponse<GitRepositoryRecord | null>> {
+  return apiFetch<GitRepositoryRecord | null>(`/api/v1/websites/${websiteId}/git`);
+}
+
+export async function saveGitRepo(websiteId: string, payload: {
+  provider?: string;
+  repo_url: string;
+  branch: string;
+  auto_deploy: boolean;
+  build_command?: string;
+  deploy_path?: string;
+  release_keep_count?: number;
+}): Promise<ApiResponse<GitRepositoryRecord>> {
+  return apiFetch<GitRepositoryRecord>(`/api/v1/websites/${websiteId}/git`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteGitRepo(websiteId: string): Promise<ApiResponse<{ deleted: boolean }>> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/websites/${websiteId}/git`, {
+    method: 'DELETE',
+  });
+}
+
+export async function triggerGitDeploy(websiteId: string, branch?: string): Promise<ApiResponse<GitDeploymentRecord>> {
+  return apiFetch<GitDeploymentRecord>(`/api/v1/websites/${websiteId}/git/deploy`, {
+    method: 'POST',
+    body: JSON.stringify({ branch }),
+  });
+}
+
+export async function listGitDeployments(websiteId: string): Promise<ApiResponse<GitDeploymentRecord[]>> {
+  return apiFetch<GitDeploymentRecord[]>(`/api/v1/websites/${websiteId}/git/deployments`);
+}
+
+export async function rollbackGitDeployment(websiteId: string, deploymentId: string): Promise<ApiResponse<GitDeploymentRecord>> {
+  return apiFetch<GitDeploymentRecord>(`/api/v1/websites/${websiteId}/git/rollback/${deploymentId}`, {
+    method: 'POST',
+  });
+}
+
+export async function getWordPressStaging(websiteId: string): Promise<ApiResponse<WordPressStagingRecord | null>> {
+  return apiFetch<WordPressStagingRecord | null>(`/api/v1/websites/${websiteId}/staging`);
+}
+
+export async function createWordPressStaging(websiteId: string, payload: {
+  staging_subdomain?: string;
+  auth_user?: string;
+  auth_password?: string;
+}): Promise<ApiResponse<{
+  success: boolean;
+  staging_domain: string;
+  staging_root: string;
+  auth_user: string;
+  auth_password?: string;
+  message: string;
+}>> {
+  return apiFetch<{
+    success: boolean;
+    staging_domain: string;
+    staging_root: string;
+    auth_user: string;
+    auth_password?: string;
+    message: string;
+  }>(`/api/v1/websites/${websiteId}/staging`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function pushWordPressStagingToLive(websiteId: string): Promise<ApiResponse<{
+  success: boolean;
+  backup_path: string;
+  completed_at: string;
+  message: string;
+}>> {
+  return apiFetch<{
+    success: boolean;
+    backup_path: string;
+    completed_at: string;
+    message: string;
+  }>(`/api/v1/websites/${websiteId}/staging/push-to-live`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteWordPressStaging(websiteId: string): Promise<ApiResponse<{ deleted: boolean }>> {
+  return apiFetch<{ deleted: boolean }>(`/api/v1/websites/${websiteId}/staging`, {
+    method: 'DELETE',
+  });
+}
+
+// ============================================================================
+// PHASE SEVEN: CACHING ENGINE API FUNCTIONS
+// ============================================================================
+
+export async function getCacheServices(): Promise<ApiResponse<CacheServiceStatus[]>> {
+  return apiFetch<CacheServiceStatus[]>('/api/v1/caching/services');
+}
+
+export async function getWebsiteCacheConfig(websiteId: string): Promise<ApiResponse<WebsiteCacheConfig>> {
+  return apiFetch<WebsiteCacheConfig>(`/api/v1/websites/${websiteId}/caching`);
+}
+
+export async function saveWebsiteCacheConfig(websiteId: string, payload: Partial<WebsiteCacheConfig>): Promise<ApiResponse<WebsiteCacheConfig>> {
+  return apiFetch<WebsiteCacheConfig>(`/api/v1/websites/${websiteId}/caching`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function disableWebsiteCache(websiteId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch<{ message: string }>(`/api/v1/websites/${websiteId}/caching`, {
+    method: 'DELETE',
+  });
+}
+
+export async function getWebsiteCacheMetrics(websiteId: string): Promise<ApiResponse<CacheMetrics>> {
+  return apiFetch<CacheMetrics>(`/api/v1/websites/${websiteId}/caching/metrics`);
+}
+
+export async function flushWebsiteCache(websiteId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch<{ message: string }>(`/api/v1/websites/${websiteId}/caching/flush`, {
+    method: 'POST',
+  });
+}
+
+export async function benchmarkWebsiteCache(websiteId: string, iterations = 30): Promise<ApiResponse<CacheBenchmarkResult>> {
+  return apiFetch<CacheBenchmarkResult>(`/api/v1/websites/${websiteId}/caching/benchmark`, {
+    method: 'POST',
+    body: JSON.stringify({ iterations }),
+  });
+}
+
+export async function toggleWordPressObjectCache(websiteId: string, enabled: boolean): Promise<ApiResponse<WebsiteCacheConfig>> {
+  return apiFetch<WebsiteCacheConfig>(`/api/v1/websites/${websiteId}/caching/wp-object-cache`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+// ============================================================================
+// PHASE SEVEN: REMOTE DATABASE ACCESS API FUNCTIONS
+// ============================================================================
+
+export async function listDatabaseRemoteAccess(databaseId: string): Promise<ApiResponse<DatabaseRemoteAccess[]>> {
+  return apiFetch<DatabaseRemoteAccess[]>(`/api/v1/databases/${databaseId}/remote-access`);
+}
+
+export async function grantDatabaseRemoteAccess(databaseId: string, payload: {
+  db_user?: string;
+  authorized_ip: string;
+  privileges?: string;
+  allow_unrestricted_wildcard?: boolean;
+  notes?: string;
+  expires_at?: string;
+}): Promise<ApiResponse<DatabaseRemoteAccess>> {
+  return apiFetch<DatabaseRemoteAccess>(`/api/v1/databases/${databaseId}/remote-access`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function revokeDatabaseRemoteAccess(databaseId: string, grantId: string): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch<{ message: string }>(`/api/v1/databases/${databaseId}/remote-access/${grantId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function testDatabaseRemoteAccess(databaseId: string, payload: {
+  host: string;
+  port?: number;
+  db_user: string;
+  password?: string;
+}): Promise<ApiResponse<{ success: boolean; latency_ms: number; message: string; error?: string }>> {
+  return apiFetch<{ success: boolean; latency_ms: number; message: string; error?: string }>(`/api/v1/databases/${databaseId}/remote-access/test`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// ============================================================================
+// PHASE SEVEN: DATABASE MAINTENANCE API FUNCTIONS
+// ============================================================================
+
+export async function getDatabaseHealth(databaseId: string): Promise<ApiResponse<DatabaseHealthReport>> {
+  return apiFetch<DatabaseHealthReport>(`/api/v1/databases/${databaseId}/maintenance/health`);
+}
+
+export async function checkDatabaseIntegrity(databaseId: string, tableNames?: string[]): Promise<ApiResponse<DatabaseMaintenanceResult>> {
+  return apiFetch<DatabaseMaintenanceResult>(`/api/v1/databases/${databaseId}/maintenance/check`, {
+    method: 'POST',
+    body: JSON.stringify({ table_names: tableNames || [] }),
+  });
+}
+
+export async function optimizeDatabase(databaseId: string, tableNames?: string[]): Promise<ApiResponse<DatabaseMaintenanceResult>> {
+  return apiFetch<DatabaseMaintenanceResult>(`/api/v1/databases/${databaseId}/maintenance/optimize`, {
+    method: 'POST',
+    body: JSON.stringify({ table_names: tableNames || [] }),
+  });
+}
+
+export async function analyzeDatabase(databaseId: string, tableNames?: string[]): Promise<ApiResponse<DatabaseMaintenanceResult>> {
+  return apiFetch<DatabaseMaintenanceResult>(`/api/v1/databases/${databaseId}/maintenance/analyze`, {
+    method: 'POST',
+    body: JSON.stringify({ table_names: tableNames || [] }),
+  });
+}
+
+export async function listDatabaseMaintenanceLogs(databaseId: string, limit = 30): Promise<ApiResponse<DatabaseMaintenanceLog[]>> {
+  return apiFetch<DatabaseMaintenanceLog[]>(`/api/v1/databases/${databaseId}/maintenance/logs?limit=${limit}`);
+}
+
+// ============================================================================
+// PHASE EIGHT: EMAIL DELIVERABILITY & RELAY API FUNCTIONS
+// ============================================================================
+
+export async function listEmailRelays(domainId?: string): Promise<ApiResponse<EmailSMTPRelay[]>> {
+  const q = domainId ? `?domain_id=${encodeURIComponent(domainId)}` : '';
+  return apiFetch<EmailSMTPRelay[]>(`/api/v1/email/relays${q}`);
+}
+
+export async function getEmailRelay(id: string): Promise<ApiResponse<EmailSMTPRelay>> {
+  return apiFetch<EmailSMTPRelay>(`/api/v1/email/relays/${id}`);
+}
+
+export async function createEmailRelay(payload: {
+  domain_id?: string;
+  name: string;
+  provider: string;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  auth_type?: string;
+  encryption?: string;
+  sender_domain: string;
+  rate_limit_per_second?: number;
+  rate_limit_per_day?: number;
+  test_on_save?: boolean;
+}): Promise<ApiResponse<EmailSMTPRelay>> {
+  return apiFetch<EmailSMTPRelay>('/api/v1/email/relays', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateEmailRelay(id: string, payload: Partial<{
+  domain_id?: string;
+  name: string;
+  provider: string;
+  host: string;
+  port: number;
+  username: string;
+  password?: string;
+  auth_type?: string;
+  encryption?: string;
+  sender_domain: string;
+  rate_limit_per_second?: number;
+  rate_limit_per_day?: number;
+}>): Promise<ApiResponse<EmailSMTPRelay>> {
+  return apiFetch<EmailSMTPRelay>(`/api/v1/email/relays/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteEmailRelay(id: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/email/relays/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function testEmailRelay(id: string): Promise<ApiResponse<RelayConnectionTestResult>> {
+  return apiFetch<RelayConnectionTestResult>(`/api/v1/email/relays/${id}/test`, {
+    method: 'POST',
+  });
+}
+
+export async function verifyDomainDeliverability(id: string): Promise<ApiResponse<DeliverabilityAuditResult>> {
+  return apiFetch<DeliverabilityAuditResult>(`/api/v1/email/relays/${id}/verify-dns`, {
+    method: 'POST',
+  });
+}
+
+// ============================================================================
+// PHASE EIGHT: ANTI-SPAM FILTER & QUARANTINE API FUNCTIONS
+// ============================================================================
+
+export async function getEmailSpamSettings(domainId?: string): Promise<ApiResponse<EmailSpamSettings>> {
+  const q = domainId ? `?domain_id=${encodeURIComponent(domainId)}` : '';
+  return apiFetch<EmailSpamSettings>(`/api/v1/email/spam/settings${q}`);
+}
+
+export async function updateEmailSpamSettings(payload: Partial<EmailSpamSettings>): Promise<ApiResponse<EmailSpamSettings>> {
+  return apiFetch<EmailSpamSettings>('/api/v1/email/spam/settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getEmailSpamTelemetry(): Promise<ApiResponse<RspamdTelemetry>> {
+  return apiFetch<RspamdTelemetry>('/api/v1/email/spam/telemetry');
+}
+
+export async function listSpamQuarantine(domainId?: string): Promise<ApiResponse<SpamQuarantineItem[]>> {
+  const q = domainId ? `?domain_id=${encodeURIComponent(domainId)}` : '';
+  return apiFetch<SpamQuarantineItem[]>(`/api/v1/email/spam/quarantine${q}`);
+}
+
+export async function releaseQuarantineItem(id: string): Promise<ApiResponse<{ success: boolean; error?: string }>> {
+  return apiFetch<{ success: boolean; error?: string }>(`/api/v1/email/spam/quarantine/${id}/release`, {
+    method: 'POST',
+  });
+}
+
+export async function learnHamQuarantineItem(id: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/email/spam/quarantine/${id}/learn-ham`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteQuarantineItem(id: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/email/spam/quarantine/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============================================================================
+// PHASE EIGHT: LIVE IMAP MAILBOX MIGRATION API FUNCTIONS
+// ============================================================================
+
+export async function listIMAPMigrations(): Promise<ApiResponse<IMAPMigration[]>> {
+  return apiFetch<IMAPMigration[]>('/api/v1/email/migrations');
+}
+
+export async function testSourceIMAP(opts: SourceConnectionOptions): Promise<ApiResponse<IMAPTestResult>> {
+  return apiFetch<IMAPTestResult>('/api/v1/email/migrations/test-source', {
+    method: 'POST',
+    body: JSON.stringify(opts),
+  });
+}
+
+export async function startIMAPMigration(payload: {
+  destination_mailbox_id: string;
+  source: SourceConnectionOptions;
+}): Promise<ApiResponse<IMAPMigration>> {
+  return apiFetch<IMAPMigration>('/api/v1/email/migrations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getIMAPMigration(id: string): Promise<ApiResponse<IMAPMigration>> {
+  return apiFetch<IMAPMigration>(`/api/v1/email/migrations/${id}`);
+}
+
+export async function cancelIMAPMigration(id: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/email/migrations/${id}/cancel`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteIMAPMigration(id: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  return apiFetch<{ success: boolean; message: string }>(`/api/v1/email/migrations/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============================================================================
+// PHASE NINE: INCREMENTAL BACKUPS, REPOSITORIES & DISASTER RECOVERY
+// ============================================================================
+
+export interface BackupRepository {
+  id: string;
+  organization_id: string;
+  destination_id?: string;
+  name: string;
+  provider: 'restic' | 'borg' | 'native';
+  repo_uri: string;
+  encryption_algorithm: string;
+  key_id?: string;
+  is_initialized: boolean;
+  last_checked_at?: string;
+  integrity_status: 'healthy' | 'checking' | 'error' | 'unknown';
+  total_snapshots: number;
+  total_size_bytes: number;
+  deduplicated_size_bytes: number;
+  compression_ratio: number;
+  deletion_protection: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackupIncrementalSnapshot {
+  id: string;
+  repository_id: string;
+  organization_id: string;
+  snapshot_hash: string;
+  parent_snapshot_id?: string;
+  scope: 'website' | 'database' | 'mail' | 'full_account';
+  target_name: string;
+  paths_included: string;
+  paths_excluded: string;
+  files_new: number;
+  files_changed: number;
+  files_unmodified: number;
+  total_files: number;
+  raw_size_bytes: number;
+  stored_size_bytes: number;
+  database_snapshot_consistent: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'pruned';
+  integrity_status: string;
+  error_message?: string;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface BackupRetentionPolicy {
+  id: string;
+  repository_id: string;
+  organization_id: string;
+  name: string;
+  keep_last: number;
+  keep_hourly: number;
+  keep_daily: number;
+  keep_weekly: number;
+  keep_monthly: number;
+  keep_yearly: number;
+  prune_schedule: string;
+  is_active: boolean;
+  last_pruned_at?: string;
+  pruned_snapshots_count: number;
+  bytes_reclaimed: number;
+}
+
+export interface SnapshotFileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  size_bytes: number;
+  mode: string;
+  modified_at: string;
+}
+
+export interface DisasterRecoveryStep {
+  step_number: number;
+  title: string;
+  description: string;
+  commands: string[];
+  safety_note?: string;
+}
+
+export interface DisasterRecoveryRunbook {
+  title: string;
+  generated_at: string;
+  summary: string;
+  steps: DisasterRecoveryStep[];
+  markdown: string;
+}
+
+export interface DestinationTestResult {
+  success: boolean;
+  auth_passed: boolean;
+  upload_passed: boolean;
+  listing_passed: boolean;
+  restore_passed: boolean;
+  deletion_passed: boolean;
+  latency_ms: number;
+  error_message?: string;
+  tested_at: string;
+}
+
+export interface IncrementalRestoreResult {
+  success: boolean;
+  files_restored: number;
+  bytes_restored: number;
+  database_restored?: boolean;
+  mailboxes_restored?: boolean;
+  target_directory: string;
+  error_message?: string;
+  completed_at: string;
+}
+
+export interface PruneResult {
+  snapshots_kept: number;
+  snapshots_removed: number;
+  bytes_reclaimed: number;
+  success: boolean;
+  error_message?: string;
+  completed_at: string;
+}
+
+export interface RepositoryIntegrityResult {
+  healthy: boolean;
+  total_snapshots: number;
+  total_packs: number;
+  total_size_bytes: number;
+  errors_found?: string[];
+  duration_seconds: number;
+  checked_at: string;
+}
+
+// Client API Methods for Incremental Backups
+export async function listBackupRepositories(): Promise<ApiResponse<BackupRepository[]>> {
+  return apiFetch<BackupRepository[]>('/api/v1/backups/repositories');
+}
+
+export async function createBackupRepository(data: {
+  name: string;
+  provider: 'restic' | 'borg' | 'native';
+  destination_type: string;
+  repo_uri?: string;
+  storage_config?: Record<string, string>;
+  encryption_algorithm?: string;
+  password?: string;
+  deletion_protection?: boolean;
+}): Promise<ApiResponse<BackupRepository>> {
+  return apiFetch<BackupRepository>('/api/v1/backups/repositories', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getBackupRepository(id: string): Promise<ApiResponse<BackupRepository>> {
+  return apiFetch<BackupRepository>(`/api/v1/backups/repositories/${id}`);
+}
+
+export async function updateBackupRepository(id: string, data: {
+  name?: string;
+  deletion_protection?: boolean;
+}): Promise<ApiResponse<BackupRepository>> {
+  return apiFetch<BackupRepository>(`/api/v1/backups/repositories/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteBackupRepository(id: string): Promise<ApiResponse<{ status: string; repo_id: string }>> {
+  return apiFetch<{ status: string; repo_id: string }>(`/api/v1/backups/repositories/${id}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function checkRepositoryIntegrity(id: string): Promise<ApiResponse<RepositoryIntegrityResult>> {
+  return apiFetch<RepositoryIntegrityResult>(`/api/v1/backups/repositories/${id}/check`, {
+    method: 'POST',
+  });
+}
+
+export async function pruneRepository(id: string, dryRun: boolean = false): Promise<ApiResponse<PruneResult>> {
+  return apiFetch<PruneResult>(`/api/v1/backups/repositories/${id}/prune`, {
+    method: 'POST',
+    body: JSON.stringify({ dry_run: dryRun }),
+  });
+}
+
+export async function getRepositoryRetention(id: string): Promise<ApiResponse<BackupRetentionPolicy>> {
+  return apiFetch<BackupRetentionPolicy>(`/api/v1/backups/repositories/${id}/retention`);
+}
+
+export async function saveRepositoryRetention(id: string, policy: Partial<BackupRetentionPolicy>): Promise<ApiResponse<BackupRetentionPolicy>> {
+  return apiFetch<BackupRetentionPolicy>(`/api/v1/backups/repositories/${id}/retention`, {
+    method: 'POST',
+    body: JSON.stringify(policy),
+  });
+}
+
+export async function listIncrementalSnapshots(repoId?: string): Promise<ApiResponse<BackupIncrementalSnapshot[]>> {
+  const url = repoId ? `/api/v1/backups/snapshots?repository_id=${encodeURIComponent(repoId)}` : '/api/v1/backups/snapshots';
+  return apiFetch<BackupIncrementalSnapshot[]>(url);
+}
+
+export async function createIncrementalSnapshot(data: {
+  repository_id: string;
+  scope: 'website' | 'database' | 'mail' | 'full_account';
+  target_name?: string;
+  include_paths?: string[];
+  exclude_paths?: string[];
+  database_type?: string;
+  database_name?: string;
+  database_user?: string;
+  database_password?: string;
+}): Promise<ApiResponse<BackupIncrementalSnapshot>> {
+  return apiFetch<BackupIncrementalSnapshot>('/api/v1/backups/snapshots', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getSnapshotFileTree(snapshotId: string, path: string = ''): Promise<ApiResponse<SnapshotFileNode[]>> {
+  const q = path ? `?path=${encodeURIComponent(path)}` : '';
+  return apiFetch<SnapshotFileNode[]>(`/api/v1/backups/snapshots/${snapshotId}/tree${q}`);
+}
+
+export async function restoreSnapshotFiles(snapshotId: string, data: {
+  selected_paths: string[];
+  target_directory?: string;
+  restore_mode?: 'in_place' | 'alternate';
+}): Promise<ApiResponse<IncrementalRestoreResult>> {
+  return apiFetch<IncrementalRestoreResult>(`/api/v1/backups/snapshots/${snapshotId}/restore-file`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function restoreFullAccountSnapshot(snapshotId: string, data: {
+  target_directory?: string;
+  restore_database?: boolean;
+  database_name?: string;
+  database_user?: string;
+  database_password?: string;
+  restore_mailboxes?: boolean;
+  dry_run?: boolean;
+}): Promise<ApiResponse<IncrementalRestoreResult>> {
+  return apiFetch<IncrementalRestoreResult>(`/api/v1/backups/snapshots/${snapshotId}/restore-full`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getDisasterRecoveryRunbook(repositoryId: string, targetHostname?: string): Promise<ApiResponse<DisasterRecoveryRunbook>> {
+  return apiFetch<DisasterRecoveryRunbook>('/api/v1/backups/disaster-recovery/runbook', {
+    method: 'POST',
+    body: JSON.stringify({
+      repository_id: repositoryId,
+      target_hostname: targetHostname || 'recovery-host.hostvra.internal',
+    }),
+  });
+}
+
+export async function testBackupDestinationConfig(cfg: {
+  type: string;
+  endpoint?: string;
+  region?: string;
+  bucket?: string;
+  access_key?: string;
+  secret_key?: string;
+  prefix?: string;
+  local_path?: string;
+}): Promise<ApiResponse<DestinationTestResult>> {
+  return apiFetch<DestinationTestResult>('/api/v1/backups/destinations/verify', {
+    method: 'POST',
+    body: JSON.stringify(cfg),
+  });
+}

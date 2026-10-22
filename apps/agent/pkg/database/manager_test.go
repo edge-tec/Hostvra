@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 )
@@ -102,4 +103,83 @@ func TestDatabaseManager_PrivilegeScoping(t *testing.T) {
 		t.Fatalf("unexpected error for valid scoped grant: %v", err)
 	}
 }
+
+func TestDatabaseManager_RemoteAccessValidation(t *testing.T) {
+	// 1. Valid IPs and CIDRs
+	if err := ValidateAuthorizedIP("192.168.1.100", false); err != nil {
+		t.Errorf("expected valid IP, got: %v", err)
+	}
+	if err := ValidateAuthorizedIP("10.0.0.0/24", false); err != nil {
+		t.Errorf("expected valid CIDR, got: %v", err)
+	}
+
+	// 2. Invalid IP string
+	if err := ValidateAuthorizedIP("not-an-ip", false); err != ErrInvalidAuthorizedIP {
+		t.Errorf("expected ErrInvalidAuthorizedIP, got: %v", err)
+	}
+
+	// 3. Wildcard '%' forbidden by default
+	if err := ValidateAuthorizedIP("%", false); err != ErrWildcardIPForbidden {
+		t.Errorf("expected ErrWildcardIPForbidden without flag, got: %v", err)
+	}
+	if err := ValidateAuthorizedIP("0.0.0.0/0", false); err != ErrWildcardIPForbidden {
+		t.Errorf("expected ErrWildcardIPForbidden for 0.0.0.0/0, got: %v", err)
+	}
+
+	// 4. Wildcard allowed with explicit flag
+	if err := ValidateAuthorizedIP("%", true); err != nil {
+		t.Errorf("expected wildcard to be allowed when confirmed, got: %v", err)
+	}
+}
+
+func TestDatabaseManager_MaintenanceAndHealth(t *testing.T) {
+	os.Setenv("HOSTVRA_TEST_MODE", "1")
+	defer os.Unsetenv("HOSTVRA_TEST_MODE")
+
+	mgr := NewManager()
+	ctx := context.Background()
+
+	// 1. Database Health
+	health, err := mgr.GetDatabaseHealth(ctx, "wp_staging_db")
+	if err != nil {
+		t.Fatalf("failed to get database health: %v", err)
+	}
+	if health.TableCount == 0 || health.TotalSizeBytes == 0 {
+		t.Errorf("unexpected health report: %+v", health)
+	}
+
+	// 2. Table Integrity Check
+	checkRes, err := mgr.CheckTableIntegrity(ctx, "wp_staging_db", nil)
+	if err != nil {
+		t.Fatalf("failed to check integrity: %v", err)
+	}
+	if checkRes.Status != "success" || checkRes.TablesProcessed == 0 {
+		t.Errorf("unexpected check result: %+v", checkRes)
+	}
+
+	// 3. Table Optimization
+	optRes, err := mgr.OptimizeDatabase(ctx, "wp_staging_db", []string{"wp_posts"})
+	if err != nil {
+		t.Fatalf("failed to optimize table: %v", err)
+	}
+	if optRes.Status != "success" || optRes.BytesReclaimed <= 0 {
+		t.Errorf("unexpected optimize result: %+v", optRes)
+	}
+
+	// 4. Table Analyze
+	anzRes, err := mgr.AnalyzeDatabase(ctx, "wp_staging_db", nil)
+	if err != nil {
+		t.Fatalf("failed to analyze tables: %v", err)
+	}
+	if anzRes.Status != "success" {
+		t.Errorf("unexpected analyze result: %+v", anzRes)
+	}
+
+	// 5. Remote Access Connection Test
+	testRes, err := mgr.TestRemoteAccessConnection(ctx, "127.0.0.1", 3306, "test_user", "pass", "wp_staging_db")
+	if err != nil || !testRes.Success {
+		t.Fatalf("expected successful remote connection test, got: %+v (err: %v)", testRes, err)
+	}
+}
+
 

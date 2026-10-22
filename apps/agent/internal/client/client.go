@@ -26,20 +26,30 @@ func NewAPIClient(baseURL string) *APIClient {
 	}
 }
 
+type ServerCapabilities struct {
+	WebServers  []string `json:"web_servers"`
+	PHPVersions []string `json:"php_versions"`
+	Databases   []string `json:"databases"`
+	Services    []string `json:"services"`
+}
+
 type EnrollRequest struct {
-	EnrollmentToken string `json:"enrollment_token"`
-	Name            string `json:"name"`
-	Hostname        string `json:"hostname"`
-	IPAddress       string `json:"ip_address"`
-	OSName          string `json:"os_name"`
-	OSVersion       string `json:"os_version"`
-	Architecture    string `json:"architecture"`
-	KernelVersion   string `json:"kernel_version"`
-	AgentVersion    string `json:"agent_version"`
-	CPUCores        int    `json:"cpu_cores"`
-	CPUModel        string `json:"cpu_model"`
-	RAMTotalMB      int64  `json:"ram_total_mb"`
-	DiskTotalGB     int64  `json:"disk_total_gb"`
+	EnrollmentToken string              `json:"enrollment_token"`
+	Name            string              `json:"name"`
+	Hostname        string              `json:"hostname"`
+	IPAddress       string              `json:"ip_address"`
+	OSName          string              `json:"os_name"`
+	OSVersion       string              `json:"os_version"`
+	Architecture    string              `json:"architecture"`
+	KernelVersion   string              `json:"kernel_version"`
+	AgentVersion    string              `json:"agent_version"`
+	CPUCores        int                 `json:"cpu_cores"`
+	CPUModel        string              `json:"cpu_model"`
+	RAMTotalMB      int64               `json:"ram_total_mb"`
+	DiskTotalGB     int64               `json:"disk_total_gb"`
+	Capabilities    *ServerCapabilities `json:"capabilities,omitempty"`
+	MaxWebsites     int                 `json:"max_websites,omitempty"`
+	MaxDatabases    int                 `json:"max_databases,omitempty"`
 }
 
 type EnrollResponseData struct {
@@ -105,12 +115,18 @@ func (c *APIClient) Enroll(token string, osInfo osadapter.OSAdapter, metrics *co
 type HeartbeatPayload struct {
 	UptimeSeconds int64                      `json:"uptime_seconds"`
 	Metric        *collector.MetricsSnapshot `json:"metric"`
+	Capabilities  *ServerCapabilities        `json:"capabilities,omitempty"`
 }
 
 func (c *APIClient) SendHeartbeat(serverID, agentKey string, metrics *collector.MetricsSnapshot) error {
+	return c.SendHeartbeatWithCapabilities(serverID, agentKey, metrics, nil)
+}
+
+func (c *APIClient) SendHeartbeatWithCapabilities(serverID, agentKey string, metrics *collector.MetricsSnapshot, caps *ServerCapabilities) error {
 	reqBody := HeartbeatPayload{
 		UptimeSeconds: metrics.UptimeSec,
 		Metric:        metrics,
+		Capabilities:  caps,
 	}
 
 	payload, err := json.Marshal(reqBody)

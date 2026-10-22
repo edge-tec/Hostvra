@@ -37,6 +37,7 @@ import {
   UploadCloud,
   FileText,
   Edit3,
+  Download,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, User as UserType, Organization, SystemSettings } from '@/lib/api';
@@ -225,6 +226,18 @@ export default function SettingsPage() {
   const [notLoggedInResponse, setNotLoggedInResponse] = useState('404 - Not Found');
   const [passwordExpire, setPasswordExpire] = useState('Never');
 
+  // Real Enterprise TOTP 2FA State
+  const [twoFactorModalOpen, setTwoFactorModalOpen] = useState(false);
+  const [twoFactorStatus, setTwoFactorStatus] = useState<{ enabled: boolean; remaining: number }>({ enabled: false, remaining: 0 });
+  const [twoFactorStep, setTwoFactorStep] = useState<'password' | 'scan' | 'recovery_codes' | 'disable' | 'regenerate'>('password');
+  const [twoFactorPassword, setTwoFactorPassword] = useState('');
+  const [twoFactorSecret, setTwoFactorSecret] = useState('');
+  const [twoFactorQRCode, setTwoFactorQRCode] = useState('');
+  const [twoFactorCode, setTwoFactorCode] = useState('');
+  const [twoFactorRecoveryCodes, setTwoFactorRecoveryCodes] = useState<string[]>([]);
+  const [twoFactorLoading, setTwoFactorLoading] = useState(false);
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null);
+
   // Modals
   const [modalType, setModalType] = useState<string | null>(null);
   const [modalInput, setModalInput] = useState('');
@@ -306,6 +319,17 @@ export default function SettingsPage() {
             }
           }
         } catch (_) {}
+        // Fetch 2FA status
+        try {
+          const tfaRes = await apiFetch<{ two_factor_enabled: boolean; recovery_codes_remaining: number }>('/api/v1/auth/2fa/status');
+          if (tfaRes?.success && tfaRes.data) {
+            setGoogleAuth(tfaRes.data.two_factor_enabled);
+            setTwoFactorStatus({
+              enabled: tfaRes.data.two_factor_enabled,
+              remaining: tfaRes.data.recovery_codes_remaining || 0,
+            });
+          }
+        } catch (_) {}
       } catch (err) {
         console.error('Failed to load system settings:', err);
       } finally {
@@ -314,6 +338,132 @@ export default function SettingsPage() {
     }
     loadSettings();
   }, []);
+
+  const openTwoFactorModal = (step?: 'password' | 'disable' | 'regenerate') => {
+    setTwoFactorError(null);
+    setTwoFactorPassword('');
+    setTwoFactorCode('');
+    if (twoFactorStatus.enabled) {
+      setTwoFactorStep(step || 'disable');
+    } else {
+      setTwoFactorStep('password');
+    }
+    setTwoFactorModalOpen(true);
+  };
+
+  const handle2FAPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!twoFactorPassword) return;
+    setTwoFactorLoading(true);
+    setTwoFactorError(null);
+
+    try {
+      if (twoFactorStep === 'regenerate') {
+        const res = await apiFetch<{ recovery_codes: string[] }>('/api/v1/auth/2fa/recovery-codes', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: twoFactorPassword }),
+        });
+        if (res.success && res.data?.recovery_codes) {
+          const codes = res.data.recovery_codes;
+          setTwoFactorRecoveryCodes(codes);
+          setTwoFactorStatus((prev) => ({ ...prev, remaining: codes.length }));
+          setTwoFactorStep('recovery_codes');
+          showToast('Emergency recovery codes regenerated');
+        } else {
+          setTwoFactorError(res.error?.message || 'Failed to regenerate recovery codes');
+        }
+      } else {
+        const res = await apiFetch<{ secret: string; otpauth_url: string; qr_code: string }>('/api/v1/auth/2fa/setup', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: twoFactorPassword }),
+        });
+        if (res.success && res.data) {
+          setTwoFactorSecret(res.data.secret);
+          setTwoFactorQRCode(res.data.qr_code);
+          setTwoFactorStep('scan');
+        } else {
+          setTwoFactorError(res.error?.message || 'Incorrect account password');
+        }
+      }
+    } catch (err: any) {
+      setTwoFactorError(err.message || 'Setup request failed');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handle2FAVerifyAndEnable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!twoFactorCode || twoFactorCode.length !== 6) {
+      setTwoFactorError('Please enter the 6-digit code from your authenticator app');
+      return;
+    }
+    setTwoFactorLoading(true);
+    setTwoFactorError(null);
+
+    try {
+      const res = await apiFetch<{ success: boolean; recovery_codes: string[] }>('/api/v1/auth/2fa/enable', {
+        method: 'POST',
+        body: JSON.stringify({ code: twoFactorCode.trim() }),
+      });
+      if (res.success && res.data?.recovery_codes) {
+        setTwoFactorRecoveryCodes(res.data.recovery_codes);
+        setTwoFactorStatus({ enabled: true, remaining: res.data.recovery_codes.length });
+        setGoogleAuth(true);
+        setTwoFactorStep('recovery_codes');
+        showToast('Two-Factor Authentication successfully enabled!');
+      } else {
+        setTwoFactorError(res.error?.message || 'Invalid verification code');
+      }
+    } catch (err: any) {
+      setTwoFactorError(err.message || 'Verification request failed');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const handle2FADisable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!twoFactorPassword || !twoFactorCode) {
+      setTwoFactorError('Password and verification code are required to disable 2FA');
+      return;
+    }
+    setTwoFactorLoading(true);
+    setTwoFactorError(null);
+
+    try {
+      const res = await apiFetch<{ success: boolean }>('/api/v1/auth/2fa/disable', {
+        method: 'POST',
+        body: JSON.stringify({
+          current_password: twoFactorPassword,
+          code: twoFactorCode.trim(),
+        }),
+      });
+      if (res.success) {
+        setTwoFactorStatus({ enabled: false, remaining: 0 });
+        setGoogleAuth(false);
+        setTwoFactorModalOpen(false);
+        showToast('Two-Factor Authentication disabled');
+      } else {
+        setTwoFactorError(res.error?.message || 'Failed to disable 2FA. Check password and code.');
+      }
+    } catch (err: any) {
+      setTwoFactorError(err.message || 'Request failed');
+    } finally {
+      setTwoFactorLoading(false);
+    }
+  };
+
+  const downloadRecoveryCodesTxt = () => {
+    const text = 'HOSTVRA EMERGENCY RECOVERY CODES\nGenerated: ' + new Date().toISOString() + '\n\nEach code can be used ONCE if you lose access to your authenticator app:\n\n' + twoFactorRecoveryCodes.join('\n') + '\n\nKeep this file in a secure location.';
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'hostvra-recovery-codes.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Persist settings to backend
   const persistSettings = async (overrides: Partial<SystemSettings>) => {
@@ -502,10 +652,6 @@ export default function SettingsPage() {
       setNotLoggedInResponse(modalInput);
       await persistSettings({ not_logged_in_response: modalInput });
       showToast(`Unauthenticated response code set to ${modalInput}`);
-    } else if (modalType === 'googleAuth') {
-      setGoogleAuth(true);
-      await persistSettings({ google_auth: true });
-      showToast('Google Authenticator 2FA enabled');
     } else if (modalType === 'tempLogin') {
       showToast(`Temporary login URL generated: https://${serverIp}:${panelPort}${securityEntrance}?token=${Math.random().toString(36).substring(7)}`);
     } else if (modalType === 'whitelist') {
@@ -2218,44 +2364,55 @@ export default function SettingsPage() {
 
               )}
 
-              {/* 3. Google Authenticator */}
+              {/* 3. Two-Factor Authentication (TOTP / Google Authenticator) */}
               {searchResults.showRowGoogleAuth && (
                 <div className="py-3 flex items-center justify-between">
-                  <span className="w-48 text-slate-800 dark:text-slate-200">Google Authenticator</span>
+                  <div className="w-48">
+                    <span className="text-slate-800 dark:text-slate-200 block font-semibold">Two-Factor Auth (2FA)</span>
+                    <span className="text-[11px] text-slate-400">TOTP Authenticator & Recovery</span>
+                  </div>
                   <div className="flex-1 flex items-center gap-3">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={googleAuth}
-                      onClick={() => {
-                        const next = !googleAuth;
-                        setGoogleAuth(next);
-                        persistSettings({ google_auth: next });
-                        showToast(`Google Authenticator ${next ? 'Enabled' : 'Disabled'}`);
-                      }}
-                      className={`w-10 h-6 shrink-0 inline-flex items-center rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
-                        googleAuth ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-700'
-                      }`}
-                    >
-                      <span
-                        className={`w-5 h-5 rounded-full bg-white shadow-xs transition-transform transform ${
-                          googleAuth ? 'translate-x-4' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                    <button
-                      onClick={() => setModalType('googleAuth')}
-                      className="px-2.5 py-1 rounded bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-slate-700 dark:text-slate-200 text-xs font-semibold"
-                    >
-                      Modify
-                    </button>
-                    <span className="text-slate-400 font-normal">
-                      A dynamic verification code is required to log in to the panel,{' '}
-                      <span className="text-emerald-600 cursor-pointer">Help</span>
+                    {twoFactorStatus.enabled ? (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Enabled ({twoFactorStatus.remaining} codes remaining)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openTwoFactorModal('regenerate')}
+                          className="px-2.5 py-1 rounded bg-white dark:bg-surface-700 border border-slate-300 dark:border-surface-600 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-surface-600 transition"
+                        >
+                          Regenerate Codes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openTwoFactorModal('disable')}
+                          className="px-2.5 py-1 rounded bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-400 text-xs font-semibold hover:bg-rose-100 transition"
+                        >
+                          Disable 2FA
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-surface-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                          Disabled
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openTwoFactorModal('password')}
+                          className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition"
+                        >
+                          Enable 2FA
+                        </button>
+                      </>
+                    )}
+                    <span className="text-slate-400 font-normal text-xs">
+                      Requires TOTP authenticator code or emergency recovery code on sign in.
                     </span>
                   </div>
                 </div>
-
               )}
 
               {/* 4. Strong password */}
@@ -2713,21 +2870,7 @@ export default function SettingsPage() {
               </h3>
 
               <div className="space-y-4 text-xs font-semibold pt-2">
-                {modalType === 'googleAuth' ? (
-                  <div className="text-center space-y-3">
-                    <div className="w-36 h-36 mx-auto bg-slate-100 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 rounded-xl flex items-center justify-center">
-                      <Smartphone className="w-16 h-16 text-emerald-600" />
-                    </div>
-                    <p className="text-slate-500 text-xs">
-                      Scan QR code with Google Authenticator or enter secret key: <strong className="font-mono text-emerald-600">JBSWY3DPEHPK3PXP</strong>
-                    </p>
-                    <input
-                      type="text"
-                      placeholder="Enter 6-digit code"
-                      className="w-full text-center tracking-widest text-base font-mono px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700"
-                    />
-                  </div>
-                ) : modalType === 'tempLogin' ? (
+                {modalType === 'tempLogin' ? (
                   <div className="space-y-3">
                     <p className="text-slate-500">
                       Generate a single-use time-limited link to access the control panel without entering password.
@@ -2779,6 +2922,291 @@ export default function SettingsPage() {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            TWO-FACTOR AUTHENTICATION (TOTP) MODAL
+            ========================================================================= */}
+        {twoFactorModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setTwoFactorModalOpen(false);
+                  setTwoFactorError(null);
+                }}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 flex items-center justify-center text-emerald-600">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                    {twoFactorStep === 'password' && 'Enable Two-Factor Authentication'}
+                    {twoFactorStep === 'scan' && 'Scan QR Code & Verify'}
+                    {twoFactorStep === 'recovery_codes' && 'Emergency Recovery Codes'}
+                    {twoFactorStep === 'disable' && 'Disable Two-Factor Authentication'}
+                    {twoFactorStep === 'regenerate' && 'Regenerate Recovery Codes'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {twoFactorStep === 'password' && 'Enter your account password to begin TOTP enrollment.'}
+                    {twoFactorStep === 'scan' && 'Scan using Google Authenticator, Authy, or 1Password.'}
+                    {twoFactorStep === 'recovery_codes' && 'Save these one-time codes in case you lose your phone.'}
+                    {twoFactorStep === 'disable' && 'Re-authenticate to deactivate two-factor protection.'}
+                    {twoFactorStep === 'regenerate' && 'Invalidate old codes and issue 8 fresh recovery codes.'}
+                  </p>
+                </div>
+              </div>
+
+              {twoFactorError && (
+                <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-400 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{twoFactorError}</span>
+                </div>
+              )}
+
+              {/* Step: Password Re-authentication */}
+              {(twoFactorStep === 'password' || twoFactorStep === 'regenerate') && (
+                <form onSubmit={handle2FAPasswordSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                      Current Account Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={twoFactorPassword}
+                      onChange={(e) => setTwoFactorPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setTwoFactorModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={twoFactorLoading || !twoFactorPassword}
+                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                    >
+                      {twoFactorLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                      <span>{twoFactorStep === 'regenerate' ? 'Regenerate Codes' : 'Continue to Scan'}</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Step: Scan QR Code & Enter 6-digit verification code */}
+              {twoFactorStep === 'scan' && (
+                <form onSubmit={handle2FAVerifyAndEnable} className="space-y-4">
+                  <div className="flex flex-col items-center justify-center p-3 bg-slate-50 dark:bg-surface-800/70 rounded-xl border border-slate-200 dark:border-surface-700">
+                    {twoFactorQRCode ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={twoFactorQRCode}
+                        alt="TOTP Enrollment QR Code"
+                        className="w-44 h-44 rounded-lg bg-white p-2 border border-slate-300 dark:border-surface-600 shadow-xs"
+                      />
+                    ) : (
+                      <div className="w-44 h-44 flex items-center justify-center text-slate-400">
+                        <RefreshCw className="w-6 h-6 animate-spin" />
+                      </div>
+                    )}
+                    <div className="mt-3 text-center">
+                      <p className="text-[11px] text-slate-500 mb-1">Manual Entry Secret Key (Base32):</p>
+                      <div className="inline-flex items-center gap-2 bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 px-3 py-1 rounded-lg">
+                        <span className="font-mono font-bold text-xs text-emerald-600 dark:text-emerald-400 tracking-wider">
+                          {twoFactorSecret}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (twoFactorSecret) {
+                              navigator.clipboard.writeText(twoFactorSecret);
+                              showToast('Secret key copied to clipboard');
+                            }
+                          }}
+                          className="text-slate-400 hover:text-slate-600 p-1"
+                          title="Copy Secret"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                      Enter 6-digit Authenticator Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      autoFocus
+                      required
+                      value={twoFactorCode}
+                      onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="123456"
+                      className="w-full text-center tracking-widest text-lg font-mono font-bold px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div className="flex justify-between items-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setTwoFactorStep('password')}
+                      className="text-slate-500 hover:text-slate-700 text-xs font-semibold"
+                    >
+                      Back
+                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTwoFactorModalOpen(false)}
+                        className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={twoFactorLoading || twoFactorCode.length !== 6}
+                        className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer"
+                      >
+                        {twoFactorLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                        <span>Verify &amp; Activate 2FA</span>
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+
+              {/* Step: Recovery Codes Display */}
+              {twoFactorStep === 'recovery_codes' && (
+                <div className="space-y-4">
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl text-amber-800 dark:text-amber-300 text-xs">
+                    <p className="font-bold flex items-center gap-1.5 mb-1">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      Save Your Recovery Codes Securely
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      Each code below can be used <strong>only once</strong> as your emergency password if you ever lose your phone or 2FA app. We do not store these codes in plain text.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-surface-800 p-3 rounded-xl border border-slate-200 dark:border-surface-700 font-mono text-xs text-center font-bold text-slate-800 dark:text-slate-200">
+                    {twoFactorRecoveryCodes.map((code, idx) => (
+                      <div key={idx} className="bg-white dark:bg-surface-900 py-1.5 px-2 rounded-lg border border-slate-200 dark:border-surface-700 tracking-wider">
+                        {code}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(twoFactorRecoveryCodes.join('\n'));
+                        showToast('Recovery codes copied to clipboard');
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      Copy All Codes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={downloadRecoveryCodesTxt}
+                      className="flex-1 py-2 rounded-xl bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-bold hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download .txt
+                    </button>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setTwoFactorModalOpen(false)}
+                      className="px-6 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md cursor-pointer"
+                    >
+                      I Have Saved My Codes
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Step: Disable 2FA */}
+              {twoFactorStep === 'disable' && (
+                <form onSubmit={handle2FADisable} className="space-y-4">
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 rounded-xl text-rose-800 dark:text-rose-300 text-xs">
+                    <p className="font-bold flex items-center gap-1.5 mb-1">
+                      <ShieldAlert className="w-4 h-4 shrink-0" />
+                      Deactivating Two-Factor Protection
+                    </p>
+                    <p className="text-[11px] leading-relaxed">
+                      Disabling 2FA reduces account security. To proceed, please confirm your current account password and current authenticator code (or an emergency recovery code).
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                      Current Account Password
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={twoFactorPassword}
+                      onChange={(e) => setTwoFactorPassword(e.target.value)}
+                      placeholder="••••••••••••"
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                      Current 6-Digit Code or Recovery Code
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={twoFactorCode}
+                      onChange={(e) => setTwoFactorCode(e.target.value)}
+                      placeholder="123456 or XXXX-XXXX-XXXX"
+                      className="w-full tracking-wider font-mono px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setTwoFactorModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={twoFactorLoading || !twoFactorPassword || !twoFactorCode}
+                      className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      {twoFactorLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                      <span>Confirm &amp; Disable 2FA</span>
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         )}

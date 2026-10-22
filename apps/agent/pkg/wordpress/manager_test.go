@@ -17,6 +17,7 @@ func TestWordPressManagerLifecycle(t *testing.T) {
 
 	mgr := &Manager{
 		WPCLIPath: "",
+		MockMode:  true,
 		CommandRunner: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return []byte("success"), nil
 		},
