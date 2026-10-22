@@ -101,11 +101,13 @@ export default function BackupsPage() {
   const [newRepoModalOpen, setNewRepoModalOpen] = useState(false);
   const [submittingNewRepo, setSubmittingNewRepo] = useState(false);
   const [repoProvider, setRepoProvider] = useState<'native' | 'restic'>('native');
-  const [repoDestPreset, setRepoDestPreset] = useState<'wasabi' | 's3' | 'cloudflare_r2' | 'backblaze_b2' | 'local' | 'nfs'>('wasabi');
+  const [repoDestPreset, setRepoDestPreset] = useState<'wasabi' | 's3' | 'cloudflare_r2' | 'backblaze_b2' | 'custom_s3' | 'local' | 'nfs'>('wasabi');
   const [repoName, setRepoName] = useState('');
   const [repoUri, setRepoUri] = useState('');
   const [repoPassword, setRepoPassword] = useState('');
   const [repoDeletionProtection, setRepoDeletionProtection] = useState(true);
+  const [cfAccountId, setCfAccountId] = useState('');
+  const [localMountPath, setLocalMountPath] = useState('/var/backups/hostvra/repo-1');
   const [repoS3Endpoint, setRepoS3Endpoint] = useState('s3.wasabisys.com');
   const [repoS3Region, setRepoS3Region] = useState('us-east-1');
   const [repoS3Bucket, setRepoS3Bucket] = useState('');
@@ -282,11 +284,14 @@ export default function BackupsPage() {
         setRepoS3Region('us-east-1');
         setRepoUri('s3:s3.wasabisys.com/' + (repoS3Bucket || 'hostvra-backups'));
         break;
-      case 'cloudflare_r2':
-        setRepoS3Endpoint('<account_id>.r2.cloudflarestorage.com');
+      case 'cloudflare_r2': {
+        const id = cfAccountId.trim();
+        const ep = id ? `${id}.r2.cloudflarestorage.com` : 'r2.cloudflarestorage.com';
+        setRepoS3Endpoint(ep);
         setRepoS3Region('auto');
-        setRepoUri('s3:https://<account_id>.r2.cloudflarestorage.com/' + (repoS3Bucket || 'hostvra-backups'));
+        setRepoUri(`s3:https://${ep}/${repoS3Bucket || 'hostvra-backups'}`);
         break;
+      }
       case 'backblaze_b2':
         setRepoS3Endpoint('s3.us-west-002.backblazeb2.com');
         setRepoS3Region('us-west-002');
@@ -297,12 +302,33 @@ export default function BackupsPage() {
         setRepoS3Region('us-east-1');
         setRepoUri('s3:s3.amazonaws.com/' + (repoS3Bucket || 'hostvra-backups'));
         break;
+      case 'custom_s3':
+        setRepoS3Endpoint('s3.us-east-1.amazonaws.com');
+        setRepoS3Region('us-east-1');
+        setRepoUri('s3:s3.us-east-1.amazonaws.com/' + (repoS3Bucket || 'hostvra-backups'));
+        break;
       case 'local':
-        setRepoUri('/var/backups/hostvra/repo-1');
+        setRepoUri(localMountPath || '/var/backups/hostvra/repo-1');
         break;
       case 'nfs':
-        setRepoUri('/mnt/nfs-share/hostvra-backups');
+        setRepoUri(localMountPath || '/mnt/nfs-share/hostvra-backups');
         break;
+    }
+  };
+
+  const handleCfAccountIdChange = (val: string) => {
+    setCfAccountId(val);
+    const cleaned = val.trim();
+    const ep = cleaned ? `${cleaned}.r2.cloudflarestorage.com` : 'r2.cloudflarestorage.com';
+    setRepoS3Endpoint(ep);
+    setRepoUri(`s3:https://${ep}/${repoS3Bucket || 'hostvra-backups'}`);
+  };
+
+  const handleBucketChange = (b: string) => {
+    setRepoS3Bucket(b);
+    if (repoDestPreset !== 'local' && repoDestPreset !== 'nfs') {
+      const ep = repoS3Endpoint.trim() || 's3.wasabisys.com';
+      setRepoUri(`s3:${ep.startsWith('http') ? ep : 'https://' + ep}/${b}`);
     }
   };
 
@@ -310,6 +336,27 @@ export default function BackupsPage() {
   const handleTestRepoConnection = async () => {
     setTestingRepoConn(true);
     setTestRepoResult(null);
+    setErrorMsg(null);
+
+    // Validate Cloudflare R2 Account ID
+    if (repoDestPreset === 'cloudflare_r2' && (!cfAccountId.trim() || repoS3Endpoint.includes('<account_id>'))) {
+      const msg = 'Please enter your Cloudflare Account ID before running the connection drill.';
+      setErrorMsg(msg);
+      setTestRepoResult({
+        success: false,
+        error_message: msg,
+        latency_ms: 0,
+        auth_passed: false,
+        upload_passed: false,
+        listing_passed: false,
+        restore_passed: false,
+        deletion_passed: false,
+        tested_at: new Date().toISOString(),
+      });
+      setTestingRepoConn(false);
+      return;
+    }
+
     try {
       const res = await testBackupDestinationConfig({
         type: repoDestPreset === 'local' || repoDestPreset === 'nfs' ? 'local' : 's3',
@@ -322,11 +369,38 @@ export default function BackupsPage() {
       });
       if (res.success && res.data) {
         setTestRepoResult(res.data);
+        if (!res.data.success && res.data.error_message) {
+          setErrorMsg(res.data.error_message);
+        }
       } else {
-        setErrorMsg(res.error?.message || 'Destination verification failed');
+        const errMsg = res.error?.message || 'Destination verification failed';
+        setErrorMsg(errMsg);
+        setTestRepoResult({
+          success: false,
+          error_message: errMsg,
+          latency_ms: 0,
+          auth_passed: false,
+          upload_passed: false,
+          listing_passed: false,
+          restore_passed: false,
+          deletion_passed: false,
+          tested_at: new Date().toISOString(),
+        });
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Connection test error');
+      const errMsg = err.message || 'Connection test error';
+      setErrorMsg(errMsg);
+      setTestRepoResult({
+        success: false,
+        error_message: errMsg,
+        latency_ms: 0,
+        auth_passed: false,
+        upload_passed: false,
+        listing_passed: false,
+        restore_passed: false,
+        deletion_passed: false,
+        tested_at: new Date().toISOString(),
+      });
     } finally {
       setTestingRepoConn(false);
     }
@@ -339,6 +413,12 @@ export default function BackupsPage() {
       setErrorMsg('Repository name is required');
       return;
     }
+
+    if (repoDestPreset === 'cloudflare_r2' && (!cfAccountId.trim() || repoS3Endpoint.includes('<account_id>'))) {
+      setErrorMsg('Please enter your Cloudflare Account ID before creating the repository.');
+      return;
+    }
+
     setSubmittingNewRepo(true);
     setErrorMsg(null);
 
@@ -350,6 +430,9 @@ export default function BackupsPage() {
         storageConfig['endpoint'] = repoS3Endpoint.trim();
         storageConfig['region'] = repoS3Region.trim();
         storageConfig['bucket'] = repoS3Bucket.trim();
+        if (cfAccountId.trim()) {
+          storageConfig['cf_account_id'] = cfAccountId.trim();
+        }
       }
 
       const res = await createBackupRepository({
@@ -1744,12 +1827,13 @@ export default function BackupsPage() {
                   <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide block mb-1.5">
                     Storage Provider Preset
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {[
                       { id: 'wasabi', label: 'Wasabi Hot Cloud' },
                       { id: 'cloudflare_r2', label: 'Cloudflare R2' },
                       { id: 'backblaze_b2', label: 'Backblaze B2' },
                       { id: 's3', label: 'Amazon S3' },
+                      { id: 'custom_s3', label: 'Custom S3 / MinIO' },
                       { id: 'local', label: 'Local Directory' },
                       { id: 'nfs', label: 'NFS Network Share' },
                     ].map((p) => (
@@ -1759,7 +1843,7 @@ export default function BackupsPage() {
                         onClick={() => handlePresetSelect(p.id as any)}
                         className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
                           repoDestPreset === p.id
-                            ? 'bg-brand-500/10 border-brand-500/30 text-brand-300 font-bold shadow-xs'
+                            ? 'bg-brand-500/10 border-brand-500/30 text-brand-300 font-bold shadow-xs ring-1 ring-brand-500/20'
                             : 'bg-surface-950 border-surface-800 text-slate-300 hover:bg-surface-850'
                         }`}
                       >
@@ -1776,7 +1860,7 @@ export default function BackupsPage() {
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Primary Wasabi Vault"
+                      placeholder="e.g. Primary Cloudflare R2 Vault"
                       value={repoName}
                       onChange={(e) => setRepoName(e.target.value)}
                       className="w-full px-3 py-2 rounded-xl bg-surface-950 border border-surface-800 text-white focus:outline-hidden focus:border-brand-500"
@@ -1799,7 +1883,46 @@ export default function BackupsPage() {
                 {/* S3 Details if cloud */}
                 {repoDestPreset !== 'local' && repoDestPreset !== 'nfs' && (
                   <div className="bg-surface-950 p-3.5 rounded-xl border border-surface-800 space-y-3">
-                    <div className="text-[11px] font-bold text-white uppercase tracking-wider">Remote S3 Credentials</div>
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-bold text-white uppercase tracking-wider">
+                        {repoDestPreset === 'cloudflare_r2'
+                          ? 'Cloudflare R2 Credentials'
+                          : repoDestPreset === 'wasabi'
+                          ? 'Wasabi Hot Cloud Credentials'
+                          : repoDestPreset === 'backblaze_b2'
+                          ? 'Backblaze B2 Credentials'
+                          : repoDestPreset === 'custom_s3'
+                          ? 'Custom S3 / MinIO Credentials'
+                          : 'Amazon S3 Credentials'}
+                      </div>
+                      <span className="text-[10px] text-emerald-400 font-mono">Hardware-Accelerated AES-256</span>
+                    </div>
+
+                    {/* Dedicated Cloudflare Account ID Field */}
+                    {repoDestPreset === 'cloudflare_r2' && (
+                      <div className="p-2.5 rounded-lg bg-surface-900 border border-brand-500/30">
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-brand-300">
+                            Cloudflare Account ID <span className="text-emerald-400">*Required</span>
+                          </label>
+                          <span className="text-[9px] text-slate-400">Dash &gt; R2 &gt; Overview &gt; Account ID</span>
+                        </div>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. 702ba639769048517f6490eac5b4648c"
+                          value={cfAccountId}
+                          onChange={(e) => handleCfAccountIdChange(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-surface-950 border border-surface-700 text-white font-mono text-xs focus:border-brand-500"
+                        />
+                        {!cfAccountId.trim() && (
+                          <div className="text-[10px] text-amber-400/90 mt-1 flex items-center gap-1">
+                            <span>⚠ Please paste your 32-character Cloudflare Account ID to complete the R2 URL.</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="text-[10px] text-slate-400 block mb-0.5">Bucket Name</label>
@@ -1808,10 +1931,7 @@ export default function BackupsPage() {
                           required
                           placeholder="my-vault-bucket"
                           value={repoS3Bucket}
-                          onChange={(e) => {
-                            setRepoS3Bucket(e.target.value);
-                            setRepoUri(`s3:${repoS3Endpoint}/${e.target.value}`);
-                          }}
+                          onChange={(e) => handleBucketChange(e.target.value)}
                           className="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-800 text-white font-mono"
                         />
                       </div>
@@ -1826,12 +1946,30 @@ export default function BackupsPage() {
                       </div>
                     </div>
 
+                    {/* S3 Endpoint Host */}
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">
+                        Endpoint Host {repoDestPreset === 'cloudflare_r2' ? '(Auto-generated from Account ID)' : ''}
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={repoS3Endpoint}
+                        onChange={(e) => {
+                          setRepoS3Endpoint(e.target.value);
+                          setRepoUri(`s3:${e.target.value}/${repoS3Bucket || 'hostvra-backups'}`);
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-800 text-white font-mono text-xs"
+                      />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
                         <label className="text-[10px] text-slate-400 block mb-0.5">Access Key ID</label>
                         <input
                           type="text"
                           required
+                          placeholder="API Access Key ID"
                           value={repoS3AccessKey}
                           onChange={(e) => setRepoS3AccessKey(e.target.value)}
                           className="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-800 text-white font-mono"
@@ -1842,6 +1980,7 @@ export default function BackupsPage() {
                         <input
                           type="password"
                           required
+                          placeholder="API Secret Key"
                           value={repoS3SecretKey}
                           onChange={(e) => setRepoS3SecretKey(e.target.value)}
                           className="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-800 text-white font-mono"
@@ -1851,15 +1990,44 @@ export default function BackupsPage() {
                   </div>
                 )}
 
+                {/* Local or NFS Path Details */}
+                {(repoDestPreset === 'local' || repoDestPreset === 'nfs') && (
+                  <div className="bg-surface-950 p-3.5 rounded-xl border border-surface-800 space-y-2">
+                    <div className="text-[11px] font-bold text-white uppercase tracking-wider">
+                      {repoDestPreset === 'local' ? 'Local Filesystem Storage' : 'NFS Network Mount Storage'}
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Absolute Storage Directory Path</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder={repoDestPreset === 'local' ? '/var/backups/hostvra/repo-1' : '/mnt/nfs-share/hostvra-backups'}
+                        value={localMountPath}
+                        onChange={(e) => {
+                          setLocalMountPath(e.target.value);
+                          setRepoUri(e.target.value);
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-surface-900 border border-surface-800 text-white font-mono text-xs"
+                      />
+                      <span className="text-[10px] text-slate-500 mt-1 block">
+                        Will be automatically created with POSIX 0700 permissions restricted to root.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* URI */}
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-300 block mb-1">Target Repository URI</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-semibold text-slate-300">Target Repository URI</label>
+                    <span className="text-[10px] text-slate-500 font-mono">Auto-synchronized</span>
+                  </div>
                   <input
                     type="text"
                     required
                     value={repoUri}
                     onChange={(e) => setRepoUri(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-surface-950 border border-surface-800 text-white font-mono"
+                    className="w-full px-3 py-2 rounded-xl bg-surface-950 border border-surface-800 text-white font-mono text-xs"
                   />
                 </div>
 

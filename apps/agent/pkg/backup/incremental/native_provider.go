@@ -671,18 +671,25 @@ func (p *NativeDeduplicatedProvider) TestDestination(ctx context.Context, dest D
 
 	// 2. Cloud Destination Test (S3 / R2 / B2 / Wasabi)
 	// Verify endpoint syntax and reachable network
-	endpoint := dest.Endpoint
+	endpoint := strings.TrimSpace(dest.Endpoint)
+	if strings.Contains(endpoint, "<account_id>") {
+		result.ErrorMessage = "Please enter your actual Cloudflare Account ID instead of <account_id>"
+		return result, nil
+	}
 	if endpoint == "" {
 		switch dest.Type {
-		case "r2":
-			endpoint = "https://cloudflare.r2.cloudflarestorage.com"
+		case "r2", "cloudflare_r2":
+			endpoint = "https://r2.cloudflarestorage.com"
 		case "wasabi":
 			endpoint = "https://s3.wasabisys.com"
-		case "b2":
+		case "b2", "backblaze_b2":
 			endpoint = "https://s3.us-west-004.backblazeb2.com"
 		default:
 			endpoint = "https://s3.amazonaws.com"
 		}
+	}
+	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
+		endpoint = "https://" + endpoint
 	}
 
 	u, err := url.Parse(endpoint)
