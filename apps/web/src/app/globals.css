@@ -1026,6 +1026,47 @@ html.dark .gauge-track {
   stroke: #1e293b !important;
 }
 
+/* Modern Telemetry & Glassmorphic Utilities */
+.gauge-glow-green {
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.45));
+}
+.gauge-glow-amber {
+  filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.45));
+}
+.gauge-glow-rose {
+  filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.45));
+}
+.gauge-glow-cyan {
+  filter: drop-shadow(0 0 6px rgba(6, 182, 212, 0.45));
+}
+.gauge-glow-indigo {
+  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.45));
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
 /* ==========================================================================
    8. PROFESSIONAL DATA TABLES & ROWS SYSTEM (DUAL MODE)
    ========================================================================== */

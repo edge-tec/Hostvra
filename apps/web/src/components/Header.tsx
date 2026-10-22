@@ -187,14 +187,14 @@ export function Header() {
           <button
             type="button"
             onClick={() => setSearchModalOpen(true)}
-            className="relative w-full max-w-md hidden sm:flex items-center text-left pl-9 pr-14 py-2 text-xs text-slate-400 dark:text-slate-400 bg-[#F8FAFC] dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-lg hover:border-emerald-500/50 hover:bg-white dark:hover:bg-[#0F172A] focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all cursor-pointer group"
+            className="relative w-full max-w-md hidden sm:flex items-center text-left pl-9 pr-14 py-2 text-xs text-slate-500 dark:text-slate-400 bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/90 dark:border-slate-800 rounded-xl hover:border-emerald-500/50 hover:bg-white dark:hover:bg-slate-900/90 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all duration-200 cursor-pointer group shadow-2xs"
           >
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-4 w-4 text-slate-400 group-hover:text-emerald-500 transition-colors" />
             </div>
-            <span className="truncate">Search anything... (domains, files, settings)</span>
+            <span className="truncate font-medium">Search anything... (domains, files, settings)</span>
             <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none">
-              <kbd className="hidden md:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-2xs">
+              <kbd className="hidden md:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono font-medium text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-md shadow-2xs group-hover:border-emerald-500/30 transition-colors">
                 Ctrl + K
               </kbd>
             </div>
@@ -203,7 +203,7 @@ export function Header() {
           {/* Mobile Search Button */}
           <button
             onClick={() => setSearchModalOpen(true)}
-            className="p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden flex items-center justify-center flex-shrink-0 cursor-pointer"
+            className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 sm:hidden flex items-center justify-center flex-shrink-0 cursor-pointer transition"
             title="Search Platform"
             aria-label="Search Platform"
           >
@@ -212,11 +212,14 @@ export function Header() {
         </div>
 
         {/* Right: Actions, Node Status & User Dropdown */}
-        <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 flex-shrink-0">
           {/* Server Node Status */}
-          <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F8FAFC] dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>{osName}</span>
+          <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-200 font-semibold shadow-2xs">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+            </span>
+            <span className="tracking-tight">{osName}</span>
           </div>
 
           {/* Quick System Tools (Green Update, Orange Fix, Rose Restart) */}
@@ -224,9 +227,9 @@ export function Header() {
             <button
               onClick={() => setUpdateModalOpen(true)}
               title="System Updates"
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/80 flex items-center gap-1.5 transition cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50/90 dark:bg-emerald-950/40 hover:bg-emerald-100/90 dark:hover:bg-emerald-900/50 border border-emerald-200/90 dark:border-emerald-800/80 flex items-center gap-1.5 transition-all duration-200 shadow-2xs hover:shadow-xs hover:-translate-y-0.5 cursor-pointer"
             >
-              <RotateCw className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <RotateCw className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 group-hover:rotate-45 transition-transform" />
               <span className="hidden md:inline">Update</span>
             </button>
 
@@ -236,7 +239,7 @@ export function Header() {
                 executeFix();
               }}
               title="Diagnostics & Auto-Repair"
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/40 hover:bg-orange-100 dark:hover:bg-orange-950/60 border border-orange-200 dark:border-orange-800/80 flex items-center gap-1.5 transition cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-orange-700 dark:text-orange-300 bg-orange-50/90 dark:bg-orange-950/40 hover:bg-orange-100/90 dark:hover:bg-orange-900/50 border border-orange-200/90 dark:border-orange-800/80 flex items-center gap-1.5 transition-all duration-200 shadow-2xs hover:shadow-xs hover:-translate-y-0.5 cursor-pointer"
             >
               <Wrench className="w-3.5 h-3.5 text-orange-600 dark:text-orange-400" />
               <span className="hidden md:inline">Fix</span>
@@ -245,7 +248,7 @@ export function Header() {
             <button
               onClick={() => setRestartModalOpen(true)}
               title="Restart Services"
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-950/60 border border-rose-200 dark:border-rose-800/80 flex items-center gap-1.5 transition cursor-pointer"
+              className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-rose-700 dark:text-rose-300 bg-rose-50/90 dark:bg-rose-950/40 hover:bg-rose-100/90 dark:hover:bg-rose-900/50 border border-rose-200/90 dark:border-rose-800/80 flex items-center gap-1.5 transition-all duration-200 shadow-2xs hover:shadow-xs hover:-translate-y-0.5 cursor-pointer"
             >
               <Power className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
               <span className="hidden md:inline">Restart</span>
