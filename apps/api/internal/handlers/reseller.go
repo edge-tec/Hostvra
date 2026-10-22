@@ -270,8 +270,31 @@ func (h *ResellerHandler) GetUsage(w http.ResponseWriter, r *http.Request) {
 
 	usage, err := h.store.GetResellerUsage(r.Context(), targetUserID)
 	if err != nil {
-		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Reseller profile not found for user", nil, "")
-		return
+		// If admin/owner/superadmin and no profile exists, automatically provision one with enterprise capacity
+		if claims.Role == rbac.RoleOwner || claims.Role == rbac.RoleAdmin || claims.IsSuperAdmin || claims.Role == "superadmin" {
+			defaultProfile := &store.ResellerProfile{
+				ID:                   uuid.New(),
+				UserID:               targetUserID,
+				OrganizationID:       claims.OrganizationID,
+				MaxAccounts:          500,
+				AllocatedDiskMB:      5242880, // 5 TB
+				AllocatedBandwidthMB: 52428800,
+				AllowOverselling:     true,
+				BrandName:            "Hostvra Enterprise",
+				BrandLogoURL:         "/logo.svg",
+				CustomNameservers:    []string{"ns1.hostvra.com", "ns2.hostvra.com"},
+				CustomEmailSender:    "noreply@hostvra.com",
+				IsActive:             true,
+				CreatedAt:            time.Now().UTC(),
+				UpdatedAt:            time.Now().UTC(),
+			}
+			_ = h.store.CreateResellerProfile(r.Context(), defaultProfile)
+			usage, err = h.store.GetResellerUsage(r.Context(), targetUserID)
+		}
+		if err != nil {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Reseller profile not found for user", nil, "")
+			return
+		}
 	}
 
 	response.JSON(w, http.StatusOK, usage, nil)
@@ -337,8 +360,28 @@ func (h *ResellerHandler) UpdateBranding(w http.ResponseWriter, r *http.Request)
 	claims, _ := auth.GetClaims(r.Context())
 	profile, err := h.store.GetResellerProfileByUserID(r.Context(), claims.UserID)
 	if err != nil || profile == nil {
-		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Reseller profile not found", nil, "")
-		return
+		if claims.Role == rbac.RoleOwner || claims.Role == rbac.RoleAdmin || claims.IsSuperAdmin || claims.Role == "superadmin" {
+			profile = &store.ResellerProfile{
+				ID:                   uuid.New(),
+				UserID:               claims.UserID,
+				OrganizationID:       claims.OrganizationID,
+				MaxAccounts:          500,
+				AllocatedDiskMB:      5242880,
+				AllocatedBandwidthMB: 52428800,
+				AllowOverselling:     true,
+				BrandName:            "Hostvra Enterprise",
+				BrandLogoURL:         "/logo.svg",
+				CustomNameservers:    []string{"ns1.hostvra.com", "ns2.hostvra.com"},
+				CustomEmailSender:    "noreply@hostvra.com",
+				IsActive:             true,
+				CreatedAt:            time.Now().UTC(),
+				UpdatedAt:            time.Now().UTC(),
+			}
+			_ = h.store.CreateResellerProfile(r.Context(), profile)
+		} else {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Reseller profile not found", nil, "")
+			return
+		}
 	}
 
 	var req BrandingResponse

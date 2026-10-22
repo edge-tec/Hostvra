@@ -175,6 +175,7 @@ func main() {
 	terminalHandler.SetQuotaService(quotaService)
 	ftpHandler.SetQuotaService(quotaService)
 	fileHandler.SetQuotaService(quotaService)
+	accountHandler.SetQuotaService(quotaService)
 	billingHandler.SetEmailService(emailService)
 	billingHandler.StartLifecycleWorker(context.Background(), 1*time.Hour)
 

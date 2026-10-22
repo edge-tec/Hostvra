@@ -584,6 +584,11 @@ func isAllowedUserStoragePath(path string) bool {
 	return false
 }
 
+// CalculateDirSizeBytes walks directory safely without following symlinks to prevent symlink escape attacks.
+func CalculateDirSizeBytes(dirPath string) int64 {
+	return calculateDirSizeBytes(dirPath)
+}
+
 // calculateDirSizeBytes walks directory safely without following symlinks to prevent symlink escape attacks.
 func calculateDirSizeBytes(dirPath string) int64 {
 	cleanPath := filepath.Clean(dirPath)

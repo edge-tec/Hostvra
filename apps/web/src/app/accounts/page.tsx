@@ -84,7 +84,7 @@ export default function AccountsPage() {
     try {
       // 1. Fetch Accounts
       const accRes = await apiFetch<HostingAccount[]>('/api/v1/accounts');
-      if (accRes.data && accRes.data.length > 0) {
+      if (accRes.data) {
         setAccounts(accRes.data);
       }
 
@@ -191,17 +191,11 @@ export default function AccountsPage() {
         showNotify('success', `Account ${selectedAccount.domain} suspended successfully.`);
         setSuspendModalOpen(false);
         loadData();
+      } else {
+        showNotify('error', res.error?.message || 'Failed to suspend account');
       }
-    } catch {
-      setAccounts(prev =>
-        prev.map(a =>
-          a.id === selectedAccount.id
-            ? { ...a, status: 'suspended', suspend_reason: suspendReason, suspended_at: new Date().toISOString() }
-            : a
-        )
-      );
-      showNotify('success', `Account ${selectedAccount.domain} suspended.`);
-      setSuspendModalOpen(false);
+    } catch (err: any) {
+      showNotify('error', err?.message || 'Failed to connect to server');
     } finally {
       setActionLoading(null);
     }
@@ -217,12 +211,11 @@ export default function AccountsPage() {
       if (res.data) {
         showNotify('success', `Account ${acc.domain} reactivated successfully!`);
         loadData();
+      } else {
+        showNotify('error', res.error?.message || 'Failed to reactivate account');
       }
-    } catch {
-      setAccounts(prev =>
-        prev.map(a => (a.id === acc.id ? { ...a, status: 'active', suspend_reason: undefined, suspended_at: undefined } : a))
-      );
-      showNotify('success', `Account ${acc.domain} reactivated!`);
+    } catch (err: any) {
+      showNotify('error', err?.message || 'Failed to connect to server');
     } finally {
       setActionLoading(null);
     }
@@ -241,27 +234,11 @@ export default function AccountsPage() {
         showNotify('success', `Hosting package for ${selectedAccount.domain} updated successfully!`);
         setChangePlanModalOpen(false);
         loadData();
+      } else {
+        showNotify('error', res.error?.message || 'Failed to update package');
       }
-    } catch {
-      const newPlan = plans.find(p => p.id === targetPlanId);
-      if (newPlan) {
-        setAccounts(prev =>
-          prev.map(a =>
-            a.id === selectedAccount.id
-              ? {
-                  ...a,
-                  plan_id: newPlan.id,
-                  plan_name: newPlan.name,
-                  disk_limit_mb: newPlan.disk_space_mb,
-                  bandwidth_limit_mb: newPlan.bandwidth_mb,
-                  websites_limit: newPlan.max_websites,
-                }
-              : a
-          )
-        );
-      }
-      showNotify('success', 'Hosting package updated successfully.');
-      setChangePlanModalOpen(false);
+    } catch (err: any) {
+      showNotify('error', err?.message || 'Failed to connect to server');
     } finally {
       setActionLoading(null);
     }
@@ -269,25 +246,52 @@ export default function AccountsPage() {
 
   // 1-Click Client Impersonation Login
   const handleLoginAsClient = async (acc: HostingAccount) => {
+    if (!confirm(`Log in as client "${acc.username}" (${acc.domain})? You will enter the client control panel.`)) {
+      return;
+    }
     setActionLoading(`login-${acc.id}`);
     try {
-      const res = await apiFetch<{ username: string; token: string; login_url: string }>(
+      const res = await apiFetch<{
+        username: string;
+        domain: string;
+        tokens?: { access_token: string; refresh_token: string };
+        token?: string;
+        login_url: string;
+      }>(
         `/api/v1/accounts/${acc.id}/login-token`,
         { method: 'POST' }
       );
       if (res.data) {
-        setLoginData(res.data);
-        setSelectedAccount(acc);
-        setLoginModalOpen(true);
+        const token = res.data.tokens?.access_token || res.data.token;
+        if (token) {
+          const currentToken = localStorage.getItem('hostvra_token');
+          if (currentToken) {
+            localStorage.setItem('hostvra_admin_backup_token', currentToken);
+          }
+          localStorage.setItem('hostvra_token', token);
+          if (typeof document !== 'undefined') {
+            document.cookie = `hostvra_token=${encodeURIComponent(token)}; path=/; max-age=3600; SameSite=Lax`;
+          }
+          localStorage.setItem(
+            'hostvra_user',
+            JSON.stringify({
+              username: acc.username,
+              domain: acc.domain,
+              role: 'customer',
+              is_superadmin: false,
+              impersonated: true,
+            })
+          );
+          showNotify('success', `Client session authenticated for ${acc.username}. Redirecting...`);
+          window.location.href = '/dashboard';
+        } else {
+          showNotify('error', 'Authentication session token not returned by server');
+        }
+      } else {
+        showNotify('error', res.error?.message || 'Failed to generate client login session');
       }
-    } catch {
-      setLoginData({
-        username: acc.username,
-        token: `session_${acc.username}_${Date.now()}`,
-        login_url: `/dashboard?client_impersonation=${acc.username}`,
-      });
-      setSelectedAccount(acc);
-      setLoginModalOpen(true);
+    } catch (err: any) {
+      showNotify('error', err?.message || 'Failed to connect to authentication server');
     } finally {
       setActionLoading(null);
     }
@@ -300,12 +304,15 @@ export default function AccountsPage() {
     }
     setActionLoading(`del-${acc.id}`);
     try {
-      await apiFetch(`/api/v1/accounts/${acc.id}`, { method: 'DELETE' });
-      showNotify('success', `Account ${acc.username} terminated successfully.`);
+      const res = await apiFetch(`/api/v1/accounts/${acc.id}`, { method: 'DELETE' });
+      if (res.error) {
+        showNotify('error', res.error.message || 'Failed to terminate account');
+        return;
+      }
+      showNotify('success', `Account ${acc.username} (${acc.domain}) terminated successfully.`);
       loadData();
-    } catch {
-      setAccounts(prev => prev.filter(a => a.id !== acc.id));
-      showNotify('success', `Account ${acc.username} terminated successfully.`);
+    } catch (err: any) {
+      showNotify('error', err?.message || 'Failed to connect to server');
     } finally {
       setActionLoading(null);
     }
