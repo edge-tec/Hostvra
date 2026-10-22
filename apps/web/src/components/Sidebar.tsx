@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -38,6 +38,8 @@ import {
   LifeBuoy,
 } from 'lucide-react';
 import { clearStoredAuth, getStoredUserRole, apiFetch } from '@/lib/api';
+
+const SIDEBAR_SCROLL_KEY = 'hostvra_sidebar_scroll_pos';
 
 interface NavItem {
   label: string;
@@ -151,6 +153,8 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const desktopNavRef = useRef<HTMLDivElement>(null);
+  const mobileNavRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const roleInfo = getStoredUserRole();
@@ -165,6 +169,76 @@ export function Sidebar() {
   }, []);
 
   const navGroups = isAdmin ? adminNavGroups : customerNavGroups;
+
+  // Cache all hrefs to prevent broad parent prefix false matches (e.g. /settings vs /settings/updates)
+  const allHrefs = useMemo(() => {
+    return navGroups.flatMap((g) => g.items.map((i) => i.href));
+  }, [navGroups]);
+
+  // Restore and keep sidebar scroll position intact on page changes
+  const restoreScrollPosition = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const container = desktopNavRef.current;
+    if (!container) return;
+
+    // 1. Try to restore previous scroll position from sessionStorage
+    try {
+      const raw = sessionStorage.getItem(SIDEBAR_SCROLL_KEY);
+      if (raw !== null) {
+        const parsed = parseInt(raw, 10);
+        if (!isNaN(parsed) && parsed >= 0) {
+          container.scrollTop = parsed;
+        }
+      }
+    } catch {}
+
+    // 2. Ensure active element is visible within the container viewport
+    const activeEl = container.querySelector<HTMLElement>('[data-active="true"]');
+    if (activeEl) {
+      const containerRect = container.getBoundingClientRect();
+      const itemRect = activeEl.getBoundingClientRect();
+
+      const isAbove = itemRect.top < containerRect.top + 8;
+      const isBelow = itemRect.bottom > containerRect.bottom - 8;
+
+      if (isAbove || isBelow) {
+        activeEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+        try {
+          sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(container.scrollTop));
+        } catch {}
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Run on frame to guarantee DOM layout calculation
+    const frameId = requestAnimationFrame(() => {
+      restoreScrollPosition();
+    });
+
+    // Run again with short delay to catch post-render role transitions
+    const timer = setTimeout(() => {
+      restoreScrollPosition();
+    }, 60);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      clearTimeout(timer);
+    };
+  }, [pathname, isAdmin, collapsed, restoreScrollPosition]);
+
+  // Handle mobile drawer active item visibility
+  useEffect(() => {
+    if (mobileOpen && mobileNavRef.current) {
+      const frameId = requestAnimationFrame(() => {
+        const activeEl = mobileNavRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+        if (activeEl) {
+          activeEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+        }
+      });
+      return () => cancelAnimationFrame(frameId);
+    }
+  }, [mobileOpen]);
 
   useEffect(() => {
     const saved = localStorage.getItem('hostvra_sidebar_collapsed');
@@ -201,8 +275,23 @@ export function Sidebar() {
     router.push('/login');
   };
 
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const top = e.currentTarget.scrollTop;
+    try {
+      sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(top));
+    } catch {}
+  };
+
+  const handleNavClick = () => {
+    if (desktopNavRef.current) {
+      try {
+        sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(desktopNavRef.current.scrollTop));
+      } catch {}
+    }
+  };
+
   const getBadgeClasses = (color?: string, isActive?: boolean) => {
-    if (isActive) return 'bg-white/30 text-white font-bold';
+    if (isActive) return 'bg-white/25 text-white font-black border border-white/30 backdrop-blur-xs';
     switch (color) {
       case 'amber':
         return 'bg-amber-100 dark:bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-400/20';
@@ -234,23 +323,34 @@ export function Sidebar() {
           <nav className="space-y-0.5">
             {group.items.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                pathname === item.href ||
-                (item.href !== '/' && pathname?.startsWith(item.href + '/'));
+              const isExact = pathname === item.href;
+              const isSubroute = Boolean(
+                item.href !== '/' &&
+                pathname?.startsWith(item.href + '/') &&
+                !allHrefs.some(
+                  (h) => h !== item.href && h.length > item.href.length && (pathname === h || pathname.startsWith(h + '/'))
+                )
+              );
+              const isActive = isExact || isSubroute;
 
               return (
                 <Link
                   key={item.label}
                   href={item.href}
+                  scroll={false}
+                  data-active={isActive ? 'true' : 'false'}
                   target={item.target}
                   rel={item.target === '_blank' ? 'noopener noreferrer' : undefined}
-                  onClick={() => isMobileView && setMobileOpen(false)}
+                  onClick={() => {
+                    if (isMobileView) setMobileOpen(false);
+                    handleNavClick();
+                  }}
                   title={!isMobileView && collapsed ? item.label : undefined}
                   className={`flex items-center ${
                     !isMobileView && collapsed ? 'justify-center px-0 py-2.5' : 'justify-between px-3 py-2'
                   } rounded-lg text-xs font-semibold transition-all group ${
                     isActive
-                      ? 'bg-[#16A34A] text-white font-bold shadow-sm shadow-emerald-600/25'
+                      ? 'bg-[#16A34A] text-white font-bold shadow-md shadow-emerald-600/30 ring-1 ring-emerald-500/50'
                       : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.08]'
                   }`}
                 >
@@ -260,7 +360,11 @@ export function Sidebar() {
                         isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'
                       }`}
                     />
-                    {(isMobileView || !collapsed) && <span className="truncate">{item.label}</span>}
+                    {(isMobileView || !collapsed) && (
+                      <span className={`truncate ${isActive ? 'text-white font-bold tracking-tight' : ''}`}>
+                        {item.label}
+                      </span>
+                    )}
                   </div>
 
                   {(isMobileView || !collapsed) && item.badge && (
@@ -327,8 +431,12 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Navigation Scroll */}
-        <div className="flex-1 overflow-y-auto px-2.5 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]">
+        {/* Navigation Scroll Container */}
+        <div
+          ref={desktopNavRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-2.5 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]"
+        >
           {renderNavList(false)}
         </div>
 
@@ -400,7 +508,10 @@ export function Sidebar() {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]">
+            <div
+              ref={mobileNavRef}
+              className="flex-1 overflow-y-auto px-3 py-3 custom-scrollbar bg-white dark:bg-[#0F172A]"
+            >
               {renderNavList(true)}
             </div>
 
