@@ -744,6 +744,7 @@ export default function BackupsPage() {
                 onClick={() => {
                   setRepoName('');
                   setRepoPassword('');
+                  setRepoDeletionProtection(true);
                   generatePassphrase();
                   handlePresetSelect('wasabi');
                   setNewRepoModalOpen(true);
@@ -1116,6 +1117,7 @@ export default function BackupsPage() {
                   </div>
                   <button
                     onClick={() => {
+                      setRepoDeletionProtection(true);
                       generatePassphrase();
                       handlePresetSelect('wasabi');
                       setNewRepoModalOpen(true);
@@ -1882,22 +1884,53 @@ export default function BackupsPage() {
                 </div>
 
                 {/* Deletion protection toggle */}
-                <div className="p-3 bg-surface-950 border border-surface-800 rounded-xl flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Lock className="w-4 h-4 text-emerald-400" />
+                <div
+                  onClick={() => setRepoDeletionProtection(!repoDeletionProtection)}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between select-none ${
+                    repoDeletionProtection
+                      ? 'bg-emerald-500/10 border-emerald-500/40 shadow-sm shadow-emerald-500/10 ring-1 ring-emerald-500/20'
+                      : 'bg-surface-950 border-surface-800 hover:border-surface-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`p-2 rounded-lg transition-colors ${
+                        repoDeletionProtection ? 'bg-emerald-500/20 text-emerald-400' : 'bg-surface-800 text-slate-400'
+                      }`}
+                    >
+                      {repoDeletionProtection ? <ShieldCheck className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                    </div>
                     <div>
-                      <div className="font-bold text-white text-xs">Enable Deletion Protection</div>
-                      <div className="text-[10px] text-slate-400">
-                        Prevents unauthorized or accidental deletion of this backup repository.
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white text-xs">Enable Deletion Protection</span>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded tracking-wide uppercase ${
+                            repoDeletionProtection
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                          }`}
+                        >
+                          {repoDeletionProtection ? 'PROTECTED • RECOMMENDED' : 'UNPROTECTED'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Prevents unauthorized, rogue, or accidental deletion of this backup repository and all its snapshots.
                       </div>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={repoDeletionProtection}
-                    onChange={(e) => setRepoDeletionProtection(e.target.checked)}
-                    className="rounded border-surface-700 bg-surface-900 text-brand-500 w-4 h-4 cursor-pointer"
-                  />
+                  {/* Custom Toggle Switch */}
+                  <div
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out ${
+                      repoDeletionProtection ? 'bg-emerald-500' : 'bg-surface-800 border border-surface-700'
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
+                        repoDeletionProtection ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </div>
                 </div>
 
                 {/* Verification result */}

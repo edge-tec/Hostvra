@@ -311,3 +311,148 @@ func TestWebsiteHandler_DistinctDocumentRootPerDomain(t *testing.T) {
 		t.Fatalf("expected document root %s, got %s", expectedDocRoot, res.Data.DocumentRoot)
 	}
 }
+
+func TestWebsiteHandler_AccountIsolationAndEnrichment(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+	t.Setenv("HOSTVRA_PHP_CONFIG_DIR", filepath.Join(tempDir, "php"))
+	t.Setenv("HOSTVRA_SYSTEMD_DIR", filepath.Join(tempDir, "systemd"))
+
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewWebsiteHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	customerUserID := uuid.New()
+
+	// 1. Seed two hosting accounts
+	acc1 := &store.HostingAccount{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		UserID:         uuid.New(),
+		Username:       "c_r",
+		Domain:         "edge.hostvra.com",
+		PlanName:       "Enterprise Pro",
+		Status:         store.AccountStatusActive,
+	}
+	acc2 := &store.HostingAccount{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		UserID:         customerUserID,
+		Username:       "bondhoo",
+		Domain:         "bondhoo.net",
+		PlanName:       "Standard Plan",
+		Status:         store.AccountStatusActive,
+	}
+	_ = s.CreateHostingAccount(context.Background(), acc1)
+	_ = s.CreateHostingAccount(context.Background(), acc2)
+
+	// 2. Create websites assigned to these accounts
+	site1 := &store.Website{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		PrimaryDomain:  "cr-shop.com",
+		DocumentRoot:   filepath.Join(tempDir, "www/cr-shop.com/public_html"),
+		SystemUser:     "c_r",
+		Status:         "active",
+	}
+	site2 := &store.Website{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		PrimaryDomain:  "bondhoo-blog.org",
+		DocumentRoot:   filepath.Join(tempDir, "www/bondhoo-blog.org/public_html"),
+		SystemUser:     "bondhoo",
+		Status:         "active",
+	}
+	_ = s.CreateWebsite(context.Background(), site1)
+	_ = s.CreateWebsite(context.Background(), site2)
+
+	// 3. Admin view: full list enriched with account metadata
+	rAdmin := chi.NewRouter()
+	rAdmin.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         uuid.New(),
+				OrganizationID: orgID,
+				Role:           "admin",
+				IsSuperAdmin:   true,
+			}
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	rAdmin.Get("/api/v1/websites", h.List)
+
+	reqAll := httptest.NewRequest("GET", "/api/v1/websites", nil)
+	recAll := httptest.NewRecorder()
+	rAdmin.ServeHTTP(recAll, reqAll)
+
+	if recAll.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from admin list, got %d", recAll.Code)
+	}
+
+	var allResp struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recAll.Body).Decode(&allResp)
+	if len(allResp.Data) != 2 {
+		t.Fatalf("expected 2 websites in admin list, got %d", len(allResp.Data))
+	}
+
+	for _, sItem := range allResp.Data {
+		if sItem.PrimaryDomain == "cr-shop.com" {
+			if sItem.AccountUsername != "c_r" || sItem.AccountDomain != "edge.hostvra.com" || sItem.AccountPlan != "Enterprise Pro" {
+				t.Fatalf("unexpected account metadata on site 1: %+v", sItem)
+			}
+		}
+		if sItem.PrimaryDomain == "bondhoo-blog.org" {
+			if sItem.AccountUsername != "bondhoo" || sItem.AccountPlan != "Standard Plan" {
+				t.Fatalf("unexpected account metadata on site 2: %+v", sItem)
+			}
+		}
+	}
+
+	// 4. Admin query filter: ?account=c_r
+	reqFiltered := httptest.NewRequest("GET", "/api/v1/websites?account=c_r", nil)
+	recFiltered := httptest.NewRecorder()
+	rAdmin.ServeHTTP(recFiltered, reqFiltered)
+
+	var filterResp struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recFiltered.Body).Decode(&filterResp)
+	if len(filterResp.Data) != 1 || filterResp.Data[0].PrimaryDomain != "cr-shop.com" {
+		t.Fatalf("expected 1 website filtered for account c_r, got %d", len(filterResp.Data))
+	}
+
+	// 5. Customer view: strict multi-tenant isolation
+	rCustomer := chi.NewRouter()
+	rCustomer.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         customerUserID,
+				OrganizationID: orgID,
+				Role:           "customer",
+			}
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	rCustomer.Get("/api/v1/websites", h.List)
+
+	reqCust := httptest.NewRequest("GET", "/api/v1/websites", nil)
+	recCust := httptest.NewRecorder()
+	rCustomer.ServeHTTP(recCust, reqCust)
+
+	var custResp struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recCust.Body).Decode(&custResp)
+	if len(custResp.Data) != 1 || custResp.Data[0].PrimaryDomain != "bondhoo-blog.org" {
+		t.Fatalf("expected customer to only see their 1 isolated site, got %d", len(custResp.Data))
+	}
+}
+

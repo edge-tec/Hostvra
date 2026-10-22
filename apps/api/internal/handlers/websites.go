@@ -144,12 +144,14 @@ func isSafeWebsiteRoot(docRoot string) bool {
 }
 
 type CreateWebsiteRequest struct {
-	ServerID      string  `json:"server_id"`
-	PrimaryDomain string  `json:"primary_domain"`
-	DocumentRoot  string  `json:"document_root"`
-	PHPVersion    *string `json:"php_version"`
-	AppType       string  `json:"app_type"` // php, static, proxy
-	ProxyPort     *int    `json:"proxy_port"`
+	ServerID        string  `json:"server_id"`
+	PrimaryDomain   string  `json:"primary_domain"`
+	DocumentRoot    string  `json:"document_root"`
+	PHPVersion      *string `json:"php_version"`
+	AppType         string  `json:"app_type"` // php, static, proxy
+	ProxyPort       *int    `json:"proxy_port"`
+	AccountUsername string  `json:"account_username,omitempty"`
+	SystemUser      string  `json:"system_user,omitempty"`
 }
 
 func (h *WebsiteHandler) resolveOrgID(ctx context.Context, claimsOrgID uuid.UUID) uuid.UUID {
@@ -352,6 +354,94 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 				sites = append(sites, site)
 			}
 		}
+	}
+
+	// Enrich websites with Hosting Account metadata (Tenant isolation & account mapping)
+	accounts, _ := h.store.ListHostingAccounts(r.Context(), uuid.Nil, nil)
+	accByUsername := make(map[string]*store.HostingAccount)
+	accByDomain := make(map[string]*store.HostingAccount)
+	var userAccounts []string
+
+	for _, acc := range accounts {
+		if acc == nil {
+			continue
+		}
+		if acc.Username != "" {
+			accByUsername[strings.ToLower(acc.Username)] = acc
+		}
+		if acc.Domain != "" {
+			accByDomain[strings.ToLower(acc.Domain)] = acc
+		}
+		if claims != nil && acc.UserID == claims.UserID {
+			userAccounts = append(userAccounts, strings.ToLower(acc.Username))
+		}
+	}
+
+	for _, s := range sites {
+		if s == nil {
+			continue
+		}
+		// Match by SystemUser
+		if s.SystemUser != "" {
+			if acc, ok := accByUsername[strings.ToLower(s.SystemUser)]; ok {
+				s.AccountUsername = acc.Username
+				s.AccountDomain = acc.Domain
+				s.AccountPlan = acc.PlanName
+			}
+		}
+		// Fallback match by PrimaryDomain
+		if s.AccountUsername == "" && s.PrimaryDomain != "" {
+			if acc, ok := accByDomain[strings.ToLower(s.PrimaryDomain)]; ok {
+				s.AccountUsername = acc.Username
+				s.AccountDomain = acc.Domain
+				s.AccountPlan = acc.PlanName
+			}
+		}
+		// Fallback to SystemUser if still empty
+		if s.AccountUsername == "" && s.SystemUser != "" {
+			s.AccountUsername = s.SystemUser
+		}
+	}
+
+	accountFilter := strings.TrimSpace(r.URL.Query().Get("account"))
+	if accountFilter == "" {
+		accountFilter = strings.TrimSpace(r.URL.Query().Get("system_user"))
+	}
+
+	// Multi-tenant customer security isolation:
+	// If the user is a customer, restrict exclusively to their own account's websites.
+	isCustomer := !isAdmin && claims != nil
+	if isCustomer {
+		var customerSites []*store.Website
+		for _, s := range sites {
+			if s == nil {
+				continue
+			}
+			matched := false
+			for _, uName := range userAccounts {
+				if strings.EqualFold(s.AccountUsername, uName) || strings.EqualFold(s.SystemUser, uName) {
+					matched = true
+					break
+				}
+			}
+			if matched || (claims.Email != "" && strings.Contains(strings.ToLower(s.PrimaryDomain), strings.ToLower(claims.Email))) {
+				customerSites = append(customerSites, s)
+			}
+		}
+		sites = customerSites
+	} else if accountFilter != "" && !strings.EqualFold(accountFilter, "all") && !strings.EqualFold(accountFilter, "all accounts") {
+		var filteredSites []*store.Website
+		for _, s := range sites {
+			if s == nil {
+				continue
+			}
+			if strings.EqualFold(s.AccountUsername, accountFilter) ||
+				strings.EqualFold(s.SystemUser, accountFilter) ||
+				strings.EqualFold(s.AccountDomain, accountFilter) {
+				filteredSites = append(filteredSites, s)
+			}
+		}
+		sites = filteredSites
 	}
 
 	response.JSON(w, http.StatusOK, sites, &response.Meta{
@@ -634,23 +724,32 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	systemUser := isolation.DeriveUsername(req.PrimaryDomain)
+	if req.SystemUser != "" {
+		systemUser = req.SystemUser
+	}
 	limits := isolation.DefaultResourceLimits()
 	if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), req.PrimaryDomain, phpVer, &limits); err == nil && isoInfo != nil {
-		systemUser = isoInfo.Username
+		if req.SystemUser == "" {
+			systemUser = isoInfo.Username
+		}
 	}
 
 	site := &store.Website{
-		ID:             uuid.New(),
-		ServerID:       serverID,
-		OrganizationID: orgID,
-		PrimaryDomain:  req.PrimaryDomain,
-		DocumentRoot:   req.DocumentRoot,
-		SystemUser:     systemUser,
-		PHPVersion:     req.PHPVersion,
-		AppType:        req.AppType,
-		ProxyPort:      req.ProxyPort,
-		Status:         "active",
-		SSLEnabled:     false,
+		ID:              uuid.New(),
+		ServerID:        serverID,
+		OrganizationID:  orgID,
+		PrimaryDomain:   req.PrimaryDomain,
+		DocumentRoot:    req.DocumentRoot,
+		SystemUser:      systemUser,
+		AccountUsername: req.AccountUsername,
+		PHPVersion:      req.PHPVersion,
+		AppType:         req.AppType,
+		ProxyPort:       req.ProxyPort,
+		Status:          "active",
+		SSLEnabled:      false,
+	}
+	if site.AccountUsername == "" && req.SystemUser != "" {
+		site.AccountUsername = req.SystemUser
 	}
 
 	if err := h.store.CreateWebsite(r.Context(), site); err != nil {

@@ -29,6 +29,9 @@ type Website struct {
 	Expiration          string            `json:"expiration,omitempty"`
 	RequestsCount       int64             `json:"requests_count,omitempty"`
 	WAFStatus           string            `json:"waf_status,omitempty"`
+	AccountUsername     string            `json:"account_username,omitempty"`
+	AccountDomain       string            `json:"account_domain,omitempty"`
+	AccountPlan         string            `json:"account_plan,omitempty"`
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
 	DeletedAt           *time.Time        `json:"deleted_at,omitempty"`

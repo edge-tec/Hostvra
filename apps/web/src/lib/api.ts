@@ -165,6 +165,9 @@ export interface Website {
   requests_count?: number;
   waf_status?: 'Active' | 'Inactive';
   traffic_history?: number[];
+  account_username?: string;
+  account_domain?: string;
+  account_plan?: string;
   created_at: string;
 }
 

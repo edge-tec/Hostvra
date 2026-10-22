@@ -80,6 +80,8 @@ export default function WebsitesPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All categories');
+  const [selectedAccount, setSelectedAccount] = useState('All accounts');
+  const [viewMode, setViewMode] = useState<'flat' | 'grouped'>('flat');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchAction, setBatchAction] = useState('');
   const [executingBatch, setExecutingBatch] = useState(false);
@@ -87,6 +89,7 @@ export default function WebsitesPage() {
   // Column Visibility Toggles
   const [colVisible, setColVisible] = useState({
     siteName: true,
+    account: true,
     status: true,
     backup: true,
     quickAction: true,
@@ -327,6 +330,28 @@ export default function WebsitesPage() {
     };
   }, []);
 
+  // Discovered Account Options
+  const accountOptions = useMemo(() => {
+    const map = new Map<string, { username: string; domain?: string; plan?: string; count: number }>();
+    websites.forEach((w) => {
+      const u = w.account_username || w.system_user || 'system';
+      if (!map.has(u)) {
+        map.set(u, {
+          username: u,
+          domain: w.account_domain,
+          plan: w.account_plan,
+          count: 1,
+        });
+      } else {
+        const item = map.get(u)!;
+        item.count += 1;
+        if (!item.domain && w.account_domain) item.domain = w.account_domain;
+        if (!item.plan && w.account_plan) item.plan = w.account_plan;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }, [websites]);
+
   // Filtered Websites
   const filteredWebsites = useMemo(() => {
     return websites.filter((site) => {
@@ -344,6 +369,14 @@ export default function WebsitesPage() {
         return false;
       }
 
+      // Client Account filter (Tenant Isolation)
+      if (selectedAccount !== 'All accounts') {
+        const u = site.account_username || site.system_user || 'system';
+        if (u.toLowerCase() !== selectedAccount.toLowerCase()) {
+          return false;
+        }
+      }
+
       // Search filter
       const q = search.toLowerCase().trim();
       if (!q) return true;
@@ -351,16 +384,39 @@ export default function WebsitesPage() {
         site.primary_domain.toLowerCase().includes(q) ||
         (site.remarks && site.remarks.toLowerCase().includes(q)) ||
         site.document_root.toLowerCase().includes(q) ||
-        (site.system_user && site.system_user.toLowerCase().includes(q))
+        (site.system_user && site.system_user.toLowerCase().includes(q)) ||
+        (site.account_username && site.account_username.toLowerCase().includes(q))
       );
     });
-  }, [websites, activeTab, selectedCategory, search]);
+  }, [websites, activeTab, selectedCategory, selectedAccount, search]);
+
+  // Grouped Websites by Client Account
+  const groupedWebsites = useMemo(() => {
+    const map = new Map<string, { account: string; domain?: string; plan?: string; sites: Website[] }>();
+    filteredWebsites.forEach((site) => {
+      const acc = site.account_username || site.system_user || 'system';
+      if (!map.has(acc)) {
+        map.set(acc, {
+          account: acc,
+          domain: site.account_domain,
+          plan: site.account_plan,
+          sites: [site],
+        });
+      } else {
+        const item = map.get(acc)!;
+        item.sites.push(site);
+        if (!item.domain && site.account_domain) item.domain = site.account_domain;
+        if (!item.plan && site.account_plan) item.plan = site.account_plan;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => b.sites.length - a.sites.length);
+  }, [filteredWebsites]);
 
   // Realtime Stateful Pagination Calculations
   useEffect(() => {
     setCurrentPage(1);
     setGotoInput('1');
-  }, [search, selectedCategory, activeTab]);
+  }, [search, selectedCategory, selectedAccount, activeTab]);
 
   const totalItems = filteredWebsites.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -1370,7 +1426,52 @@ export default function WebsitesPage() {
           </div>
 
           {/* Right Filters & Settings */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+            {/* View Mode: Group by Account vs Flat Table */}
+            <div className="flex items-center bg-slate-100 dark:bg-surface-800 p-0.5 rounded-lg border border-slate-300 dark:border-surface-700">
+              <button
+                type="button"
+                onClick={() => setViewMode('flat')}
+                title="Standard Table View"
+                className={`px-2 py-1 text-xs font-semibold rounded-md transition flex items-center gap-1 cursor-pointer ${
+                  viewMode === 'flat'
+                    ? 'bg-white dark:bg-surface-900 text-emerald-600 dark:text-emerald-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Flat</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('grouped')}
+                title="Group by Client Hosting Account (WHM Isolation)"
+                className={`px-2 py-1 text-xs font-semibold rounded-md transition flex items-center gap-1 cursor-pointer ${
+                  viewMode === 'grouped'
+                    ? 'bg-white dark:bg-surface-900 text-emerald-600 dark:text-emerald-400 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <User className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Grouped</span>
+              </button>
+            </div>
+
+            {/* Client Account Selector Dropdown */}
+            <select
+              value={selectedAccount}
+              onChange={(e) => setSelectedAccount(e.target.value)}
+              className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer max-w-[170px] truncate"
+              title="Filter by Client Hosting Account"
+            >
+              <option value="All accounts">All Accounts (WHM)</option>
+              {accountOptions.map((acc) => (
+                <option key={acc.username} value={acc.username}>
+                  {acc.username} ({acc.count})
+                </option>
+              ))}
+            </select>
+
             {/* Category Dropdown */}
             <select
               value={selectedCategory}
@@ -1385,10 +1486,10 @@ export default function WebsitesPage() {
             </select>
 
             {/* Search Input */}
-            <div className="relative flex-1 sm:w-52">
+            <div className="relative flex-1 sm:w-48">
               <input
                 type="text"
-                placeholder="Domain or Remarks..."
+                placeholder="Domain, account..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-slate-100 text-xs placeholder:text-slate-400 focus:outline-none focus:border-emerald-500 shadow-2xs transition-all pr-8"
@@ -1481,6 +1582,9 @@ export default function WebsitesPage() {
                   {colVisible.siteName && (
                     <th className="px-3 py-3 font-bold min-w-[170px]">Site name ↓</th>
                   )}
+                  {colVisible.account && (
+                    <th className="px-2.5 py-3 font-bold min-w-[110px]">Client Account ↓</th>
+                  )}
                   {colVisible.status && (
                     <th className="px-2.5 py-3 font-bold min-w-[80px]">Status ↓</th>
                   )}
@@ -1513,7 +1617,7 @@ export default function WebsitesPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-surface-800/60 font-sans">
                 {filteredWebsites.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center text-slate-500 font-medium">
+                    <td colSpan={11} className="px-6 py-12 text-center text-slate-500 font-medium">
                       <div className="max-w-md mx-auto space-y-3">
                         <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 dark:bg-surface-800 flex items-center justify-center text-slate-400">
                           <Globe className="w-6 h-6" />
@@ -1543,7 +1647,60 @@ export default function WebsitesPage() {
                     </td>
                   </tr>
                 ) : (
-                  paginatedWebsites.map((site) => {
+                  (viewMode === 'grouped'
+                    ? groupedWebsites.flatMap((group) => [
+                        { isGroupHeader: true, group, site: null as any },
+                        ...group.sites.map((site) => ({ isGroupHeader: false, group, site })),
+                      ])
+                    : paginatedWebsites.map((site) => ({ isGroupHeader: false, group: null, site }))
+                  ).map((item) => {
+                    if (item.isGroupHeader && item.group) {
+                      const group = item.group;
+                      return (
+                        <tr
+                          key={`group-${group.account}`}
+                          className="bg-slate-100/90 dark:bg-surface-800/95 border-y border-slate-200 dark:border-surface-700 select-none"
+                        >
+                          <td colSpan={11} className="px-4 py-2.5">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-2.5">
+                                <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-500 flex items-center justify-center">
+                                  <User className="w-3.5 h-3.5" />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold text-slate-900 dark:text-white text-xs">
+                                    Client Account: <span className="text-emerald-600 dark:text-emerald-400 font-mono">{group.account}</span>
+                                  </span>
+                                  {group.domain && (
+                                    <span className="text-[11px] text-slate-500 font-mono">
+                                      ({group.domain})
+                                    </span>
+                                  )}
+                                  {group.plan && (
+                                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">
+                                      {group.plan}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3 text-xs">
+                                <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                  {group.sites.length} {group.sites.length === 1 ? 'Website' : 'Websites'} Isolated
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedAccount(group.account)}
+                                  className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                                >
+                                  Isolate View →
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const site = item.site;
                     const isSelected = selectedIds.includes(site.id);
                     const isApache = site.web_server_type === 'apache';
                     const docRoot = site.document_root || `/var/www/${site.primary_domain}/public_html`;
@@ -1636,6 +1793,30 @@ export default function WebsitesPage() {
                                 </div>
                               </div>
                             </div>
+                          </td>
+                        )}
+
+                        {/* Client Account / Owner Tenant Badge */}
+                        {colVisible.account && (
+                          <td className="px-2.5 py-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAccount(site.account_username || site.system_user || 'All accounts')}
+                              title={`Filter by client account: ${site.account_username || site.system_user || 'admin'}`}
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 dark:bg-surface-800/90 hover:bg-emerald-500/10 hover:border-emerald-500/40 border border-slate-200 dark:border-surface-700 transition cursor-pointer text-left group/acc"
+                            >
+                              <User className="w-3.5 h-3.5 text-slate-400 group-hover/acc:text-emerald-400 shrink-0" />
+                              <div className="flex flex-col">
+                                <span className="font-bold text-slate-800 dark:text-slate-200 text-[11px] leading-tight group-hover/acc:text-emerald-400">
+                                  {site.account_username || site.system_user || 'admin'}
+                                </span>
+                                {site.account_plan && (
+                                  <span className="text-[9px] text-slate-400 font-mono leading-none">
+                                    {site.account_plan}
+                                  </span>
+                                )}
+                              </div>
+                            </button>
                           </td>
                         )}
 
