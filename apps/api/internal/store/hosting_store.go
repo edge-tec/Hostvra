@@ -506,8 +506,8 @@ func (p *PostgresStore) UpdateWebsiteSSL(ctx context.Context, id uuid.UUID, sslE
 
 func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error {
 	query := `
-		INSERT INTO databases (id, server_id, organization_id, db_type, name, character_set, "collation")
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO databases (id, server_id, organization_id, db_type, name, username, password, character_set, "collation", quota, note, host_allow, backup_status, backup_count, location, in_recycle_bin)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING created_at
 	`
 	if db.ID == uuid.Nil {
@@ -517,20 +517,38 @@ func (p *PostgresStore) CreateDatabase(ctx context.Context, db *Database) error 
 	if db.OrganizationID != uuid.Nil {
 		orgID = &db.OrganizationID
 	}
+	if db.BackupStatus == "" {
+		db.BackupStatus = "Not exist"
+	}
+	if db.Location == "" {
+		db.Location = "Localhost"
+	}
+	if db.HostAllow == "" {
+		db.HostAllow = "localhost"
+	}
+	if db.Quota == "" {
+		db.Quota = "Not set"
+	}
 	return p.db.QueryRowContext(ctx, query,
-		db.ID, db.ServerID, orgID, db.DBType, db.Name, db.CharacterSet, db.Collation,
+		db.ID, db.ServerID, orgID, db.DBType, db.Name, db.Username, db.Password,
+		db.CharacterSet, db.Collation, db.Quota, db.Note, db.HostAllow,
+		db.BackupStatus, db.BackupCount, db.Location, db.InRecycleBin,
 	).Scan(&db.CreatedAt)
 }
 
 func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       db_type, name, username, password, character_set, "collation", size_bytes,
+		       quota, note, host_allow, backup_status, backup_count, location, in_recycle_bin, created_at
 		FROM databases
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	d := &Database{}
 	err := p.db.QueryRowContext(ctx, query, id).Scan(
-		&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt,
+		&d.ID, &d.ServerID, &d.OrganizationID,
+		&d.DBType, &d.Name, &d.Username, &d.Password, &d.CharacterSet, &d.Collation, &d.SizeBytes,
+		&d.Quota, &d.Note, &d.HostAllow, &d.BackupStatus, &d.BackupCount, &d.Location, &d.InRecycleBin, &d.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -540,7 +558,9 @@ func (p *PostgresStore) GetDatabaseByID(ctx context.Context, id uuid.UUID) (*Dat
 
 func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid.UUID) ([]*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       db_type, name, username, password, character_set, "collation", size_bytes,
+		       quota, note, host_allow, backup_status, backup_count, location, in_recycle_bin, created_at
 		FROM databases
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR server_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -554,7 +574,11 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 	dbs := make([]*Database, 0)
 	for rows.Next() {
 		d := &Database{}
-		err := rows.Scan(&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt)
+		err := rows.Scan(
+			&d.ID, &d.ServerID, &d.OrganizationID,
+			&d.DBType, &d.Name, &d.Username, &d.Password, &d.CharacterSet, &d.Collation, &d.SizeBytes,
+			&d.Quota, &d.Note, &d.HostAllow, &d.BackupStatus, &d.BackupCount, &d.Location, &d.InRecycleBin, &d.CreatedAt,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +589,9 @@ func (p *PostgresStore) ListDatabasesByServer(ctx context.Context, serverID uuid
 
 func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID) ([]*Database, error) {
 	query := `
-		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid), db_type, name, character_set, "collation", size_bytes, created_at
+		SELECT id, server_id, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid),
+		       db_type, name, username, password, character_set, "collation", size_bytes,
+		       quota, note, host_allow, backup_status, backup_count, location, in_recycle_bin, created_at
 		FROM databases
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1) AND deleted_at IS NULL
 		ORDER BY created_at DESC
@@ -579,7 +605,11 @@ func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID)
 	dbs := make([]*Database, 0)
 	for rows.Next() {
 		d := &Database{}
-		err := rows.Scan(&d.ID, &d.ServerID, &d.OrganizationID, &d.DBType, &d.Name, &d.CharacterSet, &d.Collation, &d.SizeBytes, &d.CreatedAt)
+		err := rows.Scan(
+			&d.ID, &d.ServerID, &d.OrganizationID,
+			&d.DBType, &d.Name, &d.Username, &d.Password, &d.CharacterSet, &d.Collation, &d.SizeBytes,
+			&d.Quota, &d.Note, &d.HostAllow, &d.BackupStatus, &d.BackupCount, &d.Location, &d.InRecycleBin, &d.CreatedAt,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -591,21 +621,27 @@ func (p *PostgresStore) ListDatabasesByOrg(ctx context.Context, orgID uuid.UUID)
 func (p *PostgresStore) UpdateDatabase(ctx context.Context, db *Database) error {
 	query := `
 		UPDATE databases
-		SET name = $2, character_set = $3, "collation" = $4, size_bytes = $5
+		SET name = $2, username = $3, password = $4, character_set = $5, "collation" = $6, size_bytes = $7,
+		    quota = $8, note = $9, host_allow = $10, backup_status = $11, backup_count = $12,
+		    location = $13, in_recycle_bin = $14
 		WHERE id = $1 AND deleted_at IS NULL
 	`
-	_, err := p.db.ExecContext(ctx, query, db.ID, db.Name, db.CharacterSet, db.Collation, db.SizeBytes)
+	_, err := p.db.ExecContext(ctx, query,
+		db.ID, db.Name, db.Username, db.Password, db.CharacterSet, db.Collation, db.SizeBytes,
+		db.Quota, db.Note, db.HostAllow, db.BackupStatus, db.BackupCount,
+		db.Location, db.InRecycleBin,
+	)
 	return err
 }
 
 func (p *PostgresStore) DeleteDatabase(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE databases SET deleted_at = NOW() WHERE id = $1`
+	query := `UPDATE databases SET deleted_at = NOW(), in_recycle_bin = TRUE WHERE id = $1`
 	_, err := p.db.ExecContext(ctx, query, id)
 	return err
 }
 
 func (p *PostgresStore) RestoreDatabase(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE databases SET deleted_at = NULL WHERE id = $1`
+	query := `UPDATE databases SET deleted_at = NULL, in_recycle_bin = FALSE WHERE id = $1`
 	_, err := p.db.ExecContext(ctx, query, id)
 	return err
 }
