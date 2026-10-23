@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { getStoredToken } from '@/lib/api';
+import { getStoredToken, setStoredToken } from '@/lib/api';
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -44,8 +44,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const returnToAdmin = () => {
     const adminToken = localStorage.getItem('hostvra_admin_backup_token');
     if (adminToken) {
+      setStoredToken(adminToken);
       localStorage.setItem('hostvra_token', adminToken);
       localStorage.removeItem('hostvra_admin_backup_token');
+      const returnUrl = localStorage.getItem('hostvra_admin_return_url') || '/accounts';
+      localStorage.removeItem('hostvra_admin_return_url');
       document.cookie = `hostvra_token=${encodeURIComponent(adminToken)}; path=/; max-age=604800; SameSite=Lax`;
       const userStr = localStorage.getItem('hostvra_user');
       if (userStr) {
@@ -57,7 +60,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           localStorage.setItem('hostvra_user', JSON.stringify(u));
         } catch {}
       }
-      window.location.href = '/admin/users';
+      window.location.href = returnUrl;
     }
   };
 

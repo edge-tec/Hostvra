@@ -31,8 +31,20 @@ import {
   Sparkles,
   Webhook,
   Palette,
+  Cpu,
+  Activity,
+  Gauge,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import { apiFetch, HostingAccount, HostingPlan, Server as ServerType } from '@/lib/api';
+import {
+  apiFetch,
+  HostingAccount,
+  HostingPlan,
+  Server as ServerType,
+  setStoredToken,
+  updateAccountLimits,
+} from '@/lib/api';
 import { WebhookIntegrationsTab } from '@/components/accounts/WebhookIntegrationsTab';
 import { ResellerMultiTenancyTab } from '@/components/accounts/ResellerMultiTenancyTab';
 
@@ -51,7 +63,7 @@ export default function AccountsPage() {
   // Modals
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [suspendModalOpen, setSuspendModalOpen] = useState(false);
-  const [changePlanModalOpen, setChangePlanModalOpen] = useState(false);
+  const [limitsModalOpen, setLimitsModalOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // Selected Account for Modals
@@ -64,12 +76,28 @@ export default function AccountsPage() {
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [selectedServerId, setSelectedServerId] = useState('');
   const [selectedPHP, setSelectedPHP] = useState('8.3');
+  const [showAdvancedCreate, setShowAdvancedCreate] = useState(false);
+  const [createRamMB, setCreateRamMB] = useState(1024);
+  const [createStorageGB, setCreateStorageGB] = useState(10);
+  const [createCpuPct, setCreateCpuPct] = useState(100);
+  const [createTasksMax, setCreateTasksMax] = useState(100);
 
   // Suspend Form State
   const [suspendReason, setSuspendReason] = useState('Overdue Invoice');
 
-  // Change Plan State
+  // Resource Limits & System Isolation State
   const [targetPlanId, setTargetPlanId] = useState('');
+  const [limitRamMB, setLimitRamMB] = useState(1024);
+  const [limitStorageGB, setLimitStorageGB] = useState(10);
+  const [limitCpuPct, setLimitCpuPct] = useState(100);
+  const [limitBwGB, setLimitBwGB] = useState(100);
+  const [limitInodes, setLimitInodes] = useState(250000);
+  const [limitTasks, setLimitTasks] = useState(100);
+  const [limitWebsites, setLimitWebsites] = useState(1);
+  const [limitDatabases, setLimitDatabases] = useState(5);
+  const [limitMailboxes, setLimitMailboxes] = useState(10);
+  const [limitPHP, setLimitPHP] = useState('8.3');
+  const [limitOpenBaseDir, setLimitOpenBaseDir] = useState(true);
 
   // Login Token State
   const [loginData, setLoginData] = useState<{ username: string; token: string; login_url: string } | null>(null);
@@ -154,11 +182,15 @@ export default function AccountsPage() {
           plan_id: selectedPlanId || (plans[0]?.id || 'plan-1'),
           server_id: selectedServerId || (servers[0]?.id || ''),
           php_version: selectedPHP,
+          memory_limit_mb: Number(createRamMB) || 1024,
+          disk_limit_mb: (Number(createStorageGB) || 10) * 1024,
+          cpu_limit_percent: Number(createCpuPct) || 100,
+          tasks_max: Number(createTasksMax) || 100,
         }),
       });
 
       if (res.data) {
-        showNotify('success', `Client account ${res.data.username} (${res.data.domain}) provisioned successfully!`);
+        showNotify('success', `Client account ${res.data.username} (${res.data.domain}) provisioned with isolated Linux user & cgroups quotas!`);
         setCreateModalOpen(false);
         resetForm();
         loadData();
@@ -176,6 +208,7 @@ export default function AccountsPage() {
     setNewDomain('');
     setNewUsername('');
     setNewPassword('');
+    setShowAdvancedCreate(false);
   };
 
   // Suspend Account
@@ -221,21 +254,63 @@ export default function AccountsPage() {
     }
   };
 
-  // Change Plan
-  const handleConfirmChangePlan = async () => {
-    if (!selectedAccount || !targetPlanId) return;
-    setActionLoading(`change-plan-${selectedAccount.id}`);
+  // Open Manage Limits & Isolation Modal
+  const handleOpenLimitsModal = (acc: HostingAccount) => {
+    setSelectedAccount(acc);
+    setTargetPlanId(acc.plan_id);
+    setLimitRamMB(acc.memory_limit_mb || 1024);
+    setLimitStorageGB(Math.round((acc.disk_limit_mb || 10240) / 1024));
+    setLimitCpuPct(acc.cpu_limit_percent || 100);
+    setLimitBwGB(Math.round((acc.bandwidth_limit_mb || 102400) / 1024));
+    setLimitInodes(acc.inodes_limit || 250000);
+    setLimitTasks(acc.tasks_max || 100);
+    setLimitWebsites(acc.websites_limit || 1);
+    setLimitDatabases(acc.databases_limit || 5);
+    setLimitMailboxes(acc.mailboxes_limit || 10);
+    setLimitPHP(acc.php_version || '8.3');
+    setLimitOpenBaseDir(true);
+    setLimitsModalOpen(true);
+  };
+
+  // Apply Package Template to Limit Fields
+  const handleApplyPlanToLimits = (planId: string) => {
+    setTargetPlanId(planId);
+    const p = plans.find(plan => plan.id === planId);
+    if (p) {
+      setLimitStorageGB(Math.round(p.disk_space_mb / 1024));
+      setLimitBwGB(Math.round(p.bandwidth_mb / 1024));
+      setLimitRamMB(p.disk_space_mb >= 10240 ? 1024 : 512);
+      setLimitWebsites(p.max_websites || 1);
+      setLimitDatabases(p.max_databases || 5);
+      setLimitMailboxes(p.max_mailboxes || 10);
+    }
+  };
+
+  // Save Custom Resource Limits (RAM, Storage, CPU, Isolation)
+  const handleSaveLimits = async () => {
+    if (!selectedAccount) return;
+    setActionLoading(`limits-${selectedAccount.id}`);
     try {
-      const res = await apiFetch<HostingAccount>(`/api/v1/accounts/${selectedAccount.id}/change-plan`, {
-        method: 'POST',
-        body: JSON.stringify({ plan_id: targetPlanId }),
+      const res = await updateAccountLimits(selectedAccount.id, {
+        memory_limit_mb: Number(limitRamMB) || 1024,
+        disk_limit_mb: (Number(limitStorageGB) || 10) * 1024,
+        cpu_limit_percent: Number(limitCpuPct) || 100,
+        bandwidth_limit_mb: (Number(limitBwGB) || 100) * 1024,
+        inodes_limit: Number(limitInodes) || 250000,
+        tasks_max: Number(limitTasks) || 100,
+        websites_limit: Number(limitWebsites) || 1,
+        databases_limit: Number(limitDatabases) || 5,
+        mailboxes_limit: Number(limitMailboxes) || 10,
+        php_version: limitPHP,
+        open_basedir: limitOpenBaseDir,
       });
+
       if (res.data) {
-        showNotify('success', `Hosting package for ${selectedAccount.domain} updated successfully!`);
-        setChangePlanModalOpen(false);
+        showNotify('success', `Resource limits & cgroups v2 isolation for ${selectedAccount.domain} updated successfully!`);
+        setLimitsModalOpen(false);
         loadData();
       } else {
-        showNotify('error', res.error?.message || 'Failed to update package');
+        showNotify('error', res.error?.message || 'Failed to update resource limits');
       }
     } catch (err: any) {
       showNotify('error', err?.message || 'Failed to connect to server');
@@ -244,9 +319,9 @@ export default function AccountsPage() {
     }
   };
 
-  // 1-Click Client Impersonation Login
+  // 1-Click Client WHM Impersonation Login
   const handleLoginAsClient = async (acc: HostingAccount) => {
-    if (!confirm(`Log in as client "${acc.username}" (${acc.domain})? You will enter the client control panel.`)) {
+    if (!confirm(`Log in directly to WHM client control panel for "${acc.username}" (${acc.domain})?`)) {
       return;
     }
     setActionLoading(`login-${acc.id}`);
@@ -257,6 +332,7 @@ export default function AccountsPage() {
         tokens?: { access_token: string; refresh_token: string };
         token?: string;
         login_url: string;
+        user?: { id: string; email: string };
       }>(
         `/api/v1/accounts/${acc.id}/login-token`,
         { method: 'POST' }
@@ -264,10 +340,12 @@ export default function AccountsPage() {
       if (res.data) {
         const token = res.data.tokens?.access_token || res.data.token;
         if (token) {
-          const currentToken = localStorage.getItem('hostvra_token');
+          const currentToken = localStorage.getItem('hostvra_access_token') || localStorage.getItem('hostvra_token');
           if (currentToken) {
             localStorage.setItem('hostvra_admin_backup_token', currentToken);
           }
+          localStorage.setItem('hostvra_admin_return_url', '/accounts');
+          setStoredToken(token);
           localStorage.setItem('hostvra_token', token);
           if (typeof document !== 'undefined') {
             document.cookie = `hostvra_token=${encodeURIComponent(token)}; path=/; max-age=3600; SameSite=Lax`;
@@ -275,6 +353,8 @@ export default function AccountsPage() {
           localStorage.setItem(
             'hostvra_user',
             JSON.stringify({
+              id: res.data.user?.id,
+              email: res.data.user?.email,
               username: acc.username,
               domain: acc.domain,
               role: 'customer',
@@ -282,7 +362,7 @@ export default function AccountsPage() {
               impersonated: true,
             })
           );
-          showNotify('success', `Client session authenticated for ${acc.username}. Redirecting...`);
+          showNotify('success', `Client session authenticated for ${acc.username}. Entering client panel...`);
           window.location.href = '/dashboard';
         } else {
           showNotify('error', 'Authentication session token not returned by server');
@@ -520,6 +600,7 @@ export default function AccountsPage() {
                 <tr>
                   <th className="py-4 px-6">Domain & Username</th>
                   <th className="py-4 px-6">Hosting Package</th>
+                  <th className="py-4 px-6">RAM & CPU Limit</th>
                   <th className="py-4 px-6">Storage Quota</th>
                   <th className="py-4 px-6">Bandwidth Quota</th>
                   <th className="py-4 px-6">IP & Node</th>
@@ -530,7 +611,7 @@ export default function AccountsPage() {
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-medium">
                 {filteredAccounts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-16 text-slate-400">
+                    <td colSpan={8} className="text-center py-16 text-slate-400">
                       No client accounts found.
                     </td>
                   </tr>
@@ -583,6 +664,26 @@ export default function AccountsPage() {
                             <Zap className="w-3 h-3" />
                             <span>{acc.plan_name}</span>
                           </span>
+                        </td>
+
+                        {/* RAM & CPU Quota (Linux cgroups v2 Isolated) */}
+                        <td className="py-4 px-6 min-w-[150px]">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-800 dark:text-slate-200">
+                            <Cpu className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                            <span>
+                              {acc.memory_limit_mb
+                                ? acc.memory_limit_mb >= 1024
+                                  ? `${(acc.memory_limit_mb / 1024).toFixed(0)} GB`
+                                  : `${acc.memory_limit_mb} MB`
+                                : '1 GB'}{' '}
+                              RAM
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1 font-medium">
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{acc.cpu_limit_percent || 100}% CPU</span>
+                            <span>•</span>
+                            <span>{acc.tasks_max || 100} procs</span>
+                          </div>
                         </td>
 
                         {/* Disk Meter */}
@@ -662,7 +763,7 @@ export default function AccountsPage() {
                               onClick={() => handleLoginAsClient(acc)}
                               disabled={actionLoading === `login-${acc.id}`}
                               className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/50 text-purple-600 dark:text-purple-400 transition-colors flex items-center gap-1"
-                              title="1-Click Client Panel Login"
+                              title="1-Click Client WHM Panel Login"
                             >
                               <LogIn className="w-3.5 h-3.5" />
                               <span className="hidden xl:inline">Login</span>
@@ -691,15 +792,11 @@ export default function AccountsPage() {
                               </button>
                             )}
 
-                            {/* Change Plan */}
+                            {/* Resource Limits & System Isolation */}
                             <button
-                              onClick={() => {
-                                setSelectedAccount(acc);
-                                setTargetPlanId(acc.plan_id);
-                                setChangePlanModalOpen(true);
-                              }}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                              title="Change Package / Quota"
+                              onClick={() => handleOpenLimitsModal(acc)}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/50 transition-colors"
+                              title="Set RAM, Storage & Resource Limits (Isolation)"
                             >
                               <Sliders className="w-3.5 h-3.5" />
                             </button>
@@ -818,7 +915,14 @@ export default function AccountsPage() {
                   <label className="font-bold text-slate-700 dark:text-slate-300">Hosting Package</label>
                   <select
                     value={selectedPlanId}
-                    onChange={e => setSelectedPlanId(e.target.value)}
+                    onChange={e => {
+                      setSelectedPlanId(e.target.value);
+                      const p = plans.find(plan => plan.id === e.target.value);
+                      if (p) {
+                        setCreateStorageGB(Math.round(p.disk_space_mb / 1024));
+                        setCreateRamMB(p.disk_space_mb >= 10240 ? 1024 : 512);
+                      }
+                    }}
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                   >
                     {plans.map(p => (
@@ -842,6 +946,86 @@ export default function AccountsPage() {
                     <option value="8.2">PHP 8.2</option>
                     <option value="8.1">PHP 8.1</option>
                   </select>
+                </div>
+
+                {/* Collapsible Resource Limits & System Isolation */}
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedCreate(!showAdvancedCreate)}
+                    className="flex items-center justify-between w-full text-left py-1 text-xs font-bold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5" />
+                      <span>Customize Resource Limits & System Isolation</span>
+                    </span>
+                    {showAdvancedCreate ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
+
+                  {showAdvancedCreate && (
+                    <div className="mt-3 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3 animate-in fade-in duration-150">
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Configures Linux POSIX user isolation, systemd cgroups v2 slice, memory ceiling, and CPU quotas.
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            RAM Limit (MB)
+                          </label>
+                          <input
+                            type="number"
+                            min="256"
+                            step="128"
+                            value={createRamMB}
+                            onChange={e => setCreateRamMB(Number(e.target.value))}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            Storage Quota (GB)
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={createStorageGB}
+                            onChange={e => setCreateStorageGB(Number(e.target.value))}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            CPU Limit (%)
+                          </label>
+                          <input
+                            type="number"
+                            min="10"
+                            max="800"
+                            step="10"
+                            value={createCpuPct}
+                            onChange={e => setCreateCpuPct(Number(e.target.value))}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-medium"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                            Max Tasks/Procs
+                          </label>
+                          <input
+                            type="number"
+                            min="10"
+                            max="1000"
+                            step="10"
+                            value={createTasksMax}
+                            onChange={e => setCreateTasksMax(Number(e.target.value))}
+                            className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-medium"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
@@ -924,55 +1108,374 @@ export default function AccountsPage() {
           </div>
         )}
 
-        {/* MODAL 3: CHANGE PLAN MODAL */}
-        {changePlanModalOpen && selectedAccount && (
+        {/* MODAL 3: RESOURCE LIMITS & SYSTEM ISOLATION MODAL */}
+        {limitsModalOpen && selectedAccount && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl p-7 space-y-5">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-2xl bg-blue-500/10 text-blue-600">
-                  <Sliders className="w-6 h-6" />
+            <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-100 dark:border-slate-800 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                    <Sliders className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                      Resource Limits & Security Isolation
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      WHM Account: <span className="font-semibold text-slate-700 dark:text-slate-300">{selectedAccount.domain}</span> ({selectedAccount.username})
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                    Change Package & Quota
-                  </h3>
-                  <p className="text-xs text-slate-400">{selectedAccount.domain}</p>
+
+                <button
+                  onClick={() => setLimitsModalOpen(false)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Scrollable Body */}
+              <div className="p-6 space-y-6 overflow-y-auto text-xs">
+                {/* Isolation Architecture Card */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/30 via-slate-900/40 to-slate-900/20 border border-purple-500/20 dark:border-purple-500/30 space-y-2">
+                  <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 font-bold">
+                    <Shield className="w-4 h-4" />
+                    <span>Active Linux POSIX & cgroups v2 Isolation</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className="text-slate-400">System User:</span>
+                      <span className="font-bold text-slate-900 dark:text-white">{selectedAccount.username}</span>
+                      <span className="text-emerald-500 font-semibold">(0750)</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className="text-slate-400">Home/Root:</span>
+                      <span className="truncate text-slate-900 dark:text-white">/home/{selectedAccount.username}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className="text-slate-400">Systemd Slice:</span>
+                      <span className="text-purple-600 dark:text-purple-400">hostvra-user-{selectedAccount.username}.slice</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className="text-slate-400">FPM Pool:</span>
+                      <span className="truncate text-slate-900 dark:text-white">php{limitPHP}-fpm-{selectedAccount.username}.sock</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Package Template Quick Preset */}
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">
+                    Apply Package Template Preset:
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={targetPlanId}
+                      onChange={e => handleApplyPlanToLimits(e.target.value)}
+                      className="flex-1 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                    >
+                      <option value="">-- Custom Limits Configuration --</option>
+                      {plans.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({(p.disk_space_mb / 1024).toFixed(0)} GB Disk, {(p.bandwidth_mb / 1024).toFixed(0)} GB Bandwidth, {p.max_websites} Sites)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Core Hardware Resource Limits */}
+                <div className="space-y-4">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-purple-500" />
+                    <span>Hardware Resource Quotas (cgroups v2)</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* RAM Limit */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="flex justify-between items-center">
+                        <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                          <Gauge className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                          <span>RAM Limit (MB)</span>
+                        </label>
+                        <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
+                          {limitRamMB >= 1024 ? `${(limitRamMB / 1024).toFixed(1)} GB` : `${limitRamMB} MB`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="256"
+                        max="8192"
+                        step="128"
+                        value={limitRamMB}
+                        onChange={e => setLimitRamMB(Number(e.target.value))}
+                        className="w-full accent-purple-600 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {[512, 1024, 2048, 4096].map(mb => (
+                          <button
+                            key={mb}
+                            type="button"
+                            onClick={() => setLimitRamMB(mb)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                              limitRamMB === mb
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                            }`}
+                          >
+                            {mb >= 1024 ? `${mb / 1024}GB` : `${mb}MB`}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Hard limit (`memory.max`). Exceeding throttles or triggers OOM protection solely for this tenant.
+                      </p>
+                    </div>
+
+                    {/* Storage Quota */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="flex justify-between items-center">
+                        <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                          <HardDrive className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                          <span>Storage Quota (GB)</span>
+                        </label>
+                        <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
+                          {limitStorageGB} GB
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="200"
+                        step="1"
+                        value={limitStorageGB}
+                        onChange={e => setLimitStorageGB(Number(e.target.value))}
+                        className="w-full accent-purple-600 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {[5, 10, 25, 50, 100].map(gb => (
+                          <button
+                            key={gb}
+                            type="button"
+                            onClick={() => setLimitStorageGB(gb)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                              limitStorageGB === gb
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                            }`}
+                          >
+                            {gb}GB
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        Filesystem quota on `/home/{selectedAccount.username}` preventing disk saturation.
+                      </p>
+                    </div>
+
+                    {/* CPU Limit */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="flex justify-between items-center">
+                        <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                          <Cpu className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                          <span>CPU Limit (%)</span>
+                        </label>
+                        <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
+                          {limitCpuPct}% ({limitCpuPct >= 100 ? `${(limitCpuPct / 100).toFixed(1)} Core` : `${limitCpuPct}% Core`})
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="800"
+                        step="10"
+                        value={limitCpuPct}
+                        onChange={e => setLimitCpuPct(Number(e.target.value))}
+                        className="w-full accent-purple-600 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {[50, 100, 200, 400].map(pct => (
+                          <button
+                            key={pct}
+                            type="button"
+                            onClick={() => setLimitCpuPct(pct)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                              limitCpuPct === pct
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                            }`}
+                          >
+                            {pct}%
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        cgroups v2 `cpu.max` CFS bandwidth slice. Enforces fair sharing across cores.
+                      </p>
+                    </div>
+
+                    {/* Max Tasks / Procs */}
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-2.5">
+                      <div className="flex justify-between items-center">
+                        <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                          <Activity className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                          <span>Max Tasks & Processes</span>
+                        </label>
+                        <span className="font-bold text-purple-600 dark:text-purple-400 font-mono">
+                          {limitTasks} Procs
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="500"
+                        step="10"
+                        value={limitTasks}
+                        onChange={e => setLimitTasks(Number(e.target.value))}
+                        className="w-full accent-purple-600 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 pt-1">
+                        {[50, 100, 200, 300].map(procs => (
+                          <button
+                            key={procs}
+                            type="button"
+                            onClick={() => setLimitTasks(procs)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                              limitTasks === procs
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                            }`}
+                          >
+                            {procs}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        systemd `TasksMax` setting. Prevents fork bombs or thread exhaustion attacks.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Network & Inodes Limits */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Network className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Bandwidth Quota (GB / Month)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      step="5"
+                      value={limitBwGB}
+                      onChange={e => setLimitBwGB(Number(e.target.value))}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Inodes Quota (Files & Dirs)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="10000"
+                      step="10000"
+                      value={limitInodes}
+                      onChange={e => setLimitInodes(Number(e.target.value))}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* PHP Runtime & Strict open_basedir Security Isolation */}
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 space-y-3">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>PHP-FPM Runtime & Directory Confinement</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300">Dedicated PHP Pool Version</label>
+                      <select
+                        value={limitPHP}
+                        onChange={e => setLimitPHP(e.target.value)}
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                      >
+                        <option value="8.4">PHP 8.4 (Latest)</option>
+                        <option value="8.3">PHP 8.3 (Stable)</option>
+                        <option value="8.2">PHP 8.2</option>
+                        <option value="8.1">PHP 8.1</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-bold text-slate-700 dark:text-slate-300">Max Websites Allowed</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="50"
+                        value={limitWebsites}
+                        onChange={e => setLimitWebsites(Number(e.target.value))}
+                        className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={limitOpenBaseDir}
+                        onChange={e => setLimitOpenBaseDir(e.target.checked)}
+                        className="mt-0.5 rounded text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                          Enforce Strict PHP <code className="text-purple-600 dark:text-purple-400">open_basedir</code> Directory Isolation
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Restricts all PHP file operations strictly inside <code className="text-slate-700 dark:text-slate-300">/home/{selectedAccount.username}/public_html/</code> and <code className="text-slate-700 dark:text-slate-300">/tmp/</code>. Prevents cross-account directory traversal.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3 text-xs">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">Select New Package:</label>
-                  <select
-                    value={targetPlanId}
-                    onChange={e => setTargetPlanId(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+              {/* Footer */}
+              <div className="flex items-center justify-between p-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex-shrink-0 bg-slate-50/50 dark:bg-slate-800/20">
+                <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Real-time cgroups v2 & kernel slice reconfiguration</span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setLimitsModalOpen(false)}
+                    className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
-                    {plans.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} — {(p.disk_space_mb / 1024).toFixed(0)}GB NVMe, {p.max_websites} Sites
-                      </option>
-                    ))}
-                  </select>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveLimits}
+                    disabled={actionLoading === `limits-${selectedAccount.id}`}
+                    className="px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white text-xs font-bold shadow-md shadow-purple-500/20 flex items-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    {actionLoading === `limits-${selectedAccount.id}` && (
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                    )}
+                    <span>Save & Apply Isolation</span>
+                  </button>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setChangePlanModalOpen(false)}
-                  className="px-5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmChangePlan}
-                  disabled={actionLoading === `change-plan-${selectedAccount.id}`}
-                  className="px-6 py-2 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-bold shadow-sm"
-                >
-                  Save Changes
-                </button>
               </div>
             </div>
           </div>

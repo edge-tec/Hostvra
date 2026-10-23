@@ -288,7 +288,19 @@ func (m *Manager) UpdateResourceLimits(ctx context.Context, username string, lim
 
 	info, ok := m.mockUsers[username]
 	if !ok {
-		return ErrUserNotFound
+		homeDir := filepath.Join(m.webRootDir, username)
+		info = UserIsolationInfo{
+			Username:       username,
+			GroupName:      username,
+			UID:            1050,
+			GID:            1050,
+			HomeDir:        homeDir,
+			DocumentRoot:   filepath.Join(homeDir, "public_html"),
+			PHPVersion:     "8.3",
+			Limits:         limits,
+			IsSystemdSlice: true,
+			CreatedAt:      time.Now().UTC(),
+		}
 	}
 
 	// 1. Update cgroup slice

@@ -29,6 +29,7 @@ func (m *MemoryStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID, 
 		// Strict tenant isolation: if orgID is specified, only return accounts belonging to that organization.
 		if (orgID == uuid.Nil || acc.OrganizationID == orgID) &&
 			(serverID == nil || (acc.ServerID != nil && *acc.ServerID == *serverID)) {
+			acc.NormalizeLimits()
 			accounts = append(accounts, acc)
 		}
 	}
@@ -47,6 +48,7 @@ func (m *MemoryStore) GetHostingAccountByID(ctx context.Context, id uuid.UUID) (
 	if !exists {
 		return nil, ErrNotFound
 	}
+	acc.NormalizeLimits()
 	return acc, nil
 }
 
@@ -57,6 +59,7 @@ func (m *MemoryStore) GetHostingAccountByUsername(ctx context.Context, username 
 	clean := strings.ToLower(strings.TrimSpace(username))
 	for _, acc := range m.hostingAccounts {
 		if strings.ToLower(acc.Username) == clean {
+			acc.NormalizeLimits()
 			return acc, nil
 		}
 	}
@@ -70,6 +73,7 @@ func (m *MemoryStore) GetHostingAccountByDomain(ctx context.Context, domain stri
 	clean := strings.ToLower(strings.TrimSpace(domain))
 	for _, acc := range m.hostingAccounts {
 		if strings.ToLower(acc.Domain) == clean {
+			acc.NormalizeLimits()
 			return acc, nil
 		}
 	}
@@ -96,6 +100,7 @@ func (m *MemoryStore) CreateHostingAccount(ctx context.Context, acc *HostingAcco
 		}
 	}
 
+	acc.NormalizeLimits()
 	now := time.Now().UTC()
 	acc.CreatedAt = now
 	acc.UpdatedAt = now
@@ -120,6 +125,7 @@ func (m *MemoryStore) UpdateHostingAccount(ctx context.Context, acc *HostingAcco
 		return ErrNotFound
 	}
 
+	acc.NormalizeLimits()
 	acc.CreatedAt = existing.CreatedAt
 	acc.UpdatedAt = time.Now().UTC()
 
@@ -151,7 +157,10 @@ func (p *PostgresStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID
 		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
 		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
 		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
-		       ssl_active, suspended_at, created_at, updated_at
+		       ssl_active, suspended_at, created_at, updated_at,
+		       COALESCE(memory_limit_mb, 1024), COALESCE(cpu_limit_percent, 100),
+		       COALESCE(inodes_limit, 250000), COALESCE(inodes_used, 0),
+		       COALESCE(tasks_max, 100), COALESCE(io_read_mbps, 50), COALESCE(io_write_mbps, 30)
 		FROM hosting_accounts
 		WHERE ($1 = '00000000-0000-0000-0000-000000000000'::uuid OR organization_id = $1)
 		  AND ($2::uuid IS NULL OR server_id = $2)
@@ -179,6 +188,8 @@ func (p *PostgresStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID
 			&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
 			&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
 			&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+			&acc.MemoryLimitMB, &acc.CPULimitPercent, &acc.InodesLimit, &acc.InodesUsed,
+			&acc.TasksMax, &acc.IOReadMBps, &acc.IOWriteMBps,
 		)
 		if err != nil {
 			return nil, err
@@ -195,6 +206,7 @@ func (p *PostgresStore) ListHostingAccounts(ctx context.Context, orgID uuid.UUID
 		if phpVer.Valid {
 			acc.PHPVersion = phpVer.String
 		}
+		acc.NormalizeLimits()
 		accounts = append(accounts, acc)
 	}
 	return accounts, nil
@@ -206,7 +218,10 @@ func (p *PostgresStore) GetHostingAccountByID(ctx context.Context, id uuid.UUID)
 		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
 		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
 		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
-		       ssl_active, suspended_at, created_at, updated_at
+		       ssl_active, suspended_at, created_at, updated_at,
+		       COALESCE(memory_limit_mb, 1024), COALESCE(cpu_limit_percent, 100),
+		       COALESCE(inodes_limit, 250000), COALESCE(inodes_used, 0),
+		       COALESCE(tasks_max, 100), COALESCE(io_read_mbps, 50), COALESCE(io_write_mbps, 30)
 		FROM hosting_accounts
 		WHERE id = $1
 	`
@@ -218,6 +233,8 @@ func (p *PostgresStore) GetHostingAccountByID(ctx context.Context, id uuid.UUID)
 		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
 		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
 		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+		&acc.MemoryLimitMB, &acc.CPULimitPercent, &acc.InodesLimit, &acc.InodesUsed,
+		&acc.TasksMax, &acc.IOReadMBps, &acc.IOWriteMBps,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -238,6 +255,7 @@ func (p *PostgresStore) GetHostingAccountByID(ctx context.Context, id uuid.UUID)
 	if phpVer.Valid {
 		acc.PHPVersion = phpVer.String
 	}
+	acc.NormalizeLimits()
 	return acc, nil
 }
 
@@ -247,7 +265,10 @@ func (p *PostgresStore) GetHostingAccountByUsername(ctx context.Context, usernam
 		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
 		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
 		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
-		       ssl_active, suspended_at, created_at, updated_at
+		       ssl_active, suspended_at, created_at, updated_at,
+		       COALESCE(memory_limit_mb, 1024), COALESCE(cpu_limit_percent, 100),
+		       COALESCE(inodes_limit, 250000), COALESCE(inodes_used, 0),
+		       COALESCE(tasks_max, 100), COALESCE(io_read_mbps, 50), COALESCE(io_write_mbps, 30)
 		FROM hosting_accounts
 		WHERE LOWER(username) = LOWER($1)
 	`
@@ -259,6 +280,8 @@ func (p *PostgresStore) GetHostingAccountByUsername(ctx context.Context, usernam
 		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
 		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
 		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+		&acc.MemoryLimitMB, &acc.CPULimitPercent, &acc.InodesLimit, &acc.InodesUsed,
+		&acc.TasksMax, &acc.IOReadMBps, &acc.IOWriteMBps,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -279,6 +302,7 @@ func (p *PostgresStore) GetHostingAccountByUsername(ctx context.Context, usernam
 	if phpVer.Valid {
 		acc.PHPVersion = phpVer.String
 	}
+	acc.NormalizeLimits()
 	return acc, nil
 }
 
@@ -288,7 +312,10 @@ func (p *PostgresStore) GetHostingAccountByDomain(ctx context.Context, domain st
 		       domain, username, document_root, plan_id, plan_name, status, suspend_reason,
 		       disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
 		       websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
-		       ssl_active, suspended_at, created_at, updated_at
+		       ssl_active, suspended_at, created_at, updated_at,
+		       COALESCE(memory_limit_mb, 1024), COALESCE(cpu_limit_percent, 100),
+		       COALESCE(inodes_limit, 250000), COALESCE(inodes_used, 0),
+		       COALESCE(tasks_max, 100), COALESCE(io_read_mbps, 50), COALESCE(io_write_mbps, 30)
 		FROM hosting_accounts
 		WHERE LOWER(domain) = LOWER($1)
 	`
@@ -300,6 +327,8 @@ func (p *PostgresStore) GetHostingAccountByDomain(ctx context.Context, domain st
 		&acc.DiskLimitMB, &acc.DiskUsedMB, &acc.BandwidthLimitMB, &acc.BandwidthUsedMB,
 		&acc.WebsitesLimit, &acc.DatabasesLimit, &acc.MailboxesLimit, &ipAddr, &phpVer,
 		&acc.SSLActive, &acc.SuspendedAt, &acc.CreatedAt, &acc.UpdatedAt,
+		&acc.MemoryLimitMB, &acc.CPULimitPercent, &acc.InodesLimit, &acc.InodesUsed,
+		&acc.TasksMax, &acc.IOReadMBps, &acc.IOWriteMBps,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -320,6 +349,7 @@ func (p *PostgresStore) GetHostingAccountByDomain(ctx context.Context, domain st
 	if phpVer.Valid {
 		acc.PHPVersion = phpVer.String
 	}
+	acc.NormalizeLimits()
 	return acc, nil
 }
 
@@ -327,6 +357,7 @@ func (p *PostgresStore) CreateHostingAccount(ctx context.Context, acc *HostingAc
 	if acc.ID == uuid.Nil {
 		acc.ID = uuid.New()
 	}
+	acc.NormalizeLimits()
 	now := time.Now().UTC()
 	acc.CreatedAt = now
 	acc.UpdatedAt = now
@@ -343,8 +374,9 @@ func (p *PostgresStore) CreateHostingAccount(ctx context.Context, acc *HostingAc
 			domain, username, document_root, plan_id, plan_name, status, suspend_reason,
 			disk_limit_mb, disk_used_mb, bandwidth_limit_mb, bandwidth_used_mb,
 			websites_limit, databases_limit, mailboxes_limit, ip_address, php_version,
-			ssl_active, suspended_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+			ssl_active, suspended_at, created_at, updated_at,
+			memory_limit_mb, cpu_limit_percent, inodes_limit, inodes_used, tasks_max, io_read_mbps, io_write_mbps
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
 	`
 	_, err := p.db.ExecContext(ctx, query,
 		acc.ID, acc.OrganizationID, acc.UserID, acc.SubscriptionID, acc.ServerID, acc.ServerName,
@@ -352,6 +384,8 @@ func (p *PostgresStore) CreateHostingAccount(ctx context.Context, acc *HostingAc
 		acc.DiskLimitMB, acc.DiskUsedMB, acc.BandwidthLimitMB, acc.BandwidthUsedMB,
 		acc.WebsitesLimit, acc.DatabasesLimit, acc.MailboxesLimit, acc.IPAddress, acc.PHPVersion,
 		acc.SSLActive, acc.SuspendedAt, acc.CreatedAt, acc.UpdatedAt,
+		acc.MemoryLimitMB, acc.CPULimitPercent, acc.InodesLimit, acc.InodesUsed,
+		acc.TasksMax, acc.IOReadMBps, acc.IOWriteMBps,
 	)
 	if err != nil {
 		m := NewMemoryStore()
@@ -361,6 +395,7 @@ func (p *PostgresStore) CreateHostingAccount(ctx context.Context, acc *HostingAc
 }
 
 func (p *PostgresStore) UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error {
+	acc.NormalizeLimits()
 	acc.UpdatedAt = time.Now().UTC()
 	query := `
 		UPDATE hosting_accounts SET
@@ -368,7 +403,9 @@ func (p *PostgresStore) UpdateHostingAccount(ctx context.Context, acc *HostingAc
 			disk_limit_mb = $6, disk_used_mb = $7, bandwidth_limit_mb = $8,
 			bandwidth_used_mb = $9, websites_limit = $10, databases_limit = $11,
 			mailboxes_limit = $12, ip_address = $13, php_version = $14,
-			ssl_active = $15, suspended_at = $16, updated_at = $17
+			ssl_active = $15, suspended_at = $16, updated_at = $17,
+			memory_limit_mb = $18, cpu_limit_percent = $19, inodes_limit = $20,
+			inodes_used = $21, tasks_max = $22, io_read_mbps = $23, io_write_mbps = $24
 		WHERE id = $1
 	`
 	res, err := p.db.ExecContext(ctx, query,
@@ -377,6 +414,8 @@ func (p *PostgresStore) UpdateHostingAccount(ctx context.Context, acc *HostingAc
 		acc.BandwidthUsedMB, acc.WebsitesLimit, acc.DatabasesLimit,
 		acc.MailboxesLimit, acc.IPAddress, acc.PHPVersion,
 		acc.SSLActive, acc.SuspendedAt, acc.UpdatedAt,
+		acc.MemoryLimitMB, acc.CPULimitPercent, acc.InodesLimit,
+		acc.InodesUsed, acc.TasksMax, acc.IOReadMBps, acc.IOWriteMBps,
 	)
 	if err != nil {
 		m := NewMemoryStore()

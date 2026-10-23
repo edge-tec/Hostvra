@@ -51,6 +51,7 @@ func TestAccountHandler_Flow(t *testing.T) {
 	r.Post("/accounts/{id}/suspend", h.SuspendAccount)
 	r.Post("/accounts/{id}/unsuspend", h.UnsuspendAccount)
 	r.Post("/accounts/{id}/change-plan", h.ChangePlan)
+	r.Put("/accounts/{id}/limits", h.UpdateLimits)
 	r.Post("/accounts/{id}/login-token", h.GenerateLoginToken)
 	r.Delete("/accounts/{id}", h.DeleteAccount)
 
@@ -195,6 +196,38 @@ func TestAccountHandler_Flow(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &planResp)
 	if planResp.Data.PlanName != "Business Pro" || planResp.Data.DiskLimitMB != 51200 {
 		t.Fatalf("expected plan updated to Business Pro with 51200MB, got %+v", planResp.Data)
+	}
+
+	// 5b. Test Admin Sets Custom RAM, Storage, CPU, Inodes, and Tasks Limits
+	openBaseDirTrue := true
+	limitsBody, _ := json.Marshal(UpdateAccountLimitsRequest{
+		MemoryLimitMB:    2048,
+		CPULimitPercent:  200,
+		DiskLimitMB:      25600,
+		BandwidthLimitMB: 204800,
+		InodesLimit:      500000,
+		TasksMax:         250,
+		WebsitesLimit:    3,
+		DatabasesLimit:   10,
+		MailboxesLimit:   20,
+		PHPVersion:       "8.3",
+		OpenBaseDir:      &openBaseDirTrue,
+	})
+	req = httptest.NewRequest("PUT", "/accounts/"+newAccountID.String()+"/limits", bytes.NewReader(limitsBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for update-limits, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var limitsResp struct {
+		Data *store.HostingAccount `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &limitsResp)
+	if limitsResp.Data == nil || limitsResp.Data.MemoryLimitMB != 2048 || limitsResp.Data.CPULimitPercent != 200 || limitsResp.Data.DiskLimitMB != 25600 || limitsResp.Data.InodesLimit != 500000 || limitsResp.Data.TasksMax != 250 {
+		t.Fatalf("expected custom limits applied: RAM 2048MB, CPU 200%%, Disk 25600MB, Inodes 500000, Tasks 250, got %+v", limitsResp.Data)
 	}
 
 	// 6. Test Suspend Account (and check status sync)

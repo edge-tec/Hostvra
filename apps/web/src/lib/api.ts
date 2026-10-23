@@ -1643,12 +1643,41 @@ export interface HostingAccount {
   websites_limit: number;
   databases_limit: number;
   mailboxes_limit: number;
+  memory_limit_mb?: number;
+  cpu_limit_percent?: number;
+  inodes_limit?: number;
+  inodes_used?: number;
+  tasks_max?: number;
+  io_read_mbps?: number;
+  io_write_mbps?: number;
   ip_address?: string;
   php_version?: string;
   ssl_active: boolean;
   suspended_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export async function updateAccountLimits(
+  accountId: string,
+  limits: {
+    memory_limit_mb?: number;
+    cpu_limit_percent?: number;
+    disk_limit_mb?: number;
+    bandwidth_limit_mb?: number;
+    inodes_limit?: number;
+    tasks_max?: number;
+    websites_limit?: number;
+    databases_limit?: number;
+    mailboxes_limit?: number;
+    php_version?: string;
+    open_basedir?: boolean;
+  }
+): Promise<ApiResponse<HostingAccount>> {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/limits`, {
+    method: 'PUT',
+    body: JSON.stringify(limits),
+  });
 }
 
 export interface TLDPricing {

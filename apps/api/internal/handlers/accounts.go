@@ -141,13 +141,22 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 type CreateAccountRequest struct {
-	Domain         string `json:"domain"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	PlanID         string `json:"plan_id"`
-	ServerID       string `json:"server_id"`
-	SubscriptionID string `json:"subscription_id,omitempty"`
-	PHPVersion     string `json:"php_version,omitempty"`
+	Domain           string `json:"domain"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	PlanID           string `json:"plan_id"`
+	ServerID         string `json:"server_id"`
+	SubscriptionID   string `json:"subscription_id,omitempty"`
+	PHPVersion       string `json:"php_version,omitempty"`
+	MemoryLimitMB    int    `json:"memory_limit_mb,omitempty"`
+	CPULimitPercent  int    `json:"cpu_limit_percent,omitempty"`
+	DiskLimitMB      int64  `json:"disk_limit_mb,omitempty"`
+	BandwidthLimitMB int64  `json:"bandwidth_limit_mb,omitempty"`
+	InodesLimit      int64  `json:"inodes_limit,omitempty"`
+	TasksMax         int    `json:"tasks_max,omitempty"`
+	WebsitesLimit    int    `json:"websites_limit,omitempty"`
+	DatabasesLimit   int    `json:"databases_limit,omitempty"`
+	MailboxesLimit   int    `json:"mailboxes_limit,omitempty"`
 }
 
 func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -262,15 +271,63 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 	accID := uuid.New()
 	docRoot := fmt.Sprintf("/home/%s/public_html", cleanUser)
 
+	// Determine custom or package default resource limits
+	memLimit := 1024
+	if req.MemoryLimitMB > 0 {
+		memLimit = req.MemoryLimitMB
+	} else if plan.DiskSpaceMB < 10240 {
+		memLimit = 512
+	}
+
+	cpuLimit := 100
+	if req.CPULimitPercent > 0 {
+		cpuLimit = req.CPULimitPercent
+	}
+
+	diskLimit := plan.DiskSpaceMB
+	if req.DiskLimitMB > 0 {
+		diskLimit = req.DiskLimitMB
+	}
+
+	bwLimit := plan.BandwidthMB
+	if req.BandwidthLimitMB > 0 {
+		bwLimit = req.BandwidthLimitMB
+	}
+
+	inodesLimit := int64(250000)
+	if req.InodesLimit > 0 {
+		inodesLimit = req.InodesLimit
+	}
+
+	tasksMax := 100
+	if req.TasksMax > 0 {
+		tasksMax = req.TasksMax
+	}
+
+	webLimit := plan.MaxWebsites
+	if req.WebsitesLimit > 0 {
+		webLimit = req.WebsitesLimit
+	}
+
+	dbLimit := plan.MaxDatabases
+	if req.DatabasesLimit > 0 {
+		dbLimit = req.DatabasesLimit
+	}
+
+	mailLimit := plan.MaxMailboxes
+	if req.MailboxesLimit > 0 {
+		mailLimit = req.MailboxesLimit
+	}
+
 	// 2. Real Operating System User & cgroups v2 Isolation Provisioning
 	if h.isolationMgr != nil {
 		limits := isolation.DefaultResourceLimits()
-		if plan.DiskSpaceMB > 0 {
-			if plan.DiskSpaceMB >= 10240 {
-				limits.MemoryMaxMB = 1024
-				limits.MemoryHighMB = 920
-			}
-		}
+		limits.MemoryMaxMB = memLimit
+		limits.MemoryHighMB = int(float64(memLimit) * 0.90)
+		limits.CPUQuota = cpuLimit
+		limits.TasksMax = tasksMax
+		limits.OpenBaseDir = true
+
 		if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), cleanDomain, phpVer, &limits); err == nil && isoInfo != nil {
 			if isoInfo.DocumentRoot != "" {
 				docRoot = isoInfo.DocumentRoot
@@ -328,29 +385,38 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		PlanID:           plan.ID,
 		PlanName:         plan.Name,
 		Status:           store.AccountStatusActive,
-		DiskLimitMB:      plan.DiskSpaceMB,
+		DiskLimitMB:      diskLimit,
 		DiskUsedMB:       initialDisk,
-		BandwidthLimitMB: plan.BandwidthMB,
+		BandwidthLimitMB: bwLimit,
 		BandwidthUsedMB:  1,
-		WebsitesLimit:    plan.MaxWebsites,
-		DatabasesLimit:   plan.MaxDatabases,
-		MailboxesLimit:   plan.MaxMailboxes,
+		WebsitesLimit:    webLimit,
+		DatabasesLimit:   dbLimit,
+		MailboxesLimit:   mailLimit,
+		MemoryLimitMB:    memLimit,
+		CPULimitPercent:  cpuLimit,
+		InodesLimit:      inodesLimit,
+		InodesUsed:       10,
+		TasksMax:         tasksMax,
+		IOReadMBps:       50,
+		IOWriteMBps:      30,
 		IPAddress:        ipAddress,
 		PHPVersion:       phpVer,
 		SSLActive:        plan.FreeSSL,
 		CreatedAt:        time.Now().UTC(),
 		UpdatedAt:        time.Now().UTC(),
 	}
+	account.NormalizeLimits()
 
 	if err := h.store.CreateHostingAccount(r.Context(), account); err != nil {
 		response.Error(w, http.StatusInternalServerError, "CREATE_FAILED", "Failed to provision hosting account", err.Error(), "")
 		return
 	}
 
-	// 4. Automatically provision corresponding Website record for Nginx/Apache routing if server exists
+	// 4. Automatically provision corresponding Website record and resource quota for Nginx/Apache routing if server exists
 	if serverUUID != nil {
+		siteID := uuid.New()
 		_ = h.store.CreateWebsite(r.Context(), &store.Website{
-			ID:             uuid.New(),
+			ID:             siteID,
 			OrganizationID: claims.OrganizationID,
 			ServerID:       *serverUUID,
 			PrimaryDomain:  cleanDomain,
@@ -359,6 +425,23 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 			AppType:        "php",
 			Status:         "active",
 			SSLEnabled:     plan.FreeSSL,
+		})
+		_ = h.store.SaveWebsiteResourceQuota(r.Context(), &store.WebsiteResourceQuotaRecord{
+			WebsiteID:          siteID,
+			Username:           cleanUser,
+			MemoryLimitMB:      memLimit,
+			MemoryHighMB:       int(float64(memLimit) * 0.90),
+			CPUQuotaPercent:    cpuLimit,
+			CPUWeight:          100,
+			TasksMax:           tasksMax,
+			IOReadMBps:         50,
+			IOWriteMBps:        30,
+			IOReadIOPS:         1000,
+			IOWriteIOPS:        500,
+			OOMPolicy:          "kill",
+			OpenBaseDirEnabled: true,
+			CreatedAt:          time.Now().UTC(),
+			UpdatedAt:          time.Now().UTC(),
 		})
 	}
 
@@ -536,6 +619,129 @@ func (h *AccountHandler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		"new_plan":   newPlan.Name,
 		"disk_limit": newPlan.DiskSpaceMB,
 		"bw_limit":   newPlan.BandwidthMB,
+	})
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Custom Resource Limits & System Isolation Enforcement
+// ----------------------------------------------------------------------------
+
+type UpdateAccountLimitsRequest struct {
+	MemoryLimitMB    int    `json:"memory_limit_mb"`
+	CPULimitPercent  int    `json:"cpu_limit_percent"`
+	DiskLimitMB      int64  `json:"disk_limit_mb"`
+	BandwidthLimitMB int64  `json:"bandwidth_limit_mb"`
+	InodesLimit      int64  `json:"inodes_limit"`
+	TasksMax         int    `json:"tasks_max"`
+	WebsitesLimit    int    `json:"websites_limit"`
+	DatabasesLimit   int    `json:"databases_limit"`
+	MailboxesLimit   int    `json:"mailboxes_limit"`
+	PHPVersion       string `json:"php_version,omitempty"`
+	OpenBaseDir      *bool  `json:"open_basedir,omitempty"`
+}
+
+func (h *AccountHandler) UpdateLimits(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	var req UpdateAccountLimitsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.MemoryLimitMB > 0 {
+		acc.MemoryLimitMB = req.MemoryLimitMB
+	}
+	if req.CPULimitPercent > 0 {
+		acc.CPULimitPercent = req.CPULimitPercent
+	}
+	if req.DiskLimitMB > 0 {
+		acc.DiskLimitMB = req.DiskLimitMB
+	}
+	if req.BandwidthLimitMB > 0 {
+		acc.BandwidthLimitMB = req.BandwidthLimitMB
+	}
+	if req.InodesLimit > 0 {
+		acc.InodesLimit = req.InodesLimit
+	}
+	if req.TasksMax > 0 {
+		acc.TasksMax = req.TasksMax
+	}
+	if req.WebsitesLimit > 0 {
+		acc.WebsitesLimit = req.WebsitesLimit
+	}
+	if req.DatabasesLimit > 0 {
+		acc.DatabasesLimit = req.DatabasesLimit
+	}
+	if req.MailboxesLimit > 0 {
+		acc.MailboxesLimit = req.MailboxesLimit
+	}
+	if req.PHPVersion != "" {
+		acc.PHPVersion = req.PHPVersion
+	}
+	acc.NormalizeLimits()
+
+	// Dynamically apply to Linux cgroups v2 slice & PHP pool
+	if h.isolationMgr != nil {
+		limits := isolation.DefaultResourceLimits()
+		limits.MemoryMaxMB = acc.MemoryLimitMB
+		limits.MemoryHighMB = int(float64(acc.MemoryLimitMB) * 0.90)
+		limits.CPUQuota = acc.CPULimitPercent
+		limits.TasksMax = acc.TasksMax
+		if req.OpenBaseDir != nil {
+			limits.OpenBaseDir = *req.OpenBaseDir
+		}
+		_ = h.isolationMgr.UpdateResourceLimits(r.Context(), acc.Username, limits)
+	}
+
+	// Persist associated website resource quota if website exists
+	if site, err := h.findWebsiteByDomain(r.Context(), acc.OrganizationID, acc.Domain); err == nil && site != nil {
+		_ = h.store.SaveWebsiteResourceQuota(r.Context(), &store.WebsiteResourceQuotaRecord{
+			WebsiteID:          site.ID,
+			Username:           acc.Username,
+			MemoryLimitMB:      acc.MemoryLimitMB,
+			MemoryHighMB:       int(float64(acc.MemoryLimitMB) * 0.90),
+			CPUQuotaPercent:    acc.CPULimitPercent,
+			CPUWeight:          100,
+			TasksMax:           acc.TasksMax,
+			IOReadMBps:         acc.IOReadMBps,
+			IOWriteMBps:        acc.IOWriteMBps,
+			IOReadIOPS:         1000,
+			IOWriteIOPS:        500,
+			OOMPolicy:          "kill",
+			OpenBaseDirEnabled: true,
+			UpdatedAt:          time.Now().UTC(),
+		})
+	}
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update account limits", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.update_limits", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Updated resource limits for WHM account %s (RAM: %d MB, Disk: %d MB, CPU: %d%%)", acc.Username, acc.MemoryLimitMB, acc.DiskLimitMB, acc.CPULimitPercent), map[string]interface{}{
+		"account_id":  acc.ID,
+		"username":    acc.Username,
+		"ram_mb":      acc.MemoryLimitMB,
+		"disk_mb":     acc.DiskLimitMB,
+		"cpu_pct":     acc.CPULimitPercent,
+		"bw_mb":       acc.BandwidthLimitMB,
+		"inodes":      acc.InodesLimit,
+		"tasks_max":   acc.TasksMax,
+		"php_version": acc.PHPVersion,
 	})
 
 	response.JSON(w, http.StatusOK, acc, nil)

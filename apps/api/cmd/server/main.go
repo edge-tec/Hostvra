@@ -1279,6 +1279,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/suspend", accountHandler.SuspendAccount)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/unsuspend", accountHandler.UnsuspendAccount)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/change-plan", accountHandler.ChangePlan)
+				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Put("/{id}/limits", accountHandler.UpdateLimits)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Post("/{id}/login-token", accountHandler.GenerateLoginToken)
 				r.With(rbac.RequirePermission(rbac.PermAccountsManage)).Delete("/{id}", accountHandler.DeleteAccount)
 			})
