@@ -103,6 +103,20 @@ for cmd in git npm curl; do
     fi
 done
 
+# Ensure MySQL or MariaDB engine is available for database provisioning
+if ! command -v mysql &>/dev/null && ! command -v mariadb &>/dev/null; then
+    echo "[INFO] MySQL/MariaDB database engine not found. Installing mariadb-server..."
+    if command -v apt-get &>/dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get update -y -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mariadb-server mariadb-client >/dev/null 2>&1 || true
+    elif command -v dnf &>/dev/null; then
+        dnf install -y -q mariadb-server mariadb >/dev/null 2>&1 || true
+    fi
+fi
+if command -v systemctl &>/dev/null; then
+    systemctl enable mariadb 2>/dev/null || systemctl enable mysql 2>/dev/null || true
+    systemctl start mariadb 2>/dev/null || systemctl start mysql 2>/dev/null || true
+fi
+
 echo "Pulling latest code from origin/main..."
 git remote set-url origin https://github.com/edge-tec/Hostvra.git 2>/dev/null || true
 git fetch origin main

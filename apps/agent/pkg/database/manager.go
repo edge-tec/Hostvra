@@ -435,7 +435,7 @@ func safeSQLString(val string) string {
 	return val
 }
 
-// executeSQLScript executes SQL statements using the connection pool first, falling back to mysql CLI.
+// executeSQLScript executes SQL statements using the connection pool first, falling back to mysql/mariadb CLI.
 func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error {
 	var poolErr error
 
@@ -464,23 +464,42 @@ func (m *Manager) executeSQLScript(ctx context.Context, sqlScript string) error 
 		}
 	}
 
-	// 2. CLI fallback with secure stdin (prevents password/query exposure in ps aux / /proc)
-	if path, err := exec.LookPath("mysql"); err == nil {
-		cmd := exec.CommandContext(ctx, path, "-u", "root")
-		if m.rootPassword != "" {
-			cmd.Env = append(os.Environ(), "MYSQL_PWD="+m.rootPassword)
-		} else {
-			cmd.Env = os.Environ()
+	// 2. CLI fallback with secure stdin (supports mysql and mariadb, with debian.cnf fallback)
+	binCandidates := []string{"mysql", "mariadb"}
+	var lastCliErr error
+	for _, bin := range binCandidates {
+		path, err := exec.LookPath(bin)
+		if err != nil {
+			continue
 		}
+
+		var cmd *exec.Cmd
+		if _, statErr := os.Stat("/etc/mysql/debian.cnf"); statErr == nil {
+			cmd = exec.CommandContext(ctx, path, "--defaults-file=/etc/mysql/debian.cnf")
+		} else if _, statErr := os.Stat("/root/.my.cnf"); statErr == nil {
+			cmd = exec.CommandContext(ctx, path, "--defaults-file=/root/.my.cnf")
+		} else {
+			cmd = exec.CommandContext(ctx, path, "-u", "root")
+			if m.rootPassword != "" {
+				cmd.Env = append(os.Environ(), "MYSQL_PWD="+m.rootPassword)
+			} else {
+				cmd.Env = os.Environ()
+			}
+		}
+
 		cmd.Stdin = strings.NewReader(sqlScript)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("mysql execution error: %s (%w)", strings.TrimSpace(stderr.String()), err)
+		if runErr := cmd.Run(); runErr == nil {
+			return nil
+		} else {
+			lastCliErr = fmt.Errorf("mysql execution error: %s (%w)", strings.TrimSpace(stderr.String()), runErr)
 		}
-		return nil
 	}
 
+	if lastCliErr != nil {
+		return lastCliErr
+	}
 	if poolErr != nil {
 		return fmt.Errorf("mysql execution failed: %w", poolErr)
 	}
@@ -520,9 +539,7 @@ func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset
 			escHost := safeSQLString(h)
 			sb.WriteString(fmt.Sprintf(
 				"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
-					"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n"+
 					"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n",
-				escUser, escHost, escPass,
 				escUser, escHost, escPass,
 				quotedDB, escUser, escHost,
 			))
@@ -554,9 +571,7 @@ func (m *Manager) ExecuteCreateUser(ctx context.Context, user, password, hostAll
 	for _, h := range hosts {
 		escHost := safeSQLString(h)
 		sb.WriteString(fmt.Sprintf(
-			"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
-				"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n",
-			escUser, escHost, escPass,
+			"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n",
 			escUser, escHost, escPass,
 		))
 	}

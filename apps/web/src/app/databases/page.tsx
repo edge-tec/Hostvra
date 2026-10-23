@@ -274,21 +274,17 @@ export default function DatabasesPage() {
     });
 
     setCreating(false);
-    const newDb: Database = {
-      id: res.data?.id || `db-${Date.now()}`,
-      db_type: activeEngine,
-      name: dbName.trim(),
-      username: finalUser,
-      password: finalPassword,
-      character_set: dbCharset,
-      collation: dbCollation,
-      quota: 'Not set',
-      backup_status: 'Not exist',
-      location: dbHostAllow === 'localhost' ? 'Localhost' : dbHostAllow,
-      note: dbNote.trim() || dbName.trim(),
-      created_at: new Date().toISOString(),
-    };
-    setDatabases((prev) => [newDb, ...prev]);
+    if (!res.success) {
+      const errMsg = typeof res.error === 'string' ? res.error : (res.error as any)?.message || 'Failed to create database';
+      showToast(errMsg, true);
+      return;
+    }
+
+    if (res.data) {
+      setDatabases((prev) => [res.data!, ...prev.filter((d) => d.id !== res.data!.id)]);
+    } else {
+      await fetchDatabases(selectedServer);
+    }
     showToast(`Database '${dbName}' created successfully!`);
     setCreateDbOpen(false);
     setDbName('');

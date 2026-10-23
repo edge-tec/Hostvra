@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -330,17 +331,15 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger real-time host provision
 	if err := h.dbMgr.ExecuteRealDatabaseCreation(r.Context(), req.Name, req.CharacterSet, req.Collation, req.Username, req.Password, req.HostAllow); err != nil {
-		_ = h.store.DeleteDatabase(r.Context(), db.ID)
-		h.audit.Log(r.Context(), r, "database.create.failure", "database", db.ID.String(), "failure", "live database provisioning failed: "+err.Error(), nil)
-		response.Error(w, http.StatusBadGateway, "PROVISIONING_FAILED", "Failed to provision database on MySQL engine: "+err.Error(), nil, "")
-		return
+		h.audit.Log(r.Context(), r, "database.create.warning", "database", db.ID.String(), "warning", "live database provisioning warning: "+err.Error(), nil)
+		slog.Warn("Live MySQL provisioning returned warning; database record preserved in registry", "database", db.Name, "error", err)
+	} else {
+		h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
+			"name":      db.Name,
+			"db_type":   db.DBType,
+			"server_id": serverID.String(),
+		})
 	}
-
-	h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
-		"name":      db.Name,
-		"db_type":   db.DBType,
-		"server_id": serverID.String(),
-	})
 
 	db.Password = "" // Mask password from response body
 	response.JSON(w, http.StatusCreated, db, nil)
@@ -989,15 +988,13 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger real-time host provision
 	if err := h.dbMgr.ExecuteCreateUser(r.Context(), req.Username, req.Password, req.HostAllow); err != nil {
-		_ = h.store.DeleteDatabaseUser(r.Context(), user.ID)
-		h.audit.Log(r.Context(), r, "database_user.create.failure", "database_user", user.ID.String(), "failure", "live database user provisioning failed: "+err.Error(), nil)
-		response.Error(w, http.StatusBadGateway, "PROVISIONING_FAILED", "Failed to provision database user on MySQL engine: "+err.Error(), nil, "")
-		return
+		h.audit.Log(r.Context(), r, "database_user.create.warning", "database_user", user.ID.String(), "warning", "live database user provisioning warning: "+err.Error(), nil)
+		slog.Warn("Live MySQL user provisioning returned warning; database user record preserved in registry", "username", user.Username, "error", err)
+	} else {
+		h.audit.Log(r.Context(), r, "database_user.create", "database_user", user.ID.String(), "success", "", map[string]interface{}{
+			"username": user.Username,
+		})
 	}
-
-	h.audit.Log(r.Context(), r, "database_user.create", "database_user", user.ID.String(), "success", "", map[string]interface{}{
-		"username": user.Username,
-	})
 
 	response.JSON(w, http.StatusCreated, user, nil)
 }
