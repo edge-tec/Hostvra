@@ -175,6 +175,7 @@ type CreateAccountRequest struct {
 	WebsitesLimit    int    `json:"websites_limit,omitempty"`
 	DatabasesLimit   int    `json:"databases_limit,omitempty"`
 	MailboxesLimit   int    `json:"mailboxes_limit,omitempty"`
+	ContactEmail     string `json:"contact_email,omitempty"`
 }
 
 func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -356,19 +357,43 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Ensure Client User Record Exists for Tenant Isolation and 1-Click Login
+	// 3. Ensure Client User Record and Dedicated Tenant Organization Exists for True Isolation
 	var clientUser *store.User
+	clientOrgID := uuid.New()
+
 	if claims.Role == rbac.RoleCustomer {
 		clientUser, _ = h.store.GetUserByID(r.Context(), claims.UserID)
+		if clientUser != nil && clientUser.DefaultOrgID != uuid.Nil {
+			clientOrgID = clientUser.DefaultOrgID
+		}
 	}
+
 	if clientUser == nil {
-		clientEmail := fmt.Sprintf("%s@%s", cleanUser, cleanDomain)
+		clientEmail := req.ContactEmail
+		if clientEmail == "" {
+			clientEmail = fmt.Sprintf("%s@%s", cleanUser, cleanDomain)
+		}
 		clientUser, _ = h.store.GetUserByEmail(r.Context(), clientEmail)
+		if clientUser != nil && (clientUser.IsSuperAdmin || clientUser.Role == rbac.RoleAdmin || clientUser.Role == rbac.RoleOwner) {
+			clientEmail = fmt.Sprintf("%s.client@%s", cleanUser, cleanDomain)
+			clientUser, _ = h.store.GetUserByEmail(r.Context(), clientEmail)
+		}
 		if clientUser == nil {
 			newUserID := uuid.New()
+			_ = h.store.CreateOrganization(r.Context(), &store.Organization{
+				ID:          clientOrgID,
+				Name:        fmt.Sprintf("Hosting: %s", cleanDomain),
+				Slug:        "hosting-" + cleanUser,
+				PlanTier:    "starter",
+				MaxServers:  1,
+				MaxWebsites: 10,
+				CreatedAt:   time.Now().UTC(),
+				UpdatedAt:   time.Now().UTC(),
+			})
+
 			clientUser = &store.User{
 				ID:           newUserID,
-				DefaultOrgID: claims.OrganizationID,
+				DefaultOrgID: clientOrgID,
 				Email:        clientEmail,
 				FullName:     fmt.Sprintf("Client %s", cleanUser),
 				Role:         rbac.RoleCustomer,
@@ -376,13 +401,12 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 				CreatedAt:    time.Now().UTC(),
 				UpdatedAt:    time.Now().UTC(),
 			}
-			_ = h.store.CreateUser(r.Context(), clientUser, claims.OrganizationID, rbac.RoleCustomer)
+			_ = h.store.CreateUser(r.Context(), clientUser, clientOrgID, rbac.RoleCustomer)
+		} else {
+			clientOrgID = clientUser.DefaultOrgID
 		}
 	}
-	targetUserID := claims.UserID
-	if clientUser != nil {
-		targetUserID = clientUser.ID
-	}
+	targetUserID := clientUser.ID
 
 	// Measure initial disk space from authoritative filesystem
 	initialDisk := int64(25)
@@ -392,7 +416,7 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 
 	account := &store.HostingAccount{
 		ID:               accID,
-		OrganizationID:   claims.OrganizationID,
+		OrganizationID:   clientOrgID,
 		UserID:           targetUserID,
 		SubscriptionID:   subUUID,
 		ServerID:         serverUUID,
@@ -435,7 +459,7 @@ func (h *AccountHandler) CreateAccount(w http.ResponseWriter, r *http.Request) {
 		siteID := uuid.New()
 		_ = h.store.CreateWebsite(r.Context(), &store.Website{
 			ID:             siteID,
-			OrganizationID: claims.OrganizationID,
+			OrganizationID: clientOrgID,
 			ServerID:       *serverUUID,
 			PrimaryDomain:  cleanDomain,
 			DocumentRoot:   docRoot,
@@ -1179,19 +1203,44 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Resolve or create customer User record for this hosting account
+	// 1. Resolve or create dedicated customer User record for this hosting account
 	var targetUser *store.User
 	if acc.UserID != uuid.Nil {
 		targetUser, _ = h.store.GetUserByID(r.Context(), acc.UserID)
+		// If acc.UserID points to an admin or superadmin (e.g. from initial creation by root), DO NOT impersonate the admin!
+		if targetUser != nil && (targetUser.IsSuperAdmin || targetUser.Role == rbac.RoleAdmin || targetUser.Role == rbac.RoleOwner || targetUser.ID == claims.UserID) {
+			targetUser = nil
+		}
 	}
+
 	if targetUser == nil {
-		clientEmail := fmt.Sprintf("%s@%s", acc.Username, acc.Domain)
+		clientEmail := acc.ContactEmail
+		if clientEmail == "" {
+			clientEmail = fmt.Sprintf("%s@%s", acc.Username, acc.Domain)
+		}
 		targetUser, _ = h.store.GetUserByEmail(r.Context(), clientEmail)
+		if targetUser != nil && (targetUser.IsSuperAdmin || targetUser.Role == rbac.RoleAdmin || targetUser.Role == rbac.RoleOwner) {
+			clientEmail = fmt.Sprintf("%s.client@%s", acc.Username, acc.Domain)
+			targetUser, _ = h.store.GetUserByEmail(r.Context(), clientEmail)
+		}
+
 		if targetUser == nil {
 			newUserID := uuid.New()
+			clientOrgID := uuid.New()
+			_ = h.store.CreateOrganization(r.Context(), &store.Organization{
+				ID:          clientOrgID,
+				Name:        fmt.Sprintf("Hosting: %s", acc.Domain),
+				Slug:        "hosting-" + acc.Username,
+				PlanTier:    "starter",
+				MaxServers:  1,
+				MaxWebsites: 10,
+				CreatedAt:   time.Now().UTC(),
+				UpdatedAt:   time.Now().UTC(),
+			})
+
 			targetUser = &store.User{
 				ID:           newUserID,
-				DefaultOrgID: acc.OrganizationID,
+				DefaultOrgID: clientOrgID,
 				Email:        clientEmail,
 				FullName:     fmt.Sprintf("Client %s", acc.Username),
 				Role:         rbac.RoleCustomer,
@@ -1199,16 +1248,67 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 				CreatedAt:    time.Now().UTC(),
 				UpdatedAt:    time.Now().UTC(),
 			}
-			_ = h.store.CreateUser(r.Context(), targetUser, acc.OrganizationID, rbac.RoleCustomer)
+			_ = h.store.CreateUser(r.Context(), targetUser, clientOrgID, rbac.RoleCustomer)
+			acc.UserID = targetUser.ID
+			acc.OrganizationID = clientOrgID
+			_ = h.store.UpdateHostingAccount(r.Context(), acc)
+		} else {
 			acc.UserID = targetUser.ID
 			_ = h.store.UpdateHostingAccount(r.Context(), acc)
 		}
 	}
 
-	// Generate short-lived (1 hour) cryptographically signed JWT impersonation tokens
+	// 2. Ensure customer user has an isolated tenant organization (never share the admin's organization)
+	targetOrgID := targetUser.DefaultOrgID
+	if targetOrgID == claims.OrganizationID || targetOrgID == uuid.Nil {
+		clientOrgID := uuid.New()
+		_ = h.store.CreateOrganization(r.Context(), &store.Organization{
+			ID:          clientOrgID,
+			Name:        fmt.Sprintf("Hosting: %s", acc.Domain),
+			Slug:        "hosting-" + acc.Username,
+			PlanTier:    "starter",
+			MaxServers:  1,
+			MaxWebsites: 10,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		})
+		targetOrgID = clientOrgID
+		targetUser.DefaultOrgID = clientOrgID
+		acc.OrganizationID = clientOrgID
+		_ = h.store.UpdateHostingAccount(r.Context(), acc)
+	}
+
+	// 3. Ensure primary website exists under targetOrgID so the client panel displays their website
+	if sites, err := h.store.ListWebsitesByOrg(r.Context(), targetOrgID); err == nil && len(sites) == 0 {
+		var srvID uuid.UUID
+		if acc.ServerID != nil {
+			srvID = *acc.ServerID
+		}
+		phpVer := acc.PHPVersion
+		var phpVerPtr *string
+		if phpVer != "" {
+			phpVerPtr = &phpVer
+		}
+		_ = h.store.CreateWebsite(r.Context(), &store.Website{
+			ID:             uuid.New(),
+			OrganizationID: targetOrgID,
+			ServerID:       srvID,
+			PrimaryDomain:  acc.Domain,
+			DocumentRoot:   acc.DocumentRoot,
+			SystemUser:     acc.Username,
+			PHPVersion:     phpVerPtr,
+			AppType:        "php",
+			Status:         "active",
+			SSLEnabled:     acc.SSLActive,
+			CreatedAt:      time.Now().UTC(),
+			UpdatedAt:      time.Now().UTC(),
+		})
+	}
+
+	// 4. Generate short-lived (1 hour) cryptographically signed JWT impersonation tokens
 	impersonationDuration := 1 * time.Hour
 	tokens, err := auth.GenerateImpersonationTokenPair(
-		claims.UserID, targetUser.ID, targetUser.DefaultOrgID, targetUser.Email,
+		claims.UserID, targetUser.ID, targetOrgID, targetUser.Email,
 		h.cfg.JWTSecret, impersonationDuration,
 	)
 	if err != nil {

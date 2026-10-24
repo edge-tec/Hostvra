@@ -322,6 +322,42 @@ func (s *Service) ResolveEffectivePlan(ctx context.Context, userID uuid.UUID) (*
 		}
 	}
 
+	// 4b. Layer Authoritative WHM Hosting Account Limits & Package Details
+	if accs, err := s.store.ListHostingAccounts(ctx, uuid.Nil, nil); err == nil {
+		for _, acc := range accs {
+			if acc.UserID == user.ID || (acc.OrganizationID != uuid.Nil && acc.OrganizationID == user.DefaultOrgID) {
+				if acc.PlanName != "" {
+					effective.PlanName = acc.PlanName
+				}
+				if acc.WebsitesLimit > 0 {
+					effective.MaxWebsites = acc.WebsitesLimit
+				}
+				if acc.DatabasesLimit > 0 {
+					effective.MaxDatabases = acc.DatabasesLimit
+				}
+				if acc.MailboxesLimit > 0 {
+					effective.MaxMailboxes = acc.MailboxesLimit
+				}
+				if acc.FTPUsersLimit > 0 {
+					effective.MaxFTP = acc.FTPUsersLimit
+				}
+				if acc.CronJobsLimit > 0 {
+					effective.MaxCron = acc.CronJobsLimit
+				}
+				if acc.SubdomainsLimit > 0 {
+					effective.MaxSubdomains = acc.SubdomainsLimit
+				}
+				if acc.DiskLimitMB > 0 {
+					effective.DiskSpaceMB = acc.DiskLimitMB
+				}
+				if acc.BandwidthLimitMB > 0 {
+					effective.BandwidthMB = acc.BandwidthLimitMB
+				}
+				break
+			}
+		}
+	}
+
 	// 5. Authoritative Storage Quota & Filesystem Usage Calculation
 	quotaMB := effective.DiskSpaceMB
 	var quotaBytes int64

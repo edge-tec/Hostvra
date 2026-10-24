@@ -19,6 +19,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/quota"
 	"hostvra/api/internal/rbac"
 	"hostvra/api/internal/store"
 )
@@ -539,11 +540,32 @@ func TestAccountHandler_EnterpriseOperations(t *testing.T) {
 		Data struct {
 			SessionID string `json:"session_id"`
 			Token     string `json:"token"`
+			User      struct {
+				ID       uuid.UUID `json:"id"`
+				Role     string    `json:"role"`
+				FullName string    `json:"full_name"`
+			} `json:"user"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(tokenRec.Body.Bytes(), &tokenResp)
 	if tokenResp.Data.SessionID == "" || tokenResp.Data.Token == "" {
 		t.Fatalf("expected session_id and token in response: %s", tokenRec.Body.String())
+	}
+	if tokenResp.Data.User.Role != rbac.RoleCustomer {
+		t.Fatalf("expected impersonated target user to have customer role, got %s", tokenResp.Data.User.Role)
+	}
+	if tokenResp.Data.User.ID == adminID {
+		t.Fatalf("impersonated user ID should never be the admin user ID!")
+	}
+
+	// Verify the client's effective plan resolves with client hosting limits, not root admin 999999
+	qs := quota.NewService(s)
+	clientPlan, err := qs.ResolveEffectivePlan(context.Background(), tokenResp.Data.User.ID)
+	if err != nil {
+		t.Fatalf("failed to resolve client effective plan: %v", err)
+	}
+	if clientPlan.IsSuperAdmin || clientPlan.MaxWebsites >= 999999 {
+		t.Fatalf("client plan should not have root administrator privileges: %+v", clientPlan)
 	}
 
 	revBody := bytes.NewBufferString(fmt.Sprintf(`{"session_id":%q}`, tokenResp.Data.SessionID))
