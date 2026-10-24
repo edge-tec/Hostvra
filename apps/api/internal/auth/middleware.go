@@ -77,7 +77,12 @@ func Middleware(jwtSecret string) func(http.Handler) http.Handler {
 					return
 				}
 			} else {
-				tokenStr = r.URL.Query().Get("token")
+				// Security: Accept token in URL query parameter strictly for WebSocket handshakes
+				// (due to browser JS WebSocket API header limitations). REST APIs must use Bearer header or Cookie.
+				isWebSocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || strings.Contains(r.URL.Path, "/ws")
+				if isWebSocket {
+					tokenStr = r.URL.Query().Get("token")
+				}
 				if tokenStr == "" {
 					if c, err := r.Cookie("hostvra_token"); err == nil && c != nil {
 						tokenStr = c.Value

@@ -5,9 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -191,45 +189,19 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 	// Validate agent token against registered server record
 	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err == nil && server != nil {
-		if server.AgentTokenHash != "" && server.AgentTokenHash != tokenHash {
-			response.Error(w, http.StatusUnauthorized, "INVALID_AGENT_TOKEN", "Agent token does not match registered server key", nil, "")
-			return
-		}
+	if err != nil || server == nil {
+		response.Error(w, http.StatusUnauthorized, "SERVER_NOT_REGISTERED", "Server node not registered in fleet. Enrollment required.", nil, "")
+		return
+	}
+	if server.AgentTokenHash != "" && server.AgentTokenHash != tokenHash {
+		response.Error(w, http.StatusUnauthorized, "INVALID_AGENT_TOKEN", "Agent token does not match registered server key", nil, "")
+		return
 	}
 
 	err = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
 	if err != nil {
-		// Server not found in database (e.g. after fresh restart), auto-restore node so fleet never drops it!
-		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-		hostname := "hostvra-node"
-		if h, err := os.Hostname(); err == nil && h != "" {
-			hostname = h
-		}
-		clientIP := r.Header.Get("X-Forwarded-For")
-		if clientIP == "" {
-			clientIP = r.RemoteAddr
-		}
-		now := time.Now().UTC()
-		recoveredServer := &store.Server{
-			ID:              serverID,
-			OrganizationID:  defaultOrgID,
-			Name:            hostname,
-			Hostname:        hostname,
-			IPAddress:       clientIP,
-			OSName:          "Linux",
-			OSVersion:       "Ubuntu",
-			Architecture:    "amd64",
-			AgentVersion:    "1.0.0",
-			Status:          "online",
-			CreatedAt:       now,
-			UpdatedAt:       now,
-			LastHeartbeatAt: &now,
-			UptimeSeconds:   req.UptimeSeconds,
-			AgentTokenHash:  tokenHash,
-		}
-		_ = h.store.CreateServer(r.Context(), recoveredServer)
-		_ = h.store.UpdateServerHeartbeat(r.Context(), serverID, req.UptimeSeconds)
+		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to update server heartbeat", nil, "")
+		return
 	}
 
 	if req.Capabilities != nil {
@@ -260,15 +232,30 @@ type ReportTaskResultRequest struct {
 
 func (h *AgentHandler) ReportTaskResult(w http.ResponseWriter, r *http.Request) {
 	authHeader := r.Header.Get("Authorization")
-	if authHeader == "" {
-		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing agent key", nil, "")
+	rawToken := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	if rawToken == "" {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Empty agent bearer token", nil, "")
 		return
 	}
+	tokenHash := auth.HashOpaqueToken(rawToken)
 
 	taskIDStr := chi.URLParam(r, "id")
 	taskID, err := uuid.Parse(taskIDStr)
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid task UUID", nil, "")
+		return
+	}
+
+	existingTask, err := h.taskMgr.Get(taskID)
+	if err != nil || existingTask == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Task not found", nil, "")
+		return
+	}
+
+	// Security: Validate reporting agent token matches the task's assigned server
+	server, err := h.store.GetServerByID(r.Context(), existingTask.ServerID)
+	if err != nil || server == nil || (server.AgentTokenHash != "" && server.AgentTokenHash != tokenHash) {
+		response.Error(w, http.StatusUnauthorized, "INVALID_AGENT_TOKEN", "Agent token does not match task target server", nil, "")
 		return
 	}
 

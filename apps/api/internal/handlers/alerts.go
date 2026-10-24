@@ -10,6 +10,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/response"
 )
 
@@ -105,6 +106,14 @@ func (h *AlertHandler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" || req.Target == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Name and notification target required", nil, "")
 		return
+	}
+
+	// Security: Prevent SSRF attacks against internal networks or cloud metadata
+	if req.Type == alerts.ChannelWebhook {
+		if err := iputil.ValidateSafeWebhookURL(req.Target); err != nil {
+			response.Error(w, http.StatusBadRequest, "SSRF_PROHIBITED", "Security violation: "+err.Error(), nil, "")
+			return
+		}
 	}
 
 	ch := &alerts.NotificationChannel{

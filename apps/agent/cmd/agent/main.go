@@ -218,6 +218,13 @@ func executeTask(cfg *config.AgentConfig, cl *client.APIClient, task client.Agen
 		if task.Action == "service.reload" {
 			actionType = "reload"
 		}
+		// Security: Validate service name contains only safe alphanumeric/dot/dash characters
+		for _, ch := range svc {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '.' || ch == '_') {
+				_ = cl.SendTaskResult(cfg.ServerID, cfg.AgentKey, task.ID, "failed", 1, "illegal characters in service name")
+				return
+			}
+		}
 		cmd = exec.CommandContext(ctx, "systemctl", actionType, svc)
 
 	case "command.exec":

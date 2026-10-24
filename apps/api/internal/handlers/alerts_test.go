@@ -104,6 +104,21 @@ func TestAlertsAndAPIKeysHandlers_E2E(t *testing.T) {
 		t.Fatalf("expected 201 on create channel, got %d", chRec.Code)
 	}
 
+	// 5b. Verify SSRF attack against internal metadata is blocked
+	ssrfPayload := CreateChannelRequest{
+		Name:   "Evil Webhook",
+		Type:   alerts.ChannelWebhook,
+		Target: "http://169.254.169.254/latest/meta-data",
+	}
+	ssrfBody, _ := json.Marshal(ssrfPayload)
+	ssrfReq := httptest.NewRequest(http.MethodPost, "/api/v1/alerts/channels", bytes.NewReader(ssrfBody))
+	ssrfReq = ssrfReq.WithContext(auth.WithClaims(ssrfReq.Context(), claims))
+	ssrfRec := httptest.NewRecorder()
+	alertHandler.CreateChannel(ssrfRec, ssrfReq)
+	if ssrfRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on SSRF target, got %d", ssrfRec.Code)
+	}
+
 	// 6. Create API Key
 	keyPayload := CreateKeyRequest{
 		Name: "Production Terraform Token",

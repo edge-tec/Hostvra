@@ -122,12 +122,16 @@ func (h *DatabaseHandler) verifyDatabaseAccess(ctx context.Context, claims *auth
 // verifyDatabaseAccessByName ensures non-admin users cannot query or inspect databases
 // belonging to other tenants or internal MySQL system databases.
 func (h *DatabaseHandler) verifyDatabaseAccessByName(ctx context.Context, claims *auth.Claims, dbName string) (*store.Database, error) {
-	if claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin" {
-		return nil, nil
-	}
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 	lower := strings.ToLower(strings.TrimSpace(dbName))
 	if lower == "mysql" || lower == "information_schema" || lower == "performance_schema" || lower == "sys" {
-		return nil, fmt.Errorf("access to internal database '%s' is restricted to administrators", dbName)
+		if !isSuper {
+			return nil, fmt.Errorf("access to internal database '%s' is restricted to administrators", dbName)
+		}
+		return nil, nil
+	}
+	if isSuper {
+		return nil, nil
 	}
 
 	servers, err := h.store.ListServersByOrg(ctx, claims.OrganizationID)
@@ -741,7 +745,7 @@ func (h *DatabaseHandler) Import(w http.ResponseWriter, r *http.Request) {
 // RootPassword gets or sets root database password
 func (h *DatabaseHandler) GetRootPassword(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "superadmin") {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to access root password", nil, "")
 		return
 	}
@@ -751,7 +755,7 @@ func (h *DatabaseHandler) GetRootPassword(w http.ResponseWriter, r *http.Request
 
 func (h *DatabaseHandler) SetRootPassword(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "owner") {
+	if claims == nil || (!claims.IsSuperAdmin && claims.Role != "admin" && claims.Role != "superadmin") {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Administrative privilege required to modify root password", nil, "")
 		return
 	}
@@ -826,7 +830,7 @@ func (h *DatabaseHandler) SetAdvancedSetup(w http.ResponseWriter, r *http.Reques
 // RecycleBin lists soft-deleted databases or restores them
 func (h *DatabaseHandler) ListRecycleBin(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner"
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 
 	dbs, err := h.store.ListDatabasesByServer(r.Context(), uuid.Nil)
 	if err != nil {
@@ -837,7 +841,7 @@ func (h *DatabaseHandler) ListRecycleBin(w http.ResponseWriter, r *http.Request)
 	var inTrash []*store.Database
 	for _, d := range dbs {
 		if d.InRecycleBin {
-			if !isAdmin && claims != nil && d.OrganizationID != claims.OrganizationID {
+			if !isSuper && (claims == nil || d.OrganizationID != claims.OrganizationID) {
 				continue
 			}
 			inTrash = append(inTrash, d)

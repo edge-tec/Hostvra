@@ -337,8 +337,8 @@ func (h *TerminalHandler) CreateSession(w http.ResponseWriter, r *http.Request) 
 		"user_id": claims.UserID.String(),
 	})
 
-	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
-	if !isPrivileged {
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "superadmin"
+	if !isPrivileged && claims.Role != "owner" && claims.Role != "admin" {
 		if h.quotaSvc != nil && !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
 			h.audit.Log(r.Context(), r, "terminal.authorization.failure", "server", "localhost", "failure", "Web Terminal SSH access not enabled for plan", map[string]interface{}{
 				"user_id": claims.UserID.String(),
@@ -478,7 +478,7 @@ func (h *TerminalHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "superadmin"
 
 	// Validate pre-registered session if provided
 	var sessionMeta *TerminalSessionMeta
@@ -891,8 +891,8 @@ func (h *TerminalHandler) GetInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
-	if !isPrivileged {
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "superadmin"
+	if !isPrivileged && claims.Role != "owner" && claims.Role != "admin" {
 		if h.quotaSvc != nil {
 			if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
 				response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")
@@ -972,8 +972,8 @@ func (h *TerminalHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isPrivileged := claims.IsSuperAdmin || claims.Role == "owner" || claims.Role == "admin"
-	if !isPrivileged {
+	isPrivileged := claims.IsSuperAdmin || claims.Role == "superadmin"
+	if !isPrivileged && claims.Role != "owner" && claims.Role != "admin" {
 		if h.quotaSvc != nil {
 			if !h.quotaSvc.CheckPermission(r.Context(), claims.UserID, "terminal") {
 				response.Error(w, http.StatusForbidden, "FEATURE_DISABLED", "Web Terminal SSH access is not enabled for your hosting plan. Please upgrade your package or contact administration.", nil, "")

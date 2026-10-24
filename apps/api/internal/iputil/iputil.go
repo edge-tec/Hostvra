@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -285,4 +286,58 @@ func detectFromDiscoveryEndpoints(ctx context.Context) (string, error) {
 	}
 
 	return "", errors.New("all public IP discovery endpoints timed out or failed")
+}
+
+// ValidateSafeWebhookURL validates that a webhook target URL uses HTTP/HTTPS and does NOT resolve
+// to internal networks, localhost, cloud metadata endpoints (169.254.169.254), or private RFC 1918 addresses (SSRF defense).
+func ValidateSafeWebhookURL(target string) error {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return errors.New("webhook URL cannot be empty")
+	}
+
+	u, err := url.Parse(target)
+	if err != nil {
+		return fmt.Errorf("invalid webhook URL format: %w", err)
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("forbidden URL scheme '%s'; only http and https are permitted", u.Scheme)
+	}
+
+	hostname := strings.ToLower(u.Hostname())
+	if hostname == "" {
+		return errors.New("missing hostname in webhook URL")
+	}
+
+	// Reject localhost and local domain names
+	if hostname == "localhost" || strings.HasSuffix(hostname, ".local") || strings.HasSuffix(hostname, ".internal") || strings.HasSuffix(hostname, ".localhost") {
+		return fmt.Errorf("webhook target '%s' is prohibited (local hostname)", hostname)
+	}
+
+	// If hostname is directly an IP address
+	if ip := net.ParseIP(hostname); ip != nil {
+		if !IsPublicIPv4(hostname) {
+			return fmt.Errorf("webhook target IP '%s' is prohibited (private, loopback, or metadata address)", hostname)
+		}
+		return nil
+	}
+
+	// Resolve hostname to IPs to detect internal DNS / rebinding
+	ips, err := net.LookupIP(hostname)
+	if err == nil {
+		for _, ip := range ips {
+			if ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsPrivate() {
+				return fmt.Errorf("webhook target '%s' resolves to private/internal IP address %s", hostname, ip.String())
+			}
+			if ipv4 := ip.To4(); ipv4 != nil {
+				if !IsPublicIPv4(ipv4.String()) {
+					return fmt.Errorf("webhook target '%s' resolves to non-public IPv4 %s", hostname, ipv4.String())
+				}
+			}
+		}
+	}
+
+	return nil
 }

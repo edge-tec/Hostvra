@@ -91,7 +91,7 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 		}
 	}
 
-	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "owner" || claims.Role == "admin")
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 	if !isAdmin {
 		restrictedRoots := []string{
 			"/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/run", "/var/run",
@@ -2245,10 +2245,10 @@ func (h *FileHandler) ActivityLogs(w http.ResponseWriter, r *http.Request) {
 // ListDomains returns website domains for multi-domain directory switching
 func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 
 	orgID := uuid.Nil
-	if !isAdmin && claims != nil {
+	if !isSuper && claims != nil {
 		orgID = claims.OrganizationID
 	}
 	sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID)

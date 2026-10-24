@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -426,6 +427,31 @@ func (h *ServerHandler) DispatchTask(w http.ResponseWriter, r *http.Request) {
 	if req.Action == "" {
 		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Task action is required", nil, "")
 		return
+	}
+
+	// Security: Arbitrary shell execution requires SuperAdmin
+	if req.Action == "command.exec" && !claims.IsSuperAdmin && claims.Role != "superadmin" {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Executing raw shell commands on remote nodes requires superadmin privileges", nil, "")
+		return
+	}
+
+	// Security: Whitelist allowed service actions and services
+	if strings.HasPrefix(req.Action, "service.") {
+		svc, _ := req.Payload["service"].(string)
+		if svc == "" {
+			svc, _ = req.Payload["service_name"].(string)
+		}
+		allowedServices := map[string]bool{
+			"nginx": true, "apache2": true, "httpd": true,
+			"php-fpm": true, "php8.1-fpm": true, "php8.2-fpm": true, "php8.3-fpm": true,
+			"mysql": true, "mariadb": true, "redis": true, "redis-server": true,
+			"memcached": true, "postfix": true, "dovecot": true, "rspamd": true,
+			"named": true, "bind9": true, "fail2ban": true, "cron": true, "crond": true,
+		}
+		if !allowedServices[strings.ToLower(strings.TrimSpace(svc))] {
+			response.Error(w, http.StatusBadRequest, "INVALID_SERVICE", "Service not permitted for remote management: "+svc, nil, "")
+			return
+		}
 	}
 
 	task := h.taskMgr.Enqueue(serverID, req.Action, req.Payload)

@@ -39,7 +39,8 @@ func TestFileHandler_Lifecycle(t *testing.T) {
 		UserID:         uuid.New(),
 		OrganizationID: uuid.New(),
 		Email:          "admin@hostvra.com",
-		Role:           "owner",
+		Role:           "admin",
+		IsSuperAdmin:   true,
 	}
 
 	// 1. Mkdir

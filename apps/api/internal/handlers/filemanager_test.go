@@ -47,9 +47,10 @@ var fixedTestUserID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
 
 func testContextWithAdmin() context.Context {
 	claims := &auth.Claims{
-		UserID: fixedTestUserID,
-		Email:  "admin@hostvra.com",
-		Role:   "admin",
+		UserID:       fixedTestUserID,
+		Email:        "admin@hostvra.com",
+		Role:         "admin",
+		IsSuperAdmin: true,
 	}
 	return context.WithValue(context.Background(), auth.UserContextKey, claims)
 }
