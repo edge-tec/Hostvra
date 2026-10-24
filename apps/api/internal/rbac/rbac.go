@@ -96,8 +96,9 @@ const (
 	PermBillingManage = "billing.manage"
 
 	// Client Hosting Accounts (WHM Multi-Tenancy)
-	PermAccountsView   = "accounts.view"
-	PermAccountsManage = "accounts.manage"
+	PermAccountsView        = "accounts.view"
+	PermAccountsManage      = "accounts.manage"
+	PermAccountsImpersonate = "hosting.account.impersonate"
 
 	// Reseller Multi-Tenancy & External Provisioning (WHMCS, Blesta)
 	PermResellerManage     = "reseller.manage"
@@ -119,7 +120,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback, PermSystemUpdateManage,
 		PermBillingView, PermBillingManage,
-		PermAccountsView, PermAccountsManage,
+		PermAccountsView, PermAccountsManage, PermAccountsImpersonate,
 		PermResellerManage, PermProvisioningView, PermProvisioningManage,
 	},
 	RoleAdmin: {
@@ -134,7 +135,7 @@ var RolePermissionMatrix = map[string][]string{
 		PermWebServerView, PermWebServerManage, PermWebServerInstall, PermWebServerSwitch, PermWebServerConfig, PermWebServerLogs, PermVHostManage, PermReverseProxyManage,
 		PermSystemUpdateView, PermSystemUpdateCheck, PermSystemUpdateStart, PermSystemUpdateSchedule, PermSystemUpdateRollback,
 		PermBillingView, PermBillingManage,
-		PermAccountsView, PermAccountsManage,
+		PermAccountsView, PermAccountsManage, PermAccountsImpersonate,
 		PermResellerManage, PermProvisioningView, PermProvisioningManage,
 	},
 	RoleManager: {

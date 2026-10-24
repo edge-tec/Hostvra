@@ -312,6 +312,14 @@ type Store interface {
 	CreateHostingAccount(ctx context.Context, acc *HostingAccount) error
 	UpdateHostingAccount(ctx context.Context, acc *HostingAccount) error
 	DeleteHostingAccount(ctx context.Context, id uuid.UUID) error
+	GetWHMStats(ctx context.Context, orgID uuid.UUID) (*WHMStats, error)
+	CreateImpersonationSession(ctx context.Context, session *HostingImpersonationSession) error
+	GetImpersonationSessionByToken(ctx context.Context, tokenHash string) (*HostingImpersonationSession, error)
+	RevokeImpersonationSession(ctx context.Context, id uuid.UUID) error
+	CreateHostingJob(ctx context.Context, job *HostingJob) error
+	GetHostingJobByID(ctx context.Context, id uuid.UUID) (*HostingJob, error)
+	UpdateHostingJob(ctx context.Context, job *HostingJob) error
+	ListHostingJobsByAccount(ctx context.Context, accountID uuid.UUID) ([]*HostingJob, error)
 
 	// Domain Registrar, TLDs & Pricing
 	ListDomainTLDs(ctx context.Context) ([]*DomainTLD, error)
@@ -610,6 +618,8 @@ type MemoryStore struct {
 	gatewayConfigs      map[string]*PaymentGatewayConfig
 	paymentTransactions []*PaymentTransaction
 	hostingAccounts     map[uuid.UUID]*HostingAccount
+	hostingImpersonationSessions map[uuid.UUID]*HostingImpersonationSession
+	hostingJobs         map[uuid.UUID]*HostingJob
 	tldPricings         map[string]*TLDPricing
 	registrarConfigs    map[string]*DomainRegistrarConfig
 	domainTLDs          map[string]*DomainTLD
@@ -719,6 +729,8 @@ type memoryDumpData struct {
 	GatewayConfigs       map[string]*PaymentGatewayConfig       `json:"gateway_configs,omitempty"`
 	PaymentTransactions  []*PaymentTransaction                  `json:"payment_transactions,omitempty"`
 	HostingAccounts      map[uuid.UUID]*HostingAccount          `json:"hosting_accounts,omitempty"`
+	HostingImpersonationSessions map[uuid.UUID]*HostingImpersonationSession `json:"hosting_impersonation_sessions,omitempty"`
+	HostingJobs          map[uuid.UUID]*HostingJob              `json:"hosting_jobs,omitempty"`
 	TLDPricings          map[string]*TLDPricing                 `json:"tld_pricings,omitempty"`
 	RegistrarConfigs     map[string]*DomainRegistrarConfig      `json:"registrar_configs,omitempty"`
 	DomainTLDs           map[string]*DomainTLD                  `json:"domain_tlds,omitempty"`
@@ -833,6 +845,8 @@ func (m *MemoryStore) saveToDiskLocked() {
 		GatewayConfigs:       m.gatewayConfigs,
 		PaymentTransactions:  m.paymentTransactions,
 		HostingAccounts:      m.hostingAccounts,
+		HostingImpersonationSessions: m.hostingImpersonationSessions,
+		HostingJobs:          m.hostingJobs,
 		TLDPricings:          m.tldPricings,
 		RegistrarConfigs:     m.registrarConfigs,
 		DomainTLDs:           m.domainTLDs,
@@ -1027,6 +1041,12 @@ func (m *MemoryStore) loadFromDisk() {
 	if data.HostingAccounts != nil {
 		m.hostingAccounts = data.HostingAccounts
 	}
+	if data.HostingImpersonationSessions != nil {
+		m.hostingImpersonationSessions = data.HostingImpersonationSessions
+	}
+	if data.HostingJobs != nil {
+		m.hostingJobs = data.HostingJobs
+	}
 	if data.TLDPricings != nil {
 		m.tldPricings = data.TLDPricings
 	}
@@ -1218,8 +1238,10 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		},
 		gatewayConfigs:      make(map[string]*PaymentGatewayConfig),
 		paymentTransactions: make([]*PaymentTransaction, 0),
-		hostingAccounts:     make(map[uuid.UUID]*HostingAccount),
-		tldPricings:         make(map[string]*TLDPricing),
+		hostingAccounts:             make(map[uuid.UUID]*HostingAccount),
+		hostingImpersonationSessions: make(map[uuid.UUID]*HostingImpersonationSession),
+		hostingJobs:                 make(map[uuid.UUID]*HostingJob),
+		tldPricings:                 make(map[string]*TLDPricing),
 		registrarConfigs:    make(map[string]*DomainRegistrarConfig),
 		domainTLDs:          make(map[string]*DomainTLD),
 		domainPrices:        make(map[string]*DomainPrice),

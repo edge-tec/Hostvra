@@ -46,9 +46,23 @@ type HostingAccount struct {
 	IPAddress        string               `json:"ip_address,omitempty"`
 	PHPVersion       string               `json:"php_version,omitempty"`
 	SSLActive        bool                 `json:"ssl_active"`
-	SuspendedAt      *time.Time           `json:"suspended_at,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	ContactEmail       string               `json:"contact_email,omitempty"`
+	ContactPhone       string               `json:"contact_phone,omitempty"`
+	Notes              string               `json:"notes,omitempty"`
+	SubdomainsLimit    int                  `json:"subdomains_limit"`
+	FTPUsersLimit      int                  `json:"ftp_users_limit"`
+	CronJobsLimit      int                  `json:"cron_jobs_limit"`
+	MaxEmailSendRate   int                  `json:"max_email_send_rate"`
+	QuotaEnforced      bool                 `json:"quota_enforced"`
+	QuotaStatus        string               `json:"quota_status"`
+	LastSyncAt         *time.Time           `json:"last_sync_at,omitempty"`
+	TargetServerID     *uuid.UUID           `json:"target_server_id,omitempty"`
+	MigrationStatus    string               `json:"migration_status"`
+	MigrationLog       string               `json:"migration_log,omitempty"`
+	ExpiresAt          *time.Time           `json:"expires_at,omitempty"`
+	SuspendedAt        *time.Time           `json:"suspended_at,omitempty"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
 }
 
 // NormalizeLimits ensures all resource limits have valid, non-zero isolation quotas.
@@ -86,4 +100,70 @@ func (a *HostingAccount) NormalizeLimits() {
 	if a.MailboxesLimit <= 0 {
 		a.MailboxesLimit = 10
 	}
+	if a.SubdomainsLimit <= 0 {
+		a.SubdomainsLimit = 5
+	}
+	if a.FTPUsersLimit <= 0 {
+		a.FTPUsersLimit = 5
+	}
+	if a.CronJobsLimit <= 0 {
+		a.CronJobsLimit = 5
+	}
+	if a.MaxEmailSendRate <= 0 {
+		a.MaxEmailSendRate = 100
+	}
+	if a.QuotaStatus == "" {
+		a.QuotaStatus = "enforced"
+	}
+	if a.MigrationStatus == "" {
+		a.MigrationStatus = "idle"
+	}
+}
+
+type HostingImpersonationSession struct {
+	ID           uuid.UUID  `json:"id"`
+	AdminUserID  uuid.UUID  `json:"admin_user_id"`
+	AccountID    uuid.UUID  `json:"account_id"`
+	TargetUserID uuid.UUID  `json:"target_user_id"`
+	TokenHash    string     `json:"-"`
+	Reason       string     `json:"reason"`
+	IPAddress    string     `json:"ip_address,omitempty"`
+	UserAgent    string     `json:"user_agent,omitempty"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+type HostingJob struct {
+	ID           uuid.UUID  `json:"id"`
+	AccountID    uuid.UUID  `json:"account_id"`
+	JobType      string     `json:"job_type"`
+	Status       string     `json:"status"` // pending, running, completed, failed
+	Payload      string     `json:"payload,omitempty"`
+	Result       string     `json:"result,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+type WHMStats struct {
+	TotalAccounts         int        `json:"total_accounts"`
+	ActiveAccounts        int        `json:"active_accounts"`
+	SuspendedAccounts     int        `json:"suspended_accounts"`
+	PendingAccounts       int        `json:"pending_accounts"`
+	TerminatedAccounts    int        `json:"terminated_accounts"`
+	TotalStorageAllocMB   int64      `json:"total_storage_alloc_mb"`
+	TotalStorageUsedMB    int64      `json:"total_storage_used_mb"`
+	TotalBandwidthAllocMB int64      `json:"total_bandwidth_alloc_mb"`
+	TotalBandwidthUsedMB  int64      `json:"total_bandwidth_used_mb"`
+	TotalDomains          int        `json:"total_domains"`
+	TotalDatabases        int        `json:"total_databases"`
+	TotalMailboxes        int        `json:"total_mailboxes"`
+	TotalInodesUsed       int64      `json:"total_inodes_used"`
+	HealthyNodes          int        `json:"healthy_nodes"`
+	TotalNodes            int        `json:"total_nodes"`
+	ExpiringSSLCerts      int        `json:"expiring_ssl_certs"`
+	OverQuotaCount        int        `json:"over_quota_count"`
+	LastSyncTime          *time.Time `json:"last_sync_time,omitempty"`
 }

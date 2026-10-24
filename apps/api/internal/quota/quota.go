@@ -629,6 +629,26 @@ func calculateDirSizeBytes(dirPath string) int64 {
 	return totalBytes
 }
 
+// CalculateDirInodes walks directory safely counting files, dirs, and symlinks without following them.
+func CalculateDirInodes(dirPath string) int64 {
+	cleanPath := filepath.Clean(dirPath)
+	if _, err := os.Lstat(cleanPath); err != nil {
+		return 0
+	}
+	var count int64
+	_ = filepath.WalkDir(cleanPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		count++
+		if d.Type()&os.ModeSymlink != 0 && d.IsDir() {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return count
+}
+
 // CalculateActualUserStorage calculates actual user-owned resources on filesystem with tenant isolation
 func (s *Service) CalculateActualUserStorage(ctx context.Context, userID, orgID uuid.UUID, forceRefresh bool) int64 {
 	if !forceRefresh {

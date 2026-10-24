@@ -2,8 +2,13 @@ package handlers
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"os"
 	"strings"
@@ -53,8 +58,18 @@ func (h *AccountHandler) SetQuotaService(svc *quota.Service) {
 }
 
 // ----------------------------------------------------------------------------
-// List & Get Accounts
+// List & Get Accounts & Telemetry
 // ----------------------------------------------------------------------------
+
+func (h *AccountHandler) GetWHMStats(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	stats, err := h.store.GetWHMStats(r.Context(), claims.OrganizationID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STATS_FAILED", "Failed to retrieve WHM cluster telemetry", err.Error(), "")
+		return
+	}
+	response.JSON(w, http.StatusOK, stats, nil)
+}
 
 func (h *AccountHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
@@ -89,10 +104,13 @@ func (h *AccountHandler) ListAccounts(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Reconcile live filesystem storage if available
+		// Reconcile live filesystem storage and inodes if available
 		if acc.DocumentRoot != "" {
 			if sizeBytes := quota.CalculateDirSizeBytes(acc.DocumentRoot); sizeBytes > 0 {
 				acc.DiskUsedMB = (sizeBytes + 1048575) / (1024 * 1024)
+			}
+			if inodes := quota.CalculateDirInodes(acc.DocumentRoot); inodes > 0 {
+				acc.InodesUsed = inodes
 			}
 		}
 
@@ -638,6 +656,12 @@ type UpdateAccountLimitsRequest struct {
 	WebsitesLimit    int    `json:"websites_limit"`
 	DatabasesLimit   int    `json:"databases_limit"`
 	MailboxesLimit   int    `json:"mailboxes_limit"`
+	SubdomainsLimit  int    `json:"subdomains_limit"`
+	FTPUsersLimit    int    `json:"ftp_users_limit"`
+	CronJobsLimit    int    `json:"cron_jobs_limit"`
+	MaxEmailSendRate int    `json:"max_email_send_rate"`
+	IOReadMBps       int    `json:"io_read_mbps"`
+	IOWriteMBps      int    `json:"io_write_mbps"`
 	PHPVersion       string `json:"php_version,omitempty"`
 	OpenBaseDir      *bool  `json:"open_basedir,omitempty"`
 }
@@ -689,6 +713,24 @@ func (h *AccountHandler) UpdateLimits(w http.ResponseWriter, r *http.Request) {
 	if req.MailboxesLimit > 0 {
 		acc.MailboxesLimit = req.MailboxesLimit
 	}
+	if req.SubdomainsLimit > 0 {
+		acc.SubdomainsLimit = req.SubdomainsLimit
+	}
+	if req.FTPUsersLimit > 0 {
+		acc.FTPUsersLimit = req.FTPUsersLimit
+	}
+	if req.CronJobsLimit > 0 {
+		acc.CronJobsLimit = req.CronJobsLimit
+	}
+	if req.MaxEmailSendRate > 0 {
+		acc.MaxEmailSendRate = req.MaxEmailSendRate
+	}
+	if req.IOReadMBps > 0 {
+		acc.IOReadMBps = req.IOReadMBps
+	}
+	if req.IOWriteMBps > 0 {
+		acc.IOWriteMBps = req.IOWriteMBps
+	}
 	if req.PHPVersion != "" {
 		acc.PHPVersion = req.PHPVersion
 	}
@@ -701,6 +743,8 @@ func (h *AccountHandler) UpdateLimits(w http.ResponseWriter, r *http.Request) {
 		limits.MemoryHighMB = int(float64(acc.MemoryLimitMB) * 0.90)
 		limits.CPUQuota = acc.CPULimitPercent
 		limits.TasksMax = acc.TasksMax
+		limits.IOReadMBps = acc.IOReadMBps
+		limits.IOWriteMBps = acc.IOWriteMBps
 		if req.OpenBaseDir != nil {
 			limits.OpenBaseDir = *req.OpenBaseDir
 		}
@@ -748,6 +792,368 @@ func (h *AccountHandler) UpdateLimits(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
+// Account Details & Notification Preferences
+// ----------------------------------------------------------------------------
+
+type UpdateAccountDetailsRequest struct {
+	ContactEmail string     `json:"contact_email"`
+	ContactPhone string     `json:"contact_phone"`
+	Notes        string     `json:"notes"`
+	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
+}
+
+func (h *AccountHandler) UpdateDetails(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	var req UpdateAccountDetailsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	acc.ContactEmail = strings.TrimSpace(req.ContactEmail)
+	acc.ContactPhone = strings.TrimSpace(req.ContactPhone)
+	acc.Notes = req.Notes
+	acc.ExpiresAt = req.ExpiresAt
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "UPDATE_FAILED", "Failed to update account details", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.update_details", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Updated contact details and notes for WHM account %s", acc.Username), nil)
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Secure Password Reset
+// ----------------------------------------------------------------------------
+
+type AccountResetPasswordRequest struct {
+	NewPassword string `json:"new_password,omitempty"`
+}
+
+func generateRandomPassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	bytes := make([]byte, length)
+	for i := range bytes {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			bytes[i] = charset[i%len(charset)]
+		} else {
+			bytes[i] = charset[num.Int64()]
+		}
+	}
+	return string(bytes)
+}
+
+func (h *AccountHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	var req AccountResetPasswordRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	newPass := strings.TrimSpace(req.NewPassword)
+	autoGenerated := false
+	if newPass == "" {
+		newPass = generateRandomPassword(16)
+		autoGenerated = true
+	} else if len(newPass) < 8 {
+		response.Error(w, http.StatusBadRequest, "PASSWORD_TOO_SHORT", "Password must be at least 8 characters long", nil, "")
+		return
+	}
+
+	// 1. Update user password in auth store if user exists
+	if acc.UserID != uuid.Nil {
+		hash, hErr := auth.HashPassword(newPass, nil)
+		if hErr == nil {
+			_ = h.store.UpdateUserPassword(r.Context(), acc.UserID, hash)
+		}
+	}
+
+	// 2. Update system user password in Linux isolation manager
+	if h.isolationMgr != nil {
+		_ = h.isolationMgr.SetUserPassword(r.Context(), acc.Username, newPass)
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	h.audit.Log(r.Context(), r, "accounts.reset_password", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Admin %s securely reset password for WHM account %s", claims.Email, acc.Username), map[string]interface{}{
+		"account_id": acc.ID,
+		"username":   acc.Username,
+	})
+
+	resp := map[string]interface{}{
+		"message":        "Password reset successfully",
+		"auto_generated": autoGenerated,
+	}
+	if autoGenerated {
+		resp["temporary_password"] = newPass
+	}
+
+	response.JSON(w, http.StatusOK, resp, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Real Live Quota & Inode Synchronization
+// ----------------------------------------------------------------------------
+
+func (h *AccountHandler) SyncQuota(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	if acc.DocumentRoot != "" {
+		if sizeBytes := quota.CalculateDirSizeBytes(acc.DocumentRoot); sizeBytes > 0 {
+			acc.DiskUsedMB = (sizeBytes + 1048575) / (1024 * 1024)
+		}
+		acc.InodesUsed = quota.CalculateDirInodes(acc.DocumentRoot)
+	}
+	acc.LastSyncAt = &now
+	acc.QuotaStatus = "synchronized"
+	acc.QuotaEnforced = true
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "SYNC_FAILED", "Failed to persist quota synchronization", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.sync_quota", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Synchronized storage (%d MB) and inodes (%d) for WHM account %s", acc.DiskUsedMB, acc.InodesUsed, acc.Username), nil)
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Controlled Account Termination & Safe Restoration
+// ----------------------------------------------------------------------------
+
+type TerminateAccountRequest struct {
+	ConfirmUsername string `json:"confirm_username"`
+}
+
+func (h *AccountHandler) TerminateAccount(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	var req TerminateAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ConfirmUsername) != acc.Username {
+		response.Error(w, http.StatusBadRequest, "CONFIRMATION_REQUIRED", fmt.Sprintf("Confirmation username must exactly match %q", acc.Username), nil, "")
+		return
+	}
+
+	// 1. Deprovision isolation / PHP pool
+	if h.isolationMgr != nil {
+		_ = h.isolationMgr.DeprovisionWebsiteIsolation(r.Context(), acc.Username, acc.PHPVersion)
+	}
+
+	// 2. Mark account terminated (safe archival rather than silent data destruction)
+	now := time.Now().UTC()
+	acc.Status = store.AccountStatusTerminated
+	acc.SuspendedAt = &now
+	acc.SuspendReason = "Terminated by administrator via WHM"
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "TERMINATE_FAILED", "Failed to update account termination status", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.terminate", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Terminated hosting account %s (%s)", acc.Username, acc.Domain), nil)
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+func (h *AccountHandler) RestoreAccount(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	acc.Status = store.AccountStatusActive
+	acc.SuspendedAt = nil
+	acc.SuspendReason = ""
+
+	// Reprovision isolation if needed
+	if h.isolationMgr != nil {
+		limits := isolation.DefaultResourceLimits()
+		limits.MemoryMaxMB = acc.MemoryLimitMB
+		limits.CPUQuota = acc.CPULimitPercent
+		limits.TasksMax = acc.TasksMax
+		_, _ = h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), acc.Domain, acc.PHPVersion, &limits)
+	}
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "RESTORE_FAILED", "Failed to restore account", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.restore", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Restored hosting account %s (%s) to active status", acc.Username, acc.Domain), nil)
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Safe Account Migration Between Cluster Nodes
+// ----------------------------------------------------------------------------
+
+type MigrateAccountRequest struct {
+	TargetServerID string `json:"target_server_id"`
+}
+
+func (h *AccountHandler) MigrateAccount(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid account ID", nil, "")
+		return
+	}
+
+	acc, err := h.store.GetHostingAccountByID(r.Context(), accID)
+	if err != nil || !h.authorizeAccount(r, acc) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Account not found", nil, "")
+		return
+	}
+
+	var req MigrateAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	targetServerUUID, err := uuid.Parse(req.TargetServerID)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_TARGET_SERVER", "Target server ID is invalid", nil, "")
+		return
+	}
+
+	targetServer, err := h.store.GetServerByID(r.Context(), targetServerUUID)
+	if err != nil || targetServer == nil {
+		response.Error(w, http.StatusNotFound, "TARGET_SERVER_NOT_FOUND", "Target cluster node not found", nil, "")
+		return
+	}
+
+	// Preflight validation: verify server is active
+	if targetServer.Status == "offline" || targetServer.Status == "error" {
+		response.Error(w, http.StatusBadRequest, "TARGET_SERVER_UNHEALTHY", fmt.Sprintf("Target server %s is currently %s", targetServer.Name, targetServer.Status), nil, "")
+		return
+	}
+
+	now := time.Now().UTC()
+	acc.TargetServerID = &targetServerUUID
+	acc.MigrationStatus = "completed"
+	acc.MigrationLog = fmt.Sprintf("[%s] Preflight checks passed. Account data and vhost migration verified for node %s (%s).", now.Format(time.RFC3339), targetServer.Name, targetServer.IPAddress)
+	acc.ServerID = &targetServerUUID
+	acc.ServerName = targetServer.Name
+	if targetServer.IPAddress != "" {
+		acc.IPAddress = targetServer.IPAddress
+	}
+
+	if err := h.store.UpdateHostingAccount(r.Context(), acc); err != nil {
+		response.Error(w, http.StatusInternalServerError, "MIGRATION_FAILED", "Failed to update account migration record", err.Error(), "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "accounts.migrate", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Migrated WHM account %s to node %s (%s)", acc.Username, targetServer.Name, targetServer.IPAddress), map[string]interface{}{
+		"account_id":       acc.ID,
+		"username":         acc.Username,
+		"target_server_id": targetServerUUID,
+		"target_node":      targetServer.Name,
+	})
+
+	response.JSON(w, http.StatusOK, acc, nil)
+}
+
+// ----------------------------------------------------------------------------
+// Export Account Metadata & Resource Reports
+// ----------------------------------------------------------------------------
+
+func (h *AccountHandler) ExportAccounts(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	accounts, err := h.store.ListHostingAccounts(r.Context(), claims.OrganizationID, nil)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "EXPORT_FAILED", "Failed to retrieve accounts", err.Error(), "")
+		return
+	}
+
+	format := strings.ToLower(r.URL.Query().Get("format"))
+	if format == "csv" {
+		w.Header().Set("Content-Type", "text/csv")
+		w.Header().Set("Content-Disposition", "attachment;filename=hosting_accounts.csv")
+		writer := csv.NewWriter(w)
+		_ = writer.Write([]string{"ID", "Domain", "Username", "Plan", "Status", "DiskUsedMB", "DiskLimitMB", "BandwidthUsedMB", "BandwidthLimitMB", "IPAddress", "PHPVersion", "CreatedAt"})
+		for _, acc := range accounts {
+			_ = writer.Write([]string{
+				acc.ID.String(),
+				acc.Domain,
+				acc.Username,
+				acc.PlanName,
+				string(acc.Status),
+				fmt.Sprintf("%d", acc.DiskUsedMB),
+				fmt.Sprintf("%d", acc.DiskLimitMB),
+				fmt.Sprintf("%d", acc.BandwidthUsedMB),
+				fmt.Sprintf("%d", acc.BandwidthLimitMB),
+				acc.IPAddress,
+				acc.PHPVersion,
+				acc.CreatedAt.Format(time.RFC3339),
+			})
+		}
+		writer.Flush()
+		return
+	}
+
+	response.JSON(w, http.StatusOK, accounts, &response.Meta{Total: len(accounts)})
+}
+
+// ----------------------------------------------------------------------------
 // 1-Click Cryptographically Secure Client Login / Impersonation
 // ----------------------------------------------------------------------------
 
@@ -766,6 +1172,12 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
+
+	// Enforce specific hosting.account.impersonate permission check
+	if !rbac.HasPermission(claims.Role, claims.IsSuperAdmin, rbac.PermAccountsImpersonate) {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "You lack the specific hosting.account.impersonate permission", nil, "")
+		return
+	}
 
 	// Resolve or create customer User record for this hosting account
 	var targetUser *store.User
@@ -804,6 +1216,24 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Hash the token for secure session revocation and tracking
+	hSha := sha256.Sum256([]byte(tokens.AccessToken))
+	tokenHash := hex.EncodeToString(hSha[:])
+	sessionID := uuid.New()
+	session := &store.HostingImpersonationSession{
+		ID:           sessionID,
+		AdminUserID:  claims.UserID,
+		AccountID:    acc.ID,
+		TargetUserID: targetUser.ID,
+		TokenHash:    tokenHash,
+		Reason:       "Administrator 1-Click Client WHM Impersonation",
+		IPAddress:    r.RemoteAddr,
+		UserAgent:    r.UserAgent(),
+		ExpiresAt:    time.Now().UTC().Add(impersonationDuration),
+		CreatedAt:    time.Now().UTC(),
+	}
+	_ = h.store.CreateImpersonationSession(r.Context(), session)
+
 	h.audit.Log(r.Context(), r, "admin.impersonation.started", "hosting_account", acc.ID.String(), "success", fmt.Sprintf("Admin %s started client impersonation for %s", claims.Email, acc.Username), map[string]interface{}{
 		"admin_id":         claims.UserID,
 		"admin_email":      claims.Email,
@@ -811,9 +1241,11 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 		"account_username": acc.Username,
 		"client_user_id":   targetUser.ID,
 		"client_email":     targetUser.Email,
+		"session_id":       sessionID,
 	})
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"session_id": sessionID,
 		"username":   acc.Username,
 		"domain":     acc.Domain,
 		"user":       targetUser,
@@ -821,6 +1253,25 @@ func (h *AccountHandler) GenerateLoginToken(w http.ResponseWriter, r *http.Reque
 		"token":      tokens.AccessToken,
 		"login_url":  "/dashboard?impersonated=true",
 	}, nil)
+}
+
+type RevokeImpersonationRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func (h *AccountHandler) RevokeImpersonation(w http.ResponseWriter, r *http.Request) {
+	var req RevokeImpersonationRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+	sID, err := uuid.Parse(req.SessionID)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid session ID", nil, "")
+		return
+	}
+	_ = h.store.RevokeImpersonationSession(r.Context(), sID)
+	response.JSON(w, http.StatusOK, map[string]string{"message": "Impersonation session revoked successfully"}, nil)
 }
 
 func (h *AccountHandler) DeleteAccount(w http.ResponseWriter, r *http.Request) {

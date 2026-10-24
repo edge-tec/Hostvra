@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -378,5 +379,211 @@ func TestAccountHandler_LiveQuotaMeasurement(t *testing.T) {
 	measuredMB := listResp.Data[0].DiskUsedMB
 	if measuredMB < 5 {
 		t.Fatalf("expected live disk measurement >= 5MB, got %d MB", measuredMB)
+	}
+}
+
+func TestAccountHandler_EnterpriseOperations(t *testing.T) {
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewAccountHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	adminID := uuid.New()
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, &auth.Claims{
+				UserID:         adminID,
+				Email:          "admin@hostvra.local",
+				OrganizationID: orgID,
+				Role:           rbac.RoleOwner,
+				IsSuperAdmin:   true,
+			})
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+
+	r.Get("/accounts/stats", h.GetWHMStats)
+	r.Get("/accounts/export", h.ExportAccounts)
+	r.Post("/accounts/impersonate/revoke", h.RevokeImpersonation)
+	r.Put("/accounts/{id}/details", h.UpdateDetails)
+	r.Post("/accounts/{id}/reset-password", h.ResetPassword)
+	r.Post("/accounts/{id}/sync-quota", h.SyncQuota)
+	r.Post("/accounts/{id}/terminate", h.TerminateAccount)
+	r.Post("/accounts/{id}/restore", h.RestoreAccount)
+	r.Post("/accounts/{id}/migrate", h.MigrateAccount)
+	r.Post("/accounts/{id}/login-token", h.GenerateLoginToken)
+
+	// Seed account and servers
+	node1 := &store.Server{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		Name:           "Node-East",
+		IPAddress:      "192.168.1.10",
+		Status:         "online",
+	}
+	node2 := &store.Server{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		Name:           "Node-West",
+		IPAddress:      "192.168.1.20",
+		Status:         "online",
+	}
+	_ = s.CreateServer(context.Background(), node1)
+	_ = s.CreateServer(context.Background(), node2)
+
+	accID := uuid.New()
+	testDir := filepath.Join(os.TempDir(), "hostvra-test-whm-ops")
+	_ = os.MkdirAll(testDir, 0755)
+	_ = os.WriteFile(filepath.Join(testDir, "test.txt"), []byte("enterprise whm test"), 0644)
+	defer os.RemoveAll(testDir)
+
+	acc := &store.HostingAccount{
+		ID:             accID,
+		OrganizationID: orgID,
+		Username:       "enterprisex",
+		Domain:         "enterprisex.com",
+		DocumentRoot:   testDir,
+		PlanID:         uuid.New(),
+		PlanName:       "Business Pro",
+		Status:         store.AccountStatusActive,
+		ServerID:       &node1.ID,
+		ServerName:     node1.Name,
+		IPAddress:      node1.IPAddress,
+		DiskLimitMB:    5000,
+	}
+	_ = s.CreateHostingAccount(context.Background(), acc)
+
+	// 1. Test GetWHMStats
+	statsReq := httptest.NewRequest("GET", "/accounts/stats", nil)
+	statsRec := httptest.NewRecorder()
+	r.ServeHTTP(statsRec, statsReq)
+	if statsRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for WHMStats, got %d", statsRec.Code)
+	}
+	var statsResp struct {
+		Data *store.WHMStats `json:"data"`
+	}
+	_ = json.Unmarshal(statsRec.Body.Bytes(), &statsResp)
+	if statsResp.Data.TotalAccounts != 1 || statsResp.Data.ActiveAccounts != 1 {
+		t.Fatalf("unexpected stats: %+v", statsResp.Data)
+	}
+
+	// 2. Test UpdateDetails
+	detBody := bytes.NewBufferString(`{"contact_email":"contact@enterprisex.com","contact_phone":"+123456789","notes":"VIP client account"}`)
+	detReq := httptest.NewRequest("PUT", "/accounts/"+accID.String()+"/details", detBody)
+	detRec := httptest.NewRecorder()
+	r.ServeHTTP(detRec, detReq)
+	if detRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for UpdateDetails, got %d", detRec.Code)
+	}
+	accUpdated, _ := s.GetHostingAccountByID(context.Background(), accID)
+	if accUpdated.ContactEmail != "contact@enterprisex.com" || accUpdated.Notes != "VIP client account" {
+		t.Fatalf("UpdateDetails failed: %+v", accUpdated)
+	}
+
+	// 3. Test ResetPassword
+	pwdBody := bytes.NewBufferString(`{"new_password":"SecurePassword!2026"}`)
+	pwdReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/reset-password", pwdBody)
+	pwdRec := httptest.NewRecorder()
+	r.ServeHTTP(pwdRec, pwdReq)
+	if pwdRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for ResetPassword, got %d: %s", pwdRec.Code, pwdRec.Body.String())
+	}
+
+	// 4. Test SyncQuota
+	syncReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/sync-quota", nil)
+	syncRec := httptest.NewRecorder()
+	r.ServeHTTP(syncRec, syncReq)
+	if syncRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SyncQuota, got %d", syncRec.Code)
+	}
+	accSynced, _ := s.GetHostingAccountByID(context.Background(), accID)
+	if accSynced.LastSyncAt == nil || accSynced.QuotaStatus != "synchronized" {
+		t.Fatalf("SyncQuota failed: %+v", accSynced)
+	}
+
+	// 5. Test MigrateAccount
+	migBody := bytes.NewBufferString(fmt.Sprintf(`{"target_server_id":%q}`, node2.ID.String()))
+	migReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/migrate", migBody)
+	migRec := httptest.NewRecorder()
+	r.ServeHTTP(migRec, migReq)
+	if migRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for MigrateAccount, got %d: %s", migRec.Code, migRec.Body.String())
+	}
+	accMigrated, _ := s.GetHostingAccountByID(context.Background(), accID)
+	if accMigrated.ServerName != node2.Name || accMigrated.MigrationStatus != "completed" {
+		t.Fatalf("MigrateAccount failed: %+v", accMigrated)
+	}
+
+	// 6. Test ExportAccounts
+	expReq := httptest.NewRequest("GET", "/accounts/export?format=csv", nil)
+	expRec := httptest.NewRecorder()
+	r.ServeHTTP(expRec, expReq)
+	if expRec.Code != http.StatusOK || expRec.Header().Get("Content-Type") != "text/csv" {
+		t.Fatalf("expected 200 text/csv for ExportAccounts, got %d, type: %s", expRec.Code, expRec.Header().Get("Content-Type"))
+	}
+
+	// 7. Test GenerateLoginToken & RevokeImpersonation
+	tokenReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/login-token", nil)
+	tokenRec := httptest.NewRecorder()
+	r.ServeHTTP(tokenRec, tokenReq)
+	if tokenRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GenerateLoginToken, got %d: %s", tokenRec.Code, tokenRec.Body.String())
+	}
+	var tokenResp struct {
+		Data struct {
+			SessionID string `json:"session_id"`
+			Token     string `json:"token"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(tokenRec.Body.Bytes(), &tokenResp)
+	if tokenResp.Data.SessionID == "" || tokenResp.Data.Token == "" {
+		t.Fatalf("expected session_id and token in response: %s", tokenRec.Body.String())
+	}
+
+	revBody := bytes.NewBufferString(fmt.Sprintf(`{"session_id":%q}`, tokenResp.Data.SessionID))
+	revReq := httptest.NewRequest("POST", "/accounts/impersonate/revoke", revBody)
+	revRec := httptest.NewRecorder()
+	r.ServeHTTP(revRec, revReq)
+	if revRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for RevokeImpersonation, got %d", revRec.Code)
+	}
+
+	// 8. Test TerminateAccount (fails with wrong confirmation, succeeds with exact username)
+	badTermBody := bytes.NewBufferString(`{"confirm_username":"wrong"}`)
+	badTermReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/terminate", badTermBody)
+	badTermRec := httptest.NewRecorder()
+	r.ServeHTTP(badTermRec, badTermReq)
+	if badTermRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad confirmation, got %d", badTermRec.Code)
+	}
+
+	termBody := bytes.NewBufferString(`{"confirm_username":"enterprisex"}`)
+	termReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/terminate", termBody)
+	termRec := httptest.NewRecorder()
+	r.ServeHTTP(termRec, termReq)
+	if termRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for TerminateAccount, got %d", termRec.Code)
+	}
+	accTerminated, _ := s.GetHostingAccountByID(context.Background(), accID)
+	if accTerminated.Status != store.AccountStatusTerminated {
+		t.Fatalf("expected terminated status, got %s", accTerminated.Status)
+	}
+
+	// 9. Test RestoreAccount
+	restReq := httptest.NewRequest("POST", "/accounts/"+accID.String()+"/restore", nil)
+	restRec := httptest.NewRecorder()
+	r.ServeHTTP(restRec, restReq)
+	if restRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for RestoreAccount, got %d", restRec.Code)
+	}
+	accRestored, _ := s.GetHostingAccountByID(context.Background(), accID)
+	if accRestored.Status != store.AccountStatusActive {
+		t.Fatalf("expected active status, got %s", accRestored.Status)
 	}
 }

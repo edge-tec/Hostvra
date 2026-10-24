@@ -1653,9 +1653,94 @@ export interface HostingAccount {
   ip_address?: string;
   php_version?: string;
   ssl_active: boolean;
+  contact_email?: string;
+  contact_phone?: string;
+  notes?: string;
+  subdomains_limit?: number;
+  ftp_users_limit?: number;
+  cron_jobs_limit?: number;
+  max_email_send_rate?: number;
+  quota_enforced?: boolean;
+  quota_status?: string;
+  last_sync_at?: string;
+  target_server_id?: string;
+  migration_status?: string;
+  migration_log?: string;
+  expires_at?: string;
   suspended_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface WHMStats {
+  total_accounts: number;
+  active_accounts: number;
+  suspended_accounts: number;
+  pending_accounts: number;
+  terminated_accounts: number;
+  total_storage_alloc_mb: number;
+  total_storage_used_mb: number;
+  total_bandwidth_alloc_mb: number;
+  total_bandwidth_used_mb: number;
+  total_domains: number;
+  total_databases: number;
+  total_mailboxes: number;
+  total_inodes_used: number;
+  healthy_nodes: number;
+  total_nodes: number;
+  expiring_ssl_certs: number;
+  over_quota_count: number;
+  last_sync_time?: string;
+}
+
+export async function getWHMStats(): Promise<ApiResponse<WHMStats>> {
+  return apiFetch<WHMStats>('/api/v1/accounts/stats');
+}
+
+export async function resetAccountPassword(accountId: string, newPassword?: string) {
+  return apiFetch<{ message: string; auto_generated?: boolean; temporary_password?: string }>(
+    `/api/v1/accounts/${accountId}/reset-password`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    }
+  );
+}
+
+export async function updateAccountDetails(
+  accountId: string,
+  details: { contact_email?: string; contact_phone?: string; notes?: string; expires_at?: string }
+) {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/details`, {
+    method: 'PUT',
+    body: JSON.stringify(details),
+  });
+}
+
+export async function syncAccountQuota(accountId: string) {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/sync-quota`, {
+    method: 'POST',
+  });
+}
+
+export async function terminateAccount(accountId: string, confirmUsername: string) {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/terminate`, {
+    method: 'POST',
+    body: JSON.stringify({ confirm_username: confirmUsername }),
+  });
+}
+
+export async function restoreAccount(accountId: string) {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/restore`, {
+    method: 'POST',
+  });
+}
+
+export async function migrateAccount(accountId: string, targetServerId: string) {
+  return apiFetch<HostingAccount>(`/api/v1/accounts/${accountId}/migrate`, {
+    method: 'POST',
+    body: JSON.stringify({ target_server_id: targetServerId }),
+  });
 }
 
 export async function updateAccountLimits(
@@ -1670,6 +1755,12 @@ export async function updateAccountLimits(
     websites_limit?: number;
     databases_limit?: number;
     mailboxes_limit?: number;
+    subdomains_limit?: number;
+    ftp_users_limit?: number;
+    cron_jobs_limit?: number;
+    max_email_send_rate?: number;
+    io_read_mbps?: number;
+    io_write_mbps?: number;
     php_version?: string;
     open_basedir?: boolean;
   }

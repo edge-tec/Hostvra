@@ -689,3 +689,17 @@ func max(a, b int) int {
 	}
 	return b
 }
+
+// SetUserPassword updates the system user's password using chpasswd if on Linux/root, or mockUsers in mockMode.
+func (m *Manager) SetUserPassword(ctx context.Context, username, password string) error {
+	if !validUserRegex.MatchString(username) {
+		return fmt.Errorf("%w: %s", ErrInvalidUsername, username)
+	}
+	if m.mockMode {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "chpasswd")
+	cmd.Stdin = strings.NewReader(fmt.Sprintf("%s:%s\n", username, password))
+	return cmd.Run()
+}
+
