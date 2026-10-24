@@ -275,66 +275,71 @@ export function Header() {
             </button>
 
             {mobileToolsOpen && (
-              <div
-                className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-20px)] bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl py-2 z-50 animate-fadeIn"
-                onMouseLeave={() => setMobileToolsOpen(false)}
-              >
-                <div className="px-3.5 pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">System Actions</span>
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-                    </span>
-                    <span>{osName}</span>
+              <>
+                <div
+                  className="fixed inset-0 z-40 bg-black/20 sm:hidden"
+                  onClick={() => setMobileToolsOpen(false)}
+                />
+                <div
+                  className="fixed left-3 right-3 top-[68px] max-w-xs mx-auto sm:hidden bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl py-2 z-50 animate-fadeIn"
+                >
+                  <div className="px-3.5 pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">System Actions</span>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                      </span>
+                      <span>{osName}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 px-1.5">
+                    <button
+                      onClick={() => {
+                        setMobileToolsOpen(false);
+                        setUpdateModalOpen(true);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                    >
+                      <RotateCw className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                      <div>
+                        <div>System Updates</div>
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Check and apply latest panel updates</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setMobileToolsOpen(false);
+                        setFixModalOpen(true);
+                        executeFix();
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-orange-700 dark:text-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                    >
+                      <Wrench className="w-4 h-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+                      <div>
+                        <div>Panel Health & Repair</div>
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Diagnose permissions, configs & SSL</div>
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setMobileToolsOpen(false);
+                        setRestartModalOpen(true);
+                      }}
+                      className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                    >
+                      <Power className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                      <div>
+                        <div>Restart Services</div>
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Reload panel, Nginx, or server node</div>
+                      </div>
+                    </button>
                   </div>
                 </div>
-
-                <div className="space-y-1 px-1.5">
-                  <button
-                    onClick={() => {
-                      setMobileToolsOpen(false);
-                      setUpdateModalOpen(true);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
-                  >
-                    <RotateCw className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                    <div>
-                      <div>System Updates</div>
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Check and apply latest panel updates</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setMobileToolsOpen(false);
-                      setFixModalOpen(true);
-                      executeFix();
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-orange-700 dark:text-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
-                  >
-                    <Wrench className="w-4 h-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
-                    <div>
-                      <div>Panel Health & Repair</div>
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Diagnose permissions, configs & SSL</div>
-                    </div>
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setMobileToolsOpen(false);
-                      setRestartModalOpen(true);
-                    }}
-                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
-                  >
-                    <Power className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
-                    <div>
-                      <div>Restart Services</div>
-                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Reload panel, Nginx, or server node</div>
-                    </div>
-                  </button>
-                </div>
-              </div>
+              </>
             )}
           </div>
 
@@ -391,10 +396,15 @@ export function Header() {
 
               {/* Dropdown Menu */}
               {userMenuOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-20px)] bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
-                  onMouseLeave={() => setUserMenuOpen(false)}
-                >
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-black/20 sm:hidden"
+                    onClick={() => setUserMenuOpen(false)}
+                  />
+                  <div
+                    className="fixed left-3 right-3 top-[68px] max-w-xs mx-auto sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-64 sm:max-w-[calc(100vw-20px)] bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
+                    onMouseLeave={() => setUserMenuOpen(false)}
+                  >
                   <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
                     <p className="text-xs font-bold text-slate-900 dark:text-white">{user.full_name}</p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
@@ -480,7 +490,8 @@ export function Header() {
                     </button>
                   </div>
                 </div>
-              )}
+              </>
+            )}
             </div>
           ) : (
             <div className="w-8 h-8 rounded-full bg-slate-200 dark:bg-slate-800 animate-pulse" />
