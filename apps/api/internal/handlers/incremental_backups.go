@@ -310,7 +310,8 @@ func (h *IncrementalBackupHandler) GetRepository(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if repo.OrganizationID != claims.OrganizationID && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if repo.OrganizationID != claims.OrganizationID && !isSuper {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Repository does not belong to your organization", nil, "")
 		return
 	}
@@ -340,7 +341,8 @@ func (h *IncrementalBackupHandler) UpdateRepository(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if repo.OrganizationID != claims.OrganizationID && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if repo.OrganizationID != claims.OrganizationID && !isSuper {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Forbidden", nil, "")
 		return
 	}
@@ -393,7 +395,8 @@ func (h *IncrementalBackupHandler) DeleteRepository(w http.ResponseWriter, r *ht
 		return
 	}
 
-	if repo.OrganizationID != claims.OrganizationID && claims.Role != "admin" && claims.Role != "owner" && !claims.IsSuperAdmin {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if repo.OrganizationID != claims.OrganizationID && !isSuper {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Forbidden", nil, "")
 		return
 	}

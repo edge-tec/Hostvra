@@ -269,8 +269,9 @@ func (h *DockerHandler) RunContainer(w http.ResponseWriter, r *http.Request) {
 
 	claims, _ := auth.GetClaims(r.Context())
 	if len(req.VolumeMounts) > 0 {
-		if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-			response.Error(w, http.StatusForbidden, "VOLUME_MOUNT_FORBIDDEN", "Only administrators can mount host volumes into containers", nil, "")
+		isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+		if !isSuper {
+			response.Error(w, http.StatusForbidden, "VOLUME_MOUNT_FORBIDDEN", "Only platform superadmins can mount host volumes into containers", nil, "")
 			return
 		}
 	}
@@ -300,8 +301,9 @@ func (h *DockerHandler) RunContainer(w http.ResponseWriter, r *http.Request) {
 // PruneSystem cleans unused Docker data
 func (h *DockerHandler) PruneSystem(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims != nil && claims.Role != "" && claims.Role != "owner" && claims.Role != "admin" {
-		response.Error(w, http.StatusForbidden, "PRUNE_FORBIDDEN", "Only administrators can prune the Docker system", nil, "")
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if !isSuper {
+		response.Error(w, http.StatusForbidden, "PRUNE_FORBIDDEN", "Only platform superadmins can prune the Docker system", nil, "")
 		return
 	}
 

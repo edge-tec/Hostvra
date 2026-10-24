@@ -49,7 +49,8 @@ func (h *InstallerHandler) GetWebsiteApp(w http.ResponseWriter, r *http.Request)
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || (site.OrganizationID != claims.OrganizationID && claims.Role != "owner" && claims.Role != "admin") {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if err != nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -79,7 +80,8 @@ func (h *InstallerHandler) InstallWebsiteApp(w http.ResponseWriter, r *http.Requ
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || (site.OrganizationID != claims.OrganizationID && claims.Role != "owner" && claims.Role != "admin") {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if err != nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}
@@ -160,7 +162,8 @@ func (h *InstallerHandler) UninstallWebsiteApp(w http.ResponseWriter, r *http.Re
 	}
 
 	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
-	if err != nil || (site.OrganizationID != claims.OrganizationID && claims.Role != "owner" && claims.Role != "admin") {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if err != nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
 		return
 	}

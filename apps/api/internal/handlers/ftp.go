@@ -67,8 +67,11 @@ type UpdateFTPUserRequest struct {
 // getTenantAllowedPaths returns the set of filesystem paths owned by the authenticated tenant.
 func (h *FTPHandler) getTenantAllowedPaths(r *http.Request) []string {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil // nil = unrestricted (superadmin)
+	}
+	if claims == nil {
+		return []string{} // no allowed paths for unauthenticated
 	}
 
 	var paths []string
@@ -105,8 +108,11 @@ func (h *FTPHandler) isTenantPath(homeDir string, allowedPaths []string) bool {
 // verifyFTPUserOwnership checks whether the FTP user's home directory belongs to the caller's tenant.
 func (h *FTPHandler) verifyFTPUserOwnership(r *http.Request, username string) error {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil
+	}
+	if claims == nil {
+		return errors.New("unauthorized: missing claims")
 	}
 
 	user, err := h.ftpMgr.GetUser(username)

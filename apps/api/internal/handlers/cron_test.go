@@ -41,7 +41,8 @@ func TestCronHandler_Lifecycle(t *testing.T) {
 		UserID:         uuid.New(),
 		OrganizationID: uuid.New(),
 		Email:          "admin@hostvra.com",
-		Role:           "owner",
+		Role:           "superadmin",
+		IsSuperAdmin:   true,
 	}
 
 	// 1. Get Daemon Status
@@ -164,7 +165,8 @@ func TestCronHandler_NonAdminForbiddenFromRunningRootJob(t *testing.T) {
 		UserID:         uuid.New(),
 		OrganizationID: uuid.New(),
 		Email:          "admin@hostvra.com",
-		Role:           "owner",
+		Role:           "superadmin",
+		IsSuperAdmin:   true,
 	}
 
 	// Create root job as admin

@@ -66,10 +66,10 @@ func (h *EmailHandler) SetQuotaService(q *quota.Service) {
 // verifyMailServerOwnership ensures the mail server belongs to the caller's organization.
 func (h *EmailHandler) verifyMailServerOwnership(r *http.Request, server *store.MailServer) error {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil
 	}
-	if server.OrganizationID != claims.OrganizationID {
+	if claims == nil || server == nil || server.OrganizationID != claims.OrganizationID {
 		return errors.New("mail server does not belong to your organization")
 	}
 	return nil
@@ -78,10 +78,10 @@ func (h *EmailHandler) verifyMailServerOwnership(r *http.Request, server *store.
 // verifyDomainOwnership ensures the email domain belongs to the caller's organization.
 func (h *EmailHandler) verifyDomainOwnership(r *http.Request, domain *store.EmailDomain) error {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil
 	}
-	if domain.OrganizationID != claims.OrganizationID {
+	if claims == nil || domain == nil || domain.OrganizationID != claims.OrganizationID {
 		return errors.New("email domain does not belong to your organization")
 	}
 	return nil
@@ -90,14 +90,14 @@ func (h *EmailHandler) verifyDomainOwnership(r *http.Request, domain *store.Emai
 // verifyMailboxOwnership ensures the mailbox's parent domain belongs to the caller's organization.
 func (h *EmailHandler) verifyMailboxOwnership(r *http.Request, mb *store.EmailMailbox) error {
 	claims, _ := auth.GetClaims(r.Context())
-	if claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil
 	}
-	domain, err := h.store.GetEmailDomainByID(r.Context(), mb.DomainID)
-	if err != nil {
-		return errors.New("failed to verify mailbox ownership")
+	if claims == nil || mb == nil {
+		return errors.New("unauthorized: missing claims or mailbox")
 	}
-	if domain.OrganizationID != claims.OrganizationID {
+	domain, err := h.store.GetEmailDomainByID(r.Context(), mb.DomainID)
+	if err != nil || domain == nil || domain.OrganizationID != claims.OrganizationID {
 		return errors.New("mailbox does not belong to your organization")
 	}
 	return nil

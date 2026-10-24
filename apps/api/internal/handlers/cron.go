@@ -72,8 +72,11 @@ func (h *CronHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *CronHandler) isJobOwnedByTenant(ctx context.Context, claims *auth.Claims, jobID string) bool {
-	if claims == nil || claims.Role == "owner" || claims.Role == "admin" || claims.IsSuperAdmin {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return true
+	}
+	if claims == nil {
+		return false
 	}
 	jobs, err := h.cronMgr.ListJobs()
 	if err != nil {
@@ -96,7 +99,8 @@ func (h *CronHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	if claims != nil && claims.Role != "owner" && claims.Role != "admin" && !claims.IsSuperAdmin {
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if !isSuper {
 		var tenantJobs []cron.CronJob
 		for _, j := range jobs {
 			if h.validateTenantSystemUser(r.Context(), claims, j.SystemUser) == nil {
@@ -399,11 +403,14 @@ func (h *CronHandler) TestCommand(w http.ResponseWriter, r *http.Request) {
 // validateTenantSystemUser ensures non-admin users can only schedule cron jobs under system users
 // belonging to their own organization's websites.
 func (h *CronHandler) validateTenantSystemUser(ctx context.Context, claims *auth.Claims, sysUser string) error {
-	if claims == nil || claims.Role == "owner" || claims.Role == "admin" {
+	if claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin") {
 		return nil
 	}
+	if claims == nil {
+		return fmt.Errorf("unauthorized: missing authentication claims")
+	}
 	if sysUser == "" || sysUser == "root" {
-		return fmt.Errorf("only owner or admin can execute cron jobs as root")
+		return fmt.Errorf("only platform superadmins can execute cron jobs as root")
 	}
 	sites, err := h.store.ListWebsitesByOrg(ctx, claims.OrganizationID)
 	if err != nil || len(sites) == 0 {

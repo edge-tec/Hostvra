@@ -251,7 +251,8 @@ func (h *SSLHandler) Issue(w http.ResponseWriter, r *http.Request) {
 		websiteID, parseErr = uuid.Parse(req.WebsiteID)
 		if parseErr == nil {
 			site, err := h.store.GetWebsiteByID(r.Context(), websiteID)
-			if err != nil || (site.OrganizationID != claims.OrganizationID && claims.Role != "owner" && claims.Role != "admin") {
+			isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+			if err != nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
 				response.Error(w, http.StatusNotFound, "NOT_FOUND", "Associated website not found", nil, "")
 				return
 			}

@@ -213,6 +213,11 @@ func TestEmailHandler_CreateDomainWithoutServerID_AndDNSResolution(t *testing.T)
 
 	orgID := uuid.New()
 	userID := uuid.New()
+	_ = st.CreateOrganization(context.Background(), &store.Organization{
+		ID:   orgID,
+		Name: "Test Org",
+		Slug: "test-org",
+	})
 	claims := &auth.Claims{
 		UserID:         userID,
 		OrganizationID: orgID,
@@ -330,6 +335,11 @@ func TestEmailHandler_GetDomainDNS_RejectsPrivateAndLoopbackIPs(t *testing.T) {
 
 	orgID := uuid.New()
 	userID := uuid.New()
+	_ = st.CreateOrganization(context.Background(), &store.Organization{
+		ID:   orgID,
+		Name: "Test Org",
+		Slug: "test-org",
+	})
 	claims := &auth.Claims{
 		UserID:         userID,
 		OrganizationID: orgID,
@@ -433,7 +443,12 @@ func TestEmailHandler_GetDomainDNS_RejectsPrivateAndLoopbackIPs(t *testing.T) {
 
 func TestEmailHandler_VerifyDomainDNS(t *testing.T) {
 	handler, memStore, _, orgID, _, serverID := setupEmailTestEnv(t)
-	ctx := context.Background()
+	claims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: orgID,
+		Role:           "owner",
+	}
+	ctx := context.WithValue(context.Background(), auth.UserContextKey, claims)
 
 	domainID := uuid.New()
 	testDomain := "verifytest.org"
