@@ -297,24 +297,24 @@ export default function FirewallPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-950 dark:text-white">
                 Firewall & Intrusion Defense
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold uppercase bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800">
                 {status?.backend || 'UFW'}
               </span>
             </div>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400 mt-1">
               Production packet filtering, active port rules, and real-time Fail2ban jail enforcement.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
             <button
               onClick={() => loadData(true)}
               disabled={refreshing}
-              className="p-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition-colors shadow-xs"
+              className="p-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition-colors shadow-xs shrink-0"
               title="Refresh status"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-indigo-500' : ''}`} />
@@ -323,7 +323,7 @@ export default function FirewallPage() {
             {activeTab === 'rules' ? (
               <button
                 onClick={() => setAddModalOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-sm font-semibold shadow-sm transition-all"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-sm font-semibold shadow-sm transition-all flex-1 sm:flex-none"
               >
                 <Plus className="w-4 h-4" />
                 Add Firewall Rule
@@ -331,7 +331,7 @@ export default function FirewallPage() {
             ) : (
               <button
                 onClick={() => setBanModalOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold shadow-md shadow-rose-600/20 transition-all"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold shadow-md shadow-rose-600/20 transition-all flex-1 sm:flex-none"
               >
                 <UserX className="w-4 h-4" />
                 Manual Ban IP
@@ -343,10 +343,10 @@ export default function FirewallPage() {
         {/* Status Dashboard Banner */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Card 1: Firewall Status */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center justify-between">
-            <div className="flex items-center gap-3.5">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5">
+            <div className="flex items-center gap-3.5 min-w-0">
               <div
-                className={`w-11 h-11 rounded-xl flex items-center justify-center ${
+                className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
                   status?.is_active
                     ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                     : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
@@ -354,18 +354,18 @@ export default function FirewallPage() {
               >
                 {status?.is_active ? <ShieldCheck className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
               </div>
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-950 dark:text-white text-sm">
                     {status?.is_active ? 'Firewall Active' : 'Firewall Inactive'}
                   </span>
                   <span
-                    className={`w-2 h-2 rounded-full ${
+                    className={`w-2 h-2 rounded-full shrink-0 ${
                       status?.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
                     }`}
                   />
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate">
                   {status?.is_active
                     ? 'Default Ingress: DENY • Egress: ALLOW'
                     : 'Packet filtering disabled'}
@@ -376,7 +376,7 @@ export default function FirewallPage() {
             <button
               onClick={handleToggleFirewall}
               disabled={togglingFirewall}
-              className={`px-4 py-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer ${
+              className={`w-full sm:w-auto shrink-0 justify-center px-4 py-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer ${
                 status?.is_active
                   ? 'border border-rose-300 hover:border-rose-400 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
                   : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white border border-emerald-600 shadow-sm'
@@ -388,33 +388,33 @@ export default function FirewallPage() {
           </div>
 
           {/* Card 2: SSH Lockout Guard */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center justify-center flex-shrink-0">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
               <Lock className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-950 dark:text-white text-sm">SSH Lockout Guard</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
                   Enforced
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate sm:whitespace-normal">
                 Port 22 deny actions blocked to preserve admin connectivity
               </p>
             </div>
           </div>
 
           {/* Card 3: Fail2ban Summary */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
               <Radio className="w-6 h-6" />
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-950 dark:text-white text-sm">Fail2ban Intrusion</span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0 ${
                     status?.fail2ban_active
                       ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                       : 'bg-slate-100 dark:bg-surface-800 text-slate-500'
@@ -423,7 +423,7 @@ export default function FirewallPage() {
                   {status?.fail2ban_active ? 'Running' : 'Offline'}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate">
                 {jails.length} Jails Active • {bannedIPs.length} Banned IPs
               </p>
             </div>
@@ -431,31 +431,31 @@ export default function FirewallPage() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto text-xs font-semibold">
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-800/60 rounded-xl overflow-x-auto max-w-full scrollbar-none text-xs font-semibold">
           <button
             role="tab"
             data-tab="true"
             onClick={() => setActiveTab('rules')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap shrink-0 ${
               activeTab === 'rules'
                 ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
-            <ShieldCheck className="w-4 h-4" />
+            <ShieldCheck className="w-4 h-4 shrink-0" />
             <span>Firewall Rules ({rules.length})</span>
           </button>
           <button
             role="tab"
             data-tab="true"
             onClick={() => setActiveTab('fail2ban')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap shrink-0 ${
               activeTab === 'fail2ban'
                 ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
             }`}
           >
-            <UserX className="w-4 h-4" />
+            <UserX className="w-4 h-4 shrink-0" />
             <span>Fail2ban Jails & Banned IPs ({bannedIPs.length})</span>
           </button>
         </div>
@@ -689,21 +689,21 @@ export default function FirewallPage() {
 
         {/* Modal: Add Firewall Rule */}
         {addModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="w-full max-w-lg bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-4 sm:p-6 relative max-h-[90vh] overflow-y-auto">
               <button
                 onClick={() => setAddModalOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+                className="absolute top-4 right-4 sm:top-5 sm:right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+              <div className="flex items-center gap-3 mb-5 pr-8">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
                   <ShieldAlert className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-950 dark:text-white">Add Ingress Firewall Rule</h2>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-950 dark:text-white">Add Ingress Firewall Rule</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">Configure Linux packet filtering policy</p>
                 </div>
               </div>
@@ -753,7 +753,7 @@ export default function FirewallPage() {
               </div>
 
               <form onSubmit={handleAddRule} className="space-y-4">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                       Port or Range
@@ -783,7 +783,7 @@ export default function FirewallPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                       Traffic Action
@@ -825,18 +825,18 @@ export default function FirewallPage() {
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3">
+                <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-3">
                   <button
                     type="button"
                     onClick={() => setAddModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                    className="w-full sm:w-auto justify-center px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors inline-flex items-center"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submittingRule}
-                    className="px-5 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
+                    className="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5"
                   >
                     {submittingRule ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
                     Apply Rule
@@ -849,21 +849,21 @@ export default function FirewallPage() {
 
         {/* Modal: Manual Ban IP */}
         {banModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+            <div className="w-full max-w-md bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-4 sm:p-6 relative max-h-[90vh] overflow-y-auto">
               <button
                 onClick={() => setBanModalOpen(false)}
-                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+                className="absolute top-4 right-4 sm:top-5 sm:right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
+              <div className="flex items-center gap-3 mb-5 pr-8">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
                   <UserX className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-950 dark:text-white">Manual IP Ban</h2>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-950 dark:text-white">Manual IP Ban</h2>
                   <p className="text-xs text-slate-500 dark:text-slate-400">Ban a malicious IP address across Fail2ban</p>
                 </div>
               </div>
@@ -904,18 +904,18 @@ export default function FirewallPage() {
                   />
                 </div>
 
-                <div className="flex justify-end gap-2 pt-3">
+                <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-3">
                   <button
                     type="button"
                     onClick={() => setBanModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                    className="w-full sm:w-auto justify-center px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors inline-flex items-center"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submittingBan}
-                    className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 transition-all flex items-center gap-1.5"
+                    className="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-md shadow-rose-600/20 transition-all flex items-center gap-1.5"
                   >
                     {submittingBan ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
                     Ban IP Immediately
