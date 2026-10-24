@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { DashboardShell } from '@/components/DashboardShell';
 import {
   Users,
@@ -152,7 +152,7 @@ export default function AccountsPage() {
     setTimeout(() => setNotification(null), 4500);
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [accRes, plansRes, serversRes, statsRes] = await Promise.allSettled([
@@ -181,11 +181,11 @@ export default function AccountsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedPlanId, selectedServerId]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   // Auto-generate username when domain changes
   useEffect(() => {
