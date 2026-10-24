@@ -2096,7 +2096,7 @@ export default function EmailHostingPage() {
 
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
+                <table className="w-full text-left text-sm border-collapse min-w-[700px]">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
                       <th className="px-6 py-4">Account / Email</th>
@@ -3071,7 +3071,7 @@ export default function EmailHostingPage() {
             ) : (
               <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm border-collapse">
+                  <table className="w-full text-left text-sm border-collapse min-w-[800px]">
                     <thead>
                       <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
                         <th className="px-5 py-4 w-44">Queue ID</th>
@@ -3173,7 +3173,7 @@ export default function EmailHostingPage() {
 
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
+                <table className="w-full text-left text-sm border-collapse min-w-[700px]">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
                       <th className="px-6 py-4">Timestamp</th>
@@ -3245,7 +3245,7 @@ export default function EmailHostingPage() {
 
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
+                <table className="w-full text-left text-sm border-collapse min-w-[650px]">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
                       <th className="px-6 py-4">Suppressed Email</th>

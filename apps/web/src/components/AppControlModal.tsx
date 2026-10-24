@@ -339,13 +339,13 @@ export function AppControlModal({
   const sidebarTabs = getSidebarTabs();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
       {/* aaPanel style Main Dialog Container */}
-      <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[640px] max-h-[90vh] relative">
+      <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden flex flex-col h-[90vh] max-h-[720px] relative">
         {/* Top Header Bar */}
-        <div className="h-14 px-5 border-b border-slate-200 dark:border-surface-800 bg-slate-50/70 dark:bg-surface-950/60 flex items-center justify-between shrink-0 select-none">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+        <div className="h-14 px-4 sm:px-5 border-b border-slate-200 dark:border-surface-800 bg-slate-50/70 dark:bg-surface-950/60 flex items-center justify-between shrink-0 select-none">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 flex-shrink-0">
               {app.id === 'supervisor' ? (
                 <Cpu className="w-5 h-5 text-indigo-500" />
               ) : app.category === 'web_server' ? (
@@ -354,31 +354,48 @@ export function AppControlModal({
                 <Boxes className="w-5 h-5 text-indigo-500" />
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white capitalize">
+            <div className="flex items-center gap-2 min-w-0 truncate">
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white capitalize truncate">
                 {app.id === 'supervisor' ? 'Supervisor' : app.name}
               </h3>
-              <span className="text-xs text-slate-400 font-mono font-medium">
+              <span className="text-xs text-slate-400 font-mono font-medium flex-shrink-0">
                 v{app.version}
               </span>
             </div>
           </div>
 
-          {/* Circular close button matching screenshot */}
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-full bg-slate-400/80 hover:bg-slate-600 dark:bg-surface-800 dark:hover:bg-surface-700 text-white flex items-center justify-center transition-colors shadow-sm"
-            title="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Mobile Pin to Dashboard toggle */}
+            <button
+              onClick={handleTogglePin}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white transition md:hidden cursor-pointer"
+              title={pinned ? 'Pinned to Dashboard' : 'Pin to Dashboard'}
+              aria-label="Pin to dashboard"
+            >
+              {pinned ? (
+                <BookmarkCheck className="w-4 h-4 text-amber-500" />
+              ) : (
+                <Bookmark className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {/* Circular close button matching screenshot */}
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-full bg-slate-400/80 hover:bg-slate-600 dark:bg-surface-800 dark:hover:bg-surface-700 text-white flex items-center justify-center transition-colors shadow-sm cursor-pointer"
+              title="Close"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
-        {/* 2-Column Body Layout */}
-        <div className="flex-1 flex overflow-hidden">
+        {/* Responsive Body Layout (Scrollable Ribbon on Mobile, Vertical Sidebar on Desktop) */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
           {/* Left Column: Sidebar Navigation (matching aaPanel Screenshot 2 & 3) */}
-          <div className="w-48 sm:w-52 border-r border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-950/40 p-2 flex flex-col justify-between shrink-0 select-none">
-            <nav className="space-y-1">
+          <div className="w-full md:w-52 border-b md:border-b-0 md:border-r border-slate-200 dark:border-surface-800 bg-slate-50/70 dark:bg-surface-950/40 p-2 flex md:flex-col justify-between items-center md:items-stretch shrink-0 select-none overflow-x-auto md:overflow-y-auto gap-1 custom-scrollbar">
+            <nav className="flex md:flex-col gap-1 w-full shrink-0">
               {sidebarTabs.map((tab) => {
                 const isActive = selectedTab === tab.id;
                 return (
@@ -388,9 +405,9 @@ export function AppControlModal({
                       setSelectedTab(tab.id);
                       setSaveSuccessMessage(null);
                     }}
-                    className={`w-full text-left px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                    className={`whitespace-nowrap px-3 py-1.5 md:px-3.5 md:py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer text-left ${
                       isActive
-                        ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white font-bold shadow-sm border-l-2 border-emerald-500'
+                        ? 'bg-white dark:bg-surface-800 text-slate-900 dark:text-white font-bold shadow-sm md:border-l-2 md:border-emerald-500 ring-1 ring-emerald-500/30 md:ring-0'
                         : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800/50'
                     }`}
                   >
@@ -400,11 +417,11 @@ export function AppControlModal({
               })}
             </nav>
 
-            {/* Bottom Quick Pin */}
-            <div className="pt-2 border-t border-slate-200 dark:border-surface-800">
+            {/* Bottom Quick Pin on Desktop */}
+            <div className="hidden md:block pt-2 border-t border-slate-200 dark:border-surface-800">
               <button
                 onClick={handleTogglePin}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition cursor-pointer"
               >
                 <span>Pin to Dashboard</span>
                 {pinned ? (
@@ -417,7 +434,7 @@ export function AppControlModal({
           </div>
 
           {/* Right Column: Main Content Area */}
-          <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-surface-900 p-6">
+          <div className="flex-1 flex flex-col overflow-y-auto bg-white dark:bg-surface-900 p-4 sm:p-6">
             {/* Save Toast Notification */}
             {saveSuccessMessage && (
               <div className="mb-4 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-fadeIn">

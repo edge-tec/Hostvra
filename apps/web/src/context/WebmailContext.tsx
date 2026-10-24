@@ -104,6 +104,10 @@ interface WebmailContextType {
   isAddAccountOpen: boolean;
   openAddAccount: () => void;
   closeAddAccount: () => void;
+  // Mobile Sidebar Drawer
+  isSidebarOpen: boolean;
+  toggleSidebar: () => void;
+  closeSidebar: () => void;
   // Layout & General Preferences
   readingPaneLayout: 'split' | 'full';
   setReadingPaneLayout: (l: 'split' | 'full') => void;
@@ -207,6 +211,11 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
   
   // Add Account modal
   const [isAddAccountOpen, setIsAddAccountOpen] = useState<boolean>(false);
+
+  // Mobile Sidebar Drawer
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const toggleSidebar = useCallback(() => setIsSidebarOpen((prev) => !prev), []);
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
 
   // Sound and Desktop alerts
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(true);
@@ -834,6 +843,9 @@ export function WebmailProvider({ children }: { children: React.ReactNode }) {
         isAddAccountOpen,
         openAddAccount,
         closeAddAccount,
+        isSidebarOpen,
+        toggleSidebar,
+        closeSidebar,
         readingPaneLayout,
         setReadingPaneLayout,
         emailsPerPage,

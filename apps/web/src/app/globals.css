@@ -1327,14 +1327,44 @@ textarea.config-textarea:focus,
 
 /* Ensure no accidental horizontal page overflow */
 html, body {
-  max-width: 100vw;
+  max-width: 100%;
   overflow-x: hidden;
+  position: relative;
+  -webkit-text-size-adjust: 100%;
 }
 
-/* Modal and dialog scroll containment */
-[role="dialog"] {
-  max-height: calc(100vh - 2rem);
-  overflow-y: auto;
+/* Universal touch scrolling for tables and horizontal scroll wrappers */
+.overflow-x-auto,
+.table-responsive-wrapper,
+[class*="overflow-x-auto"] {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+}
+
+/* Modal containers: ensure safe viewport containment and internal scroll without clipping on small screens */
+div[class*="fixed inset-0"][class*="z-"] {
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.5rem;
+}
+@media (min-width: 640px) {
+  div[class*="fixed inset-0"][class*="z-"] {
+    padding: 1rem;
+  }
+}
+
+[role="dialog"],
+.modal-sheet,
+div[class*="fixed inset-0"] > div[class*="rounded-"] {
+  max-height: min(94vh, 100dvh - 16px) !important;
+  max-width: 100% !important;
+}
+
+/* Break words safely for paths, domains, tokens, and hashes */
+.break-words-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 

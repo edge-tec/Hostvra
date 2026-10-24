@@ -17,6 +17,7 @@ import {
   PenSquare,
   HardDrive,
   UserPlus,
+  X,
 } from 'lucide-react';
 import { useWebmail } from '@/context/WebmailContext';
 
@@ -31,7 +32,7 @@ function formatBytes(bytes?: number): string {
 export function WebmailSidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { folderCounts, openCompose, openAddAccount, activeAccount } = useWebmail();
+  const { folderCounts, openCompose, openAddAccount, activeAccount, isSidebarOpen, closeSidebar } = useWebmail();
 
   const usedBytes = activeAccount?.usedBytes || 0;
   const quotaBytes = activeAccount?.quotaBytes || (1024 * 1024 * 1024 * 2);
@@ -108,13 +109,16 @@ export function WebmailSidebar() {
     return pathname === href || pathname?.startsWith(href + '/');
   };
 
-  return (
-    <aside className="w-64 bg-white border-r border-slate-200 flex flex-col justify-between p-3.5 select-none transition-colors">
+  const renderSidebarContent = (isMobile = false) => (
+    <div className="flex flex-col justify-between h-full select-none">
       <div className="space-y-3">
         {/* Large Gmail-like Compose Button */}
         <button
-          onClick={() => openCompose()}
-          className="w-full h-11 flex items-center justify-center gap-3 px-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-2xl shadow-md shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+          onClick={() => {
+            if (isMobile) closeSidebar();
+            openCompose();
+          }}
+          className="w-full h-11 flex items-center justify-center gap-3 px-5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-sm rounded-2xl shadow-md shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
         >
           <PenSquare className="w-5 h-5" />
           <span>Compose</span>
@@ -122,8 +126,11 @@ export function WebmailSidebar() {
 
         {/* Quick Connect / Switch Mailbox button */}
         <button
-          onClick={openAddAccount}
-          className="w-full h-8 flex items-center justify-center gap-2 px-3 border border-emerald-600/30 hover:border-emerald-600 bg-emerald-50/60 hover:bg-emerald-100/80 text-emerald-800 font-semibold text-[11px] rounded-xl transition-all"
+          onClick={() => {
+            if (isMobile) closeSidebar();
+            openAddAccount();
+          }}
+          className="w-full h-8 flex items-center justify-center gap-2 px-3 border border-emerald-600/30 hover:border-emerald-600 bg-emerald-50/60 hover:bg-emerald-100/80 text-emerald-800 font-semibold text-[11px] rounded-xl transition-all cursor-pointer"
         >
           <UserPlus className="w-3.5 h-3.5 text-emerald-600" />
           <span>+ Connect Mailbox</span>
@@ -139,6 +146,9 @@ export function WebmailSidebar() {
               <Link
                 key={item.id}
                 href={item.href}
+                onClick={() => {
+                  if (isMobile) closeSidebar();
+                }}
                 className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all group ${
                   active
                     ? 'bg-emerald-100/80 text-emerald-800 font-bold'
@@ -176,6 +186,9 @@ export function WebmailSidebar() {
           </p>
           <Link
             href="/webmail/contacts"
+            onClick={() => {
+              if (isMobile) closeSidebar();
+            }}
             className={`flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
               pathname === '/webmail/contacts'
                 ? 'bg-emerald-100/80 text-emerald-800 font-bold'
@@ -188,6 +201,9 @@ export function WebmailSidebar() {
 
           <Link
             href="/webmail/settings"
+            onClick={() => {
+              if (isMobile) closeSidebar();
+            }}
             className={`flex items-center gap-3 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
               pathname === '/webmail/settings'
                 ? 'bg-emerald-100/80 text-emerald-800 font-bold'
@@ -201,7 +217,7 @@ export function WebmailSidebar() {
       </div>
 
       {/* Storage Widget Card */}
-      <div className="p-3 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+      <div className="p-3 bg-white rounded-2xl border border-slate-200/80 shadow-xs mt-4">
         <div className="flex items-center justify-between text-xs font-bold text-slate-700 mb-1.5">
           <span className="flex items-center gap-1.5">
             <HardDrive className="w-3.5 h-3.5 text-emerald-500" /> Storage
@@ -222,6 +238,41 @@ export function WebmailSidebar() {
           {formatBytes(usedBytes)} of {formatBytes(quotaBytes)} used
         </p>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* 1. Desktop Sidebar (lg+) */}
+      <aside className="hidden lg:flex w-64 bg-white border-r border-slate-200 flex-col justify-between p-3.5 select-none transition-colors shrink-0">
+        {renderSidebarContent(false)}
+      </aside>
+
+      {/* 2. Mobile Off-Canvas Drawer (< lg) */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex">
+          {/* Backdrop */}
+          <div
+            onClick={closeSidebar}
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-fadeIn"
+          />
+
+          {/* Drawer Content */}
+          <div className="relative w-72 max-w-[85vw] bg-white border-r border-slate-200 flex flex-col h-full shadow-2xl z-10 animate-fadeIn p-4 overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+              <span className="font-bold text-sm text-slate-900">Mailbox Folders</span>
+              <button
+                onClick={closeSidebar}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+                aria-label="Close folders"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            {renderSidebarContent(true)}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

@@ -1039,7 +1039,7 @@ export default function BackupsPage() {
             {/* Snapshots Table */}
             <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full text-left border-collapse text-xs min-w-[760px]">
                   <thead>
                     <tr className="bg-surface-950/80 border-b border-surface-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
                       <th className="py-3.5 px-4">Snapshot / Scope</th>
@@ -1502,7 +1502,7 @@ export default function BackupsPage() {
 
             <div className="bg-surface-900 border border-surface-800 rounded-2xl overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+                <table className="w-full text-left border-collapse text-xs min-w-[680px]">
                   <thead>
                     <tr className="bg-surface-950/80 border-b border-surface-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
                       <th className="py-3 px-4">Archive Scope</th>

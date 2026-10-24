@@ -313,10 +313,10 @@ export function CustomerDashboard() {
           Hosting Control Center
         </h2>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <Link
             href="/websites"
-            className="group p-5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500/50 hover:shadow-md transition-all flex flex-col justify-between"
+            className="group p-4 sm:p-5 bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl hover:border-emerald-500 dark:hover:border-emerald-500/50 hover:shadow-md transition-all flex flex-col justify-between"
           >
             <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
               <Globe className="w-5 h-5" />
@@ -512,17 +512,17 @@ export function CustomerDashboard() {
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-surface-800">
             {websites.slice(0, 5).map((w) => (
-              <div key={w.id} className="p-4 sm:px-6 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-surface-800/40 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-surface-800 flex items-center justify-center text-slate-600 dark:text-slate-300">
+              <div key={w.id} className="p-4 sm:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-slate-50/50 dark:hover:bg-surface-800/40 transition-colors">
+                <div className="flex items-center gap-3 min-w-0 max-w-full">
+                  <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-surface-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
                     <Globe className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-slate-900 dark:text-white">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-sm text-slate-900 dark:text-white truncate">
                         {w.primary_domain}
                       </span>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
                         w.status === 'active'
                           ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
                           : 'bg-amber-100 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300'
@@ -530,13 +530,13 @@ export function CustomerDashboard() {
                         {w.status.toUpperCase()}
                       </span>
                     </div>
-                    <span className="text-xs text-slate-400 font-mono">
+                    <span className="text-xs text-slate-400 font-mono truncate block">
                       {w.document_root}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 dark:border-surface-800">
                   {w.php_version && (
                     <span className="hidden sm:inline-flex text-[11px] font-medium px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-300">
                       PHP {w.php_version}

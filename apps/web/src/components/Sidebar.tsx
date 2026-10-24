@@ -482,7 +482,7 @@ export function Sidebar() {
           />
 
           {/* Drawer Content */}
-          <div className="relative w-64 bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-10 animate-fadeIn">
+          <div className="relative w-64 max-w-[85vw] bg-white dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-10 animate-fadeIn">
             <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 dark:border-slate-800 flex-shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-600 flex items-center justify-center text-white flex-shrink-0 shadow-sm shadow-emerald-600/20">

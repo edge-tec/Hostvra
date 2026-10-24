@@ -1344,7 +1344,7 @@ export default function FileManagerPage() {
                 type="button"
                 onClick={() => setStorageModalOpen(true)}
                 title="Disk Storage Telemetry"
-                className="hidden lg:flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
+                className="flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
               >
                 <PieChart className="w-3.5 h-3.5" />
               </button>
@@ -1354,7 +1354,7 @@ export default function FileManagerPage() {
                 type="button"
                 onClick={() => setActivityModalOpen(true)}
                 title="Activity & Audit Logs"
-                className="hidden lg:flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
+                className="flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
               >
                 <Clock className="w-3.5 h-3.5" />
               </button>
@@ -1364,7 +1364,7 @@ export default function FileManagerPage() {
                 type="button"
                 onClick={() => setShortcutsModalOpen(true)}
                 title="Keyboard Shortcuts (?)"
-                className="hidden sm:flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
+                className="flex p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 hover:text-emerald-600 hover:bg-slate-100 transition cursor-pointer"
               >
                 <Keyboard className="w-3.5 h-3.5" />
               </button>
@@ -1793,8 +1793,8 @@ export default function FileManagerPage() {
                           </th>
                           <th className="py-2.5 px-3 min-w-[160px]">Name & Original Path</th>
                           <th className="py-2.5 px-3 min-w-[70px]">Size</th>
-                          <th className="py-2.5 px-3 hidden lg:table-cell min-w-[100px]">Deleted By</th>
-                          <th className="py-2.5 px-3 hidden sm:table-cell min-w-[120px]">Deleted At</th>
+                          <th className="py-2.5 px-3 min-w-[100px]">Deleted By</th>
+                          <th className="py-2.5 px-3 min-w-[120px]">Deleted At</th>
                           <th className="py-2.5 px-3 text-right">Actions</th>
                         </tr>
                       </thead>
@@ -1830,10 +1830,10 @@ export default function FileManagerPage() {
                             <td className="py-2.5 px-3 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {formatBytes(t.size)}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 hidden lg:table-cell">
+                            <td className="py-2.5 px-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
                               {t.deleted_by || 'Admin'}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-500 text-[11px] hidden sm:table-cell whitespace-nowrap">
+                            <td className="py-2.5 px-3 text-slate-500 text-[11px] whitespace-nowrap">
                               {t.deleted_at ? new Date(t.deleted_at).toLocaleString() : 'N/A'}
                             </td>
                             <td className="py-2.5 px-3 text-right">
@@ -1924,7 +1924,7 @@ export default function FileManagerPage() {
                           </th>
                           <th
                             onClick={() => toggleSort('perm')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none min-w-[70px] hidden sm:table-cell"
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none min-w-[85px]"
                           >
                             <div className="flex items-center gap-1">
                               <span>Permissions</span>
@@ -1935,10 +1935,10 @@ export default function FileManagerPage() {
                               )}
                             </div>
                           </th>
-                          <th className="py-2.5 px-3 hidden lg:table-cell min-w-[110px]">Owner:Group</th>
+                          <th className="py-2.5 px-3 min-w-[110px]">Owner:Group</th>
                           <th
                             onClick={() => toggleSort('modified')}
-                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none hidden md:table-cell min-w-[130px]"
+                            className="py-2.5 px-3 cursor-pointer hover:text-emerald-600 select-none min-w-[130px]"
                           >
                             <div className="flex items-center gap-1">
                               <span>Last Modified</span>
@@ -2045,7 +2045,7 @@ export default function FileManagerPage() {
                               </td>
 
                               {/* Interactive Permissions Pill */}
-                              <td className="py-2.5 px-3 font-mono hidden sm:table-cell whitespace-nowrap min-w-[85px]">
+                              <td className="py-2.5 px-3 font-mono whitespace-nowrap min-w-[85px]">
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -2069,14 +2069,14 @@ export default function FileManagerPage() {
                               </td>
 
                               {/* Owner & Group */}
-                              <td className="py-2.5 px-3 font-mono text-slate-500 hidden lg:table-cell max-w-[130px] truncate" title={`${file.owner}:${file.group}`}>
+                              <td className="py-2.5 px-3 font-mono text-slate-500 max-w-[130px] truncate" title={`${file.owner}:${file.group}`}>
                                 <span className="px-1.5 py-0.5 rounded text-[11px] bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-surface-700">
                                   {file.owner}:{file.group}
                                 </span>
                               </td>
 
                               {/* Last Modified */}
-                              <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 font-mono text-[11px] hidden md:table-cell whitespace-nowrap min-w-[140px]">
+                              <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400 font-mono text-[11px] whitespace-nowrap min-w-[140px]">
                                 {formatDate(file.modified_at)}
                               </td>
 

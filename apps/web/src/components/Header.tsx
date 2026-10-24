@@ -50,6 +50,7 @@ export function Header() {
   const [osName, setOsName] = useState<string>('Ubuntu 24');
   const [hasAlerts, setHasAlerts] = useState<boolean>(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
@@ -222,7 +223,7 @@ export function Header() {
             <span className="tracking-tight">{osName}</span>
           </div>
 
-          {/* Quick System Tools (Green Update, Orange Fix, Rose Restart) */}
+          {/* Quick System Tools (Green Update, Orange Fix, Rose Restart) - Desktop & Tablet */}
           <div className="hidden sm:flex items-center gap-1.5">
             <button
               onClick={() => setUpdateModalOpen(true)}
@@ -255,6 +256,88 @@ export function Header() {
             </button>
           </div>
 
+          {/* Quick System Tools (Mobile Dropdown Toggle) */}
+          <div className="relative sm:hidden">
+            <button
+              onClick={() => {
+                setMobileToolsOpen(!mobileToolsOpen);
+                setUserMenuOpen(false);
+              }}
+              className={`p-2 rounded-lg transition relative cursor-pointer ${
+                mobileToolsOpen
+                  ? 'bg-orange-100 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300'
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Quick System Actions"
+              aria-label="Quick System Actions"
+            >
+              <Wrench className="w-4 h-4 text-orange-600 dark:text-orange-400" />
+            </button>
+
+            {mobileToolsOpen && (
+              <div
+                className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-20px)] bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl py-2 z-50 animate-fadeIn"
+                onMouseLeave={() => setMobileToolsOpen(false)}
+              >
+                <div className="px-3.5 pb-2 mb-1.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">System Actions</span>
+                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+                    </span>
+                    <span>{osName}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-1 px-1.5">
+                  <button
+                    onClick={() => {
+                      setMobileToolsOpen(false);
+                      setUpdateModalOpen(true);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                  >
+                    <RotateCw className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                    <div>
+                      <div>System Updates</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Check and apply latest panel updates</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setMobileToolsOpen(false);
+                      setFixModalOpen(true);
+                      executeFix();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-orange-700 dark:text-orange-300 hover:bg-orange-50 dark:hover:bg-orange-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                  >
+                    <Wrench className="w-4 h-4 text-orange-600 dark:text-orange-400 flex-shrink-0" />
+                    <div>
+                      <div>Panel Health & Repair</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Diagnose permissions, configs & SSL</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setMobileToolsOpen(false);
+                      setRestartModalOpen(true);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2.5 transition text-left cursor-pointer"
+                  >
+                    <Power className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
+                    <div>
+                      <div>Restart Services</div>
+                      <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400">Reload panel, Nginx, or server node</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-0.5 hidden sm:block" />
 
           {/* Notifications Bell */}
@@ -284,10 +367,13 @@ export function Header() {
           {user ? (
             <div className="relative">
               <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                onClick={() => {
+                  setUserMenuOpen(!userMenuOpen);
+                  setMobileToolsOpen(false);
+                }}
                 className="flex items-center gap-2.5 pl-2 pr-1.5 py-1 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 border border-transparent hover:border-slate-200 dark:hover:border-slate-700 transition cursor-pointer"
               >
-                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold text-xs">
+                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400 font-bold text-xs flex-shrink-0">
                   {(user.full_name?.[0] || 'U').toUpperCase()}
                 </div>
 
@@ -300,21 +386,59 @@ export function Header() {
                   </div>
                 </div>
 
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
               </button>
 
               {/* Dropdown Menu */}
               {userMenuOpen && (
                 <div
-                  className="absolute right-0 mt-2 w-56 bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
+                  className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-20px)] bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-50 animate-fadeIn"
                   onMouseLeave={() => setUserMenuOpen(false)}
                 >
                   <div className="px-3.5 py-2.5 border-b border-slate-200 dark:border-slate-800">
                     <p className="text-xs font-bold text-slate-900 dark:text-white">{user.full_name}</p>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{user.email}</p>
-                    <div className="mt-1.5 inline-block px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
-                      {org?.plan_tier || 'Enterprise Plan'}
+                    <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                      <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                        {org?.plan_tier || 'Enterprise Plan'}
+                      </span>
+                      <span className="lg:hidden text-[10px] text-slate-500 font-medium">Node: {osName}</span>
                     </div>
+                  </div>
+
+                  {/* Quick System Tools inside user menu on mobile */}
+                  <div className="py-1 border-b border-slate-100 dark:border-slate-800 sm:hidden">
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setUpdateModalOpen(true);
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <RotateCw className="w-3.5 h-3.5" />
+                      <span>Check Updates</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setFixModalOpen(true);
+                        executeFix();
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/40 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>Panel Diagnostics & Fix</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        setRestartModalOpen(true);
+                      }}
+                      className="w-full px-3.5 py-1.5 text-xs text-left text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 cursor-pointer font-medium"
+                    >
+                      <Power className="w-3.5 h-3.5" />
+                      <span>Restart Services</span>
+                    </button>
                   </div>
 
                   <div className="py-1">
@@ -367,16 +491,16 @@ export function Header() {
 
       {/* Restart Modal */}
       {restartModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-4 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Power className="w-5 h-5 text-rose-600" />
-                Restart Services or Server
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Power className="w-5 h-5 text-rose-600 flex-shrink-0" />
+                <span>Restart Services or Server</span>
               </h3>
               <button
                 onClick={() => setRestartModalOpen(false)}
-                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer flex-shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -437,16 +561,16 @@ export function Header() {
 
       {/* Fix Diagnostics Modal */}
       {fixModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden p-4 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Wrench className="w-5 h-5 text-orange-600" />
-                Panel Health & Repair Utility
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-orange-600 flex-shrink-0" />
+                <span>Panel Health & Repair Utility</span>
               </h3>
               <button
                 onClick={() => setFixModalOpen(false)}
-                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer flex-shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -456,7 +580,7 @@ export function Header() {
               Running automated self-repair for file permissions, process locks, and web server configurations.
             </p>
 
-            <div className="p-4 rounded-lg bg-slate-900 dark:bg-[#090D16] border border-slate-800 font-mono text-xs text-slate-200 space-y-1.5 min-h-[140px]">
+            <div className="p-3 sm:p-4 rounded-lg bg-slate-900 dark:bg-[#090D16] border border-slate-800 font-mono text-xs text-slate-200 space-y-1.5 min-h-[140px] max-h-[220px] overflow-y-auto">
               {fixLogs.map((log, i) => (
                 <p key={i} className={i === fixLogs.length - 1 && !fixing ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
                   {log}
@@ -485,22 +609,22 @@ export function Header() {
 
       {/* Update Check Modal */}
       {updateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-fadeIn overflow-y-auto">
+          <div className="bg-white dark:bg-[#0B1120] border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-4 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <RotateCw className="w-5 h-5 text-emerald-600" />
-                Hostvra System Updates
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <RotateCw className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                <span>Hostvra System Updates</span>
               </h3>
               <button
                 onClick={() => setUpdateModalOpen(false)}
-                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
+                className="w-7 h-7 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer flex-shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+            <div className="p-3.5 sm:p-4 rounded-lg bg-slate-50 dark:bg-[#131B2E] border border-slate-200 dark:border-slate-800 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-400">Installed Version:</span>
                 <span className="font-mono font-bold text-slate-900 dark:text-white">v1.2.0-stable</span>
@@ -514,11 +638,11 @@ export function Header() {
               </p>
             </div>
 
-            <div className="flex justify-between items-center pt-2">
+            <div className="flex flex-col-reverse sm:flex-row justify-between items-stretch sm:items-center gap-2.5 pt-2">
               <button
                 onClick={executeCheckUpdate}
                 disabled={checkingUpdate}
-                className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <RotateCw className={`w-3.5 h-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
                 <span>Check for Updates</span>
@@ -526,7 +650,7 @@ export function Header() {
 
               <button
                 onClick={() => setUpdateModalOpen(false)}
-                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-bold transition shadow-xs cursor-pointer text-center"
               >
                 Close
               </button>

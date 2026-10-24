@@ -88,14 +88,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <div className="flex-1 flex flex-col h-full min-w-0 overflow-hidden bg-white dark:bg-[#0B1120]">
         {isImpersonating && (
-          <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-between shadow-md z-50 border-b border-amber-600">
+          <div className="bg-amber-500 text-slate-950 px-3.5 sm:px-4 py-2 text-xs font-bold flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-md z-50 border-b border-amber-600">
             <div className="flex items-center gap-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-              <span>AUDIT NOTICE: You are logged into a customer account via Admin Impersonation. Admin actions are restricted.</span>
+              <span className="inline-block w-2 h-2 rounded-full bg-red-600 animate-pulse flex-shrink-0" />
+              <span className="break-words">AUDIT NOTICE: You are logged into a customer account via Admin Impersonation.</span>
             </div>
             <button
               onClick={returnToAdmin}
-              className="px-3 py-1 bg-slate-950 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              className="px-3 py-1 bg-slate-950 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex-shrink-0 self-end sm:self-auto"
             >
               Return to Admin Panel
             </button>
@@ -109,10 +109,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               className={`flex-1 w-full bg-white dark:bg-[#0B1120] ${
                 isFullBleed
                   ? 'overflow-hidden p-0'
-                  : 'overflow-y-auto overflow-x-hidden p-3.5 sm:p-6 lg:p-8'
+                  : 'overflow-y-auto overflow-x-hidden p-2.5 sm:p-6 lg:p-8'
               }`}
             >
-              <div className={isFullBleed ? 'w-full h-full' : 'w-full max-w-[1600px] mx-auto space-y-6'}>
+              <div className={isFullBleed ? 'w-full h-full' : 'w-full max-w-[1600px] mx-auto space-y-5 sm:space-y-6'}>
                 {children}
               </div>
             </main>

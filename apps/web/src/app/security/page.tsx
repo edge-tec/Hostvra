@@ -473,7 +473,7 @@ export default function SecurityPage() {
         {activeTab === 'scans' && (
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-xs min-w-[700px]">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-800/40 text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider text-[10px]">
                     <th className="py-3.5 px-4">Status</th>
@@ -578,7 +578,7 @@ export default function SecurityPage() {
         {activeTab === 'quarantine' && (
           <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="w-full text-left border-collapse text-xs min-w-[680px]">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50/50 dark:bg-surface-800/40 text-slate-500 dark:text-slate-400 uppercase font-bold tracking-wider text-[10px]">
                     <th className="py-3.5 px-4">Threat Name</th>

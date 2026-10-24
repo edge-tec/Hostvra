@@ -471,7 +471,7 @@ export default function WAFPage() {
             {/* Events Table */}
             <div className="bg-surface-900 border border-surface-800 rounded-xl overflow-hidden shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-300">
+                <table className="w-full text-left text-sm text-slate-300 min-w-[750px]">
                   <thead className="bg-surface-950/60 text-xs uppercase font-semibold text-slate-400 border-b border-surface-800">
                     <tr>
                       <th className="px-6 py-3.5">Timestamp</th>
@@ -615,8 +615,9 @@ export default function WAFPage() {
             </div>
 
             <div className="bg-surface-900 border border-surface-800 rounded-xl overflow-hidden shadow-sm">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-surface-950/60 text-xs uppercase font-semibold text-slate-400 border-b border-surface-800">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-300 min-w-[650px]">
+                  <thead className="bg-surface-950/60 text-xs uppercase font-semibold text-slate-400 border-b border-surface-800">
                   <tr>
                     <th className="px-6 py-3.5">Website Domain</th>
                     <th className="px-6 py-3.5">WAF Status</th>
@@ -656,6 +657,7 @@ export default function WAFPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           </div>
         )}

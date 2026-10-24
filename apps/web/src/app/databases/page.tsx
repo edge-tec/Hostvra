@@ -944,7 +944,7 @@ export default function DatabasesPage() {
         {/* 4. High-Contrast Database Table */}
         <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden shadow-2xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-collapse min-w-[750px]">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-850 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px] tracking-wider select-none">
                   <th className="px-3 py-3 w-8 text-center">

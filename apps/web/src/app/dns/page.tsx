@@ -611,7 +611,7 @@ export default function DNSPage() {
             {/* 4. DOMAINS TABLE (Exact match with aaPanel layout) */}
             <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-xl overflow-hidden shadow-2xs">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-xs border-collapse min-w-[700px]">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-surface-850 text-slate-700 dark:text-slate-300 font-bold uppercase text-[11px] tracking-wider select-none">
                       <th className="px-3 py-3 w-8 text-center">
@@ -1301,7 +1301,7 @@ export default function DNSPage() {
 
               {/* Records Table */}
               <div className="flex-1 overflow-auto border border-slate-200 dark:border-surface-700 rounded-xl">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full text-left text-xs border-collapse min-w-[550px]">
                   <thead>
                     <tr className="border-b border-slate-200 dark:border-surface-700 bg-slate-50 dark:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold uppercase text-[10px]">
                       <th className="px-3 py-2">Type</th>

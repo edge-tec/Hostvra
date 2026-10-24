@@ -847,26 +847,30 @@ server {
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 animate-fadeIn">
       {/* Modal Container: 100% White in Light Mode, Dark Slate in Dark Mode */}
-      <div className="w-full max-w-5xl h-[88vh] max-h-[760px] bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-5xl h-[92vh] max-h-[820px] bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header: Site modification [domain] */}
-        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 dark:bg-[#0F172A] border-b border-slate-200 dark:border-slate-800 select-none">
-          <div className="flex items-center gap-2 truncate">
-            <span className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">
-              Site modification [{website.primary_domain}] -- Time added [{website.created_at ? website.created_at.replace('T', ' ').slice(0, 19) : '2026-08-17 14:27:38'}]
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-slate-50 dark:bg-[#0F172A] border-b border-slate-200 dark:border-slate-800 select-none flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold text-xs sm:text-sm text-slate-900 dark:text-slate-100 truncate">
+              Site modification <span className="font-mono text-emerald-600 font-bold">[{website.primary_domain}]</span>
+            </span>
+            <span className="hidden sm:inline-block text-[11px] text-slate-500 truncate">
+              -- Time added [{website.created_at ? website.created_at.replace('T', ' ').slice(0, 19) : '2026-08-17 14:27:38'}]
             </span>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700/50 transition cursor-pointer"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700/50 transition cursor-pointer flex-shrink-0"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Modal Body: Left Sidebar + Right Tab Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar (16 options) */}
-          <div className="w-48 sm:w-52 bg-slate-50/80 dark:bg-[#0F172A] border-r border-slate-200 dark:border-slate-800 overflow-y-auto py-2 select-none flex-shrink-0">
+        {/* Modal Body: Responsive Layout (Scrollable Ribbon on Mobile, Vertical Sidebar on Desktop) */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
+          {/* Sidebar / Mobile Tab Ribbon (All 19 options preserved) */}
+          <div className="w-full md:w-52 bg-slate-50/90 dark:bg-[#0F172A] border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-800 overflow-x-auto md:overflow-y-auto py-1.5 px-2 md:py-2 md:px-0 select-none flex-shrink-0 flex md:flex-col gap-1 md:gap-0 custom-scrollbar">
             {SIDEBAR_TABS.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
@@ -876,21 +880,21 @@ server {
                   role="tab"
                   data-tab="true"
                   onClick={() => setActiveTab(tab.id as SiteModalTab)}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-left transition font-medium cursor-pointer ${
+                  className={`flex items-center gap-2 px-3 py-2 md:px-4 md:py-2.5 text-xs text-left transition font-medium cursor-pointer flex-shrink-0 whitespace-nowrap rounded-lg md:rounded-none ${
                     isActive
-                      ? 'bg-white dark:bg-[#1E293B] text-emerald-700 dark:text-emerald-400 font-bold border-l-3 border-emerald-600 shadow-2xs'
+                      ? 'bg-white dark:bg-[#1E293B] text-emerald-700 dark:text-emerald-400 font-bold md:border-l-3 md:border-emerald-600 shadow-2xs ring-1 ring-emerald-500/20 md:ring-0'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800/40'
                   }`}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
-                  <span className="truncate">{tab.label}</span>
+                  <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`} />
+                  <span>{tab.label}</span>
                 </button>
               );
             })}
           </div>
 
           {/* Right Content Area: Pure White in Light Mode, Dark in Dark Mode */}
-          <div className="flex-1 overflow-y-auto p-5 bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100">
+          <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 bg-white dark:bg-[#0B1120] text-slate-900 dark:text-slate-100">
             {/* 0. WORDPRESS MANAGER */}
             {activeTab === 'wordpress' && website && (
               <WordPressManagerTab website={website} showToast={showToast} />
@@ -905,7 +909,7 @@ server {
             {activeTab === 'domain' && (
               <div className="space-y-4">
                 {/* Domain Input Textarea + Add Button */}
-                <div className="flex items-start gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3 sm:gap-4">
                   <textarea
                     rows={4}
                     value={domainInput}
