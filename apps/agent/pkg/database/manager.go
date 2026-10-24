@@ -539,7 +539,9 @@ func (m *Manager) ExecuteRealDatabaseCreation(ctx context.Context, name, charset
 			escHost := safeSQLString(h)
 			sb.WriteString(fmt.Sprintf(
 				"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
+					"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n"+
 					"GRANT ALL PRIVILEGES ON %s.* TO '%s'@'%s';\n",
+				escUser, escHost, escPass,
 				escUser, escHost, escPass,
 				quotedDB, escUser, escHost,
 			))
@@ -571,7 +573,9 @@ func (m *Manager) ExecuteCreateUser(ctx context.Context, user, password, hostAll
 	for _, h := range hosts {
 		escHost := safeSQLString(h)
 		sb.WriteString(fmt.Sprintf(
-			"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n",
+			"CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s';\n"+
+				"ALTER USER '%s'@'%s' IDENTIFIED BY '%s';\n",
+			escUser, escHost, escPass,
 			escUser, escHost, escPass,
 		))
 	}

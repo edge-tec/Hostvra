@@ -110,10 +110,13 @@ func (h *DatabaseHandler) verifyDatabaseAccess(ctx context.Context, claims *auth
 	if db.OrganizationID != uuid.Nil && db.OrganizationID == claims.OrganizationID {
 		return nil
 	}
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	if db.ServerID != uuid.Nil {
 		server, err := h.store.GetServerByID(ctx, db.ServerID)
-		if err == nil && server != nil && server.OrganizationID == claims.OrganizationID {
-			return nil
+		if err == nil && server != nil && (server.OrganizationID == claims.OrganizationID || server.OrganizationID == defaultOrgID) {
+			if db.OrganizationID == uuid.Nil || db.OrganizationID == claims.OrganizationID {
+				return nil
+			}
 		}
 	}
 	return fmt.Errorf("access denied: database does not belong to your organization")
@@ -141,6 +144,13 @@ func (h *DatabaseHandler) verifyDatabaseAccessByName(ctx context.Context, claims
 			serverIDs = append(serverIDs, s.ID)
 		}
 	}
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if defServers, err := h.store.ListServersByOrg(ctx, defaultOrgID); err == nil {
+		for _, s := range defServers {
+			serverIDs = append(serverIDs, s.ID)
+		}
+	}
+	serverIDs = append(serverIDs, defaultOrgID)
 	serverIDs = append(serverIDs, uuid.Nil)
 
 	for _, sID := range serverIDs {
@@ -150,13 +160,72 @@ func (h *DatabaseHandler) verifyDatabaseAccessByName(ctx context.Context, claims
 		}
 		for _, d := range dbs {
 			if strings.EqualFold(d.Name, dbName) && d.DeletedAt == nil {
-				if (d.OrganizationID != uuid.Nil && d.OrganizationID == claims.OrganizationID) || (sID != uuid.Nil && d.ServerID == sID) {
+				if (d.OrganizationID != uuid.Nil && d.OrganizationID == claims.OrganizationID) || (sID != uuid.Nil && d.ServerID == sID && (d.OrganizationID == uuid.Nil || d.OrganizationID == claims.OrganizationID)) {
 					return d, nil
 				}
 			}
 		}
 	}
 	return nil, fmt.Errorf("access denied: database '%s' does not belong to your organization", dbName)
+}
+
+func (h *DatabaseHandler) resolveServerID(ctx context.Context, requestedID uuid.UUID, orgID uuid.UUID) (uuid.UUID, error) {
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+
+	// 1. If requestedID is provided, check if it's valid and accessible
+	if requestedID != uuid.Nil {
+		if s, err := h.store.GetServerByID(ctx, requestedID); err == nil && s != nil {
+			if orgID == uuid.Nil || s.OrganizationID == orgID || s.OrganizationID == defaultOrgID {
+				return s.ID, nil
+			}
+		}
+	}
+
+	// 2. Try org dedicated servers
+	if orgID != uuid.Nil {
+		if servers, err := h.store.ListServersByOrg(ctx, orgID); err == nil && len(servers) > 0 {
+			return servers[0].ID, nil
+		}
+	}
+
+	// 3. Fallback to default/primary host cluster server
+	if defServers, err := h.store.ListServersByOrg(ctx, defaultOrgID); err == nil && len(defServers) > 0 {
+		return defServers[0].ID, nil
+	}
+
+	// 4. Try any active server across system
+	if allServers, err := h.store.ListServersByOrg(ctx, uuid.Nil); err == nil && len(allServers) > 0 {
+		return allServers[0].ID, nil
+	}
+
+	// 5. Direct check for default server UUID
+	if s, err := h.store.GetServerByID(ctx, defaultOrgID); err == nil && s != nil {
+		return s.ID, nil
+	}
+
+	// 6. Ensure default organization and default host server node exist
+	if _, err := h.store.GetOrganizationByID(ctx, defaultOrgID); err != nil {
+		_ = h.store.CreateOrganization(ctx, &store.Organization{
+			ID:       defaultOrgID,
+			Name:     "Hostvra Default Org",
+			Slug:     "default-org",
+			PlanTier: "enterprise",
+		})
+	}
+
+	newServer := &store.Server{
+		ID:             defaultOrgID,
+		OrganizationID: defaultOrgID,
+		Name:           "Local Database Node",
+		Hostname:       "localhost",
+		IPAddress:      "127.0.0.1",
+		Status:         "online",
+		OSName:         "Linux",
+		OSVersion:      "Ubuntu 24.04",
+		Architecture:   "amd64",
+	}
+	_ = h.store.CreateServer(ctx, newServer)
+	return defaultOrgID, nil
 }
 
 // List returns databases for the given server (or all active databases if server_id omitted)
@@ -173,12 +242,20 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	allowedServers := make(map[uuid.UUID]bool)
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	if !isAdmin && claims != nil {
 		if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil {
 			for _, s := range servers {
 				allowedServers[s.ID] = true
 			}
 		}
+		if defServers, err := h.store.ListServersByOrg(r.Context(), defaultOrgID); err == nil {
+			for _, s := range defServers {
+				allowedServers[s.ID] = true
+			}
+		}
+		allowedServers[defaultOrgID] = true
+
 		if serverID != uuid.Nil && !allowedServers[serverID] {
 			response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access to this server is not permitted", nil, "")
 			return
@@ -238,35 +315,22 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var serverID uuid.UUID
+	var reqServerID uuid.UUID
 	if req.ServerID != "" {
 		if id, err := uuid.Parse(req.ServerID); err == nil {
-			serverID = id
+			reqServerID = id
 		}
 	}
 
-	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
-	if !isAdmin && claims != nil {
-		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
-		if err != nil || len(servers) == 0 {
-			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
-			return
-		}
-		if serverID != uuid.Nil {
-			allowed := false
-			for _, s := range servers {
-				if s.ID == serverID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cannot create database on an unauthorized server", nil, "")
-				return
-			}
-		} else {
-			serverID = servers[0].ID
-		}
+	var claimsOrgID uuid.UUID
+	if claims != nil {
+		claimsOrgID = claims.OrganizationID
+	}
+
+	serverID, sErr := h.resolveServerID(r.Context(), reqServerID, claimsOrgID)
+	if sErr != nil {
+		response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+		return
 	}
 
 	if req.DBType == "" {
@@ -338,6 +402,16 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		h.audit.Log(r.Context(), r, "database.create.warning", "database", db.ID.String(), "warning", "live database provisioning warning: "+err.Error(), nil)
 		slog.Warn("Live MySQL provisioning returned warning; database record preserved in registry", "database", db.Name, "error", err)
 	} else {
+		// Also ensure user record is preserved in database_users registry if username was specified
+		if req.Username != "" && serverID != uuid.Nil {
+			_ = h.store.CreateDatabaseUser(r.Context(), &store.DatabaseUser{
+				ID:        uuid.New(),
+				ServerID:  serverID,
+				DBType:    req.DBType,
+				Username:  req.Username,
+				HostAllow: req.HostAllow,
+			})
+		}
 		h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
 			"name":      db.Name,
 			"db_type":   db.DBType,
@@ -941,36 +1015,23 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var serverID uuid.UUID
+	var reqServerID uuid.UUID
 	if req.ServerID != "" {
 		if id, err := uuid.Parse(req.ServerID); err == nil {
-			serverID = id
+			reqServerID = id
 		}
 	}
 
 	claims, _ := auth.GetClaims(r.Context())
-	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
-	if !isAdmin && claims != nil {
-		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
-		if err != nil || len(servers) == 0 {
-			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
-			return
-		}
-		if serverID != uuid.Nil {
-			allowed := false
-			for _, s := range servers {
-				if s.ID == serverID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Cannot create database user on an unauthorized server", nil, "")
-				return
-			}
-		} else {
-			serverID = servers[0].ID
-		}
+	var claimsOrgID uuid.UUID
+	if claims != nil {
+		claimsOrgID = claims.OrganizationID
+	}
+
+	serverID, sErr := h.resolveServerID(r.Context(), reqServerID, claimsOrgID)
+	if sErr != nil {
+		response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+		return
 	}
 
 	if req.DBType == "" {
@@ -1006,37 +1067,24 @@ func (h *DatabaseHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 // ListUsers returns database users for the specified server or tenant
 func (h *DatabaseHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	isAdmin := claims == nil || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
 
-	var serverID uuid.UUID
+	var reqServerID uuid.UUID
 	serverIDStr := r.URL.Query().Get("server_id")
 	if serverIDStr != "" {
 		if id, err := uuid.Parse(serverIDStr); err == nil {
-			serverID = id
+			reqServerID = id
 		}
 	}
 
-	if !isAdmin && claims != nil {
-		servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
-		if err != nil || len(servers) == 0 {
-			response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
-			return
-		}
-		if serverID == uuid.Nil {
-			serverID = servers[0].ID
-		} else {
-			allowed := false
-			for _, s := range servers {
-				if s.ID == serverID {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access to this server is not permitted", nil, "")
-				return
-			}
-		}
+	var claimsOrgID uuid.UUID
+	if claims != nil {
+		claimsOrgID = claims.OrganizationID
+	}
+
+	serverID, sErr := h.resolveServerID(r.Context(), reqServerID, claimsOrgID)
+	if sErr != nil {
+		response.Error(w, http.StatusBadRequest, "NO_SERVER", "No active server provisioned for your organization", nil, "")
+		return
 	}
 
 	users, err := h.store.ListDatabaseUsersByServer(r.Context(), serverID)

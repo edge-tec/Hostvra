@@ -48,10 +48,25 @@ type CreateEnrollmentTokenRequest struct {
 func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
 
-	servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
+	var orgID uuid.UUID
+	if claims != nil {
+		orgID = claims.OrganizationID
+	}
+
+	servers, err := h.store.ListServersByOrg(r.Context(), orgID)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve servers", nil, "")
 		return
+	}
+
+	// Fallback to cluster primary server node if org has no dedicated servers
+	if len(servers) == 0 {
+		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+		if defServers, dErr := h.store.ListServersByOrg(r.Context(), defaultOrgID); dErr == nil && len(defServers) > 0 {
+			servers = defServers
+		} else if allServers, aErr := h.store.ListServersByOrg(r.Context(), uuid.Nil); aErr == nil && len(allServers) > 0 {
+			servers = allServers
+		}
 	}
 
 	response.JSON(w, http.StatusOK, servers, &response.Meta{
@@ -74,7 +89,8 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if server.OrganizationID != claims.OrganizationID && !claims.IsSuperAdmin {
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	if claims != nil && !claims.IsSuperAdmin && server.OrganizationID != claims.OrganizationID && server.OrganizationID != defaultOrgID {
 		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied to server", nil, "")
 		return
 	}
