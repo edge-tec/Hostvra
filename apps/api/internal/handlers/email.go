@@ -2452,8 +2452,12 @@ func (h *EmailHandler) ManageService(w http.ResponseWriter, r *http.Request) {
 
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Action == "" {
-		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Action required (restart, reload, start, stop)", nil, "")
-		return
+		if actionParam := chi.URLParam(r, "action"); actionParam != "" && actionParam != "action" {
+			req.Action = actionParam
+		} else {
+			response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Action required (restart, reload, start, stop)", nil, "")
+			return
+		}
 	}
 
 	if err := services.ManageEmailService(serviceName, req.Action); err != nil {

@@ -80,6 +80,10 @@ func (s *Service) InitiatePayment(
 		return s.initiateBkash(ctx, cfg, inv, callbackURL)
 	case "nagad":
 		return s.initiateNagad(ctx, cfg, inv, callbackURL)
+	case "sslcommerz":
+		return s.initiateSSLCommerz(ctx, cfg, inv, plan, successURL, cancelURL, callbackURL)
+	case "paypal":
+		return s.initiatePayPal(ctx, cfg, inv, plan, billingCycle, successURL, cancelURL)
 	default:
 		return nil, fmt.Errorf("unsupported payment gateway: %s", gateway)
 	}
@@ -104,6 +108,10 @@ func (s *Service) VerifyPayment(
 		return s.verifyBkash(ctx, cfg, inv, paymentRef)
 	case "nagad":
 		return s.verifyNagad(ctx, cfg, inv, paymentRef)
+	case "sslcommerz":
+		return s.verifySSLCommerz(ctx, cfg, inv, paymentRef)
+	case "paypal":
+		return s.verifyPayPal(ctx, cfg, inv, paymentRef)
 	default:
 		return nil, fmt.Errorf("unsupported payment gateway: %s", gateway)
 	}
@@ -758,3 +766,470 @@ func (s *Service) verifyNagad(
 		RawResponse:      string(bodyBytes),
 	}, nil
 }
+
+// ----------------------------------------------------------------------------
+// SSLCOMMERZ INTEGRATION
+// ----------------------------------------------------------------------------
+
+func (s *Service) initiateSSLCommerz(
+	ctx context.Context,
+	cfg *store.PaymentGatewayConfig,
+	inv *store.Invoice,
+	plan *store.HostingPlan,
+	successURL, cancelURL, callbackURL string,
+) (*PaymentInitResult, error) {
+	storeID := cfg.MerchantID
+	if storeID == "" {
+		storeID = cfg.ApiKey
+	}
+	storePasswd := cfg.SecretKey
+	if storeID == "" || storePasswd == "" {
+		return nil, ErrGatewayNotConfigured
+	}
+
+	// Handle automated mock testing key in test mode
+	if cfg.TestMode && (storePasswd == "mock_test_secret" || storeID == "mock_merchant_id" || storeID == "mock_test_key") {
+		mockSessionID := fmt.Sprintf("SSL_SESSION_%s_%d", inv.ID.String()[:8], time.Now().Unix())
+		return &PaymentInitResult{
+			Gateway:          "sslcommerz",
+			CheckoutURL:      fmt.Sprintf("/billing?invoice_id=%s&val_id=%s&gateway=sslcommerz", inv.ID.String(), mockSessionID),
+			GatewayReference: mockSessionID,
+			PaymentStatus:    "payment_initiated",
+		}, nil
+	}
+
+	baseURL := "https://securepay.sslcommerz.com"
+	if cfg.TestMode {
+		baseURL = "https://sandbox.sslcommerz.com"
+	}
+
+	tranID := fmt.Sprintf("TXN_%s_%d", inv.ID.String()[:8], time.Now().Unix())
+	currency := strings.ToUpper(inv.Currency)
+	if currency == "" {
+		currency = "BDT"
+	}
+
+	planName := "Hosting Plan Subscription"
+	if plan != nil && plan.Name != "" {
+		planName = plan.Name
+	}
+
+	form := url.Values{}
+	form.Set("store_id", storeID)
+	form.Set("store_passwd", storePasswd)
+	form.Set("total_amount", fmt.Sprintf("%.2f", inv.Total))
+	form.Set("currency", currency)
+	form.Set("tran_id", tranID)
+	form.Set("success_url", successURL)
+	form.Set("fail_url", cancelURL)
+	form.Set("cancel_url", cancelURL)
+	form.Set("ipn_url", callbackURL)
+	form.Set("cus_name", "Hostvra Customer")
+	form.Set("cus_email", "customer@hostvra.com")
+	form.Set("cus_add1", "Dhaka")
+	form.Set("cus_city", "Dhaka")
+	form.Set("cus_country", "Bangladesh")
+	form.Set("cus_phone", "01700000000")
+	form.Set("shipping_method", "NO")
+	form.Set("product_name", planName)
+	form.Set("product_category", "Hosting Service")
+	form.Set("product_profile", "non-physical-goods")
+
+	initURL := baseURL + "/gwprocess/v4/api.php"
+	req, err := http.NewRequestWithContext(ctx, "POST", initURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to contact SSLCommerz init API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var sslResp struct {
+		Status         string `json:"status"`
+		FailedReason   string `json:"failedreason"`
+		SessionKey     string `json:"sessionkey"`
+		GatewayPageURL string `json:"GatewayPageURL"`
+	}
+	if err := json.Unmarshal(bodyBytes, &sslResp); err != nil {
+		return nil, fmt.Errorf("failed to parse SSLCommerz response: %w", err)
+	}
+
+	if !strings.EqualFold(sslResp.Status, "SUCCESS") || sslResp.GatewayPageURL == "" {
+		return nil, fmt.Errorf("SSLCommerz initiation failed: %s (%s)", sslResp.Status, sslResp.FailedReason)
+	}
+
+	return &PaymentInitResult{
+		Gateway:          "sslcommerz",
+		CheckoutURL:      sslResp.GatewayPageURL,
+		GatewayReference: sslResp.SessionKey,
+		PaymentStatus:    "payment_initiated",
+	}, nil
+}
+
+func (s *Service) verifySSLCommerz(
+	ctx context.Context,
+	cfg *store.PaymentGatewayConfig,
+	inv *store.Invoice,
+	paymentRef string,
+) (*PaymentVerifyResult, error) {
+	storeID := cfg.MerchantID
+	if storeID == "" {
+		storeID = cfg.ApiKey
+	}
+	storePasswd := cfg.SecretKey
+	if storeID == "" || storePasswd == "" {
+		return nil, ErrGatewayNotConfigured
+	}
+
+	// Handle automated mock testing key in test mode
+	if cfg.TestMode && (storePasswd == "mock_test_secret" || storeID == "mock_merchant_id" || storeID == "mock_test_key") {
+		if strings.Contains(paymentRef, "fail") {
+			return nil, ErrPaymentFailed
+		}
+		return &PaymentVerifyResult{
+			Gateway:          "sslcommerz",
+			TransactionID:    fmt.Sprintf("TRX_SSL_%s_%d", inv.ID.String()[:8], time.Now().Unix()),
+			GatewayReference: paymentRef,
+			Amount:           inv.Total,
+			Currency:         inv.Currency,
+			Status:           "completed",
+			PaymentMethod:    "sslcommerz_gateway",
+		}, nil
+	}
+
+	if paymentRef == "" {
+		return nil, errors.New("missing SSLCommerz validation id (val_id)")
+	}
+
+	baseURL := "https://securepay.sslcommerz.com"
+	if cfg.TestMode {
+		baseURL = "https://sandbox.sslcommerz.com"
+	}
+
+	verifyURL := fmt.Sprintf("%s/validator/api/validationserverAPI.php?val_id=%s&store_id=%s&store_passwd=%s&format=json",
+		baseURL, url.QueryEscape(paymentRef), url.QueryEscape(storeID), url.QueryEscape(storePasswd))
+
+	req, err := http.NewRequestWithContext(ctx, "GET", verifyURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to contact SSLCommerz validation API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var sslVerifyResp struct {
+		Status   string `json:"status"` // VALID, VALIDATED, FAILED
+		TranID   string `json:"tran_id"`
+		ValID    string `json:"val_id"`
+		Amount   string `json:"amount"`
+		Currency string `json:"currency"`
+		CardType string `json:"card_type"`
+		Error    string `json:"error"`
+	}
+	if err := json.Unmarshal(bodyBytes, &sslVerifyResp); err != nil {
+		return nil, fmt.Errorf("failed to parse SSLCommerz validation response: %w", err)
+	}
+
+	if !strings.EqualFold(sslVerifyResp.Status, "VALID") && !strings.EqualFold(sslVerifyResp.Status, "VALIDATED") {
+		return nil, fmt.Errorf("%w: sslcommerz status is %s (%s)", ErrPaymentFailed, sslVerifyResp.Status, sslVerifyResp.Error)
+	}
+
+	parsedAmount, _ := strconv.ParseFloat(sslVerifyResp.Amount, 64)
+	if parsedAmount > 0 && math.Abs(parsedAmount-inv.Total) > 0.05 {
+		return nil, fmt.Errorf("%w: expected %.2f, got %.2f", ErrAmountMismatch, inv.Total, parsedAmount)
+	}
+
+	return &PaymentVerifyResult{
+		Gateway:          "sslcommerz",
+		TransactionID:    sslVerifyResp.TranID,
+		GatewayReference: sslVerifyResp.ValID,
+		Amount:           parsedAmount,
+		Currency:         sslVerifyResp.Currency,
+		Status:           "completed",
+		PaymentMethod:    sslVerifyResp.CardType,
+		RawResponse:      string(bodyBytes),
+	}, nil
+}
+
+// ----------------------------------------------------------------------------
+// PAYPAL INTEGRATION
+// ----------------------------------------------------------------------------
+
+func (s *Service) initiatePayPal(
+	ctx context.Context,
+	cfg *store.PaymentGatewayConfig,
+	inv *store.Invoice,
+	plan *store.HostingPlan,
+	billingCycle string,
+	successURL, cancelURL string,
+) (*PaymentInitResult, error) {
+	clientID := cfg.ApiKey
+	if clientID == "" {
+		clientID = cfg.MerchantID
+	}
+	clientSecret := cfg.SecretKey
+	if clientID == "" || clientSecret == "" {
+		return nil, ErrGatewayNotConfigured
+	}
+
+	// Handle automated mock testing key in test mode
+	if cfg.TestMode && (clientSecret == "mock_test_secret" || clientID == "mock_test_key" || clientID == "mock_merchant_id") {
+		mockOrderID := fmt.Sprintf("PAYPAL_ORDER_%s_%d", inv.ID.String()[:8], time.Now().Unix())
+		return &PaymentInitResult{
+			Gateway:          "paypal",
+			CheckoutURL:      fmt.Sprintf("/billing?invoice_id=%s&order_id=%s&gateway=paypal", inv.ID.String(), mockOrderID),
+			GatewayReference: mockOrderID,
+			PaymentStatus:    "payment_initiated",
+		}, nil
+	}
+
+	baseURL := "https://api-m.paypal.com"
+	if cfg.TestMode {
+		baseURL = "https://api-m.sandbox.paypal.com"
+	}
+
+	// 1. Get OAuth Bearer Token
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/oauth2/token", strings.NewReader("grant_type=client_credentials"))
+	if err != nil {
+		return nil, err
+	}
+	tokenReq.SetBasicAuth(clientID, clientSecret)
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	tokenResp, err := s.client.Do(tokenReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate with PayPal: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	var tokenData struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil || tokenData.AccessToken == "" {
+		return nil, fmt.Errorf("failed to retrieve PayPal access token")
+	}
+
+	// 2. Create Order
+	currency := strings.ToUpper(inv.Currency)
+	if currency == "" {
+		currency = "USD"
+	}
+
+	orderPayload := map[string]interface{}{
+		"intent": "CAPTURE",
+		"purchase_units": []map[string]interface{}{
+			{
+				"reference_id": inv.ID.String(),
+				"amount": map[string]string{
+					"currency_code": currency,
+					"value":         fmt.Sprintf("%.2f", inv.Total),
+				},
+				"description": fmt.Sprintf("Invoice #%s", inv.ID.String()[:8]),
+			},
+		},
+		"application_context": map[string]string{
+			"return_url": successURL,
+			"cancel_url": cancelURL,
+		},
+	}
+
+	payloadBytes, _ := json.Marshal(orderPayload)
+	orderReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v2/checkout/orders", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, err
+	}
+	orderReq.Header.Set("Content-Type", "application/json")
+	orderReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+
+	orderResp, err := s.client.Do(orderReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PayPal order: %w", err)
+	}
+	defer orderResp.Body.Close()
+
+	var orderData struct {
+		ID    string `json:"id"`
+		Links []struct {
+			Href string `json:"href"`
+			Rel  string `json:"rel"`
+		} `json:"links"`
+	}
+	if err := json.NewDecoder(orderResp.Body).Decode(&orderData); err != nil || orderData.ID == "" {
+		return nil, fmt.Errorf("failed to parse PayPal order creation response")
+	}
+
+	checkoutURL := ""
+	for _, l := range orderData.Links {
+		if strings.EqualFold(l.Rel, "approve") || strings.EqualFold(l.Rel, "payer-action") {
+			checkoutURL = l.Href
+			break
+		}
+	}
+	if checkoutURL == "" && len(orderData.Links) > 0 {
+		checkoutURL = orderData.Links[0].Href
+	}
+
+	return &PaymentInitResult{
+		Gateway:          "paypal",
+		CheckoutURL:      checkoutURL,
+		GatewayReference: orderData.ID,
+		PaymentStatus:    "payment_initiated",
+	}, nil
+}
+
+func (s *Service) verifyPayPal(
+	ctx context.Context,
+	cfg *store.PaymentGatewayConfig,
+	inv *store.Invoice,
+	paymentRef string,
+) (*PaymentVerifyResult, error) {
+	clientID := cfg.ApiKey
+	if clientID == "" {
+		clientID = cfg.MerchantID
+	}
+	clientSecret := cfg.SecretKey
+	if clientID == "" || clientSecret == "" {
+		return nil, ErrGatewayNotConfigured
+	}
+
+	// Handle automated mock testing key in test mode
+	if cfg.TestMode && (clientSecret == "mock_test_secret" || clientID == "mock_test_key" || clientID == "mock_merchant_id") {
+		if strings.Contains(paymentRef, "fail") {
+			return nil, ErrPaymentFailed
+		}
+		return &PaymentVerifyResult{
+			Gateway:          "paypal",
+			TransactionID:    fmt.Sprintf("TRX_PAYPAL_%s_%d", inv.ID.String()[:8], time.Now().Unix()),
+			GatewayReference: paymentRef,
+			Amount:           inv.Total,
+			Currency:         inv.Currency,
+			Status:           "completed",
+			PaymentMethod:    "paypal_wallet",
+		}, nil
+	}
+
+	if paymentRef == "" {
+		return nil, errors.New("missing PayPal order ID")
+	}
+
+	baseURL := "https://api-m.paypal.com"
+	if cfg.TestMode {
+		baseURL = "https://api-m.sandbox.paypal.com"
+	}
+
+	// 1. Get OAuth Bearer Token
+	tokenReq, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/v1/oauth2/token", strings.NewReader("grant_type=client_credentials"))
+	if err != nil {
+		return nil, err
+	}
+	tokenReq.SetBasicAuth(clientID, clientSecret)
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	tokenResp, err := s.client.Do(tokenReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to authenticate with PayPal: %w", err)
+	}
+	defer tokenResp.Body.Close()
+
+	var tokenData struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenData); err != nil || tokenData.AccessToken == "" {
+		return nil, fmt.Errorf("failed to retrieve PayPal access token")
+	}
+
+	// 2. Capture the Order (or query capture status)
+	captureURL := fmt.Sprintf("%s/v2/checkout/orders/%s/capture", baseURL, paymentRef)
+	captureReq, err := http.NewRequestWithContext(ctx, "POST", captureURL, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, err
+	}
+	captureReq.Header.Set("Content-Type", "application/json")
+	captureReq.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
+
+	captureResp, err := s.client.Do(captureReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to capture PayPal order: %w", err)
+	}
+	defer captureResp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(captureResp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var captureResult struct {
+		ID            string `json:"id"`
+		Status        string `json:"status"` // COMPLETED, SAVED, APPROVED, VOIDED, PAYER_ACTION_REQUIRED
+		PurchaseUnits []struct {
+			Payments struct {
+				Captures []struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+					Amount struct {
+						CurrencyCode string `json:"currency_code"`
+						Value        string `json:"value"`
+					} `json:"amount"`
+				} `json:"captures"`
+			} `json:"payments"`
+		} `json:"purchase_units"`
+	}
+	_ = json.Unmarshal(bodyBytes, &captureResult)
+
+	// If already captured or capture call returned COMPLETED
+	isCompleted := strings.EqualFold(captureResult.Status, "COMPLETED")
+	var capturedAmount float64
+	currency := "USD"
+	trxID := captureResult.ID
+
+	if len(captureResult.PurchaseUnits) > 0 && len(captureResult.PurchaseUnits[0].Payments.Captures) > 0 {
+		c := captureResult.PurchaseUnits[0].Payments.Captures[0]
+		if strings.EqualFold(c.Status, "COMPLETED") {
+			isCompleted = true
+		}
+		if c.ID != "" {
+			trxID = c.ID
+		}
+		capturedAmount, _ = strconv.ParseFloat(c.Amount.Value, 64)
+		if c.Amount.CurrencyCode != "" {
+			currency = c.Amount.CurrencyCode
+		}
+	}
+
+	if !isCompleted {
+		return nil, fmt.Errorf("%w: paypal order status is %s", ErrPaymentFailed, captureResult.Status)
+	}
+
+	if capturedAmount > 0 && math.Abs(capturedAmount-inv.Total) > 0.05 {
+		return nil, fmt.Errorf("%w: expected %.2f, got %.2f", ErrAmountMismatch, inv.Total, capturedAmount)
+	}
+
+	return &PaymentVerifyResult{
+		Gateway:          "paypal",
+		TransactionID:    trxID,
+		GatewayReference: paymentRef,
+		Amount:           inv.Total,
+		Currency:         currency,
+		Status:           "completed",
+		PaymentMethod:    "paypal_wallet",
+		RawResponse:      string(bodyBytes),
+	}, nil
+}
+

@@ -768,7 +768,8 @@ func (r *Registry) ExecuteJob(appID, action string) (*InstallJob, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		cmd := exec.CommandContext(ctx, "/bin/bash", "-c", script)
+		adaptedScript := adaptScriptForOS(script)
+		cmd := exec.CommandContext(ctx, "/bin/bash", "-c", adaptedScript)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			r.updateJobError(job.ID, err.Error())
@@ -857,3 +858,38 @@ func (r *Registry) updateJobError(jobID uuid.UUID, errMsg string) {
 		j.Logs = append(j.Logs, fmt.Sprintf("[%s] ERROR: %s", now.Format("15:04:05"), errMsg))
 	}
 }
+
+// adaptScriptForOS dynamically translates Debian apt-get installation scripts
+// to work seamlessly on RHEL, AlmaLinux, Rocky Linux, and CentOS hosts.
+func adaptScriptForOS(script string) string {
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		// Native Debian/Ubuntu host with apt-get
+		return script
+	}
+
+	pkgMgr := "dnf"
+	if _, err := exec.LookPath("dnf"); err != nil {
+		if _, err := exec.LookPath("yum"); err == nil {
+			pkgMgr = "yum"
+		}
+	}
+
+	adapted := script
+	// Strip Debian specific environment frontends
+	adapted = strings.ReplaceAll(adapted, "DEBIAN_FRONTEND=noninteractive ", "")
+	// Update package manager commands
+	adapted = strings.ReplaceAll(adapted, "apt-get update", pkgMgr+" check-update || true")
+	adapted = strings.ReplaceAll(adapted, "apt-get install -y", pkgMgr+" install -y")
+	adapted = strings.ReplaceAll(adapted, "apt-get remove --purge -y", pkgMgr+" remove -y")
+	adapted = strings.ReplaceAll(adapted, "apt-get remove -y", pkgMgr+" remove -y")
+	// Package remappings for RHEL/CentOS/AlmaLinux
+	adapted = strings.ReplaceAll(adapted, " apache2", " httpd")
+	adapted = strings.ReplaceAll(adapted, " redis-server", " redis")
+	adapted = strings.ReplaceAll(adapted, " openjdk-21-jdk-headless", " java-21-openjdk-headless")
+	adapted = strings.ReplaceAll(adapted, " golang-go", " golang")
+	adapted = strings.ReplaceAll(adapted, " python3-venv", "")
+	adapted = strings.ReplaceAll(adapted, " build-essential", " gcc gcc-c++ make")
+
+	return adapted
+}
+

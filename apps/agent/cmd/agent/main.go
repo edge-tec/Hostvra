@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -175,7 +177,7 @@ func sendReport(cfg *config.AgentConfig, c *collector.Collector, cl *client.APIC
 		return
 	}
 
-	err = cl.SendHeartbeat(cfg.ServerID, cfg.AgentKey, metrics)
+	resp, err := cl.SendHeartbeat(cfg.ServerID, cfg.AgentKey, metrics)
 	if err != nil {
 		log.Warn("Failed to report telemetry heartbeat to control plane", "error", err)
 	} else {
@@ -184,5 +186,73 @@ func sendReport(cfg *config.AgentConfig, c *collector.Collector, cl *client.APIC
 			"ram_used_mb", metrics.RAMUsedMB,
 			"uptime_sec", metrics.UptimeSec,
 		)
+	}
+
+	// Process any remote workload tasks returned by Control Plane
+	if resp != nil && len(resp.Tasks) > 0 {
+		log.Info("Received remote workload tasks from control plane", "count", len(resp.Tasks))
+		for _, task := range resp.Tasks {
+			executeTask(cfg, cl, task, log)
+		}
+	}
+}
+
+func executeTask(cfg *config.AgentConfig, cl *client.APIClient, task client.AgentTask, log *slog.Logger) {
+	log.Info("Executing remote workload task", "id", task.ID, "action", task.Action)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	switch task.Action {
+	case "service.restart", "service.reload":
+		svc, _ := task.Payload["service"].(string)
+		if svc == "" {
+			svc, _ = task.Payload["service_name"].(string)
+		}
+		if svc == "" {
+			_ = cl.SendTaskResult(cfg.ServerID, cfg.AgentKey, task.ID, "failed", 1, "missing service name in payload")
+			return
+		}
+		actionType := "restart"
+		if task.Action == "service.reload" {
+			actionType = "reload"
+		}
+		cmd = exec.CommandContext(ctx, "systemctl", actionType, svc)
+
+	case "command.exec":
+		cmdStr, _ := task.Payload["command"].(string)
+		if cmdStr == "" {
+			_ = cl.SendTaskResult(cfg.ServerID, cfg.AgentKey, task.ID, "failed", 1, "missing command string in payload")
+			return
+		}
+		cmd = exec.CommandContext(ctx, "sh", "-c", cmdStr)
+
+	default:
+		_ = cl.SendTaskResult(cfg.ServerID, cfg.AgentKey, task.ID, "failed", 127, fmt.Sprintf("unsupported task action: %s", task.Action))
+		return
+	}
+
+	out, err := cmd.CombinedOutput()
+	exitCode := 0
+	status := "completed"
+	if err != nil {
+		status = "failed"
+		exitCode = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	outputStr := string(out)
+	if outputStr == "" && err != nil {
+		outputStr = err.Error()
+	}
+
+	reportErr := cl.SendTaskResult(cfg.ServerID, cfg.AgentKey, task.ID, status, exitCode, outputStr)
+	if reportErr != nil {
+		log.Warn("Failed to report task execution result to control plane", "task_id", task.ID, "error", reportErr)
+	} else {
+		log.Info("Remote task executed and reported successfully", "task_id", task.ID, "status", status, "exit_code", exitCode)
 	}
 }

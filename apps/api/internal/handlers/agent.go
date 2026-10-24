@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/api/internal/agenttask"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -19,17 +21,23 @@ import (
 )
 
 type AgentHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg     *config.Config
+	store   store.Store
+	audit   *audit.Logger
+	taskMgr *agenttask.Manager
 }
 
 func NewAgentHandler(cfg *config.Config, s store.Store, a *audit.Logger) *AgentHandler {
 	return &AgentHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+		cfg:     cfg,
+		store:   s,
+		audit:   a,
+		taskMgr: agenttask.NewManager(),
 	}
+}
+
+func (h *AgentHandler) SetTaskManager(tm *agenttask.Manager) {
+	h.taskMgr = tm
 }
 
 type AgentEnrollRequest struct {
@@ -233,7 +241,62 @@ func (h *AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		_ = h.store.RecordServerMetric(r.Context(), req.Metric)
 	}
 
+	var pendingTasks []*agenttask.AgentTask
+	if h.taskMgr != nil {
+		pendingTasks = h.taskMgr.FetchPendingForServer(serverID)
+	}
+
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"acknowledged": true,
+		"tasks":        pendingTasks,
+	}, nil)
+}
+
+type ReportTaskResultRequest struct {
+	Status   string `json:"status"` // completed, failed
+	ExitCode int    `json:"exit_code"`
+	Output   string `json:"output"`
+}
+
+func (h *AgentHandler) ReportTaskResult(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing agent key", nil, "")
+		return
+	}
+
+	taskIDStr := chi.URLParam(r, "id")
+	taskID, err := uuid.Parse(taskIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid task UUID", nil, "")
+		return
+	}
+
+	var req ReportTaskResultRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	status := agenttask.StatusCompleted
+	if req.Status == "failed" || req.ExitCode != 0 {
+		status = agenttask.StatusFailed
+	}
+
+	task, err := h.taskMgr.Complete(taskID, status, req.ExitCode, req.Output)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Task not found", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "agent.task.completed", "agent_task", task.ID.String(), string(status), "", map[string]interface{}{
+		"server_id": task.ServerID.String(),
+		"action":    task.Action,
+		"exit_code": task.ExitCode,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"task":    task,
 	}, nil)
 }

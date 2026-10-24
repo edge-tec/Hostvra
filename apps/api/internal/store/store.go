@@ -542,6 +542,21 @@ type Store interface {
 	ListFileRestoreRequests(ctx context.Context, orgID uuid.UUID, limit int) ([]*BackupFileRestoreRequestRecord, error)
 	UpdateFileRestoreRequest(ctx context.Context, req *BackupFileRestoreRequestRecord) error
 
+	// Alerts, Incidents & Notifications Persistence
+	CreateAlertRule(ctx context.Context, rule *AlertRule) error
+	ListAlertRules(ctx context.Context, orgID uuid.UUID) ([]*AlertRule, error)
+	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
+	CreateAlertIncident(ctx context.Context, inc *AlertIncident) error
+	UpdateAlertIncident(ctx context.Context, inc *AlertIncident) error
+	ListAlertIncidents(ctx context.Context, limit int) ([]*AlertIncident, error)
+	CreateNotificationChannel(ctx context.Context, ch *NotificationChannel) error
+	ListNotificationChannels(ctx context.Context, orgID uuid.UUID) ([]*NotificationChannel, error)
+
+	// API Keys Persistence
+	CreateAPIKey(ctx context.Context, key *StoredAPIKey) error
+	ListAPIKeys(ctx context.Context, orgID uuid.UUID) ([]*StoredAPIKey, error)
+	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
+
 	// Close
 	Close() error
 }
@@ -655,6 +670,10 @@ type MemoryStore struct {
 	backupIncrementalSnapshots map[uuid.UUID]*BackupIncrementalSnapshotRecord
 	backupRetentionPolicies  map[uuid.UUID]*BackupRetentionPolicyRecord
 	backupFileRestoreRequests map[uuid.UUID]*BackupFileRestoreRequestRecord
+	alertRules                 map[uuid.UUID]*AlertRule
+	alertIncidents             map[uuid.UUID]*AlertIncident
+	notificationChannels       map[uuid.UUID]*NotificationChannel
+	storedAPIKeys              map[uuid.UUID]*StoredAPIKey
 	filePath            string
 }
 
@@ -1259,6 +1278,10 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		backupIncrementalSnapshots: make(map[uuid.UUID]*BackupIncrementalSnapshotRecord),
 		backupRetentionPolicies:  make(map[uuid.UUID]*BackupRetentionPolicyRecord),
 		backupFileRestoreRequests: make(map[uuid.UUID]*BackupFileRestoreRequestRecord),
+		alertRules:                 make(map[uuid.UUID]*AlertRule),
+		alertIncidents:             make(map[uuid.UUID]*AlertIncident),
+		notificationChannels:       make(map[uuid.UUID]*NotificationChannel),
+		storedAPIKeys:              make(map[uuid.UUID]*StoredAPIKey),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

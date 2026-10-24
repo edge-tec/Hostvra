@@ -60,6 +60,7 @@ const adminNavGroups: NavGroup[] = [
     title: 'SERVER & HOSTING',
     items: [
       { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Server Fleet', href: '/servers', icon: Server, badge: 'Nodes', badgeColor: 'blue' },
       { label: 'Domain Manager', href: '/domains', icon: Globe },
       { label: 'DNS Zones', href: '/dns', icon: Globe },
       { label: 'Websites', href: '/websites', icon: Server },

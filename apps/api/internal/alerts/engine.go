@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"hostvra/api/internal/store"
 )
 
 type Severity string
@@ -82,11 +85,12 @@ type NotificationChannel struct {
 }
 
 type Engine struct {
-	mu          sync.RWMutex
-	rules       map[uuid.UUID]*AlertRule
-	incidents   map[uuid.UUID]*Incident
-	channels    map[uuid.UUID]*NotificationChannel
-	httpClient  *http.Client
+	mu         sync.RWMutex
+	rules      map[uuid.UUID]*AlertRule
+	incidents  map[uuid.UUID]*Incident
+	channels   map[uuid.UUID]*NotificationChannel
+	httpClient *http.Client
+	store      store.Store
 }
 
 func NewEngine() *Engine {
@@ -98,7 +102,13 @@ func NewEngine() *Engine {
 	}
 }
 
-// AddRule registers an alert threshold rule
+func (e *Engine) SetStore(s store.Store) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.store = s
+}
+
+// AddRule registers an alert threshold rule and persists to store
 func (e *Engine) AddRule(rule *AlertRule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -106,12 +116,53 @@ func (e *Engine) AddRule(rule *AlertRule) {
 	if rule.ID == uuid.Nil {
 		rule.ID = uuid.New()
 	}
-	rule.CreatedAt = time.Now().UTC()
+	if rule.CreatedAt.IsZero() {
+		rule.CreatedAt = time.Now().UTC()
+	}
 	e.rules[rule.ID] = rule
+
+	if e.store != nil {
+		_ = e.store.CreateAlertRule(context.Background(), &store.AlertRule{
+			ID:             rule.ID,
+			OrganizationID: rule.OrganizationID,
+			Name:           rule.Name,
+			Type:           string(rule.Type),
+			Threshold:      rule.Threshold,
+			DurationSec:    rule.DurationSec,
+			Severity:       string(rule.Severity),
+			Enabled:        rule.Enabled,
+			CreatedAt:      rule.CreatedAt,
+		})
+	}
 }
 
-// ListRules returns rules for an organization
+// ListRules returns rules for an organization, syncing from store if available
 func (e *Engine) ListRules(orgID uuid.UUID) []*AlertRule {
+	if e.store != nil {
+		storedRules, err := e.store.ListAlertRules(context.Background(), orgID)
+		if err == nil && len(storedRules) > 0 {
+			e.mu.Lock()
+			out := make([]*AlertRule, 0, len(storedRules))
+			for _, sr := range storedRules {
+				r := &AlertRule{
+					ID:             sr.ID,
+					OrganizationID: sr.OrganizationID,
+					Name:           sr.Name,
+					Type:           RuleType(sr.Type),
+					Threshold:      sr.Threshold,
+					DurationSec:    sr.DurationSec,
+					Severity:       Severity(sr.Severity),
+					Enabled:        sr.Enabled,
+					CreatedAt:      sr.CreatedAt,
+				}
+				e.rules[r.ID] = r
+				out = append(out, r)
+			}
+			e.mu.Unlock()
+			return out
+		}
+	}
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -124,7 +175,7 @@ func (e *Engine) ListRules(orgID uuid.UUID) []*AlertRule {
 	return out
 }
 
-// AddChannel registers a notification endpoint
+// AddChannel registers a notification endpoint and persists to store
 func (e *Engine) AddChannel(channel *NotificationChannel) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -132,12 +183,49 @@ func (e *Engine) AddChannel(channel *NotificationChannel) {
 	if channel.ID == uuid.Nil {
 		channel.ID = uuid.New()
 	}
-	channel.CreatedAt = time.Now().UTC()
+	if channel.CreatedAt.IsZero() {
+		channel.CreatedAt = time.Now().UTC()
+	}
 	e.channels[channel.ID] = channel
+
+	if e.store != nil {
+		_ = e.store.CreateNotificationChannel(context.Background(), &store.NotificationChannel{
+			ID:             channel.ID,
+			OrganizationID: channel.OrganizationID,
+			Name:           channel.Name,
+			Type:           string(channel.Type),
+			Target:         channel.Target,
+			Enabled:        channel.Enabled,
+			CreatedAt:      channel.CreatedAt,
+		})
+	}
 }
 
 // ListChannels returns channels for an organization
 func (e *Engine) ListChannels(orgID uuid.UUID) []*NotificationChannel {
+	if e.store != nil {
+		storedChannels, err := e.store.ListNotificationChannels(context.Background(), orgID)
+		if err == nil && len(storedChannels) > 0 {
+			e.mu.Lock()
+			out := make([]*NotificationChannel, 0, len(storedChannels))
+			for _, sc := range storedChannels {
+				c := &NotificationChannel{
+					ID:             sc.ID,
+					OrganizationID: sc.OrganizationID,
+					Name:           sc.Name,
+					Type:           ChannelType(sc.Type),
+					Target:         sc.Target,
+					Enabled:        sc.Enabled,
+					CreatedAt:      sc.CreatedAt,
+				}
+				e.channels[c.ID] = c
+				out = append(out, c)
+			}
+			e.mu.Unlock()
+			return out
+		}
+	}
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -174,7 +262,6 @@ func (e *Engine) EvaluateMetric(serverID uuid.UUID, serverName string, cpuPct, m
 			continue
 		}
 
-		incidentKey := fmt.Sprintf("%s-%s", serverID, rule.ID)
 		activeIncident := e.findActiveIncident(serverID, rule.ID)
 
 		if currentVal >= rule.Threshold {
@@ -196,6 +283,23 @@ func (e *Engine) EvaluateMetric(serverID uuid.UUID, serverName string, cpuPct, m
 				}
 				e.incidents[inc.ID] = inc
 				newIncidents = append(newIncidents, inc)
+
+				if e.store != nil {
+					_ = e.store.CreateAlertIncident(context.Background(), &store.AlertIncident{
+						ID:         inc.ID,
+						ServerID:   inc.ServerID,
+						ServerName: inc.ServerName,
+						RuleID:     inc.RuleID,
+						RuleName:   inc.RuleName,
+						Severity:   string(inc.Severity),
+						Status:     string(inc.Status),
+						Value:      inc.Value,
+						Threshold:  inc.Threshold,
+						Message:    inc.Message,
+						StartedAt:  inc.StartedAt,
+					})
+				}
+
 				go e.dispatchNotification(inc)
 			}
 		} else {
@@ -206,10 +310,19 @@ func (e *Engine) EvaluateMetric(serverID uuid.UUID, serverName string, cpuPct, m
 				activeIncident.Status = StatusResolved
 				activeIncident.ResolvedAt = &now
 				activeIncident.Value = currentVal
+
+				if e.store != nil {
+					_ = e.store.UpdateAlertIncident(context.Background(), &store.AlertIncident{
+						ID:         activeIncident.ID,
+						Status:     string(activeIncident.Status),
+						Value:      activeIncident.Value,
+						ResolvedAt: activeIncident.ResolvedAt,
+					})
+				}
+
 				go e.dispatchNotification(activeIncident)
 			}
 		}
-		_ = incidentKey
 	}
 
 	return newIncidents
@@ -226,6 +339,30 @@ func (e *Engine) findActiveIncident(serverID, ruleID uuid.UUID) *Incident {
 
 // ListIncidents returns all incidents ordered newest first
 func (e *Engine) ListIncidents(limit int) []*Incident {
+	if e.store != nil {
+		storedIncidents, err := e.store.ListAlertIncidents(context.Background(), limit)
+		if err == nil && len(storedIncidents) > 0 {
+			out := make([]*Incident, 0, len(storedIncidents))
+			for _, si := range storedIncidents {
+				out = append(out, &Incident{
+					ID:         si.ID,
+					ServerID:   si.ServerID,
+					ServerName: si.ServerName,
+					RuleID:     si.RuleID,
+					RuleName:   si.RuleName,
+					Severity:   Severity(si.Severity),
+					Status:     AlertStatus(si.Status),
+					Value:      si.Value,
+					Threshold:  si.Threshold,
+					Message:    si.Message,
+					StartedAt:  si.StartedAt,
+					ResolvedAt: si.ResolvedAt,
+				})
+			}
+			return out
+		}
+	}
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 

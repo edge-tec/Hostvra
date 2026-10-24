@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -33,12 +34,12 @@ func NewAPIKeyHandler(cfg *config.Config, s store.Store, a *audit.Logger) *APIKe
 }
 
 type APIKeyRecord struct {
-	ID         uuid.UUID `json:"id"`
-	Name       string    `json:"name"`
-	KeyPrefix  string    `json:"key_prefix"`
-	FullSecret string    `json:"full_secret,omitempty"` // Only returned once on creation
-	Role       string    `json:"role"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID         uuid.UUID  `json:"id"`
+	Name       string     `json:"name"`
+	KeyPrefix  string     `json:"key_prefix"`
+	FullSecret string     `json:"full_secret,omitempty"` // Only returned once on creation
+	Role       string     `json:"role"`
+	CreatedAt  time.Time  `json:"created_at"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 }
 
@@ -48,25 +49,28 @@ type CreateKeyRequest struct {
 }
 
 func (h *APIKeyHandler) List(w http.ResponseWriter, r *http.Request) {
-	now := time.Now().UTC()
-	keys := []APIKeyRecord{
-		{
-			ID:         uuid.New(),
-			Name:       "CI/CD Deployment Token",
-			KeyPrefix:  "hv_live_9f8a",
-			Role:       "manager",
-			CreatedAt:  now.AddDate(0, 0, -14),
-			LastUsedAt: &now,
-		},
-		{
-			ID:        uuid.New(),
-			Name:      "Prometheus Scraper",
-			KeyPrefix: "hv_live_3b1e",
-			Role:      "viewer",
-			CreatedAt: now.AddDate(0, 0, -30),
-		},
+	claims, _ := auth.GetClaims(r.Context())
+
+	if h.store != nil {
+		storedKeys, err := h.store.ListAPIKeys(r.Context(), claims.OrganizationID)
+		if err == nil && len(storedKeys) > 0 {
+			records := make([]APIKeyRecord, 0, len(storedKeys))
+			for _, k := range storedKeys {
+				records = append(records, APIKeyRecord{
+					ID:         k.ID,
+					Name:       k.Name,
+					KeyPrefix:  k.KeyPrefix,
+					Role:       k.Role,
+					CreatedAt:  k.CreatedAt,
+					LastUsedAt: k.LastUsedAt,
+				})
+			}
+			response.JSON(w, http.StatusOK, records, &response.Meta{Total: len(records)})
+			return
+		}
 	}
-	response.JSON(w, http.StatusOK, keys, &response.Meta{Total: len(keys)})
+
+	response.JSON(w, http.StatusOK, []APIKeyRecord{}, &response.Meta{Total: 0})
 }
 
 func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -100,6 +104,24 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:  time.Now().UTC(),
 	}
 
+	hashBytes := sha256.Sum256([]byte(fullToken))
+	keyHash := hex.EncodeToString(hashBytes[:])
+
+	stored := &store.StoredAPIKey{
+		ID:             rec.ID,
+		OrganizationID: claims.OrganizationID,
+		UserID:         &claims.UserID,
+		Name:           rec.Name,
+		KeyPrefix:      rec.KeyPrefix,
+		KeyHash:        keyHash,
+		Role:           rec.Role,
+		CreatedAt:      rec.CreatedAt,
+	}
+
+	if h.store != nil {
+		_ = h.store.CreateAPIKey(r.Context(), stored)
+	}
+
 	h.audit.Log(r.Context(), r, "apikey.create", "api_key", rec.ID.String(), "success", "", map[string]interface{}{
 		"name":   req.Name,
 		"prefix": prefix,
@@ -112,6 +134,10 @@ func (h *APIKeyHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *APIKeyHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	keyIDStr := chi.URLParam(r, "keyID")
+	keyID, err := uuid.Parse(keyIDStr)
+	if err == nil && h.store != nil {
+		_ = h.store.RevokeAPIKey(r.Context(), keyID)
+	}
 
 	h.audit.Log(r.Context(), r, "apikey.revoke", "api_key", keyIDStr, "success", "", nil)
 	response.JSON(w, http.StatusOK, map[string]interface{}{"revoked": true, "key_id": keyIDStr}, nil)

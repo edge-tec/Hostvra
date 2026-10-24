@@ -118,11 +118,28 @@ type HeartbeatPayload struct {
 	Capabilities  *ServerCapabilities        `json:"capabilities,omitempty"`
 }
 
-func (c *APIClient) SendHeartbeat(serverID, agentKey string, metrics *collector.MetricsSnapshot) error {
+type AgentTask struct {
+	ID       string                 `json:"id"`
+	ServerID string                 `json:"server_id"`
+	Action   string                 `json:"action"`
+	Payload  map[string]interface{} `json:"payload"`
+}
+
+type HeartbeatResponseData struct {
+	Acknowledged bool        `json:"acknowledged"`
+	Tasks        []AgentTask `json:"tasks,omitempty"`
+}
+
+type HeartbeatResponseEnvelope struct {
+	Success bool                   `json:"success"`
+	Data    *HeartbeatResponseData `json:"data,omitempty"`
+}
+
+func (c *APIClient) SendHeartbeat(serverID, agentKey string, metrics *collector.MetricsSnapshot) (*HeartbeatResponseData, error) {
 	return c.SendHeartbeatWithCapabilities(serverID, agentKey, metrics, nil)
 }
 
-func (c *APIClient) SendHeartbeatWithCapabilities(serverID, agentKey string, metrics *collector.MetricsSnapshot, caps *ServerCapabilities) error {
+func (c *APIClient) SendHeartbeatWithCapabilities(serverID, agentKey string, metrics *collector.MetricsSnapshot, caps *ServerCapabilities) (*HeartbeatResponseData, error) {
 	reqBody := HeartbeatPayload{
 		UptimeSeconds: metrics.UptimeSec,
 		Metric:        metrics,
@@ -131,10 +148,48 @@ func (c *APIClient) SendHeartbeatWithCapabilities(serverID, agentKey string, met
 
 	payload, err := json.Marshal(reqBody)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	url := fmt.Sprintf("%s/api/v1/agent/heartbeat", c.baseURL)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", agentKey))
+	req.Header.Set("X-Server-ID", serverID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("heartbeat HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("control plane returned non-200 status: %d", resp.StatusCode)
+	}
+
+	var env HeartbeatResponseEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err == nil && env.Data != nil {
+		return env.Data, nil
+	}
+
+	return &HeartbeatResponseData{Acknowledged: true}, nil
+}
+
+func (c *APIClient) SendTaskResult(serverID, agentKey, taskID, status string, exitCode int, output string) error {
+	payload, err := json.Marshal(map[string]interface{}{
+		"status":    status,
+		"exit_code": exitCode,
+		"output":    output,
+	})
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf("%s/api/v1/agent/tasks/%s/result", c.baseURL, taskID)
 	req, err := http.NewRequest("POST", url, bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -146,13 +201,12 @@ func (c *APIClient) SendHeartbeatWithCapabilities(serverID, agentKey string, met
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("heartbeat HTTP request failed: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("control plane returned non-200 status: %d", resp.StatusCode)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("server returned error status: %d", resp.StatusCode)
 	}
-
 	return nil
 }

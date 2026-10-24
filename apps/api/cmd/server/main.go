@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/google/uuid"
 
+	"hostvra/api/internal/agenttask"
 	"hostvra/api/internal/alerts"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
@@ -101,6 +102,10 @@ func main() {
 	serverHandler := handlers.NewServerHandler(cfg, dataStore, auditLogger)
 	crossNodeMigrationHandler := handlers.NewCrossNodeMigrationHandler(cfg, dataStore, auditLogger)
 	agentHandler := handlers.NewAgentHandler(cfg, dataStore, auditLogger)
+
+	agentTaskMgr := agenttask.NewManager()
+	serverHandler.SetTaskManager(agentTaskMgr)
+	agentHandler.SetTaskManager(agentTaskMgr)
 	websiteHandler := handlers.NewWebsiteHandler(cfg, dataStore, auditLogger)
 	databaseHandler := handlers.NewDatabaseHandler(cfg, dataStore, auditLogger)
 	auditHandler := handlers.NewAuditHandler(dataStore)
@@ -108,6 +113,7 @@ func main() {
 
 	dnsService := dns.NewService()
 	alertEngine := alerts.NewEngine()
+	alertEngine.SetStore(dataStore)
 	licenseManager := license.NewManager()
 
 	dnsHandler := handlers.NewDNSHandler(cfg, dnsService, auditLogger)
@@ -163,6 +169,7 @@ func main() {
 	supportHandler := handlers.NewSupportHandler(cfg, dataStore, auditLogger)
 	settingsHandler := handlers.NewSettingsHandler(cfg, dataStore, auditLogger)
 	migrationMgr := migration.NewManager()
+	migrationMgr.SetStore(dataStore)
 	migrationHandler := handlers.NewMigrationHandler(migrationMgr, auditLogger)
 
 	// Initialize Centralized Quota & Permission Engine
@@ -403,6 +410,7 @@ func main() {
 		r.Route("/agent", func(r chi.Router) {
 			r.Post("/enroll", agentHandler.Enroll)
 			r.Post("/heartbeat", agentHandler.Heartbeat)
+			r.Post("/tasks/{id}/result", agentHandler.ReportTaskResult)
 		})
 
 		// Public Hosting Plans Catalog & Payment Webhooks
@@ -566,6 +574,11 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/workloads", serverHandler.GetWorkloadSummary)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/rotate-key", serverHandler.RotateAgentKey)
 				r.With(rbac.RequirePermission(rbac.PermServersDelete)).Delete("/{id}", serverHandler.DeleteServer)
+
+				// Remote Task & Workload Execution
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/tasks", serverHandler.DispatchTask)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/tasks", serverHandler.ListTasks)
+				r.With(rbac.RequirePermission(rbac.PermServersView)).Get("/{id}/tasks/{taskId}", serverHandler.GetTask)
 
 				// PHP Management Subsystem per Server
 				r.Route("/{serverID}/php", func(r chi.Router) {
@@ -1126,7 +1139,9 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/reset", emailHandler.ResetRateControlCooldown)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/record-event", emailHandler.RecordSimulatedRateLimitEvent)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/simulate-event", emailHandler.RecordSimulatedRateLimitEvent)
 
 				// Suppression List
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/suppressions", emailHandler.ListSuppressions)
@@ -1136,9 +1151,11 @@ func main() {
 				// Services Management
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/services", emailHandler.ListServices)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/services/{name}/action", emailHandler.ManageService)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/services/{name}/{action}", emailHandler.ManageService)
 
 				// Test Tool
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test", emailHandler.SendTestEmail)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test-send", emailHandler.SendTestEmail)
 
 				// Phase Eight: External SMTP Relay
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/relays", emailDeliverabilityHandler.ListRelays)
@@ -1218,12 +1235,17 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Delete("/queue/{id}", emailHandler.DeleteQueueItem)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/rate-control", emailHandler.GetRateControlStatus)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/cooldown/reset", emailHandler.ResetRateControlCooldown)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/reset", emailHandler.ResetRateControlCooldown)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/record-event", emailHandler.RecordSimulatedRateLimitEvent)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/rate-control/simulate-event", emailHandler.RecordSimulatedRateLimitEvent)
 				r.With(rbac.RequirePermission(rbac.PermEmailLogsView)).Get("/logs", emailHandler.ListLogs)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/diagnostics", emailHandler.GetMailDiagnostics)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/spam", emailHandler.GetSpamProtectionStats)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/services", emailHandler.ListServices)
 				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/services/{name}/action", emailHandler.ManageService)
+				r.With(rbac.RequirePermission(rbac.PermEmailDomainManage)).Post("/services/{name}/{action}", emailHandler.ManageService)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test", emailHandler.SendTestEmail)
+				r.With(rbac.RequirePermission(rbac.PermEmailView)).Post("/test-send", emailHandler.SendTestEmail)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/smtp-settings", emailHandler.GetSMTPSettings)
 				r.With(rbac.RequirePermission(rbac.PermEmailView)).Get("/health", emailHandler.CheckHealth)
 			})

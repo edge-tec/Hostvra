@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/api/internal/agenttask"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -19,17 +20,23 @@ import (
 )
 
 type ServerHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg     *config.Config
+	store   store.Store
+	audit   *audit.Logger
+	taskMgr *agenttask.Manager
 }
 
 func NewServerHandler(cfg *config.Config, s store.Store, a *audit.Logger) *ServerHandler {
 	return &ServerHandler{
-		cfg:   cfg,
-		store: s,
-		audit: a,
+		cfg:     cfg,
+		store:   s,
+		audit:   a,
+		taskMgr: agenttask.NewManager(),
 	}
+}
+
+func (h *ServerHandler) SetTaskManager(tm *agenttask.Manager) {
+	h.taskMgr = tm
 }
 
 type CreateEnrollmentTokenRequest struct {
@@ -384,5 +391,97 @@ func (h *ServerHandler) RotateAgentKey(w http.ResponseWriter, r *http.Request) {
 		"new_agent_key": rawAgentKey,
 		"message":       "Agent key rotated successfully. Update /etc/hostvra/agent.json on the remote node.",
 	}, nil)
+}
+
+type CreateServerTaskRequest struct {
+	Action  string                 `json:"action"` // e.g. "service.reload", "service.restart", "command.exec"
+	Payload map[string]interface{} `json:"payload"`
+}
+
+func (h *ServerHandler) DispatchTask(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	serverIDStr := chi.URLParam(r, "id")
+	serverID, err := uuid.Parse(serverIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server UUID", nil, "")
+		return
+	}
+
+	server, err := h.store.GetServerByID(r.Context(), serverID)
+	if err != nil || server == nil {
+		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Server not found", nil, "")
+		return
+	}
+	if server.OrganizationID != claims.OrganizationID && !claims.IsSuperAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+		return
+	}
+
+	var req CreateServerTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body", nil, "")
+		return
+	}
+
+	if req.Action == "" {
+		response.Error(w, http.StatusBadRequest, "VALIDATION_FAILED", "Task action is required", nil, "")
+		return
+	}
+
+	task := h.taskMgr.Enqueue(serverID, req.Action, req.Payload)
+
+	h.audit.Log(r.Context(), r, "server.task.dispatched", "server", serverID.String(), "success", "", map[string]interface{}{
+		"task_id": task.ID.String(),
+		"action":  task.Action,
+	})
+
+	response.JSON(w, http.StatusAccepted, task, nil)
+}
+
+func (h *ServerHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	serverIDStr := chi.URLParam(r, "id")
+	serverID, err := uuid.Parse(serverIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server UUID", nil, "")
+		return
+	}
+
+	server, err := h.store.GetServerByID(r.Context(), serverID)
+	if err != nil || server == nil {
+		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Server not found", nil, "")
+		return
+	}
+	if server.OrganizationID != claims.OrganizationID && !claims.IsSuperAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+		return
+	}
+
+	tasks := h.taskMgr.ListByServer(serverID, 50)
+	response.JSON(w, http.StatusOK, tasks, &response.Meta{Total: len(tasks)})
+}
+
+func (h *ServerHandler) GetTask(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	taskIDStr := chi.URLParam(r, "taskId")
+	taskID, err := uuid.Parse(taskIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid task UUID", nil, "")
+		return
+	}
+
+	task, err := h.taskMgr.Get(taskID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "TASK_NOT_FOUND", "Task not found", nil, "")
+		return
+	}
+
+	server, _ := h.store.GetServerByID(r.Context(), task.ServerID)
+	if server != nil && server.OrganizationID != claims.OrganizationID && !claims.IsSuperAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, task, nil)
 }
 

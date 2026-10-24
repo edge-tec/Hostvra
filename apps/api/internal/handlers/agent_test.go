@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"hostvra/api/internal/agenttask"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -110,5 +112,138 @@ func TestAgentHandler_EnrollAndHeartbeatSecurity(t *testing.T) {
 
 	if forgedRec.Code != http.StatusUnauthorized {
 		t.Fatalf("Expected forged agent key to be rejected with 401, got status %d, body: %s", forgedRec.Code, forgedRec.Body.String())
+	}
+}
+
+func TestAgentRemoteTaskExecutionLoop(t *testing.T) {
+	st := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(st, logger)
+	cfg := &config.Config{JWTSecret: "test-secret-1234567890"}
+
+	taskMgr := agenttask.NewManager()
+
+	agentHandler := NewAgentHandler(cfg, st, auditLogger)
+	agentHandler.SetTaskManager(taskMgr)
+
+	serverHandler := NewServerHandler(cfg, st, auditLogger)
+	serverHandler.SetTaskManager(taskMgr)
+
+	orgID := uuid.New()
+	serverID := uuid.New()
+	rawAgentKey := "hv_agt_valid_test_key_12345"
+	agentKeyHash := auth.HashOpaqueToken(rawAgentKey)
+
+	_ = st.CreateServer(context.Background(), &store.Server{
+		ID:             serverID,
+		OrganizationID: orgID,
+		Name:           "node-test",
+		AgentTokenHash: agentKeyHash,
+		Status:         "online",
+	})
+
+	adminClaims := &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: orgID,
+		Email:          "admin@hostvra.internal",
+		Role:           "superadmin",
+		IsSuperAdmin:   true,
+	}
+
+	// 1. Control plane dispatches task to server
+	taskReqBody, _ := json.Marshal(CreateServerTaskRequest{
+		Action: "service.restart",
+		Payload: map[string]interface{}{
+			"service": "nginx",
+		},
+	})
+	dispatchReq := httptest.NewRequest(http.MethodPost, "/api/v1/servers/"+serverID.String()+"/tasks", bytes.NewReader(taskReqBody))
+	dispatchReq = dispatchReq.WithContext(auth.WithClaims(dispatchReq.Context(), adminClaims))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", serverID.String())
+	dispatchReq = dispatchReq.WithContext(context.WithValue(dispatchReq.Context(), chi.RouteCtxKey, rctx))
+	dispatchRec := httptest.NewRecorder()
+
+	serverHandler.DispatchTask(dispatchRec, dispatchReq)
+	if dispatchRec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 StatusAccepted on task dispatch, got %d: %s", dispatchRec.Code, dispatchRec.Body.String())
+	}
+
+	var dispatchResp struct {
+		Data *agenttask.AgentTask `json:"data"`
+	}
+	_ = json.Unmarshal(dispatchRec.Body.Bytes(), &dispatchResp)
+	dispatchedTaskID := dispatchResp.Data.ID
+
+	// 2. Node Agent sends heartbeat -> receives pending task in response
+	hbBody, _ := json.Marshal(AgentHeartbeatRequest{
+		UptimeSeconds: 120,
+	})
+	hbReq := httptest.NewRequest(http.MethodPost, "/api/v1/agent/heartbeat", bytes.NewReader(hbBody))
+	hbReq.Header.Set("Authorization", "Bearer "+rawAgentKey)
+	hbReq.Header.Set("X-Server-ID", serverID.String())
+	hbRec := httptest.NewRecorder()
+
+	agentHandler.Heartbeat(hbRec, hbReq)
+	if hbRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on heartbeat, got %d", hbRec.Code)
+	}
+
+	var hbResp struct {
+		Data struct {
+			Acknowledged bool                   `json:"acknowledged"`
+			Tasks        []*agenttask.AgentTask `json:"tasks"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(hbRec.Body.Bytes(), &hbResp)
+
+	if len(hbResp.Data.Tasks) != 1 {
+		t.Fatalf("expected 1 task in heartbeat response, got %d", len(hbResp.Data.Tasks))
+	}
+	if hbResp.Data.Tasks[0].ID != dispatchedTaskID {
+		t.Fatalf("task ID mismatch: expected %s, got %s", dispatchedTaskID, hbResp.Data.Tasks[0].ID)
+	}
+
+	// 3. Node Agent executes task and reports result back
+	resultBody, _ := json.Marshal(ReportTaskResultRequest{
+		Status:   "completed",
+		ExitCode: 0,
+		Output:   "Nginx service reloaded cleanly without downtime",
+	})
+	resultReq := httptest.NewRequest(http.MethodPost, "/api/v1/agent/tasks/"+dispatchedTaskID.String()+"/result", bytes.NewReader(resultBody))
+	resultReq.Header.Set("Authorization", "Bearer "+rawAgentKey)
+	rCtx := chi.NewRouteContext()
+	rCtx.URLParams.Add("id", dispatchedTaskID.String())
+	resultReq = resultReq.WithContext(context.WithValue(resultReq.Context(), chi.RouteCtxKey, rCtx))
+	resultRec := httptest.NewRecorder()
+
+	agentHandler.ReportTaskResult(resultRec, resultReq)
+	if resultRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on report task result, got %d: %s", resultRec.Code, resultRec.Body.String())
+	}
+
+	// 4. Control Plane / Admin queries task status -> verified completed
+	getTaskReq := httptest.NewRequest(http.MethodGet, "/api/v1/servers/"+serverID.String()+"/tasks/"+dispatchedTaskID.String(), nil)
+	getTaskReq = getTaskReq.WithContext(auth.WithClaims(getTaskReq.Context(), adminClaims))
+	taskCtx := chi.NewRouteContext()
+	taskCtx.URLParams.Add("id", serverID.String())
+	taskCtx.URLParams.Add("taskId", dispatchedTaskID.String())
+	getTaskReq = getTaskReq.WithContext(context.WithValue(getTaskReq.Context(), chi.RouteCtxKey, taskCtx))
+	getTaskRec := httptest.NewRecorder()
+
+	serverHandler.GetTask(getTaskRec, getTaskReq)
+	if getTaskRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 on get task, got %d: %s", getTaskRec.Code, getTaskRec.Body.String())
+	}
+
+	var getTaskResp struct {
+		Data *agenttask.AgentTask `json:"data"`
+	}
+	_ = json.Unmarshal(getTaskRec.Body.Bytes(), &getTaskResp)
+	if getTaskResp.Data.Status != agenttask.StatusCompleted || getTaskResp.Data.ExitCode != 0 {
+		t.Fatalf("unexpected task final status: %+v", getTaskResp.Data)
+	}
+	if getTaskResp.Data.Output != "Nginx service reloaded cleanly without downtime" {
+		t.Fatalf("unexpected task output: %s", getTaskResp.Data.Output)
 	}
 }
