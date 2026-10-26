@@ -32,6 +32,8 @@ import {
   BookmarkCheck,
   Zap,
   Globe,
+  ArrowUpCircle,
+  Settings,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, AppPackage, AppInstallJob, Website } from '@/lib/api';
@@ -63,6 +65,9 @@ export default function AppStorePage() {
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [selectedControlApp, setSelectedControlApp] = useState<AppPackage | null>(null);
   const [controlModalOpen, setControlModalOpen] = useState(false);
+  const [controlModalTab, setControlModalTab] = useState<string>('service');
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateFilterOnly, setUpdateFilterOnly] = useState(false);
   const [pinnedAppIds, setPinnedAppIds] = useState<string[]>([]);
 
   const [websites, setWebsites] = useState<Website[]>([]);
@@ -97,12 +102,13 @@ export default function AppStorePage() {
     return () => window.removeEventListener('hostvra_pinned_apps_changed', handlePinnedChange);
   }, []);
 
-  const handleOpenApp = (app: AppPackage) => {
+  const handleOpenApp = (app: AppPackage, tab: string = 'service') => {
     setSelectedControlApp(app);
+    setControlModalTab(tab);
     setControlModalOpen(true);
   };
 
-  // Poll active install/uninstall job
+  // Poll active install/uninstall/update job
   useEffect(() => {
     if (!activeJob || activeJob.status === 'completed' || activeJob.status === 'failed') {
       return;
@@ -127,6 +133,39 @@ export default function AppStorePage() {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [activeJob?.logs, jobModalOpen]);
+
+  // Real-time Check for Software Updates across all packages
+  const handleCheckUpdates = async () => {
+    setCheckingUpdates(true);
+    try {
+      const res = await apiFetch<AppPackage[]>('/api/v1/apps/check-updates', {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        setApps(res.data);
+      } else {
+        await loadApps();
+      }
+    } finally {
+      setCheckingUpdates(false);
+    }
+  };
+
+  // 1-Click Update trigger
+  const handleUpdate = async (app: AppPackage) => {
+    setActionLoadingId(app.id);
+    try {
+      const res = await apiFetch<AppInstallJob>(`/api/v1/apps/${app.id}/update`, {
+        method: 'POST',
+      });
+      if (res.success && res.data) {
+        setActiveJob(res.data);
+        setJobModalOpen(true);
+      }
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   // 1-Click Install trigger
   const handleInstall = async (app: AppPackage) => {
@@ -179,8 +218,14 @@ export default function AppStorePage() {
     }
   };
 
-  // Filter apps by category & search query
+  const updatesCount = apps.filter((a) => a.is_installed && a.has_update).length;
+
+  // Filter apps by category, search query & updates only
   const filteredApps = apps.filter((app) => {
+    if (updateFilterOnly && (!app.is_installed || !app.has_update)) {
+      return false;
+    }
+
     const matchesCategory =
       activeCategory === 'all' ||
       app.category === activeCategory ||
@@ -240,6 +285,20 @@ export default function AppStorePage() {
           {/* Header Action Tools */}
           <div className="flex items-center gap-2">
             <button
+              onClick={handleCheckUpdates}
+              disabled={checkingUpdates || loading}
+              className="px-3 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 transition-all flex items-center gap-2 text-xs font-semibold"
+              title="Check upstream repositories for new software versions"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${checkingUpdates ? 'animate-spin' : ''}`} />
+              <span>Check Updates</span>
+              {updatesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
+                  {updatesCount}
+                </span>
+              )}
+            </button>
+            <button
               onClick={loadApps}
               disabled={loading}
               className="p-2 rounded-xl bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 text-slate-600 dark:text-slate-300 border border-surface-200 dark:border-surface-700 transition-colors"
@@ -278,11 +337,14 @@ export default function AppStorePage() {
           <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
             {CATEGORIES.map((cat) => {
               const Icon = cat.icon;
-              const isActive = activeCategory === cat.id;
+              const isActive = activeCategory === cat.id && !updateFilterOnly;
               return (
                 <button
                   key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
+                  onClick={() => {
+                    setActiveCategory(cat.id);
+                    setUpdateFilterOnly(false);
+                  }}
                   className={`px-3.5 py-2 rounded-xl text-xs font-medium whitespace-nowrap flex items-center gap-2 transition-all ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20 font-semibold'
@@ -294,6 +356,26 @@ export default function AppStorePage() {
                 </button>
               );
             })}
+
+            {/* Updates Filter Pill */}
+            {updatesCount > 0 && (
+              <button
+                onClick={() => setUpdateFilterOnly(!updateFilterOnly)}
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 transition-all ${
+                  updateFilterOnly
+                    ? 'bg-amber-500 text-slate-950 shadow-sm shadow-amber-500/30'
+                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+                }`}
+              >
+                <ArrowUpCircle className="w-3.5 h-3.5" />
+                <span>Updates</span>
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  updateFilterOnly ? 'bg-slate-950 text-amber-400' : 'bg-amber-500 text-slate-950'
+                }`}>
+                  {updatesCount}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* Search Input Box */}
@@ -443,16 +525,27 @@ export default function AppStorePage() {
                               {getCategoryIcon(app.category)}
                             </div>
                             <div>
-                              <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
-                                {app.name}
+                              <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                <span>{app.name}</span>
                                 {app.id === 'supervisor' && (
                                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-500/10 text-indigo-500 font-semibold border border-indigo-500/20">
                                     Process Mgr
                                   </span>
                                 )}
+                                {app.has_update && app.is_installed && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 animate-pulse">
+                                    <ArrowUpCircle className="w-3 h-3" />
+                                    v{app.latest_version} Available
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-[11px] text-slate-400 font-mono">
-                                {app.display_name}
+                              <div className="text-[11px] text-slate-400 font-mono flex items-center gap-2">
+                                <span>{app.display_name}</span>
+                                {(app.installed_version || app.version) && (
+                                  <span className="text-slate-400 dark:text-slate-500">
+                                    • {app.is_installed ? `v${app.installed_version || app.version}` : `v${app.version}`}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -519,25 +612,57 @@ export default function AppStorePage() {
                           )}
                         </td>
 
-                        {/* Actions (Install / Setting / Restart / Uninstall) */}
+                        {/* Actions (Install / Setting / Update / Restart / Uninstall) */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           {isActing ? (
                             <span className="inline-flex items-center gap-1 text-xs text-indigo-500 font-medium">
                               <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Processing...
                             </span>
                           ) : !app.is_installed ? (
-                            <button
-                              onClick={() => handleInstall(app)}
-                              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5 ml-auto"
-                            >
-                              <Sparkles className="w-3 h-3" />
-                              Install
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleOpenApp(app, 'settings')}
+                                className="px-2.5 py-1.5 rounded-lg border border-surface-200 dark:border-surface-700 hover:bg-surface-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-300 font-medium text-xs shadow-xs transition-all flex items-center gap-1"
+                                title="Configure Settings"
+                              >
+                                <Settings className="w-3 h-3 text-slate-400" />
+                                Settings
+                              </button>
+                              <button
+                                onClick={() => handleInstall(app)}
+                                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                Install
+                              </button>
+                            </div>
                           ) : (
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* 1-Click Update if available */}
+                              {app.has_update && (
+                                <button
+                                  onClick={() => handleUpdate(app)}
+                                  className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95 animate-pulse"
+                                  title={`Update to v${app.latest_version}`}
+                                >
+                                  <ArrowUpCircle className="w-3 h-3" />
+                                  Update
+                                </button>
+                              )}
+
+                              {/* Settings Button */}
+                              <button
+                                onClick={() => handleOpenApp(app, 'settings')}
+                                className="px-2.5 py-1 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/80 hover:bg-surface-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 font-medium text-xs shadow-xs flex items-center gap-1 transition-all active:scale-95"
+                                title="Configure App Settings"
+                              >
+                                <Settings className="w-3 h-3 text-slate-400" />
+                                Settings
+                              </button>
+
                               {/* Open / Launch Button */}
                               <button
-                                onClick={() => handleOpenApp(app)}
+                                onClick={() => handleOpenApp(app, 'service')}
                                 className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95"
                                 title="Open & Manage Application"
                               >
@@ -606,7 +731,13 @@ export default function AppStorePage() {
                       <div className="w-10 h-10 rounded-xl bg-surface-100 dark:bg-surface-800 flex items-center justify-center border border-surface-200 dark:border-surface-700 flex-shrink-0">
                         {getCategoryIcon(app.category)}
                       </div>
-                      <div>
+                      <div className="flex items-center gap-1.5">
+                        {app.has_update && app.is_installed && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 animate-pulse">
+                            <ArrowUpCircle className="w-3 h-3" />
+                            v{app.latest_version} Available
+                          </span>
+                        )}
                         {app.status === 'running' ? (
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -633,7 +764,14 @@ export default function AppStorePage() {
                           </span>
                         )}
                       </h3>
-                      <p className="text-xs text-slate-400 font-mono mt-0.5">{app.display_name}</p>
+                      <div className="flex items-center justify-between text-xs text-slate-400 font-mono mt-0.5">
+                        <span>{app.display_name}</span>
+                        {(app.installed_version || app.version) && (
+                          <span className="text-slate-400 dark:text-slate-500 font-sans text-[11px]">
+                            {app.is_installed ? `v${app.installed_version || app.version}` : `v${app.version}`}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 line-clamp-3 leading-relaxed">
                         {app.description}
                       </p>
@@ -651,19 +789,52 @@ export default function AppStorePage() {
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" /> Processing...
                         </span>
                       ) : !app.is_installed ? (
-                        <button
-                          onClick={() => handleInstall(app)}
-                          className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
-                        >
-                          <Sparkles className="w-3 h-3" />
-                          1-Click Install
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenApp(app, 'settings')}
+                            className="px-2.5 py-1.5 rounded-xl border border-surface-200 dark:border-surface-700 hover:bg-surface-100 dark:hover:bg-surface-800 text-slate-600 dark:text-slate-300 font-medium text-xs shadow-xs transition-all flex items-center gap-1"
+                            title="Configure Settings"
+                          >
+                            <Settings className="w-3.5 h-3.5 text-slate-400" />
+                            Settings
+                          </button>
+                          <button
+                            onClick={() => handleInstall(app)}
+                            className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs shadow-sm transition-all active:scale-95 flex items-center gap-1.5"
+                          >
+                            <Sparkles className="w-3 h-3" />
+                            1-Click Install
+                          </button>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
+                          {/* 1-Click Update if available */}
+                          {app.has_update && (
+                            <button
+                              onClick={() => handleUpdate(app)}
+                              className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95 animate-pulse"
+                              title={`Update to v${app.latest_version}`}
+                            >
+                              <ArrowUpCircle className="w-3 h-3" />
+                              Update
+                            </button>
+                          )}
+
+                          {/* Settings Button */}
+                          <button
+                            onClick={() => handleOpenApp(app, 'settings')}
+                            className="px-2 py-1 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-800/80 hover:bg-surface-100 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 font-medium text-xs shadow-xs flex items-center gap-1 transition-all active:scale-95"
+                            title="Configure App Settings"
+                          >
+                            <Settings className="w-3 h-3 text-slate-400" />
+                            Settings
+                          </button>
+
                           {/* Open / Manage Button */}
                           <button
-                            onClick={() => handleOpenApp(app)}
+                            onClick={() => handleOpenApp(app, 'service')}
                             className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-sm flex items-center gap-1 transition-all active:scale-95"
+                            title="Open & Manage Application"
                           >
                             <ExternalLink className="w-3 h-3" />
                             Open
@@ -733,7 +904,12 @@ export default function AppStorePage() {
                     ) : (
                       <AlertCircle className="w-4 h-4 text-rose-500" />
                     )}
-                    {activeJob.action === 'install' ? 'Installing' : 'Uninstalling'} {activeJob.app_id}
+                    {activeJob.action === 'install'
+                      ? 'Installing'
+                      : activeJob.action === 'update'
+                      ? 'Updating'
+                      : 'Uninstalling'}{' '}
+                    {activeJob.app_id}
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     {activeJob.status === 'running'
@@ -804,8 +980,10 @@ export default function AppStorePage() {
         <AppControlModal
           app={selectedControlApp}
           isOpen={controlModalOpen}
+          initialTab={controlModalTab}
           onClose={() => setControlModalOpen(false)}
           onServiceControl={handleServiceControl}
+          onUpdateApp={handleUpdate}
           isActing={actionLoadingId === selectedControlApp?.id}
         />
 

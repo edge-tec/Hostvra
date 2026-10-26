@@ -1039,10 +1039,14 @@ func main() {
 			// 1-Click App Store & Extensions
 			r.Route("/apps", func(r chi.Router) {
 				r.Get("/", appStoreHandler.ListApps)
+				r.Post("/check-updates", appStoreHandler.CheckUpdates)
 				r.Get("/{id}", appStoreHandler.GetApp)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/install", appStoreHandler.InstallApp)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/uninstall", appStoreHandler.UninstallApp)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/update", appStoreHandler.UpdateApp)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/{id}/service", appStoreHandler.ControlService)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Get("/{id}/settings", appStoreHandler.GetAppSettings)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Put("/{id}/settings", appStoreHandler.UpdateAppSettings)
 				r.Get("/jobs/{jobID}", appStoreHandler.GetJob)
 			})
 

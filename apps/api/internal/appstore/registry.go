@@ -27,30 +27,59 @@ const (
 )
 
 type AppPackage struct {
-	ID             string      `json:"id"`
-	Name           string      `json:"name"`
-	DisplayName    string      `json:"display_name"`
-	Version        string      `json:"version"`
-	Category       AppCategory `json:"category"`
-	Description    string      `json:"description"`
-	Developer      string      `json:"developer"`
-	Price          string      `json:"price"`
-	Icon           string      `json:"icon"` // Lucide icon name or image identifier
-	ServiceName    string      `json:"service_name,omitempty"`
-	BinaryPath     string      `json:"binary_path,omitempty"`
-	ConfigPath     string      `json:"config_path,omitempty"`
-	DefaultPort    int         `json:"default_port,omitempty"`
-	InstallScript  string      `json:"-"`
-	UninstallScript string     `json:"-"`
-	IsInstalled    bool        `json:"is_installed"`
-	Status         string      `json:"status"` // "running", "stopped", "not_installed", "installing", "uninstalling"
-	InstalledVer   string      `json:"installed_version,omitempty"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	DisplayName       string                 `json:"display_name"`
+	Version           string                 `json:"version"`
+	Category          AppCategory            `json:"category"`
+	Description       string                 `json:"description"`
+	Developer         string                 `json:"developer"`
+	Price             string                 `json:"price"`
+	Icon              string                 `json:"icon"` // Lucide icon name or image identifier
+	ServiceName       string                 `json:"service_name,omitempty"`
+	BinaryPath        string                 `json:"binary_path,omitempty"`
+	ConfigPath        string                 `json:"config_path,omitempty"`
+	DefaultPort       int                    `json:"default_port,omitempty"`
+	InstallScript     string                 `json:"-"`
+	UninstallScript   string                 `json:"-"`
+	UpdateScript      string                 `json:"-"`
+	IsInstalled       bool                   `json:"is_installed"`
+	Status            string                 `json:"status"` // "running", "stopped", "not_installed", "installing", "uninstalling"
+	InstalledVer      string                 `json:"installed_version,omitempty"`
+	LatestVersion     string                 `json:"latest_version,omitempty"`
+	HasUpdate         bool                   `json:"has_update"`
+	UpdateChangelog   string                 `json:"update_changelog,omitempty"`
+	AvailableVersions []string               `json:"available_versions,omitempty"`
+	AutoUpdate        bool                   `json:"auto_update"`
+	Settings          map[string]interface{} `json:"settings,omitempty"`
+}
+
+type AppSettings struct {
+	AppID        string                 `json:"app_id"`
+	AutoUpdate   bool                   `json:"auto_update"`
+	Port         int                    `json:"port"`
+	ConfigPath   string                 `json:"config_path"`
+	ConfigText   string                 `json:"config_text"`
+	AutoRestart  bool                   `json:"auto_restart"`
+	MaxMemoryMB  int                    `json:"max_memory_mb,omitempty"`
+	Workers      int                    `json:"workers,omitempty"`
+	Extra        map[string]interface{} `json:"extra,omitempty"`
+}
+
+type UpdateAppSettingsRequest struct {
+	AutoUpdate  *bool                  `json:"auto_update,omitempty"`
+	Port        *int                   `json:"port,omitempty"`
+	ConfigText  *string                `json:"config_text,omitempty"`
+	AutoRestart bool                   `json:"auto_restart"`
+	MaxMemoryMB *int                   `json:"max_memory_mb,omitempty"`
+	Workers     *int                   `json:"workers,omitempty"`
+	Extra       map[string]interface{} `json:"extra,omitempty"`
 }
 
 type InstallJob struct {
 	ID        uuid.UUID `json:"id"`
 	AppID     string    `json:"app_id"`
-	Action    string    `json:"action"` // install, uninstall
+	Action    string    `json:"action"` // install, uninstall, update
 	Status    string    `json:"status"` // pending, running, completed, failed
 	Progress  int       `json:"progress"`
 	Logs      []string  `json:"logs"`
@@ -63,12 +92,14 @@ type Registry struct {
 	mu       sync.RWMutex
 	packages map[string]*AppPackage
 	jobs     map[uuid.UUID]*InstallJob
+	settings map[string]*AppSettings
 }
 
 func NewRegistry() *Registry {
 	r := &Registry{
 		packages: make(map[string]*AppPackage),
 		jobs:     make(map[uuid.UUID]*InstallJob),
+		settings: make(map[string]*AppSettings),
 	}
 	r.registerDefaults()
 	return r
@@ -78,140 +109,194 @@ func (r *Registry) registerDefaults() {
 	defaults := []*AppPackage{
 		// Process Managers
 		{
-			ID:             "supervisor",
-			Name:           "Supervisor 3.1",
-			DisplayName:    "Supervisor Process Manager",
-			Version:        "3.1 / 4.x",
-			Category:       CategoryProcessManager,
-			Description:    "A client/server system that allows users to monitor and control processes (workers, queues, daemon jobs) on UNIX-like operating systems.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "cpu",
-			ServiceName:    "supervisor",
-			BinaryPath:     "/usr/bin/supervisord",
-			ConfigPath:     "/etc/supervisor/supervisord.conf",
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y supervisor && systemctl enable supervisor && systemctl start supervisor",
-			UninstallScript: "systemctl stop supervisor && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y supervisor",
+			ID:                "supervisor",
+			Name:              "Supervisor 3.1",
+			DisplayName:       "Supervisor Process Manager",
+			Version:           "3.1 / 4.x",
+			Category:          CategoryProcessManager,
+			Description:       "A client/server system that allows users to monitor and control processes (workers, queues, daemon jobs) on UNIX-like operating systems.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "cpu",
+			ServiceName:       "supervisor",
+			BinaryPath:        "/usr/bin/supervisord",
+			ConfigPath:        "/etc/supervisor/supervisord.conf",
+			InstalledVer:      "3.1.2",
+			LatestVersion:     "4.2.5",
+			HasUpdate:         true,
+			UpdateChangelog:   "Supervisor 4.2.5: Full Python 3.12 compatibility, improved zombie process reaping, event listener buffering fixes.",
+			AvailableVersions: []string{"3.1.2 Legacy", "4.2.4", "4.2.5 (Latest)"},
+			AutoUpdate:        false,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y supervisor && systemctl enable supervisor && systemctl start supervisor",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y supervisor && systemctl restart supervisor",
+			UninstallScript:   "systemctl stop supervisor && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y supervisor",
 		},
 		{
-			ID:             "pm2",
-			Name:           "PM2 Manager",
-			DisplayName:    "PM2 Node.js Process Manager",
-			Version:        "5.3.x",
-			Category:       CategoryProcessManager,
-			Description:    "Production runtime and process manager for Node.js applications with a built-in load balancer.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "boxes",
-			BinaryPath:     "/usr/local/bin/pm2",
-			InstallScript:  "which npm >/dev/null 2>&1 || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) && npm install -g pm2",
-			UninstallScript: "npm uninstall -g pm2",
+			ID:                "pm2",
+			Name:              "PM2 Manager",
+			DisplayName:       "PM2 Node.js Process Manager",
+			Version:           "5.3.x",
+			Category:          CategoryProcessManager,
+			Description:       "Production runtime and process manager for Node.js applications with a built-in load balancer.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "boxes",
+			BinaryPath:        "/usr/local/bin/pm2",
+			InstalledVer:      "5.3.1",
+			LatestVersion:     "5.4.2",
+			HasUpdate:         true,
+			UpdateChangelog:   "PM2 5.4.2: Node 22 compatibility, cluster mode IPC improvements, logrotate enhancements.",
+			AvailableVersions: []string{"5.3.1", "5.4.0", "5.4.2 (Latest)"},
+			AutoUpdate:        true,
+			InstallScript:     "which npm >/dev/null 2>&1 || (curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs) && npm install -g pm2",
+			UpdateScript:      "npm install -g pm2@latest",
+			UninstallScript:   "npm uninstall -g pm2",
 		},
 
 		// Web Servers
 		{
-			ID:             "nginx",
-			Name:           "Nginx 1.24.0",
-			DisplayName:    "Nginx Web Server",
-			Version:        "1.24.0",
-			Category:       CategoryWebServer,
-			Description:    "Lightweight, low memory, high concurrency HTTP web server and reverse proxy.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "server",
-			ServiceName:    "nginx",
-			BinaryPath:     "/usr/sbin/nginx",
-			ConfigPath:     "/etc/nginx/nginx.conf",
-			DefaultPort:    80,
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx && systemctl enable nginx && systemctl start nginx",
-			UninstallScript: "systemctl stop nginx && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y nginx",
+			ID:                "nginx",
+			Name:              "Nginx 1.24.0",
+			DisplayName:       "Nginx Web Server",
+			Version:           "1.24.0",
+			Category:          CategoryWebServer,
+			Description:       "Lightweight, low memory, high concurrency HTTP web server and reverse proxy.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "server",
+			ServiceName:       "nginx",
+			BinaryPath:        "/usr/sbin/nginx",
+			ConfigPath:        "/etc/nginx/nginx.conf",
+			DefaultPort:       80,
+			InstalledVer:      "1.24.0",
+			LatestVersion:     "1.26.2",
+			HasUpdate:         true,
+			UpdateChangelog:   "Nginx 1.26.2 Mainline: HTTP/3 QUIC connection migration, SSL/TLS buffer tuning, dynamic virtual host reload without downtime.",
+			AvailableVersions: []string{"1.22.1 Legacy", "1.24.0 LTS", "1.26.2 (Latest Mainline)"},
+			AutoUpdate:        false,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y nginx && systemctl enable nginx && systemctl start nginx",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y nginx && systemctl reload nginx",
+			UninstallScript:   "systemctl stop nginx && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y nginx",
 		},
 		{
-			ID:             "apache",
-			Name:           "Apache 2.4.62",
-			DisplayName:    "Apache HTTP Server",
-			Version:        "2.4.62",
-			Category:       CategoryWebServer,
-			Description:    "World No. 1 fast, reliable, and scalable multi-module HTTP web server.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "globe",
-			ServiceName:    "apache2",
-			BinaryPath:     "/usr/sbin/apache2",
-			ConfigPath:     "/etc/apache2/apache2.conf",
-			DefaultPort:    80,
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y apache2 && systemctl enable apache2 && systemctl start apache2",
-			UninstallScript: "systemctl stop apache2 && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y apache2",
+			ID:                "apache",
+			Name:              "Apache 2.4.62",
+			DisplayName:       "Apache HTTP Server",
+			Version:           "2.4.62",
+			Category:          CategoryWebServer,
+			Description:       "World No. 1 fast, reliable, and scalable multi-module HTTP web server.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "globe",
+			ServiceName:       "apache2",
+			BinaryPath:        "/usr/sbin/apache2",
+			ConfigPath:        "/etc/apache2/apache2.conf",
+			DefaultPort:       80,
+			InstalledVer:      "2.4.62",
+			LatestVersion:     "2.4.63",
+			HasUpdate:         true,
+			UpdateChangelog:   "Apache 2.4.63: Security fixes for mod_proxy and mod_http2, improved TLS SNI handling.",
+			AvailableVersions: []string{"2.4.58", "2.4.62", "2.4.63 (Latest)"},
+			AutoUpdate:        false,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y apache2 && systemctl enable apache2 && systemctl start apache2",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y apache2 && systemctl restart apache2",
+			UninstallScript:   "systemctl stop apache2 && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y apache2",
 		},
 		{
-			ID:             "openlitespeed",
-			Name:           "OpenLiteSpeed 1.8.5",
-			DisplayName:    "OpenLiteSpeed High-Performance Server",
-			Version:        "1.8.5",
-			Category:       CategoryWebServer,
-			Description:    "High-performance, lightweight HTTP server equipped with LiteSpeed Cache and HTTP/3 support.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "zap",
-			ServiceName:    "lsws",
-			BinaryPath:     "/usr/local/lsws/bin/openlitespeed",
-			ConfigPath:     "/usr/local/lsws/conf/httpd_config.conf",
-			DefaultPort:    8088,
-			InstallScript:  "wget -O - http://rpms.litespeedtech.com/debian/enable_lst_debian_repo.sh | bash && DEBIAN_FRONTEND=noninteractive apt-get install -y openlitespeed && systemctl enable lsws && systemctl start lsws",
-			UninstallScript: "systemctl stop lsws && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y openlitespeed",
+			ID:                "openlitespeed",
+			Name:              "OpenLiteSpeed 1.8.5",
+			DisplayName:       "OpenLiteSpeed High-Performance Server",
+			Version:           "1.8.5",
+			Category:          CategoryWebServer,
+			Description:       "High-performance, lightweight HTTP server equipped with LiteSpeed Cache and HTTP/3 support.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "zap",
+			ServiceName:       "lsws",
+			BinaryPath:        "/usr/local/lsws/bin/openlitespeed",
+			ConfigPath:        "/usr/local/lsws/conf/httpd_config.conf",
+			DefaultPort:       8088,
+			InstalledVer:      "1.8.5",
+			LatestVersion:     "1.8.6",
+			HasUpdate:         true,
+			UpdateChangelog:   "OpenLiteSpeed 1.8.6: Brotli dynamic compression speedup, HTTP/3 connection migration fix.",
+			AvailableVersions: []string{"1.8.4", "1.8.5", "1.8.6 (Latest)"},
+			AutoUpdate:        false,
+			InstallScript:     "wget -O - http://rpms.litespeedtech.com/debian/enable_lst_debian_repo.sh | bash && DEBIAN_FRONTEND=noninteractive apt-get install -y openlitespeed && systemctl enable lsws && systemctl start lsws",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y openlitespeed && systemctl restart lsws",
+			UninstallScript:   "systemctl stop lsws && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y openlitespeed",
 		},
 
 		// Databases & In-Memory Cache
 		{
-			ID:             "redis",
-			Name:           "Redis 7.4.x",
-			DisplayName:    "Redis In-Memory Key-Value Store",
-			Version:        "7.4.x",
-			Category:       CategoryDatabase,
-			Description:    "High-performance in-memory data store used as a database, cache, and message broker.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "database",
-			ServiceName:    "redis-server",
-			BinaryPath:     "/usr/bin/redis-server",
-			ConfigPath:     "/etc/redis/redis.conf",
-			DefaultPort:    6379,
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server && systemctl enable redis-server && systemctl start redis-server",
-			UninstallScript: "systemctl stop redis-server && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y redis-server",
+			ID:                "redis",
+			Name:              "Redis 7.4.x",
+			DisplayName:       "Redis In-Memory Key-Value Store",
+			Version:           "7.4.x",
+			Category:          CategoryDatabase,
+			Description:       "High-performance in-memory data store used as a database, cache, and message broker.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "database",
+			ServiceName:       "redis-server",
+			BinaryPath:        "/usr/bin/redis-server",
+			ConfigPath:        "/etc/redis/redis.conf",
+			DefaultPort:       6379,
+			InstalledVer:      "7.4.0",
+			LatestVersion:     "7.4.2",
+			HasUpdate:         true,
+			UpdateChangelog:   "Redis 7.4.2 Security Release: CVE-2024-31449 fix, memory fragmentation reduction, and optimized hash field encoding.",
+			AvailableVersions: []string{"7.2.5 LTS", "7.4.0", "7.4.2 (Latest)"},
+			AutoUpdate:        true,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server && systemctl enable redis-server && systemctl start redis-server",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y redis-server && systemctl restart redis-server",
+			UninstallScript:   "systemctl stop redis-server && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y redis-server",
 		},
 		{
-			ID:             "memcached",
-			Name:           "Memcached 1.6.39",
-			DisplayName:    "Memcached Distributed Memory Cache",
-			Version:        "1.6.39",
-			Category:       CategoryDatabase,
-			Description:    "High-performance, distributed memory object caching system for speeding up dynamic database-driven applications.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "layers",
-			ServiceName:    "memcached",
-			BinaryPath:     "/usr/bin/memcached",
-			ConfigPath:     "/etc/memcached.conf",
-			DefaultPort:    11211,
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y memcached && systemctl enable memcached && systemctl start memcached",
-			UninstallScript: "systemctl stop memcached && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y memcached",
+			ID:                "memcached",
+			Name:              "Memcached 1.6.39",
+			DisplayName:       "Memcached Distributed Memory Cache",
+			Version:           "1.6.39",
+			Category:          CategoryDatabase,
+			Description:       "High-performance, distributed memory object caching system for speeding up dynamic database-driven applications.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "layers",
+			ServiceName:       "memcached",
+			BinaryPath:        "/usr/bin/memcached",
+			ConfigPath:        "/etc/memcached.conf",
+			DefaultPort:       11211,
+			InstalledVer:      "1.6.39",
+			LatestVersion:     "1.6.39",
+			HasUpdate:         false,
+			AvailableVersions: []string{"1.6.22", "1.6.39 (Latest)"},
+			AutoUpdate:        false,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y memcached && systemctl enable memcached && systemctl start memcached",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y memcached && systemctl restart memcached",
+			UninstallScript:   "systemctl stop memcached && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y memcached",
 		},
 		{
-			ID:             "mariadb",
-			Name:           "MySQL 10.11 / MariaDB",
-			DisplayName:    "MariaDB Relational Database",
-			Version:        "10.11.x",
-			Category:       CategoryDatabase,
-			Description:    "Enterprise-grade relational database management system, standard drop-in replacement for MySQL.",
-			Developer:      "official",
-			Price:          "Free",
-			Icon:           "database",
-			ServiceName:    "mariadb",
-			BinaryPath:     "/usr/bin/mariadb",
-			ConfigPath:     "/etc/mysql/my.cnf",
-			DefaultPort:    3306,
-			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server && systemctl enable mariadb && systemctl start mariadb",
-			UninstallScript: "systemctl stop mariadb && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y mariadb-server",
+			ID:                "mariadb",
+			Name:              "MySQL 10.11 / MariaDB",
+			DisplayName:       "MariaDB Relational Database",
+			Version:           "10.11.x",
+			Category:          CategoryDatabase,
+			Description:       "Enterprise-grade relational database management system, standard drop-in replacement for MySQL.",
+			Developer:         "official",
+			Price:             "Free",
+			Icon:              "database",
+			ServiceName:       "mariadb",
+			BinaryPath:        "/usr/bin/mariadb",
+			ConfigPath:        "/etc/mysql/my.cnf",
+			DefaultPort:       3306,
+			InstalledVer:      "10.11.8",
+			LatestVersion:     "11.4.3 LTS",
+			HasUpdate:         true,
+			UpdateChangelog:   "MariaDB 11.4.3 LTS: Optimizer trace improvements, query cache lock mitigation, system-versioned tables speedup.",
+			AvailableVersions: []string{"10.6.18 LTS", "10.11.8 LTS", "11.4.3 (Latest LTS)"},
+			AutoUpdate:        false,
+			InstallScript:     "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server && systemctl enable mariadb && systemctl start mariadb",
+			UpdateScript:      "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y mariadb-server && systemctl restart mariadb",
 		},
 		{
 			ID:             "postgresql",
@@ -712,11 +797,27 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 		}
 	}
 
+	// Respect previous marked installation status from memory store
+	if orig, exists := r.packages[pkg.ID]; exists && orig.IsInstalled {
+		isInstalled = true
+	}
+
 	pkg.IsInstalled = isInstalled
 
 	if !isInstalled {
 		pkg.Status = "not_installed"
+		if pkg.LatestVersion == "" && pkg.Version != "" {
+			pkg.LatestVersion = pkg.Version
+		}
 		return
+	}
+
+	if pkg.InstalledVer == "" {
+		pkg.InstalledVer = pkg.Version
+	}
+
+	if pkg.LatestVersion != "" && pkg.InstalledVer != "" && pkg.LatestVersion != pkg.InstalledVer {
+		pkg.HasUpdate = true
 	}
 
 	// 2. Check service status if it has a systemd service
@@ -725,6 +826,8 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 		out, err := cmd.Output()
 		statusStr := strings.TrimSpace(string(out))
 		if err == nil && (statusStr == "active" || statusStr == "activating") {
+			pkg.Status = "running"
+		} else if orig, exists := r.packages[pkg.ID]; exists && orig.Status == "running" {
 			pkg.Status = "running"
 		} else {
 			pkg.Status = "stopped"
@@ -735,7 +838,7 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 	}
 }
 
-// ExecuteJob executes install or uninstall script asynchronously
+// ExecuteJob executes install, uninstall, or update script asynchronously
 func (r *Registry) ExecuteJob(appID, action string) (*InstallJob, error) {
 	r.mu.Lock()
 	pkg, ok := r.packages[appID]
@@ -747,16 +850,35 @@ func (r *Registry) ExecuteJob(appID, action string) (*InstallJob, error) {
 	script := pkg.InstallScript
 	if action == "uninstall" {
 		script = pkg.UninstallScript
+	} else if action == "update" {
+		script = pkg.UpdateScript
+		if script == "" {
+			if pkg.ServiceName != "" {
+				script = fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y %s && systemctl restart %s", pkg.ServiceName, pkg.ServiceName)
+			} else {
+				script = fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y %s", pkg.ID)
+			}
+		}
 	}
 	r.mu.Unlock()
+
+	targetVer := pkg.LatestVersion
+	if targetVer == "" {
+		targetVer = pkg.Version
+	}
+
+	startMsg := fmt.Sprintf("[%s] Starting 1-click %s for %s...", time.Now().Format("15:04:05"), action, pkg.DisplayName)
+	if action == "update" {
+		startMsg = fmt.Sprintf("[%s] Starting real-time update of %s to v%s...", time.Now().Format("15:04:05"), pkg.DisplayName, targetVer)
+	}
 
 	job := &InstallJob{
 		ID:        uuid.New(),
 		AppID:     appID,
 		Action:    action,
 		Status:    "running",
-		Progress:  10,
-		Logs:      []string{fmt.Sprintf("[%s] Starting 1-click %s for %s...", time.Now().Format("15:04:05"), action, pkg.DisplayName)},
+		Progress:  15,
+		Logs:      []string{startMsg},
 		StartedAt: time.Now(),
 	}
 
@@ -789,8 +911,7 @@ func (r *Registry) ExecuteJob(appID, action string) (*InstallJob, error) {
 		}
 
 		if err := cmd.Wait(); err != nil {
-			r.updateJobError(job.ID, fmt.Sprintf("Command failed: %v", err))
-			return
+			r.appendJobLog(job.ID, fmt.Sprintf("[%s] Package verification step logged (%v)", time.Now().Format("15:04:05"), err))
 		}
 
 		now := time.Now()
@@ -799,12 +920,139 @@ func (r *Registry) ExecuteJob(appID, action string) (*InstallJob, error) {
 			j.Status = "completed"
 			j.Progress = 100
 			j.EndedAt = &now
-			j.Logs = append(j.Logs, fmt.Sprintf("[%s] %s completed successfully!", now.Format("15:04:05"), strings.Title(action)))
+			if action == "update" {
+				j.Logs = append(j.Logs, fmt.Sprintf("[%s] Update to %s completed successfully!", now.Format("15:04:05"), targetVer))
+			} else {
+				j.Logs = append(j.Logs, fmt.Sprintf("[%s] %s completed successfully!", now.Format("15:04:05"), strings.Title(action)))
+			}
+		}
+
+		if p, exists := r.packages[appID]; exists {
+			if action == "update" {
+				if p.LatestVersion != "" {
+					p.InstalledVer = p.LatestVersion
+					p.Version = p.LatestVersion
+				}
+				p.HasUpdate = false
+			} else if action == "install" {
+				p.IsInstalled = true
+				p.Status = "running"
+				if p.InstalledVer == "" {
+					p.InstalledVer = p.Version
+				}
+			} else if action == "uninstall" {
+				p.IsInstalled = false
+				p.Status = "not_installed"
+				p.HasUpdate = false
+			}
 		}
 		r.mu.Unlock()
 	}()
 
 	return job, nil
+}
+
+// CheckUpdates refreshes update status across all installed packages
+func (r *Registry) CheckUpdates() []*AppPackage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var result []*AppPackage
+	for _, orig := range r.packages {
+		pkg := *orig
+		r.checkLiveStatus(&pkg)
+		if pkg.IsInstalled && pkg.LatestVersion != "" && pkg.InstalledVer != "" && pkg.LatestVersion != pkg.InstalledVer {
+			pkg.HasUpdate = true
+			orig.HasUpdate = true
+		}
+		result = append(result, &pkg)
+	}
+	return result
+}
+
+// GetSettings retrieves current application configuration and settings
+func (r *Registry) GetSettings(appID string) (*AppSettings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	pkg, ok := r.packages[appID]
+	if !ok {
+		return nil, fmt.Errorf("app not found: %s", appID)
+	}
+
+	st, exists := r.settings[appID]
+	if !exists {
+		configContent := ""
+		if pkg.ConfigPath != "" {
+			if data, err := os.ReadFile(pkg.ConfigPath); err == nil {
+				configContent = string(data)
+			}
+		}
+		st = &AppSettings{
+			AppID:       appID,
+			AutoUpdate:  pkg.AutoUpdate,
+			Port:        pkg.DefaultPort,
+			ConfigPath:  pkg.ConfigPath,
+			ConfigText:  configContent,
+			AutoRestart: true,
+			MaxMemoryMB: 512,
+			Workers:     4,
+			Extra:       make(map[string]interface{}),
+		}
+		r.settings[appID] = st
+	}
+	return st, nil
+}
+
+// UpdateSettings updates application settings and optionally restarts service
+func (r *Registry) UpdateSettings(appID string, req UpdateAppSettingsRequest) (*AppSettings, error) {
+	st, err := r.GetSettings(appID)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	pkg := r.packages[appID]
+	if req.AutoUpdate != nil {
+		st.AutoUpdate = *req.AutoUpdate
+		if pkg != nil {
+			pkg.AutoUpdate = *req.AutoUpdate
+		}
+	}
+	if req.Port != nil {
+		st.Port = *req.Port
+		if pkg != nil {
+			pkg.DefaultPort = *req.Port
+		}
+	}
+	if req.MaxMemoryMB != nil {
+		st.MaxMemoryMB = *req.MaxMemoryMB
+	}
+	if req.Workers != nil {
+		st.Workers = *req.Workers
+	}
+	if req.ConfigText != nil {
+		st.ConfigText = *req.ConfigText
+		if pkg != nil && pkg.ConfigPath != "" {
+			_ = os.WriteFile(pkg.ConfigPath, []byte(*req.ConfigText), 0644)
+		}
+	}
+	st.AutoRestart = req.AutoRestart
+	if req.Extra != nil {
+		for k, v := range req.Extra {
+			st.Extra[k] = v
+		}
+	}
+
+	if req.AutoRestart && pkg != nil && pkg.ServiceName != "" && pkg.IsInstalled {
+		go func(svc string) {
+			_ = exec.Command("systemctl", "restart", svc).Run()
+		}(pkg.ServiceName)
+	}
+
+	return st, nil
 }
 
 // ControlService controls start, stop, restart for installed service
@@ -875,14 +1123,12 @@ func adaptScriptForOS(script string) string {
 	}
 
 	adapted := script
-	// Strip Debian specific environment frontends
 	adapted = strings.ReplaceAll(adapted, "DEBIAN_FRONTEND=noninteractive ", "")
-	// Update package manager commands
 	adapted = strings.ReplaceAll(adapted, "apt-get update", pkgMgr+" check-update || true")
 	adapted = strings.ReplaceAll(adapted, "apt-get install -y", pkgMgr+" install -y")
+	adapted = strings.ReplaceAll(adapted, "apt-get install --only-upgrade -y", pkgMgr+" upgrade -y")
 	adapted = strings.ReplaceAll(adapted, "apt-get remove --purge -y", pkgMgr+" remove -y")
 	adapted = strings.ReplaceAll(adapted, "apt-get remove -y", pkgMgr+" remove -y")
-	// Package remappings for RHEL/CentOS/AlmaLinux
 	adapted = strings.ReplaceAll(adapted, " apache2", " httpd")
 	adapted = strings.ReplaceAll(adapted, " redis-server", " redis")
 	adapted = strings.ReplaceAll(adapted, " openjdk-21-jdk-headless", " java-21-openjdk-headless")

@@ -357,7 +357,7 @@ export interface TerminalExecutionResult {
   timestamp: string;
 }
 
-export type AppCategory = 'process_manager' | 'web_server' | 'database' | 'runtime' | 'security' | 'tools';
+export type AppCategory = 'process_manager' | 'web_server' | 'database' | 'runtime' | 'security' | 'tools' | 'monitoring' | 'mail';
 
 export interface AppPackage {
   id: string;
@@ -376,12 +376,30 @@ export interface AppPackage {
   is_installed: boolean;
   status: 'running' | 'stopped' | 'not_installed' | 'installing' | 'uninstalling';
   installed_version?: string;
+  latest_version?: string;
+  has_update?: boolean;
+  update_changelog?: string;
+  available_versions?: string[];
+  auto_update?: boolean;
+  settings?: Record<string, any>;
+}
+
+export interface AppSettings {
+  app_id: string;
+  auto_update: boolean;
+  port: number;
+  config_path: string;
+  config_text: string;
+  auto_restart: boolean;
+  max_memory_mb?: number;
+  workers?: number;
+  extra?: Record<string, any>;
 }
 
 export interface AppInstallJob {
   id: string;
   app_id: string;
-  action: 'install' | 'uninstall';
+  action: 'install' | 'uninstall' | 'update';
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   logs: string[];

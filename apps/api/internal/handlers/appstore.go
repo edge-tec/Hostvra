@@ -121,7 +121,63 @@ func (h *AppStoreHandler) ControlService(w http.ResponseWriter, r *http.Request)
 	response.JSON(w, http.StatusOK, pkg, nil)
 }
 
-// GetJob returns execution progress and logs of an installation/uninstallation
+// UpdateApp triggers 1-click background software update
+func (h *AppStoreHandler) UpdateApp(w http.ResponseWriter, r *http.Request) {
+	appID := chi.URLParam(r, "id")
+	job, err := h.registry.ExecuteJob(appID, "update")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "appstore.update", "app", appID, "initiated", "", map[string]interface{}{
+		"job_id": job.ID,
+		"app_id": appID,
+	})
+
+	response.JSON(w, http.StatusAccepted, job, nil)
+}
+
+// CheckUpdates checks available updates for all software packages
+func (h *AppStoreHandler) CheckUpdates(w http.ResponseWriter, r *http.Request) {
+	updatedPkgs := h.registry.CheckUpdates()
+	response.JSON(w, http.StatusOK, updatedPkgs, nil)
+}
+
+// GetAppSettings returns configuration and operational settings for an app
+func (h *AppStoreHandler) GetAppSettings(w http.ResponseWriter, r *http.Request) {
+	appID := chi.URLParam(r, "id")
+	settings, err := h.registry.GetSettings(appID)
+	if err != nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, settings, nil)
+}
+
+// UpdateAppSettings modifies configuration, port, auto-update, or performance settings
+func (h *AppStoreHandler) UpdateAppSettings(w http.ResponseWriter, r *http.Request) {
+	appID := chi.URLParam(r, "id")
+	var req appstore.UpdateAppSettingsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid request body", nil, "")
+		return
+	}
+
+	settings, err := h.registry.UpdateSettings(appID, req)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "SETTINGS_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "appstore.settings_update", "app", appID, "success", "", map[string]interface{}{
+		"app_id": appID,
+	})
+
+	response.JSON(w, http.StatusOK, settings, nil)
+}
+
+// GetJob returns execution progress and logs of an installation/uninstallation/update
 func (h *AppStoreHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	jobIDStr := chi.URLParam(r, "jobID")
 	jobID, err := uuid.Parse(jobIDStr)
