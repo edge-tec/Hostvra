@@ -76,8 +76,8 @@ func NewDebianPackageManager() *DebianPackageManager {
 }
 
 func (d *DebianPackageManager) DetectAvailablePHPVersions(ctx context.Context) ([]string, error) {
-	// Standard candidate versions
-	candidates := []string{"8.1", "8.2", "8.3", "8.4"}
+	// Standard candidate versions covering all major production PHP releases
+	candidates := []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}
 	available := make([]string, 0)
 
 	// Check with apt-cache search if possible
@@ -101,7 +101,7 @@ func (d *DebianPackageManager) DetectAvailablePHPVersions(ctx context.Context) (
 }
 
 func (d *DebianPackageManager) DetectInstalledPHPVersions(ctx context.Context) ([]PHPVersionInfo, error) {
-	candidates := []string{"8.1", "8.2", "8.3", "8.4"}
+	candidates := []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}
 	var results []PHPVersionInfo
 
 	// Determine default CLI version
@@ -347,11 +347,11 @@ func NewRhelPackageManager() *RhelPackageManager {
 }
 
 func (r *RhelPackageManager) DetectAvailablePHPVersions(ctx context.Context) ([]string, error) {
-	return []string{"8.1", "8.2", "8.3", "8.4"}, nil
+	return []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}, nil
 }
 
 func (r *RhelPackageManager) DetectInstalledPHPVersions(ctx context.Context) ([]PHPVersionInfo, error) {
-	candidates := []string{"8.1", "8.2", "8.3", "8.4"}
+	candidates := []string{"7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"}
 	var results []PHPVersionInfo
 
 	defaultCliVersion := ""

@@ -532,6 +532,42 @@ func (r *Registry) registerDefaults() {
 			UninstallScript: "systemctl stop php8.1-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.1* || apt-get remove --purge -y php8.1-fpm php8.1-cli",
 		},
 		{
+			ID:             "php80",
+			Name:           "PHP 8.0 & FPM",
+			DisplayName:    "PHP 8.0 FastCGI Process Manager",
+			Version:        "8.0.x",
+			Category:       CategoryRuntime,
+			Description:    "Stable PHP 8.0 FastCGI runtime with JIT compiler support for legacy CMS platforms.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.0-fpm",
+			BinaryPath:     "/usr/bin/php8.0",
+			ConfigPath:     "/etc/php/8.0/fpm/php.ini",
+			LatestVersion:   "8.0.30",
+			UpdateScript:   "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y php8.0* && systemctl restart php8.0-fpm",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common && add-apt-repository -y ppa:ondrej/php && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.0-fpm php8.0-cli php8.0-common php8.0-mysql php8.0-pgsql php8.0-sqlite3 php8.0-redis php8.0-mbstring php8.0-xml php8.0-curl php8.0-zip php8.0-gd php8.0-bcmath php8.0-intl && systemctl enable php8.0-fpm && systemctl start php8.0-fpm",
+			UninstallScript: "systemctl stop php8.0-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.0* || apt-get remove --purge -y php8.0-fpm php8.0-cli",
+		},
+		{
+			ID:             "php74",
+			Name:           "PHP 7.4 & FPM",
+			DisplayName:    "PHP 7.4 FastCGI Process Manager",
+			Version:        "7.4.x",
+			Category:       CategoryRuntime,
+			Description:    "Legacy PHP 7.4 runtime for classic PHP applications and older WordPress themes.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php7.4-fpm",
+			BinaryPath:     "/usr/bin/php7.4",
+			ConfigPath:     "/etc/php/7.4/fpm/php.ini",
+			LatestVersion:   "7.4.33",
+			UpdateScript:   "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y php7.4* && systemctl restart php7.4-fpm",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common && add-apt-repository -y ppa:ondrej/php && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php7.4-fpm php7.4-cli php7.4-common php7.4-mysql php7.4-pgsql php7.4-sqlite3 php7.4-redis php7.4-mbstring php7.4-xml php7.4-curl php7.4-zip php7.4-gd php7.4-bcmath php7.4-intl && systemctl enable php7.4-fpm && systemctl start php7.4-fpm",
+			UninstallScript: "systemctl stop php7.4-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php7.4* || apt-get remove --purge -y php7.4-fpm php7.4-cli",
+		},
+		{
 			ID:             "composer",
 			Name:           "Composer 2.x",
 			DisplayName:    "Composer PHP Package Manager",
@@ -815,6 +851,10 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 			cmdName = "php8.2"
 		case "php81":
 			cmdName = "php8.1"
+		case "php80":
+			cmdName = "php8.0"
+		case "php74":
+			cmdName = "php7.4"
 		case "golang":
 			cmdName = "go"
 		case "java":
@@ -833,6 +873,33 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 			cmdName = "prometheus-node-exporter"
 		}
 		if path, err := exec.LookPath(cmdName); err == nil && path != "" {
+			isInstalled = true
+		} else if strings.HasPrefix(pkg.ID, "php") {
+			// Check if system php CLI matches this major.minor version
+			if out, err := exec.Command("php", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;").Output(); err == nil {
+				v := strings.TrimSpace(string(out))
+				verPrefix := strings.TrimPrefix(pkg.ID, "php") // e.g. "85" -> "8.5"
+				if len(verPrefix) == 2 && fmt.Sprintf("%c.%c", verPrefix[0], verPrefix[1]) == v {
+					isInstalled = true
+				}
+			}
+			// Check if FPM socket exists
+			if pkg.ServiceName != "" {
+				sockPath := fmt.Sprintf("/run/php/%s.sock", pkg.ServiceName)
+				if _, err := os.Stat(sockPath); err == nil {
+					isInstalled = true
+				}
+			}
+		}
+	}
+
+	// 2. Check service status if it has a systemd service
+	if pkg.ServiceName != "" {
+		cmd := exec.Command("systemctl", "is-active", pkg.ServiceName)
+		out, err := cmd.Output()
+		statusStr := strings.TrimSpace(string(out))
+		if err == nil && (statusStr == "active" || statusStr == "activating") {
+			pkg.Status = "running"
 			isInstalled = true
 		}
 	}
@@ -860,21 +927,22 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 		pkg.HasUpdate = true
 	}
 
-	// 2. Check service status if it has a systemd service
-	if pkg.ServiceName != "" {
-		cmd := exec.Command("systemctl", "is-active", pkg.ServiceName)
-		out, err := cmd.Output()
-		statusStr := strings.TrimSpace(string(out))
-		if err == nil && (statusStr == "active" || statusStr == "activating") {
-			pkg.Status = "running"
-		} else if orig, exists := r.packages[pkg.ID]; exists && orig.Status == "running" {
-			pkg.Status = "running"
+	// Final status check if service status was not set
+	if pkg.Status == "" || pkg.Status == "not_installed" {
+		if pkg.ServiceName != "" {
+			cmd := exec.Command("systemctl", "is-active", pkg.ServiceName)
+			out, err := cmd.Output()
+			statusStr := strings.TrimSpace(string(out))
+			if err == nil && (statusStr == "active" || statusStr == "activating") {
+				pkg.Status = "running"
+			} else if orig, exists := r.packages[pkg.ID]; exists && orig.Status == "running" {
+				pkg.Status = "running"
+			} else {
+				pkg.Status = "stopped"
+			}
 		} else {
-			pkg.Status = "stopped"
+			pkg.Status = "running"
 		}
-	} else {
-		// For tools without dedicated persistent daemon (e.g. node, python)
-		pkg.Status = "running"
 	}
 }
 
