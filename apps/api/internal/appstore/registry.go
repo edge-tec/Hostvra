@@ -448,6 +448,42 @@ func (r *Registry) registerDefaults() {
 
 		// PHP Runtimes & Tooling (WordPress, Laravel, CMS)
 		{
+			ID:             "php85",
+			Name:           "PHP 8.5 & FPM",
+			DisplayName:    "PHP 8.5 FastCGI Process Manager",
+			Version:        "8.5.x",
+			Category:       CategoryRuntime,
+			Description:    "Cutting-edge PHP 8.5 FastCGI runtime with Zend engine optimizations for modern high-load CMS platforms.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.5-fpm",
+			BinaryPath:     "/usr/bin/php8.5",
+			ConfigPath:     "/etc/php/8.5/fpm/php.ini",
+			LatestVersion:   "8.5.4",
+			UpdateScript:   "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y php8.5* php* && systemctl restart php8.5-fpm",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.5 php8.5-fpm php8.5-cli php8.5-common php8.5-mysql php8.5-curl php8.5-gd php8.5-mbstring php8.5-xml php8.5-zip php8.5-bcmath php8.5-intl && systemctl enable php8.5-fpm && systemctl start php8.5-fpm",
+			UninstallScript: "systemctl stop php8.5-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.5* || apt-get remove --purge -y php8.5-fpm php8.5-cli",
+		},
+		{
+			ID:             "php84",
+			Name:           "PHP 8.4 & FPM",
+			DisplayName:    "PHP 8.4 FastCGI Process Manager",
+			Version:        "8.4.x",
+			Category:       CategoryRuntime,
+			Description:    "High-speed PHP 8.4 FastCGI runtime with property hooks and asymmetric visibility support.",
+			Developer:      "official",
+			Price:          "Free",
+			Icon:           "code",
+			ServiceName:    "php8.4-fpm",
+			BinaryPath:     "/usr/bin/php8.4",
+			ConfigPath:     "/etc/php/8.4/fpm/php.ini",
+			LatestVersion:   "8.4.2",
+			UpdateScript:   "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --only-upgrade -y php8.4* && systemctl restart php8.4-fpm",
+			InstallScript:  "DEBIAN_FRONTEND=noninteractive apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y php8.4 php8.4-fpm php8.4-cli php8.4-common php8.4-mysql php8.4-curl php8.4-gd php8.4-mbstring php8.4-xml php8.4-zip php8.4-bcmath php8.4-intl && systemctl enable php8.4-fpm && systemctl start php8.4-fpm",
+			UninstallScript: "systemctl stop php8.4-fpm && DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y php8.4* || apt-get remove --purge -y php8.4-fpm php8.4-cli",
+		},
+		{
 			ID:             "php83",
 			Name:           "PHP 8.3 & FPM",
 			DisplayName:    "PHP 8.3 FastCGI Process Manager",
@@ -769,6 +805,10 @@ func (r *Registry) checkLiveStatus(pkg *AppPackage) {
 			cmdName = "node"
 		case "python-tools":
 			cmdName = "python3"
+		case "php85":
+			cmdName = "php8.5"
+		case "php84":
+			cmdName = "php8.4"
 		case "php83":
 			cmdName = "php8.3"
 		case "php82":
