@@ -631,6 +631,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}", websiteHandler.Get)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesManage)).Post("/{id}/status", websiteHandler.UpdateStatus)
 				r.With(rbac.RequirePermission(rbac.PermWebsitesDelete)).Delete("/{id}", websiteHandler.Delete)
+				r.With(rbac.RequirePermission(rbac.PermSSLView)).Get("/{id}/ssl", websiteHandler.GetSSL)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl", websiteHandler.IssueSSL)
 
 				// Realtime Conf, Logs, Backup, WAF, Batch, Statistics

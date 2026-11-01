@@ -23,6 +23,7 @@ import (
 	"hostvra/agent/pkg/files"
 	"hostvra/agent/pkg/isolation"
 	"hostvra/agent/pkg/security"
+	"hostvra/agent/pkg/ssl"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
@@ -955,6 +956,177 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 	})
 
 	response.JSON(w, http.StatusOK, cert, nil)
+}
+
+// GetSSL returns detailed active SSL certificate status, issuer, expiration, and PEM files for a website
+func (h *WebsiteHandler) GetSSL(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	cleanDomain := strings.ToLower(strings.TrimSpace(site.PrimaryDomain))
+
+	// 1. Check database for certificate record
+	cert, _ := h.store.GetSSLByWebsiteID(r.Context(), siteID)
+	if cert == nil {
+		if allCerts, cErr := h.store.ListSSLCertificates(r.Context(), site.OrganizationID); cErr == nil {
+			for _, c := range allCerts {
+				if c != nil {
+					for _, d := range c.DomainList {
+						if strings.EqualFold(d, cleanDomain) {
+							cert = c
+							break
+						}
+					}
+					if cert != nil {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Discover certificate files on disk
+	certPath := ""
+	keyPath := ""
+	if cert != nil {
+		certPath = cert.CertPath
+		keyPath = cert.KeyPath
+	}
+
+	candidates := []struct {
+		cert string
+		key  string
+	}{
+		{
+			cert: fmt.Sprintf("/etc/letsencrypt/live/%s/fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/letsencrypt/live/%s/privkey.pem", cleanDomain),
+		},
+		{
+			cert: fmt.Sprintf("/etc/ssl/hostvra/%s/fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/hostvra/%s/privkey.pem", cleanDomain),
+		},
+		{
+			cert: fmt.Sprintf("/etc/ssl/certs/%s.crt", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/private/%s.key", cleanDomain),
+		},
+		{
+			cert: fmt.Sprintf("/etc/ssl/hostvra/%s/origin-fullchain.pem", cleanDomain),
+			key:  fmt.Sprintf("/etc/ssl/hostvra/%s/origin-privkey.pem", cleanDomain),
+		},
+	}
+
+	if certPath == "" || !fileExists(certPath) {
+		for _, cand := range candidates {
+			if fileExists(cand.cert) {
+				certPath = cand.cert
+				if fileExists(cand.key) {
+					keyPath = cand.key
+				}
+				break
+			}
+		}
+	}
+
+	var certPEM, keyPEM string
+	var certInfo *ssl.CertInfo
+
+	if certPath != "" && fileExists(certPath) {
+		if data, rErr := os.ReadFile(certPath); rErr == nil && len(data) > 0 {
+			certPEM = string(data)
+			mgr := ssl.NewSSLManager()
+			if parsed, pErr := mgr.ParseCertificatePEM(data); pErr == nil {
+				certInfo = parsed
+			}
+		}
+	}
+
+	if keyPath != "" && fileExists(keyPath) {
+		if data, rErr := os.ReadFile(keyPath); rErr == nil {
+			keyPEM = string(data)
+		}
+	}
+
+	installed := certPEM != "" || cert != nil
+	daysRemaining := 0
+	issuer := "Unknown"
+	status := "not_installed"
+	var validFrom, validTo *time.Time
+	var sans []string
+	isWildcard := false
+
+	if certInfo != nil {
+		installed = true
+		issuer = certInfo.Issuer
+		validFrom = &certInfo.ValidFrom
+		validTo = &certInfo.ValidTo
+		daysRemaining = certInfo.DaysRemaining
+		sans = certInfo.SANs
+		isWildcard = certInfo.IsWildcard
+		status = certInfo.Status
+	} else if cert != nil {
+		installed = true
+		issuer = cert.Issuer
+		validFrom = &cert.IssuedAt
+		validTo = &cert.ExpiresAt
+		daysRemaining = cert.DaysRemaining
+		if daysRemaining == 0 && !cert.ExpiresAt.IsZero() {
+			daysRemaining = int(time.Until(cert.ExpiresAt).Hours() / 24)
+		}
+		sans = cert.DomainList
+		isWildcard = cert.IsWildcard
+		status = cert.Status
+	}
+
+	if installed {
+		if status == "" || status == "not_installed" {
+			if daysRemaining <= 0 {
+				status = "expired"
+			} else if daysRemaining <= 30 {
+				status = "expiring_soon"
+			} else {
+				status = "valid"
+			}
+		}
+	}
+
+	result := map[string]interface{}{
+		"installed":      installed,
+		"ssl_enabled":    site.SSLEnabled,
+		"domain":         cleanDomain,
+		"issuer":         issuer,
+		"days_remaining": daysRemaining,
+		"status":         status,
+		"is_wildcard":    isWildcard,
+		"sans":           sans,
+		"cert_path":      certPath,
+		"key_path":       keyPath,
+		"cert_pem":       certPEM,
+		"key_pem":        keyPEM,
+		"valid_from":     validFrom,
+		"valid_to":       validTo,
+		"auto_renew":     cert != nil && cert.AutoRenew,
+	}
+
+	response.JSON(w, http.StatusOK, result, nil)
+}
+
+func fileExists(p string) bool {
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // GetIsolation returns user isolation metadata, PHP socket, and live cgroups v2 telemetry.

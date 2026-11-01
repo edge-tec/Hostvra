@@ -554,3 +554,115 @@ func TestWebsiteHandler_DeleteWebsite_DoesNotReappearInList(t *testing.T) {
 	}
 }
 
+func TestWebsiteHandler_GetSSL(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+
+	h := NewWebsiteHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	_ = s.CreateOrganization(context.Background(), &store.Organization{
+		ID:   orgID,
+		Name: "Test Org",
+		Slug: "test-org",
+	})
+
+	serverID := uuid.New()
+	_ = s.CreateServer(context.Background(), &store.Server{
+		ID:             serverID,
+		OrganizationID: orgID,
+		Name:           "srv-01",
+	})
+
+	site := &store.Website{
+		ID:             uuid.New(),
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		PrimaryDomain:  "example-ssl.com",
+		AppType:        "php",
+		DocumentRoot:   filepath.Join(tempDir, "www", "example-ssl.com", "public_html"),
+		SSLEnabled:     true,
+	}
+	_ = s.CreateWebsite(context.Background(), site)
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := auth.WithClaims(req.Context(), &auth.Claims{
+				UserID:         uuid.New(),
+				OrganizationID: orgID,
+				Role:           "admin",
+			})
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Get("/api/v1/websites/{id}/ssl", h.GetSSL)
+
+	// 1. Initial check: No cert installed yet
+	req1 := httptest.NewRequest("GET", "/api/v1/websites/"+site.ID.String()+"/ssl", nil)
+	rec1 := httptest.NewRecorder()
+	r.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec1.Code, rec1.Body.String())
+	}
+	var res1 struct {
+		Data struct {
+			Installed bool   `json:"installed"`
+			Domain    string `json:"domain"`
+			Status    string `json:"status"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(rec1.Body).Decode(&res1)
+	if res1.Data.Domain != "example-ssl.com" {
+		t.Fatalf("expected domain example-ssl.com, got %s", res1.Data.Domain)
+	}
+
+	// 2. Add certificate record to store
+	_ = s.CreateOrUpdateSSL(context.Background(), &store.SSLCertificate{
+		ID:            uuid.New(),
+		WebsiteID:     site.ID,
+		DomainList:    []string{"example-ssl.com", "www.example-ssl.com"},
+		Issuer:        "Let's Encrypt Authority X3",
+		Status:        "valid",
+		DaysRemaining: 88,
+		AutoRenew:     true,
+	})
+
+	req2 := httptest.NewRequest("GET", "/api/v1/websites/"+site.ID.String()+"/ssl", nil)
+	rec2 := httptest.NewRecorder()
+	r.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var res2 struct {
+		Data struct {
+			Installed     bool     `json:"installed"`
+			Domain        string   `json:"domain"`
+			Issuer        string   `json:"issuer"`
+			DaysRemaining int      `json:"days_remaining"`
+			Status        string   `json:"status"`
+			SANs          []string `json:"sans"`
+			AutoRenew     bool     `json:"auto_renew"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(rec2.Body).Decode(&res2)
+	if !res2.Data.Installed {
+		t.Fatalf("expected installed to be true")
+	}
+	if res2.Data.Issuer != "Let's Encrypt Authority X3" {
+		t.Fatalf("expected issuer Let's Encrypt Authority X3, got %s", res2.Data.Issuer)
+	}
+	if res2.Data.DaysRemaining != 88 {
+		t.Fatalf("expected 88 days remaining, got %d", res2.Data.DaysRemaining)
+	}
+	if len(res2.Data.SANs) != 2 {
+		t.Fatalf("expected 2 SANs, got %d", len(res2.Data.SANs))
+	}
+}
+
+

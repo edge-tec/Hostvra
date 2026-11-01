@@ -409,6 +409,52 @@ server {
   const [customKey, setCustomKey] = useState('');
   const [isIssuingSsl, setIsIssuingSsl] = useState(false);
   const [isDeployingCustomCert, setIsDeployingCustomCert] = useState(false);
+  const [sslDetails, setSslDetails] = useState<{
+    installed: boolean;
+    ssl_enabled: boolean;
+    domain: string;
+    issuer: string;
+    days_remaining: number;
+    status: string;
+    is_wildcard: boolean;
+    sans?: string[];
+    cert_path?: string;
+    key_path?: string;
+    cert_pem?: string;
+    key_pem?: string;
+    valid_from?: string;
+    valid_to?: string;
+    auto_renew?: boolean;
+  } | null>(null);
+  const [loadingSslDetails, setLoadingSslDetails] = useState(false);
+  const [copiedCert, setCopiedCert] = useState(false);
+
+  const fetchSslDetails = useCallback(async () => {
+    if (!website?.id) return;
+    setLoadingSslDetails(true);
+    try {
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/ssl`);
+      if (res.success && res.data) {
+        setSslDetails(res.data);
+        if (res.data.cert_pem) {
+          setCustomCert(res.data.cert_pem);
+        }
+        if (res.data.key_pem) {
+          setCustomKey(res.data.key_pem);
+        }
+      }
+    } catch {
+      // Graceful fallback
+    } finally {
+      setLoadingSslDetails(false);
+    }
+  }, [website?.id]);
+
+  useEffect(() => {
+    if (activeTab === 'ssl' && website?.id) {
+      fetchSslDetails();
+    }
+  }, [activeTab, website?.id, fetchSslDetails]);
 
   const handleApplyLetsEncrypt = async () => {
     if (!website) return;
@@ -423,6 +469,7 @@ server {
           onUpdateWebsite({ ssl_enabled: true, ssl_days_left: 90 });
         }
         showToast(`Let's Encrypt 90-day multi-domain certificate successfully issued and installed!`);
+        await fetchSslDetails();
       } else {
         showToast(res.error?.message || 'SSL issuance failed', true);
       }
@@ -458,6 +505,7 @@ server {
           onUpdateWebsite({ ssl_enabled: true });
         }
         showToast(`Custom certificate deployed and active for '${website.primary_domain}'!`);
+        await fetchSslDetails();
       } else {
         showToast(res.error?.message || 'Failed to deploy custom certificate', true);
       }
@@ -1416,6 +1464,140 @@ server {
             {/* 7. SSL */}
             {activeTab === 'ssl' && (
               <div className="space-y-5 text-xs">
+                {/* Active SSL Certificate Status Card */}
+                {loadingSslDetails ? (
+                  <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center justify-center gap-2 py-6 text-slate-500">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                    <span>Checking SSL certificate status for {website?.primary_domain}...</span>
+                  </div>
+                ) : sslDetails && sslDetails.installed ? (
+                  <div className="bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-slate-900 dark:text-white">{sslDetails.domain}</span>
+                            {sslDetails.is_wildcard && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-medium">
+                                Wildcard (*.{sslDetails.domain})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            HTTPS Security Status &amp; SSL Certificate Details
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {sslDetails.status === 'valid' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                            <span>Valid &amp; Active</span>
+                          </span>
+                        ) : sslDetails.status === 'expiring_soon' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>Expiring Soon ({sslDetails.days_remaining}d)</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300 border border-red-300 dark:border-red-700">
+                            <AlertOctagon className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                            <span>Expired</span>
+                          </span>
+                        )}
+
+                        <button
+                          onClick={fetchSslDetails}
+                          disabled={loadingSslDetails}
+                          title="Refresh certificate metadata"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${loadingSslDetails ? 'animate-spin' : ''}`} />
+                          <span>Refresh</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                      <div className="p-2.5 rounded bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/80">
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Issuer / CA</div>
+                        <div className="font-semibold text-slate-900 dark:text-slate-100 truncate mt-0.5" title={sslDetails.issuer}>
+                          {sslDetails.issuer || 'Unknown CA'}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/80">
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Validity / Expiry</div>
+                        <div className="font-semibold text-slate-900 dark:text-slate-100 mt-0.5">
+                          {sslDetails.days_remaining > 0 ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-bold">{sslDetails.days_remaining} days left</span>
+                          ) : (
+                            <span className="text-red-600 dark:text-red-400 font-bold">Expired</span>
+                          )}
+                        </div>
+                        {sslDetails.valid_to && (
+                          <div className="text-[10px] text-slate-500 truncate">
+                            Until {new Date(sslDetails.valid_to).toLocaleDateString()}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-2.5 rounded bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/80">
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Renewal Policy</div>
+                        <div className="font-semibold text-slate-900 dark:text-slate-100 mt-0.5">
+                          {sslDetails.auto_renew ? (
+                            <span className="text-emerald-600 dark:text-emerald-400">Auto-Renewal Active</span>
+                          ) : (
+                            <span className="text-slate-600 dark:text-slate-400">Manual Custom Cert</span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500">Every 60-90 days</div>
+                      </div>
+
+                      <div className="p-2.5 rounded bg-white dark:bg-[#0F172A] border border-slate-200 dark:border-slate-800/80">
+                        <div className="text-[10px] text-slate-500 uppercase font-semibold">Covered SANs</div>
+                        <div className="font-mono text-[11px] text-slate-900 dark:text-slate-100 truncate mt-0.5" title={(sslDetails.sans || [sslDetails.domain]).join(', ')}>
+                          {sslDetails.sans && sslDetails.sans.length > 0 ? sslDetails.sans.join(', ') : sslDetails.domain}
+                        </div>
+                        <div className="text-[10px] text-slate-500">{sslDetails.sans?.length || 1} domains protected</div>
+                      </div>
+                    </div>
+
+                    {sslDetails.cert_path && (
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono bg-white dark:bg-[#0F172A] px-2.5 py-1.5 rounded border border-slate-200 dark:border-slate-800/80 flex items-center justify-between">
+                        <span className="truncate">Installed at: {sslDetails.cert_path}</span>
+                        {sslDetails.cert_pem && (
+                          <button
+                            onClick={() => {
+                              if (sslDetails.cert_pem) {
+                                navigator.clipboard.writeText(sslDetails.cert_pem);
+                                setCopiedCert(true);
+                                setTimeout(() => setCopiedCert(false), 2000);
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 ml-2 shrink-0 cursor-pointer"
+                          >
+                            {copiedCert ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedCert ? 'Copied' : 'Copy Cert PEM'}</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/60 rounded-lg p-3.5 flex items-start gap-3">
+                    <Shield className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-semibold text-amber-900 dark:text-amber-200">No Active SSL Certificate Found</div>
+                      <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                        HTTPS is not securely configured for <span className="font-mono font-bold">{website?.primary_domain}</span>. Issue a free 1-click Let's Encrypt certificate or paste your custom SSL certificate below.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Toggles */}
                 <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
                   <div className="flex items-center justify-between">
@@ -1505,24 +1687,75 @@ server {
                   </div>
                 ) : (
                   <div className="space-y-4 bg-slate-50 dark:bg-[#131B2E] p-4 rounded-lg border border-slate-200 dark:border-slate-800">
+                    {customCert.trim() && (
+                      <div className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 text-[11px] font-medium">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>Active certificate &amp; private key loaded from server.</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(customCert);
+                              setCopiedCert(true);
+                              setTimeout(() => setCopiedCert(false), 2000);
+                            }}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-emerald-900/30 hover:bg-emerald-100 text-emerald-800 dark:text-emerald-200 transition cursor-pointer"
+                          >
+                            {copiedCert ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedCert ? 'Copied' : 'Copy CRT'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomCert('');
+                              setCustomKey('');
+                            }}
+                            className="text-slate-500 hover:text-red-600 text-[10px] underline cursor-pointer"
+                          >
+                            Clear Form
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Certificate (CRT / PEM / Fullchain)</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-700 dark:text-slate-300 font-medium">
+                          Certificate (CRT / PEM / Fullchain)
+                        </label>
+                        {customCert && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {customCert.length} characters
+                          </span>
+                        )}
+                      </div>
                       <textarea
-                        rows={5}
+                        rows={6}
                         placeholder="-----BEGIN CERTIFICATE-----..."
                         value={customCert}
                         onChange={(e) => setCustomCert(e.target.value)}
-                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs"
+                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-700 dark:text-slate-300 font-medium mb-1">Private Key (KEY)</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-slate-700 dark:text-slate-300 font-medium">
+                          Private Key (KEY)
+                        </label>
+                        {customKey && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {customKey.length} characters
+                          </span>
+                        )}
+                      </div>
                       <textarea
-                        rows={4}
+                        rows={5}
                         placeholder="-----BEGIN RSA PRIVATE KEY-----..."
                         value={customKey}
                         onChange={(e) => setCustomKey(e.target.value)}
-                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs"
+                        className="w-full p-2.5 rounded-lg bg-white dark:bg-[#0F172A] border border-slate-300 dark:border-slate-700 font-mono text-slate-900 dark:text-slate-100 text-xs focus:ring-1 focus:ring-emerald-500"
                       />
                     </div>
                     <button
@@ -1536,7 +1769,7 @@ server {
                           <span>Deploying Certificate...</span>
                         </>
                       ) : (
-                        <span>Save & Deploy Certificate</span>
+                        <span>Save &amp; Deploy Certificate</span>
                       )}
                     </button>
                   </div>
