@@ -456,3 +456,101 @@ func TestWebsiteHandler_AccountIsolationAndEnrichment(t *testing.T) {
 	}
 }
 
+func TestWebsiteHandler_DeleteWebsite_DoesNotReappearInList(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+	t.Setenv("HOSTVRA_PHP_CONFIG_DIR", filepath.Join(tempDir, "php"))
+	t.Setenv("HOSTVRA_SYSTEMD_DIR", filepath.Join(tempDir, "systemd"))
+
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	h := NewWebsiteHandler(cfg, s, auditLogger)
+
+	orgID := uuid.New()
+	_ = s.CreateOrganization(context.Background(), &store.Organization{
+		ID:   orgID,
+		Name: "Test Org",
+		Slug: "test-org",
+	})
+
+	serverID := uuid.New()
+	_ = s.CreateServer(context.Background(), &store.Server{
+		ID:             serverID,
+		OrganizationID: orgID,
+		Name:           "srv-01",
+		Hostname:       "srv01.hostvra.io",
+		IPAddress:      "127.0.0.1",
+		AgentVersion:   "1.0.0",
+		Status:         "online",
+	})
+
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         uuid.New(),
+				OrganizationID: orgID,
+				Role:           "superadmin",
+				IsSuperAdmin:   true,
+			}
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Get("/api/v1/websites", h.List)
+	r.Post("/api/v1/websites", h.Create)
+	r.Delete("/api/v1/websites/{id}", h.Delete)
+
+	// 1. Create a website
+	createPayload := []byte(`{"primary_domain":"test-deleted-domain.com","app_type":"php"}`)
+	reqCreate := httptest.NewRequest("POST", "/api/v1/websites", bytes.NewReader(createPayload))
+	reqCreate.Header.Set("Content-Type", "application/json")
+	recCreate := httptest.NewRecorder()
+	r.ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("failed to create site: code=%d body=%s", recCreate.Code, recCreate.Body.String())
+	}
+
+	var created struct {
+		Data *store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recCreate.Body).Decode(&created)
+	siteID := created.Data.ID
+
+	// 2. Verify it is returned in List
+	reqList1 := httptest.NewRequest("GET", "/api/v1/websites", nil)
+	recList1 := httptest.NewRecorder()
+	r.ServeHTTP(recList1, reqList1)
+	var listResp1 struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recList1.Body).Decode(&listResp1)
+	if len(listResp1.Data) != 1 || listResp1.Data[0].PrimaryDomain != "test-deleted-domain.com" {
+		t.Fatalf("expected 1 site in list, got %d", len(listResp1.Data))
+	}
+
+	// 3. Delete the website
+	delPayload := []byte(`{"delete_files":true,"permanent_wipe":false,"delete_database":false,"delete_dns":true,"delete_ftp":true}`)
+	reqDel := httptest.NewRequest("DELETE", "/api/v1/websites/"+siteID.String(), bytes.NewReader(delPayload))
+	reqDel.Header.Set("Content-Type", "application/json")
+	recDel := httptest.NewRecorder()
+	r.ServeHTTP(recDel, reqDel)
+	if recDel.Code != http.StatusOK {
+		t.Fatalf("delete failed: code=%d body=%s", recDel.Code, recDel.Body.String())
+	}
+
+	// 4. Verify List immediately returns 0 websites and does NOT resurrect it
+	reqList2 := httptest.NewRequest("GET", "/api/v1/websites", nil)
+	recList2 := httptest.NewRecorder()
+	r.ServeHTTP(recList2, reqList2)
+	var listResp2 struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recList2.Body).Decode(&listResp2)
+	if len(listResp2.Data) != 0 {
+		t.Fatalf("expected 0 websites after deletion, but got %d: website was resurrected!", len(listResp2.Data))
+	}
+}
+

@@ -780,8 +780,10 @@ export default function WebsitesPage() {
       });
       if (res.success) {
         showToast(`Website '${deleteModalSite.primary_domain}' deleted successfully.`);
+        const deletedId = deleteModalSite.id;
         setDeleteModalOpen(false);
         setDeleteModalSite(null);
+        setWebsites((prev) => prev.filter((s) => s.id !== deletedId));
         await fetchData();
       } else {
         showToast(res.error?.message || 'Failed to delete website.', true);
@@ -828,6 +830,7 @@ export default function WebsitesPage() {
           failCount++;
         }
       }
+      setWebsites((prev) => prev.filter((s) => !selectedIds.includes(s.id)));
       setSelectedIds([]);
       if (failCount === 0) {
         showToast(`${successCount} websites deleted successfully.`);

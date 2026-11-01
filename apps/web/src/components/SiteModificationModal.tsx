@@ -447,8 +447,10 @@ server {
         body: JSON.stringify({
           domain: website.primary_domain,
           website_id: website.id,
-          certificate: customCert,
-          private_key: customKey,
+          cert_pem: customCert.trim(),
+          key_pem: customKey.trim(),
+          certificate: customCert.trim(),
+          private_key: customKey.trim(),
         }),
       });
       if (res.data) {

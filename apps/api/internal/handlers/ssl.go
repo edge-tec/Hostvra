@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -320,10 +321,32 @@ func (h *SSLHandler) Issue(w http.ResponseWriter, r *http.Request) {
 
 // ImportCustom handles custom certificate and private key upload
 func (h *SSLHandler) ImportCustom(w http.ResponseWriter, r *http.Request) {
-	var req ssl.CustomCertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw struct {
+		WebsiteID   string `json:"website_id,omitempty"`
+		Domain      string `json:"domain"`
+		CertPEM     string `json:"cert_pem"`
+		KeyPEM      string `json:"key_pem"`
+		ChainPEM    string `json:"chain_pem,omitempty"`
+		Certificate string `json:"certificate,omitempty"`
+		PrivateKey  string `json:"private_key,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid custom certificate payload", nil, "")
 		return
+	}
+
+	req := ssl.CustomCertRequest{
+		WebsiteID: raw.WebsiteID,
+		Domain:    raw.Domain,
+		CertPEM:   raw.CertPEM,
+		KeyPEM:    raw.KeyPEM,
+		ChainPEM:  raw.ChainPEM,
+	}
+	if strings.TrimSpace(req.CertPEM) == "" && strings.TrimSpace(raw.Certificate) != "" {
+		req.CertPEM = raw.Certificate
+	}
+	if strings.TrimSpace(req.KeyPEM) == "" && strings.TrimSpace(raw.PrivateKey) != "" {
+		req.KeyPEM = raw.PrivateKey
 	}
 
 	certInfo, err := h.manager.ImportCustomCert(r.Context(), req)

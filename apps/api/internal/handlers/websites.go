@@ -232,130 +232,6 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build map of already recognized domains
-	seen := make(map[string]bool)
-	for _, s := range sites {
-		if s != nil && s.DeletedAt == nil && s.PrimaryDomain != "" {
-			seen[strings.ToLower(strings.TrimSpace(s.PrimaryDomain))] = true
-		}
-	}
-
-	var rawOrgID uuid.UUID
-	if claims != nil {
-		rawOrgID = claims.OrganizationID
-	}
-	targetOrgID := h.resolveOrgID(r.Context(), rawOrgID)
-
-	// 1. For administrators, auto-discover physical domains present in /var/www/
-	if isSuper {
-		if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
-			serverID := h.resolveServerID(r.Context(), "", targetOrgID)
-			defaultPHP := "8.3"
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				dName := strings.ToLower(entry.Name())
-				if dName == "html" || dName == "default" || dName == "hostvra-temp" || strings.HasPrefix(dName, ".") {
-					continue
-				}
-				if !seen[dName] && strings.Contains(dName, ".") {
-					docRoot := filepath.Join("/var/www", dName, "public_html")
-					if _, sErr := os.Stat(docRoot); os.IsNotExist(sErr) {
-						docRoot = filepath.Join("/var/www", dName)
-					}
-					systemUser := isolation.DeriveUsername(dName)
-					newSite := &store.Website{
-						ID:             uuid.New(),
-						ServerID:       serverID,
-						OrganizationID: targetOrgID,
-						PrimaryDomain:  dName,
-						DocumentRoot:   docRoot,
-						SystemUser:     systemUser,
-						PHPVersion:     &defaultPHP,
-						AppType:        "php",
-						Status:         "active",
-						SSLEnabled:     false,
-					}
-					if cErr := h.store.CreateWebsite(r.Context(), newSite); cErr == nil {
-						sites = append(sites, newSite)
-						seen[dName] = true
-					} else {
-						if existing, gErr := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); gErr == nil {
-							for _, es := range existing {
-								if es != nil && strings.EqualFold(es.PrimaryDomain, dName) && !seen[dName] {
-									sites = append(sites, es)
-									seen[dName] = true
-									break
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// 2. Auto-provision from email domains or registered domains if candidates exist
-	var candidates []string
-	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), uuid.Nil); err == nil {
-		for _, ed := range emailDomains {
-			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
-				d := strings.ToLower(strings.TrimSpace(ed.Domain))
-				if !seen[d] {
-					candidates = append(candidates, d)
-				}
-			}
-		}
-	}
-	if claims != nil {
-		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
-			for _, rd := range regDomains {
-				if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
-					d := strings.ToLower(strings.TrimSpace(rd.DomainName))
-					if !seen[d] {
-						candidates = append(candidates, d)
-					}
-				}
-			}
-		}
-	}
-
-	if len(candidates) > 0 {
-		serverID := h.resolveServerID(r.Context(), "", targetOrgID)
-		defaultPHP := "8.3"
-		for _, domain := range candidates {
-			if seen[domain] {
-				continue
-			}
-			seen[domain] = true
-			docRoot := "/var/www/" + domain + "/public_html"
-			systemUser := isolation.DeriveUsername(domain)
-			limits := isolation.DefaultResourceLimits()
-			if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), domain, defaultPHP, &limits); err == nil && isoInfo != nil {
-				systemUser = isoInfo.Username
-			}
-
-			site := &store.Website{
-				ID:             uuid.New(),
-				ServerID:       serverID,
-				OrganizationID: targetOrgID,
-				PrimaryDomain:  domain,
-				DocumentRoot:   docRoot,
-				SystemUser:     systemUser,
-				PHPVersion:     &defaultPHP,
-				AppType:        "php",
-				Status:         "active",
-				SSLEnabled:     false,
-			}
-
-			if err := h.store.CreateWebsite(r.Context(), site); err == nil {
-				_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, defaultPHP, site.AppType, nil)
-				sites = append(sites, site)
-			}
-		}
-	}
-
 	// Enrich websites with Hosting Account metadata (Tenant isolation & account mapping)
 	accounts, _ := h.store.ListHostingAccounts(r.Context(), uuid.Nil, nil)
 	accByUsername := make(map[string]*store.HostingAccount)
@@ -902,10 +778,18 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if _, statErr := os.Stat(docRoot); statErr == nil {
+		targetPath := docRoot
+		parentDir := filepath.Dir(docRoot)
+		// If docRoot is /var/www/<domain>/... where <domain> equals site.PrimaryDomain,
+		// clean up the entire /var/www/<domain> directory so no orphaned domain directory lingers
+		if filepath.Dir(parentDir) == "/var/www" && strings.EqualFold(filepath.Base(parentDir), site.PrimaryDomain) {
+			targetPath = parentDir
+		}
+
+		if _, statErr := os.Stat(targetPath); statErr == nil {
 			if req.PermanentWipe {
 				// Permanent wipe — no recovery
-				if rmErr := h.fileMgr.Delete(docRoot); rmErr != nil {
+				if rmErr := h.fileMgr.Delete(targetPath); rmErr != nil {
 					result["files_error"] = rmErr.Error()
 				} else {
 					result["files_action"] = "permanently_deleted"
@@ -919,13 +803,13 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 				// Calculate size before moving
 				var totalSize int64
-				if sz, _, _, sErr := h.fileMgr.CalculateDirSize(docRoot); sErr == nil {
+				if sz, _, _, sErr := h.fileMgr.CalculateDirSize(targetPath); sErr == nil {
 					totalSize = sz
 				}
 
-				if mvErr := h.fileMgr.Rename(docRoot, physicalTrashPath); mvErr != nil {
+				if mvErr := h.fileMgr.Rename(targetPath, physicalTrashPath); mvErr != nil {
 					// Fallback to permanent delete if moving to trash failed
-					if rmErr := h.fileMgr.Delete(docRoot); rmErr != nil {
+					if rmErr := h.fileMgr.Delete(targetPath); rmErr != nil {
 						result["files_error"] = fmt.Sprintf("Trash move failed: %s; Delete failed: %s", mvErr.Error(), rmErr.Error())
 					} else {
 						result["files_action"] = "permanently_deleted"
@@ -946,7 +830,7 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 						ID:           trashID,
 						UserID:       userID,
 						Domain:       site.PrimaryDomain,
-						OriginalPath: docRoot,
+						OriginalPath: targetPath,
 						TrashPath:    physicalTrashPath,
 						Name:         site.PrimaryDomain,
 						Size:         totalSize,
@@ -959,12 +843,20 @@ func (h *WebsiteHandler) Delete(w http.ResponseWriter, r *http.Request) {
 					result["files_action"] = "moved_to_trash"
 					result["trash_id"] = trashID.String()
 				}
+				_ = h.store.DeleteFileManagerFavorite(r.Context(), nil, targetPath)
 				_ = h.store.DeleteFileManagerFavorite(r.Context(), nil, docRoot)
+				_ = h.store.DeleteFileManagerRecent(r.Context(), targetPath)
 				_ = h.store.DeleteFileManagerRecent(r.Context(), docRoot)
+				_ = h.store.DeleteFolderLabel(r.Context(), targetPath)
 				_ = h.store.DeleteFolderLabel(r.Context(), docRoot)
 			}
 		} else {
 			result["files_action"] = "not_found"
+		}
+
+		// Also clean up parent domain directory if still exists and is empty
+		if targetPath != parentDir && filepath.Dir(parentDir) == "/var/www" && strings.EqualFold(filepath.Base(parentDir), site.PrimaryDomain) {
+			_ = os.Remove(parentDir)
 		}
 	}
 
