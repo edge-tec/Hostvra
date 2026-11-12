@@ -186,7 +186,7 @@ func (h *WebmailHandler) verifyMailboxAccess(ctx context.Context, claims *auth.C
 		// Protected HTTP routes are guarded by RequireWebmailAuth.
 		return true
 	}
-	if claims.IsSuperAdmin || claims.Role == "admin" {
+	if claims.IsSuperAdmin || claims.Role == "superadmin" {
 		return true
 	}
 	if claims.Role == "webmail_user" {
@@ -197,25 +197,23 @@ func (h *WebmailHandler) verifyMailboxAccess(ctx context.Context, claims *auth.C
 		// carried a verified Control Panel admin/owner token in context
 		if ctx != nil {
 			if cpClaims, ok := ctx.Value(cpClaimsContextKey).(*auth.Claims); ok && cpClaims != nil {
-				if cpClaims.IsSuperAdmin || cpClaims.Role == "admin" {
+				if cpClaims.IsSuperAdmin || cpClaims.Role == "superadmin" {
 					return true
 				}
 				if cpClaims.OrganizationID != uuid.Nil {
 					domain, _ := h.store.GetEmailDomainByID(ctx, mb.DomainID)
-					if domain == nil || domain.OrganizationID == cpClaims.OrganizationID {
+					if domain != nil && domain.OrganizationID == cpClaims.OrganizationID {
 						return true
 					}
-				} else {
-					return true
 				}
 			}
 		}
 		return false
 	}
-	// Any control panel user (owner, admin, member, client, reseller, etc) has access to mailboxes in their organization
-	if claims.OrganizationID != uuid.Nil && !claims.IsSuperAdmin {
+	// Any control panel user (owner, admin, member, client, reseller, etc) has access ONLY to mailboxes in their organization
+	if claims.OrganizationID != uuid.Nil && !claims.IsSuperAdmin && claims.Role != "superadmin" {
 		domain, _ := h.store.GetEmailDomainByID(ctx, mb.DomainID)
-		if domain != nil && domain.OrganizationID != claims.OrganizationID {
+		if domain == nil || domain.OrganizationID != claims.OrganizationID {
 			return false
 		}
 	}

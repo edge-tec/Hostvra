@@ -539,4 +539,144 @@ func TestEmailHandler_VerifyDomainDNS(t *testing.T) {
 	}
 }
 
+func TestEmailHandler_StrictMultiTenantIsolation(t *testing.T) {
+	st := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	auditLogger := audit.NewLogger(st, logger)
+	dnsSvc := dns.NewService()
+	cfg := &config.Config{JWTSecret: "test-secret"}
+	handler := NewEmailHandler(cfg, st, dnsSvc, auditLogger)
+
+	// Org A
+	orgA := uuid.New()
+	userA := uuid.New()
+	serverA := uuid.New()
+	_ = st.CreateOrganization(context.Background(), &store.Organization{ID: orgA, Name: "Org A", Slug: "org-a"})
+	_ = st.CreateServer(context.Background(), &store.Server{ID: serverA, OrganizationID: orgA, Name: "srv-a", IPAddress: "198.51.100.1"})
+
+	// Org B
+	orgB := uuid.New()
+	userB := uuid.New()
+	serverB := uuid.New()
+	_ = st.CreateOrganization(context.Background(), &store.Organization{ID: orgB, Name: "Org B", Slug: "org-b"})
+	_ = st.CreateServer(context.Background(), &store.Server{ID: serverB, OrganizationID: orgB, Name: "srv-b", IPAddress: "198.51.100.2"})
+
+	claimsA := &auth.Claims{UserID: userA, OrganizationID: orgA, Role: "owner"}
+	ctxA := context.WithValue(context.Background(), auth.UserContextKey, claimsA)
+
+	claimsB := &auth.Claims{UserID: userB, OrganizationID: orgB, Role: "owner"}
+	ctxB := context.WithValue(context.Background(), auth.UserContextKey, claimsB)
+
+	// 1. Create Domain for Org A
+	bodyA, _ := json.Marshal(CreateEmailDomainRequest{ServerID: serverA.String(), Domain: "orga-mail.com"})
+	reqA := httptest.NewRequest("POST", "/api/v1/email/domains", bytes.NewReader(bodyA)).WithContext(ctxA)
+	wA := httptest.NewRecorder()
+	handler.CreateDomain(wA, reqA)
+	if wA.Code != http.StatusCreated {
+		t.Fatalf("Failed to create domain for Org A: %s", wA.Body.String())
+	}
+	var domAResp struct {
+		Data store.EmailDomain `json:"data"`
+	}
+	_ = json.Unmarshal(wA.Body.Bytes(), &domAResp)
+	domAID := domAResp.Data.ID
+
+	// Create Mailbox for Org A
+	mbBodyA, _ := json.Marshal(CreateMailboxRequest{DomainID: domAID.String(), LocalPart: "alice", Password: "Password123!", Name: "Alice"})
+	mbReqA := httptest.NewRequest("POST", "/api/v1/email/mailboxes", bytes.NewReader(mbBodyA)).WithContext(ctxA)
+	mbWA := httptest.NewRecorder()
+	handler.CreateMailbox(mbWA, mbReqA)
+	if mbWA.Code != http.StatusCreated {
+		t.Fatalf("Failed to create mailbox for Org A: %s", mbWA.Body.String())
+	}
+
+	// 2. Create Domain for Org B
+	bodyB, _ := json.Marshal(CreateEmailDomainRequest{ServerID: serverB.String(), Domain: "orgb-mail.com"})
+	reqB := httptest.NewRequest("POST", "/api/v1/email/domains", bytes.NewReader(bodyB)).WithContext(ctxB)
+	wB := httptest.NewRecorder()
+	handler.CreateDomain(wB, reqB)
+	if wB.Code != http.StatusCreated {
+		t.Fatalf("Failed to create domain for Org B: %s", wB.Body.String())
+	}
+	var domBResp struct {
+		Data store.EmailDomain `json:"data"`
+	}
+	_ = json.Unmarshal(wB.Body.Bytes(), &domBResp)
+	domBID := domBResp.Data.ID
+
+	// Create Mailbox for Org B
+	mbBodyB, _ := json.Marshal(CreateMailboxRequest{DomainID: domBID.String(), LocalPart: "bob", Password: "Password123!", Name: "Bob"})
+	mbReqB := httptest.NewRequest("POST", "/api/v1/email/mailboxes", bytes.NewReader(mbBodyB)).WithContext(ctxB)
+	mbWB := httptest.NewRecorder()
+	handler.CreateMailbox(mbWB, mbReqB)
+	if mbWB.Code != http.StatusCreated {
+		t.Fatalf("Failed to create mailbox for Org B: %s", mbWB.Body.String())
+	}
+
+	// 3. Org A calls ListDomains -> Must ONLY see orga-mail.com, NEVER orgb-mail.com
+	listDomReqA := httptest.NewRequest("GET", "/api/v1/email/domains", nil).WithContext(ctxA)
+	listDomWA := httptest.NewRecorder()
+	handler.ListDomains(listDomWA, listDomReqA)
+	if listDomWA.Code != http.StatusOK {
+		t.Fatalf("ListDomains for Org A failed: %s", listDomWA.Body.String())
+	}
+	var listDomARes struct {
+		Data []*store.EmailDomain `json:"data"`
+	}
+	_ = json.Unmarshal(listDomWA.Body.Bytes(), &listDomARes)
+	if len(listDomARes.Data) != 1 || listDomARes.Data[0].Domain != "orga-mail.com" {
+		t.Fatalf("Org A saw incorrect domains: %v", listDomARes.Data)
+	}
+
+	// 4. Org B calls ListDomains -> Must ONLY see orgb-mail.com, NEVER orga-mail.com
+	listDomReqB := httptest.NewRequest("GET", "/api/v1/email/domains", nil).WithContext(ctxB)
+	listDomWB := httptest.NewRecorder()
+	handler.ListDomains(listDomWB, listDomReqB)
+	if listDomWB.Code != http.StatusOK {
+		t.Fatalf("ListDomains for Org B failed: %s", listDomWB.Body.String())
+	}
+	var listDomBRes struct {
+		Data []*store.EmailDomain `json:"data"`
+	}
+	_ = json.Unmarshal(listDomWB.Body.Bytes(), &listDomBRes)
+	if len(listDomBRes.Data) != 1 || listDomBRes.Data[0].Domain != "orgb-mail.com" {
+		t.Fatalf("Org B saw incorrect domains: %v", listDomBRes.Data)
+	}
+
+	// 5. Org A calls ListMailboxes -> Must ONLY see alice@orga-mail.com, NEVER bob@orgb-mail.com
+	listMbReqA := httptest.NewRequest("GET", "/api/v1/email/mailboxes", nil).WithContext(ctxA)
+	listMbWA := httptest.NewRecorder()
+	handler.ListMailboxes(listMbWA, listMbReqA)
+	if listMbWA.Code != http.StatusOK {
+		t.Fatalf("ListMailboxes for Org A failed: %s", listMbWA.Body.String())
+	}
+	var listMbARes struct {
+		Data []*store.EmailMailbox `json:"data"`
+	}
+	_ = json.Unmarshal(listMbWA.Body.Bytes(), &listMbARes)
+	if len(listMbARes.Data) != 1 || listMbARes.Data[0].Email != "alice@orga-mail.com" {
+		t.Fatalf("Org A saw incorrect mailboxes: %v", listMbARes.Data)
+	}
+
+	// 6. Org A attempts to call ListMailboxes with domain_id of Org B -> Must be Forbidden
+	crossMbReq := httptest.NewRequest("GET", "/api/v1/email/mailboxes?domain_id="+domBID.String(), nil).WithContext(ctxA)
+	crossMbW := httptest.NewRecorder()
+	handler.ListMailboxes(crossMbW, crossMbReq)
+	if crossMbW.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when Org A requests Org B's mailboxes, got %d", crossMbW.Code)
+	}
+
+	// 7. Org A attempts to GetDomain of Org B -> Must be Forbidden
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", domBID.String())
+	crossDomReq := httptest.NewRequest("GET", "/api/v1/email/domains/"+domBID.String(), nil)
+	crossDomReq = crossDomReq.WithContext(context.WithValue(ctxA, chi.RouteCtxKey, rctx))
+	crossDomW := httptest.NewRecorder()
+	handler.GetDomain(crossDomW, crossDomReq)
+	if crossDomW.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when Org A gets Org B's domain, got %d", crossDomW.Code)
+	}
+}
+
+
 

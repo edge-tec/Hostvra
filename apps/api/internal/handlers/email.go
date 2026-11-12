@@ -280,20 +280,19 @@ type ServiceActionRequest struct {
 
 func (h *EmailHandler) ListMailServers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	orgID := defaultOrgID
-	if claims != nil && claims.OrganizationID != uuid.Nil {
-		orgID = claims.OrganizationID
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+
+	var servers []*store.MailServer
+	var err error
+
+	if isSuper {
+		servers, err = h.store.ListAllMailServers(r.Context())
+	} else if claims != nil && claims.OrganizationID != uuid.Nil {
+		servers, err = h.store.ListMailServersByOrg(r.Context(), claims.OrganizationID)
 	}
 
-	servers, err := h.store.ListMailServersByOrg(r.Context(), orgID)
-	if err != nil {
+	if err != nil || servers == nil {
 		servers = make([]*store.MailServer, 0)
-	}
-	if len(servers) == 0 && orgID != defaultOrgID {
-		if defServers, err := h.store.ListMailServersByOrg(r.Context(), defaultOrgID); err == nil && len(defServers) > 0 {
-			servers = defServers
-		}
 	}
 
 	response.JSON(w, http.StatusOK, servers, &response.Meta{
@@ -726,68 +725,105 @@ func (h *EmailHandler) GetSpamProtectionStats(w http.ResponseWriter, r *http.Req
 
 func (h *EmailHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 
-	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	orgID := uuid.Nil
-	if !isAdmin && claims != nil && claims.OrganizationID != uuid.Nil {
+	if !isSuper && claims != nil {
 		orgID = claims.OrganizationID
+	}
+
+	if !isSuper && orgID == uuid.Nil {
+		response.JSON(w, http.StatusOK, []*store.EmailDomain{}, &response.Meta{
+			Total: 0,
+		})
+		return
 	}
 
 	domains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID)
 	if err != nil {
-		domains, _ = h.store.ListEmailDomainsByOrg(r.Context(), uuid.Nil)
-	}
-
-	if len(domains) == 0 && orgID != uuid.Nil {
-		if defDomains, dErr := h.store.ListEmailDomainsByOrg(r.Context(), uuid.Nil); dErr == nil && len(defDomains) > 0 {
-			domains = defDomains
-		}
+		domains = make([]*store.EmailDomain, 0)
 	}
 
 	seen := make(map[string]bool)
+	activeDomains := make([]*store.EmailDomain, 0)
 	for _, d := range domains {
 		if d != nil && d.DeletedAt == nil && d.Domain != "" {
-			seen[strings.ToLower(strings.TrimSpace(d.Domain))] = true
+			dName := strings.ToLower(strings.TrimSpace(d.Domain))
+			if !seen[dName] {
+				seen[dName] = true
+				activeDomains = append(activeDomains, d)
+			}
 		}
 	}
+	domains = activeDomains
 
+	defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	targetOrg := orgID
-	if targetOrg == uuid.Nil {
-		if claims != nil && claims.OrganizationID != uuid.Nil {
-			targetOrg = claims.OrganizationID
-		} else {
-			targetOrg = defaultOrgID
-		}
+	if isSuper && targetOrg == uuid.Nil {
+		targetOrg = defaultOrgID
 	}
 
 	// Auto-discover existing email domains from /var/mail/vhosts/
-	if entries, rErr := os.ReadDir("/var/mail/vhosts"); rErr == nil {
-		serverID := defaultOrgID
-		if servers, sErr := h.store.ListAllMailServers(r.Context()); sErr == nil && len(servers) > 0 {
-			serverID = servers[0].ID
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-				continue
+	// Superadmin can discover unmapped domains into defaultOrgID
+	// Regular tenant/user can ONLY discover domains they legitimately own in websites
+	if isSuper {
+		if entries, rErr := os.ReadDir("/var/mail/vhosts"); rErr == nil {
+			serverID := defaultOrgID
+			if servers, sErr := h.store.ListAllMailServers(r.Context()); sErr == nil && len(servers) > 0 {
+				serverID = servers[0].ID
 			}
-			dName := strings.ToLower(entry.Name())
-			if !seen[dName] && strings.Contains(dName, ".") {
-				newDom := &store.EmailDomain{
-					ID:                uuid.New(),
-					OrganizationID:    targetOrg,
-					ServerID:          serverID,
-					Domain:            dName,
-					MailHostname:      "mail." + dName,
-					Status:            "active",
-					StorageLimitBytes: 53687091200,
-					DKIMSelector:      "default",
-					IsCatchallEnabled: false,
-					IsDNSVerified:     true,
+			for _, entry := range entries {
+				if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+					continue
 				}
-				if cErr := h.store.CreateEmailDomain(r.Context(), newDom); cErr == nil {
-					domains = append(domains, newDom)
-					seen[dName] = true
+				dName := strings.ToLower(entry.Name())
+				if !seen[dName] && strings.Contains(dName, ".") {
+					newDom := &store.EmailDomain{
+						ID:                uuid.New(),
+						OrganizationID:    targetOrg,
+						ServerID:          serverID,
+						Domain:            dName,
+						MailHostname:      "mail." + dName,
+						Status:            "active",
+						StorageLimitBytes: 53687091200,
+						DKIMSelector:      "default",
+						IsCatchallEnabled: false,
+						IsDNSVerified:     true,
+					}
+					if cErr := h.store.CreateEmailDomain(r.Context(), newDom); cErr == nil {
+						domains = append(domains, newDom)
+						seen[dName] = true
+					}
+				}
+			}
+		}
+	} else if orgID != uuid.Nil {
+		if userSites, sErr := h.store.ListWebsitesByOrg(r.Context(), orgID); sErr == nil && len(userSites) > 0 {
+			serverID := defaultOrgID
+			if servers, sErr := h.store.ListMailServersByOrg(r.Context(), orgID); sErr == nil && len(servers) > 0 {
+				serverID = servers[0].ID
+			}
+			for _, s := range userSites {
+				if s != nil && s.PrimaryDomain != "" {
+					dName := strings.ToLower(strings.TrimSpace(s.PrimaryDomain))
+					if !seen[dName] && fileExists(filepath.Join("/var/mail/vhosts", dName)) {
+						newDom := &store.EmailDomain{
+							ID:                uuid.New(),
+							OrganizationID:    orgID,
+							ServerID:          serverID,
+							Domain:            dName,
+							MailHostname:      "mail." + dName,
+							Status:            "active",
+							StorageLimitBytes: 53687091200,
+							DKIMSelector:      "default",
+							IsCatchallEnabled: false,
+							IsDNSVerified:     true,
+						}
+						if cErr := h.store.CreateEmailDomain(r.Context(), newDom); cErr == nil {
+							domains = append(domains, newDom)
+							seen[dName] = true
+						}
+					}
 				}
 			}
 		}
@@ -1559,6 +1595,9 @@ func (h *EmailHandler) VerifyDomainDNS(w http.ResponseWriter, r *http.Request) {
 // ----------------------------------------------------------------------------
 
 func (h *EmailHandler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+
 	domainIDStr := r.URL.Query().Get("domain_id")
 	serverIDStr := r.URL.Query().Get("server_id")
 
@@ -1567,93 +1606,92 @@ func (h *EmailHandler) ListMailboxes(w http.ResponseWriter, r *http.Request) {
 
 	if domainIDStr != "" {
 		domainID, pErr := uuid.Parse(domainIDStr)
-		if pErr == nil {
-			mailboxes, err = h.store.ListEmailMailboxesByDomain(r.Context(), domainID)
+		if pErr != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_DOMAIN_ID", "Invalid domain UUID", nil, "")
+			return
 		}
+		domain, dErr := h.store.GetEmailDomainByID(r.Context(), domainID)
+		if dErr != nil || domain == nil {
+			response.Error(w, http.StatusNotFound, "NOT_FOUND", "Email domain not found", nil, "")
+			return
+		}
+		if err := h.verifyDomainOwnership(r, domain); err != nil {
+			response.Error(w, http.StatusForbidden, "FORBIDDEN", err.Error(), nil, "")
+			return
+		}
+		mailboxes, err = h.store.ListEmailMailboxesByDomain(r.Context(), domainID)
 	} else if serverIDStr != "" {
 		serverID, pErr := uuid.Parse(serverIDStr)
-		if pErr == nil {
-			mailboxes, err = h.store.ListEmailMailboxesByServer(r.Context(), serverID)
+		if pErr != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_SERVER_ID", "Invalid server UUID", nil, "")
+			return
 		}
+		if !isSuper && claims != nil {
+			srv, sErr := h.store.GetServerByID(r.Context(), serverID)
+			if sErr != nil || srv == nil || srv.OrganizationID != claims.OrganizationID {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Server does not belong to your organization", nil, "")
+				return
+			}
+		}
+		mailboxes, err = h.store.ListEmailMailboxesByServer(r.Context(), serverID)
 	} else {
-		claims, _ := auth.GetClaims(r.Context())
-		isAdmin := claims == nil || claims.IsSuperAdmin || claims.Role == "admin" || claims.Role == "owner" || claims.Role == "superadmin"
-
-		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 		orgID := uuid.Nil
-		if !isAdmin && claims != nil && claims.OrganizationID != uuid.Nil {
+		if !isSuper && claims != nil {
 			orgID = claims.OrganizationID
 		}
+
+		if !isSuper && orgID == uuid.Nil {
+			response.JSON(w, http.StatusOK, []*store.EmailMailbox{}, &response.Meta{Total: 0})
+			return
+		}
+
 		domains, _ := h.store.ListEmailDomainsByOrg(r.Context(), orgID)
-		if len(domains) == 0 {
-			domains, _ = h.store.ListEmailDomainsByOrg(r.Context(), uuid.Nil)
-		}
 		for _, d := range domains {
-			mbs, _ := h.store.ListEmailMailboxesByDomain(r.Context(), d.ID)
-			mailboxes = append(mailboxes, mbs...)
-		}
-		if len(mailboxes) == 0 {
-			if allMbs, sErr := h.store.ListEmailMailboxesByServer(r.Context(), uuid.Nil); sErr == nil {
-				mailboxes = allMbs
+			if d != nil && d.DeletedAt == nil {
+				mbs, _ := h.store.ListEmailMailboxesByDomain(r.Context(), d.ID)
+				for _, mb := range mbs {
+					if mb != nil && mb.DeletedAt == nil {
+						mailboxes = append(mailboxes, mb)
+					}
+				}
 			}
 		}
 
-		// Also check physical maildirs in /var/mail/vhosts/<domain>/<user>
+		// Also check physical maildirs ONLY for the caller's authorized domains
 		seenMailboxes := make(map[string]bool)
 		for _, mb := range mailboxes {
-			seenMailboxes[strings.ToLower(mb.Email)] = true
+			if mb != nil && mb.Email != "" {
+				seenMailboxes[strings.ToLower(strings.TrimSpace(mb.Email))] = true
+			}
 		}
 
-		if entries, rErr := os.ReadDir("/var/mail/vhosts"); rErr == nil {
-			for _, dEntry := range entries {
-				if !dEntry.IsDir() || strings.HasPrefix(dEntry.Name(), ".") {
-					continue
-				}
-				domName := strings.ToLower(dEntry.Name())
-				var parentDomID uuid.UUID
-				for _, d := range domains {
-					if strings.EqualFold(d.Domain, domName) {
-						parentDomID = d.ID
-						break
+		for _, d := range domains {
+			if d == nil || d.DeletedAt != nil || d.Domain == "" {
+				continue
+			}
+			domName := strings.ToLower(strings.TrimSpace(d.Domain))
+			domDir := filepath.Join("/var/mail/vhosts", domName)
+			if userEntries, uErr := os.ReadDir(domDir); uErr == nil {
+				for _, uEntry := range userEntries {
+					if !uEntry.IsDir() || strings.HasPrefix(uEntry.Name(), ".") {
+						continue
 					}
-				}
-				if userEntries, uErr := os.ReadDir(filepath.Join("/var/mail/vhosts", domName)); uErr == nil {
-					for _, uEntry := range userEntries {
-						if !uEntry.IsDir() || strings.HasPrefix(uEntry.Name(), ".") {
-							continue
+					uName := strings.ToLower(uEntry.Name())
+					fullEmail := uName + "@" + domName
+					if !seenMailboxes[fullEmail] {
+						newMb := &store.EmailMailbox{
+							ID:         uuid.New(),
+							DomainID:   d.ID,
+							ServerID:   d.ServerID,
+							LocalPart:  uName,
+							Email:      fullEmail,
+							Name:       uName,
+							QuotaBytes: 10737418240,
+							IsActive:   true,
 						}
-						uName := strings.ToLower(uEntry.Name())
-						fullEmail := uName + "@" + domName
-						if !seenMailboxes[fullEmail] {
-							if parentDomID == uuid.Nil {
-								newD := &store.EmailDomain{
-									ID:                uuid.New(),
-									OrganizationID:    defaultOrgID,
-									Domain:            domName,
-									MailHostname:      "mail." + domName,
-									Status:            "active",
-									StorageLimitBytes: 53687091200,
-									DKIMSelector:      "default",
-									IsCatchallEnabled: false,
-									IsDNSVerified:     true,
-								}
-								_ = h.store.CreateEmailDomain(r.Context(), newD)
-								parentDomID = newD.ID
-							}
-							newMb := &store.EmailMailbox{
-								ID:         uuid.New(),
-								DomainID:   parentDomID,
-								ServerID:   defaultOrgID,
-								LocalPart:  uName,
-								Email:      fullEmail,
-								Name:       uName,
-								QuotaBytes: 10737418240,
-								IsActive:   true,
-							}
-							if cErr := h.store.CreateEmailMailbox(r.Context(), newMb); cErr == nil {
-								mailboxes = append(mailboxes, newMb)
-								seenMailboxes[fullEmail] = true
-							}
+						if cErr := h.store.CreateEmailMailbox(r.Context(), newMb); cErr == nil {
+							mailboxes = append(mailboxes, newMb)
+							seenMailboxes[fullEmail] = true
 						}
 					}
 				}
@@ -1961,21 +1999,35 @@ func (h *EmailHandler) TestMailbox(w http.ResponseWriter, r *http.Request) {
 
 func (h *EmailHandler) GetSMTPSettings(w http.ResponseWriter, r *http.Request) {
 	domainName := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
-	if domainName == "" {
-		// Resolve from registered domains if no query param supplied
-		defaultOrgID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-		orgID := defaultOrgID
-		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.OrganizationID != uuid.Nil {
-			orgID = claims.OrganizationID
+	claims, _ := auth.GetClaims(r.Context())
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+
+	if domainName != "" && !isSuper && claims != nil && claims.OrganizationID != uuid.Nil {
+		// Verify domain belongs to caller's org
+		if userDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), claims.OrganizationID); err == nil {
+			found := false
+			for _, d := range userDomains {
+				if d != nil && strings.EqualFold(d.Domain, domainName) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Email domain does not belong to your organization", nil, "")
+				return
+			}
 		}
-		if domains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil && len(domains) > 0 {
-			domainName = domains[0].Domain
-		} else if domains, err := h.store.ListEmailDomainsByOrg(r.Context(), defaultOrgID); err == nil && len(domains) > 0 {
-			domainName = domains[0].Domain
+	}
+
+	if domainName == "" {
+		if claims != nil && claims.OrganizationID != uuid.Nil {
+			if domains, err := h.store.ListEmailDomainsByOrg(r.Context(), claims.OrganizationID); err == nil && len(domains) > 0 {
+				domainName = domains[0].Domain
+			}
 		}
 	}
 	if domainName == "" {
-		domainName = "hostvra.com"
+		domainName = "mail.hostvra.local"
 	}
 
 	mailHostname := h.findDomainByName(r.Context(), domainName)
@@ -2334,19 +2386,31 @@ func (h *EmailHandler) RecordSimulatedRateLimitEvent(w http.ResponseWriter, r *h
 func (h *EmailHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 	serverIDStr := r.URL.Query().Get("server_id")
 	claims, _ := auth.GetClaims(r.Context())
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
 
 	var serverID uuid.UUID
 	var err error
 	if serverIDStr != "" {
 		serverID, err = uuid.Parse(serverIDStr)
-	} else {
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_SERVER_ID", "Invalid server UUID", nil, "")
+			return
+		}
+		if !isSuper && claims != nil {
+			srv, sErr := h.store.GetServerByID(r.Context(), serverID)
+			if sErr != nil || srv == nil || srv.OrganizationID != claims.OrganizationID {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Server does not belong to your organization", nil, "")
+				return
+			}
+		}
+	} else if claims != nil && claims.OrganizationID != uuid.Nil {
 		servers, _ := h.store.ListServersByOrg(r.Context(), claims.OrganizationID)
 		if len(servers) > 0 {
 			serverID = servers[0].ID
 		}
 	}
 
-	if err != nil || serverID == uuid.Nil {
+	if serverID == uuid.Nil {
 		response.JSON(w, http.StatusOK, []*store.EmailDeliveryLog{}, &response.Meta{Total: 0})
 		return
 	}
@@ -2355,6 +2419,35 @@ func (h *EmailHandler) ListLogs(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "DB_ERROR", "Failed to retrieve logs", nil, "")
 		return
+	}
+
+	// Filter logs by caller's domains if not superadmin
+	if !isSuper && claims != nil {
+		userDomains, _ := h.store.ListEmailDomainsByOrg(r.Context(), claims.OrganizationID)
+		allowedDomainMap := make(map[string]bool)
+		for _, d := range userDomains {
+			if d != nil && d.Domain != "" {
+				allowedDomainMap[strings.ToLower(strings.TrimSpace(d.Domain))] = true
+			}
+		}
+		filteredLogs := make([]*store.EmailDeliveryLog, 0)
+		for _, log := range logs {
+			if log == nil {
+				continue
+			}
+			senderDom := ""
+			if parts := strings.Split(log.Sender, "@"); len(parts) == 2 {
+				senderDom = strings.ToLower(strings.TrimSpace(parts[1]))
+			}
+			rcptDom := ""
+			if parts := strings.Split(log.Recipient, "@"); len(parts) == 2 {
+				rcptDom = strings.ToLower(strings.TrimSpace(parts[1]))
+			}
+			if allowedDomainMap[senderDom] || allowedDomainMap[rcptDom] {
+				filteredLogs = append(filteredLogs, log)
+			}
+		}
+		logs = filteredLogs
 	}
 
 	response.JSON(w, http.StatusOK, logs, &response.Meta{Total: len(logs)})
