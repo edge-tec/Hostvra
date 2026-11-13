@@ -565,6 +565,36 @@ type Store interface {
 	ListAPIKeys(ctx context.Context, orgID uuid.UUID) ([]*StoredAPIKey, error)
 	RevokeAPIKey(ctx context.Context, id uuid.UUID) error
 
+	// In-House Crypto Payment & Treasury
+	ListCryptoNetworks(ctx context.Context, onlyActive bool) ([]*CryptoNetwork, error)
+	GetCryptoNetworkByID(ctx context.Context, id string) (*CryptoNetwork, error)
+	UpdateCryptoNetwork(ctx context.Context, net *CryptoNetwork) error
+	ListCryptoCurrencies(ctx context.Context, networkID string, onlyActive bool) ([]*CryptoCurrency, error)
+	GetCryptoCurrencyByID(ctx context.Context, id string) (*CryptoCurrency, error)
+	UpdateCryptoCurrency(ctx context.Context, cur *CryptoCurrency) error
+	ListCryptoTreasuryWallets(ctx context.Context, networkID string) ([]*CryptoTreasuryWallet, error)
+	GetCryptoTreasuryWalletByID(ctx context.Context, id uuid.UUID) (*CryptoTreasuryWallet, error)
+	CreateCryptoTreasuryWallet(ctx context.Context, w *CryptoTreasuryWallet) error
+	UpdateCryptoTreasuryWallet(ctx context.Context, w *CryptoTreasuryWallet) error
+	DeleteCryptoTreasuryWallet(ctx context.Context, id uuid.UUID) error
+	AcquireDepositAddress(ctx context.Context, networkID, currencyID string, invoiceID uuid.UUID) (*CryptoDepositAddress, error)
+	ReleaseDepositAddress(ctx context.Context, addressID uuid.UUID) error
+	CreateDepositAddress(ctx context.Context, addr *CryptoDepositAddress) error
+	ListDepositAddresses(ctx context.Context, networkID string, status string) ([]*CryptoDepositAddress, error)
+	CreateCryptoInvoice(ctx context.Context, inv *CryptoPaymentInvoice) error
+	GetCryptoInvoiceByID(ctx context.Context, id uuid.UUID) (*CryptoPaymentInvoice, error)
+	GetCryptoInvoiceByCode(ctx context.Context, code string) (*CryptoPaymentInvoice, error)
+	GetCryptoInvoiceByAddress(ctx context.Context, address string) (*CryptoPaymentInvoice, error)
+	GetCryptoInvoiceByTxHash(ctx context.Context, txHash string) (*CryptoPaymentInvoice, error)
+	ListPendingCryptoInvoices(ctx context.Context) ([]*CryptoPaymentInvoice, error)
+	ListCryptoInvoices(ctx context.Context, userID, orgID uuid.UUID, status, networkID string, limit, offset int) ([]*CryptoPaymentInvoice, int, error)
+	UpdateCryptoInvoice(ctx context.Context, inv *CryptoPaymentInvoice) error
+	RecordCryptoLedger(ctx context.Context, entry *CryptoInternalLedger) error
+	ListCryptoLedgerByInvoice(ctx context.Context, invoiceID uuid.UUID) ([]*CryptoInternalLedger, error)
+	ListCryptoLedger(ctx context.Context, limit, offset int) ([]*CryptoInternalLedger, int, error)
+	GetCryptoSettings(ctx context.Context) (map[string]string, error)
+	SetCryptoSetting(ctx context.Context, key, value string) error
+
 	// Close
 	Close() error
 }
@@ -684,6 +714,16 @@ type MemoryStore struct {
 	alertIncidents             map[uuid.UUID]*AlertIncident
 	notificationChannels       map[uuid.UUID]*NotificationChannel
 	storedAPIKeys              map[uuid.UUID]*StoredAPIKey
+
+	// Crypto In-House Payment & Treasury
+	cryptoNetworks    map[string]*CryptoNetwork
+	cryptoCurrencies  map[string]*CryptoCurrency
+	cryptoTreasuries  map[uuid.UUID]*CryptoTreasuryWallet
+	cryptoDepositAddrs map[uuid.UUID]*CryptoDepositAddress
+	cryptoInvoices    map[uuid.UUID]*CryptoPaymentInvoice
+	cryptoLedger      []*CryptoInternalLedger
+	cryptoSettings    map[string]string
+
 	filePath            string
 }
 
@@ -1304,12 +1344,20 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		alertIncidents:             make(map[uuid.UUID]*AlertIncident),
 		notificationChannels:       make(map[uuid.UUID]*NotificationChannel),
 		storedAPIKeys:              make(map[uuid.UUID]*StoredAPIKey),
+		cryptoNetworks:             make(map[string]*CryptoNetwork),
+		cryptoCurrencies:           make(map[string]*CryptoCurrency),
+		cryptoTreasuries:           make(map[uuid.UUID]*CryptoTreasuryWallet),
+		cryptoDepositAddrs:         make(map[uuid.UUID]*CryptoDepositAddress),
+		cryptoInvoices:             make(map[uuid.UUID]*CryptoPaymentInvoice),
+		cryptoLedger:               make([]*CryptoInternalLedger, 0),
+		cryptoSettings:             make(map[string]string),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()
 	m.seedAccountData()
 	m.seedDomainResellerData()
 	m.seedSupportData()
+	m.seedCryptoData()
 	return m
 }
 
