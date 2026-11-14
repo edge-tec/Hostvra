@@ -116,7 +116,7 @@ export default function WebServersPage() {
         setServers(res.data);
         setSelectedServerId(res.data[0].id);
       } else {
-        setLoading(false);
+        setSelectedServerId('00000000-0000-0000-0000-000000000001');
       }
     }
     loadServers();

@@ -816,23 +816,58 @@ server {
   const [newProxyCache, setNewProxyCache] = useState(false);
   const [newProxyWs, setNewProxyWs] = useState(true);
 
-  const handleAddProxy = () => {
-    if (!newProxyName.trim() || !newProxyTarget.trim()) return;
-    setProxyList([
-      ...proxyList,
-      {
-        id: `p-${Date.now()}`,
-        name: newProxyName.trim(),
-        targetUrl: newProxyTarget.trim(),
-        sentHost: newProxySentHost.trim() || '$host',
-        cacheEnabled: newProxyCache,
-        cacheTimeMinutes: 10,
-        websocket: newProxyWs,
-      },
-    ]);
-    setNewProxyName('');
-    setNewProxyTarget('');
-    showToast(`Reverse proxy '${newProxyName.trim()}' added.`);
+  const handleAddProxy = async () => {
+    if (!newProxyName.trim() || !newProxyTarget.trim() || !website?.id) return;
+    try {
+      const res = await apiFetch(`/api/v1/websites/${website.id}/proxy`, {
+        method: 'POST',
+        body: JSON.stringify({
+          location_path: '/',
+          backend_url: newProxyTarget.trim(),
+          websocket_enabled: newProxyWs,
+          timeout_seconds: 60,
+          buffer_enabled: !newProxyCache,
+        }),
+      });
+      if (res && res.success) {
+        setProxyList([
+          ...proxyList,
+          {
+            id: `p-${Date.now()}`,
+            name: newProxyName.trim(),
+            targetUrl: newProxyTarget.trim(),
+            sentHost: newProxySentHost.trim() || '$host',
+            cacheEnabled: newProxyCache,
+            cacheTimeMinutes: 10,
+            websocket: newProxyWs,
+          },
+        ]);
+        setNewProxyName('');
+        setNewProxyTarget('');
+        showToast(`Reverse proxy '${newProxyName.trim()}' applied to live web server!`);
+      } else {
+        showToast(`Failed: ${res?.error?.message || 'Apply failed'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e?.message || 'Failed'}`);
+    }
+  };
+
+  const handleDeleteProxy = async (proxyId: string) => {
+    if (!website?.id) return;
+    try {
+      const res = await apiFetch(`/api/v1/websites/${website.id}/proxy`, {
+        method: 'DELETE',
+      });
+      if (res && res.success) {
+        setProxyList(proxyList.filter((item) => item.id !== proxyId));
+        showToast('Reverse proxy configuration removed from web server.');
+      } else {
+        showToast(`Failed: ${res?.error?.message || 'Failed'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e?.message || 'Failed'}`);
+    }
   };
 
   // ----------------------------------------------------
@@ -2125,7 +2160,7 @@ server {
                           <td className="p-2.5 text-slate-700 dark:text-slate-300">{p.websocket ? 'Enabled' : 'Disabled'}</td>
                           <td className="p-2.5 text-right">
                             <button
-                              onClick={() => setProxyList(proxyList.filter((item) => item.id !== p.id))}
+                              onClick={() => handleDeleteProxy(p.id)}
                               className="text-rose-600 hover:text-rose-700 dark:text-rose-400 hover:underline font-medium cursor-pointer"
                             >
                               Delete

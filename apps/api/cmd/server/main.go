@@ -668,6 +668,20 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Get("/{version}/health", phpHandler.GetHealth)
 			})
 
+			// Direct Web Server Management Routes (Single-node / primary server fallback)
+			r.Route("/webservers", func(r chi.Router) {
+				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/", webServerHandler.ListServers)
+				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/conflicts", webServerHandler.GetPortConflicts)
+				r.With(rbac.RequirePermission(rbac.PermWebServerSwitch)).Post("/migrate", webServerHandler.Migrate)
+				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/{type}", webServerHandler.GetServer)
+				r.With(rbac.RequirePermission(rbac.PermWebServerInstall)).Post("/{type}/install", webServerHandler.InstallServer)
+				r.With(rbac.RequirePermission(rbac.PermWebServerManage)).Post("/{type}/uninstall", webServerHandler.UninstallServer)
+				r.With(rbac.RequirePermission(rbac.PermWebServerManage)).Post("/{type}/service", webServerHandler.ServiceAction)
+				r.With(rbac.RequirePermission(rbac.PermWebServerConfig)).Get("/{type}/config", webServerHandler.GetMasterConfig)
+				r.With(rbac.RequirePermission(rbac.PermWebServerConfig)).Put("/{type}/config", webServerHandler.UpdateMasterConfig)
+				r.With(rbac.RequirePermission(rbac.PermVHostManage)).Get("/{type}/vhosts", webServerHandler.ListVHosts)
+			})
+
 			// Websites & Vhosts
 			r.Route("/websites", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", websiteHandler.List)
@@ -700,6 +714,11 @@ func main() {
 				// Per-Website Web Server Integration
 				r.With(rbac.RequirePermission(rbac.PermWebServerView)).Get("/{id}/webserver", webServerHandler.GetWebsiteWebServer)
 				r.With(rbac.RequirePermission(rbac.PermWebServerSwitch)).Post("/{id}/webserver/switch", webServerHandler.SwitchWebsiteWebServer)
+
+				// Per-Website Reverse Proxy Integration (aaPanel Feature Parity)
+				r.With(rbac.RequirePermission(rbac.PermReverseProxyManage)).Get("/{id}/proxy", webServerHandler.GetWebsiteReverseProxy)
+				r.With(rbac.RequirePermission(rbac.PermReverseProxyManage)).Post("/{id}/proxy", webServerHandler.ApplyWebsiteReverseProxy)
+				r.With(rbac.RequirePermission(rbac.PermReverseProxyManage)).Delete("/{id}/proxy", webServerHandler.RemoveWebsiteReverseProxy)
 
 				// Per-Website User Isolation & cgroups v2
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/{id}/isolation", websiteHandler.GetIsolation)

@@ -157,3 +157,15 @@ func (m *Manager) UninstallServer(ctx context.Context, serverType WebServerType)
 func (m *Manager) Migration() *MigrationCoordinator {
 	return m.migration
 }
+
+// GetActiveRunningProvider returns the currently running web server provider, defaulting to Nginx
+func (m *Manager) GetActiveRunningProvider(ctx context.Context) (WebServerProvider, error) {
+	order := []WebServerType{TypeNginx, TypeApache, TypeOpenLiteSpeed, TypeLiteSpeedEnterprise}
+	for _, t := range order {
+		p := m.providers[t]
+		if running, _ := p.GetStatus(ctx); running {
+			return p, nil
+		}
+	}
+	return m.providers[TypeNginx], nil
+}

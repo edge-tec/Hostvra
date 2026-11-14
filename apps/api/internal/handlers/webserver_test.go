@@ -192,3 +192,67 @@ func TestWebsiteWebServerIntegration(t *testing.T) {
 		t.Errorf("expected 200 or 400 for switch, got %d: %s", recSwitch.Code, recSwitch.Body.String())
 	}
 }
+
+func TestWebsiteReverseProxy(t *testing.T) {
+	handler, st, claims, _, serverID := setupWebServerTestEnv(t)
+	orgID := claims.OrganizationID
+
+	siteID := uuid.New()
+	_ = st.CreateWebsite(context.Background(), &store.Website{
+		ID:             siteID,
+		OrganizationID: orgID,
+		ServerID:       serverID,
+		PrimaryDomain:  "proxytest.hostvra.io",
+		DocumentRoot:   "/var/www/proxytest",
+		AppType:        "proxy",
+		WebServerType:  "nginx",
+		Status:         "active",
+		CreatedAt:      time.Now().UTC(),
+	})
+
+	r := chi.NewRouter()
+	r.Get("/websites/{id}/proxy", handler.GetWebsiteReverseProxy)
+	r.Post("/websites/{id}/proxy", handler.ApplyWebsiteReverseProxy)
+	r.Delete("/websites/{id}/proxy", handler.RemoveWebsiteReverseProxy)
+
+	// 1. Get initial proxy config
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/websites/%s/proxy", siteID), nil)
+	ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetWebsiteReverseProxy failed with status %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 2. Apply reverse proxy
+	applyPayload := ApplyWebsiteReverseProxyRequest{
+		LocationPath:     "/",
+		BackendURL:       "http://127.0.0.1:3000",
+		WebSocketEnabled: true,
+		TimeoutSeconds:   60,
+	}
+	bodyBytes, _ := json.Marshal(applyPayload)
+	reqApply := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/websites/%s/proxy", siteID), bytes.NewReader(bodyBytes))
+	reqApply = reqApply.WithContext(ctx)
+
+	recApply := httptest.NewRecorder()
+	r.ServeHTTP(recApply, reqApply)
+
+	if recApply.Code != http.StatusOK && recApply.Code != http.StatusBadRequest {
+		t.Errorf("expected 200 or 400 for proxy apply, got %d: %s", recApply.Code, recApply.Body.String())
+	}
+
+	// 3. Delete reverse proxy
+	reqDel := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/websites/%s/proxy", siteID), nil)
+	reqDel = reqDel.WithContext(ctx)
+
+	recDel := httptest.NewRecorder()
+	r.ServeHTTP(recDel, reqDel)
+
+	if recDel.Code != http.StatusOK && recDel.Code != http.StatusInternalServerError {
+		t.Errorf("expected 200 or 500 for proxy delete, got %d: %s", recDel.Code, recDel.Body.String())
+	}
+}

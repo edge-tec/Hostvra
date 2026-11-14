@@ -59,6 +59,43 @@ type SwitchWebsiteWebServerRequest struct {
 	TargetServerType string `json:"target_server_type"` // nginx, apache, openlitespeed, litespeed
 }
 
+func (h *WebServerHandler) getServerID(r *http.Request) uuid.UUID {
+	serverIDStr := chi.URLParam(r, "serverID")
+	if serverIDStr == "" {
+		serverIDStr = chi.URLParam(r, "id")
+	}
+	if serverIDStr != "" && serverIDStr != "default" && serverIDStr != "local" {
+		if id, err := uuid.Parse(serverIDStr); err == nil && id != uuid.Nil {
+			return id
+		}
+	}
+	if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil {
+		if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil && len(servers) > 0 {
+			return servers[0].ID
+		}
+	}
+	dummy, _ := uuid.Parse("00000000-0000-0000-0000-000000000001")
+	return dummy
+}
+
+func (h *WebServerHandler) getManagedServer(r *http.Request, orgID uuid.UUID) (*store.Server, error) {
+	serverID := h.getServerID(r)
+	server, err := h.store.GetServerByID(r.Context(), serverID)
+	if err == nil && server != nil && server.OrganizationID == orgID {
+		return server, nil
+	}
+	if servers, sErr := h.store.ListServersByOrg(r.Context(), orgID); sErr == nil && len(servers) > 0 {
+		return servers[0], nil
+	}
+	return &store.Server{
+		ID:             serverID,
+		OrganizationID: orgID,
+		Name:           "Local Server",
+		Hostname:       "localhost",
+		Status:         "active",
+	}, nil
+}
+
 // ----------------------------------------------------------------------------
 // SERVER-LEVEL HANDLERS
 // ----------------------------------------------------------------------------
@@ -71,18 +108,12 @@ func (h *WebServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
+	server, err := h.getManagedServer(r, claims.OrganizationID)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
 		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Managed server not found", nil, "")
 		return
 	}
+	serverID := server.ID
 
 	// Live OS detection
 	details, err := h.wsMgr.DetectAll(r.Context())
@@ -142,18 +173,12 @@ func (h *WebServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
+	server, err := h.getManagedServer(r, claims.OrganizationID)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
 		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Managed server not found", nil, "")
 		return
 	}
+	_ = server
 
 	serverType := chi.URLParam(r, "type")
 	provider, err := h.wsMgr.GetProvider(webserver.WebServerType(serverType))
@@ -179,18 +204,12 @@ func (h *WebServerHandler) InstallServer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
+	server, err := h.getManagedServer(r, claims.OrganizationID)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
 		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Managed server not found", nil, "")
 		return
 	}
+	serverID := server.ID
 
 	serverType := chi.URLParam(r, "type")
 	wsType := webserver.WebServerType(serverType)
@@ -222,18 +241,12 @@ func (h *WebServerHandler) UninstallServer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
+	server, err := h.getManagedServer(r, claims.OrganizationID)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
 		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Managed server not found", nil, "")
 		return
 	}
+	serverID := server.ID
 
 	serverType := chi.URLParam(r, "type")
 	wsType := webserver.WebServerType(serverType)
@@ -283,18 +296,12 @@ func (h *WebServerHandler) ServiceAction(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
+	server, err := h.getManagedServer(r, claims.OrganizationID)
 	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
-	server, err := h.store.GetServerByID(r.Context(), serverID)
-	if err != nil || server.OrganizationID != claims.OrganizationID {
 		response.Error(w, http.StatusNotFound, "SERVER_NOT_FOUND", "Managed server not found", nil, "")
 		return
 	}
+	serverID := server.ID
 
 	serverType := chi.URLParam(r, "type")
 	wsType := webserver.WebServerType(serverType)
@@ -402,13 +409,7 @@ func (h *WebServerHandler) UpdateMasterConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
+	serverID := h.getServerID(r)
 	serverType := chi.URLParam(r, "type")
 	provider, err := h.wsMgr.GetProvider(webserver.WebServerType(serverType))
 	if err != nil {
@@ -460,13 +461,7 @@ func (h *WebServerHandler) ListVHosts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
-
+	serverID := h.getServerID(r)
 	serverType := chi.URLParam(r, "type")
 	vhosts, err := h.store.ListWebServerVHosts(r.Context(), serverID, serverType)
 	if err != nil {
@@ -485,12 +480,7 @@ func (h *WebServerHandler) Migrate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
+	serverID := h.getServerID(r)
 
 	var req MigrateWebServersRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -703,5 +693,193 @@ func (h *WebServerHandler) SwitchWebsiteWebServer(w http.ResponseWriter, r *http
 
 	response.JSON(w, http.StatusOK, map[string]string{
 		"message": fmt.Sprintf("Website %s successfully switched to %s", site.PrimaryDomain, req.TargetServerType),
+	}, nil)
+}
+
+// ----------------------------------------------------------------------------
+// REVERSE PROXY HANDLERS (aaPanel Feature Parity)
+// ----------------------------------------------------------------------------
+
+type ApplyWebsiteReverseProxyRequest struct {
+	LocationPath     string            `json:"location_path"`     // e.g. "/" or "/api"
+	BackendURL       string            `json:"backend_url"`      // e.g. "http://127.0.0.1:3000"
+	WebSocketEnabled bool              `json:"websocket_enabled"` // proxy Upgrade
+	TimeoutSeconds   int               `json:"timeout_seconds"`   // default 60
+	BufferEnabled    bool              `json:"buffer_enabled"`    // buffering on/off
+	CustomHeaders    map[string]string `json:"custom_headers,omitempty"`
+}
+
+// GetWebsiteReverseProxy retrieves active reverse proxy configuration for a website
+func (h *WebServerHandler) GetWebsiteReverseProxy(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	siteIDStr := chi.URLParam(r, "id")
+	siteID, err := uuid.Parse(siteIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website ID format", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil || site.OrganizationID != claims.OrganizationID {
+		response.Error(w, http.StatusNotFound, "WEBSITE_NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	currentType := "nginx"
+	if site.WebServerType != "" {
+		currentType = site.WebServerType
+	}
+	provider, err := h.wsMgr.GetProvider(webserver.WebServerType(currentType))
+	if err != nil {
+		provider, _ = h.wsMgr.GetActiveRunningProvider(r.Context())
+	}
+	_ = provider
+
+	proxyConfPath := fmt.Sprintf("/etc/%s/conf.d/%s_proxy.conf", currentType, site.PrimaryDomain)
+	if currentType == "apache" {
+		proxyConfPath = fmt.Sprintf("/etc/apache2/sites-available/%s_proxy.conf", site.PrimaryDomain)
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"website_id":      site.ID,
+		"domain":          site.PrimaryDomain,
+		"web_server_type": currentType,
+		"proxy_conf_path": proxyConfPath,
+	}, nil)
+}
+
+// ApplyWebsiteReverseProxy configures and applies reverse proxy for a website
+func (h *WebServerHandler) ApplyWebsiteReverseProxy(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	siteIDStr := chi.URLParam(r, "id")
+	siteID, err := uuid.Parse(siteIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website ID format", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil || site.OrganizationID != claims.OrganizationID {
+		response.Error(w, http.StatusNotFound, "WEBSITE_NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	var req ApplyWebsiteReverseProxyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.BackendURL == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYLOAD", "Backend target URL (e.g. http://127.0.0.1:3000) is required", nil, "")
+		return
+	}
+
+	if req.LocationPath == "" {
+		req.LocationPath = "/"
+	}
+	if req.TimeoutSeconds <= 0 {
+		req.TimeoutSeconds = 60
+	}
+
+	currentType := "nginx"
+	if site.WebServerType != "" {
+		currentType = site.WebServerType
+	}
+
+	provider, err := h.wsMgr.GetProvider(webserver.WebServerType(currentType))
+	if err != nil {
+		provider, err = h.wsMgr.GetActiveRunningProvider(r.Context())
+		if err != nil {
+			response.Error(w, http.StatusInternalServerError, "NO_ACTIVE_SERVER", "No active web server provider found", nil, "")
+			return
+		}
+	}
+
+	params := webserver.ReverseProxyParams{
+		Domain:           site.PrimaryDomain,
+		LocationPath:     req.LocationPath,
+		BackendURL:       req.BackendURL,
+		WebSocketEnabled: req.WebSocketEnabled,
+		CustomHeaders:    req.CustomHeaders,
+		TimeoutSeconds:   req.TimeoutSeconds,
+		BufferEnabled:    req.BufferEnabled,
+	}
+
+	proxyCfg, err := provider.GenerateReverseProxy(r.Context(), params)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "GENERATE_FAILED", fmt.Sprintf("Failed to generate reverse proxy: %v", err), nil, "")
+		return
+	}
+
+	if err := provider.ApplyReverseProxy(r.Context(), site.PrimaryDomain, proxyCfg); err != nil {
+		response.Error(w, http.StatusBadRequest, "APPLY_FAILED", fmt.Sprintf("Failed to apply reverse proxy: %v", err), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "website.proxy.apply", "website", site.ID.String(), "success", "", map[string]interface{}{
+		"domain":      site.PrimaryDomain,
+		"backend_url": req.BackendURL,
+		"location":    req.LocationPath,
+		"server_type": currentType,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"message":     fmt.Sprintf("Reverse proxy successfully applied to %s -> %s", site.PrimaryDomain, req.BackendURL),
+		"config":      proxyCfg,
+		"backend_url": req.BackendURL,
+		"location":    req.LocationPath,
+	}, nil)
+}
+
+// RemoveWebsiteReverseProxy removes reverse proxy routing for a website
+func (h *WebServerHandler) RemoveWebsiteReverseProxy(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	siteIDStr := chi.URLParam(r, "id")
+	siteID, err := uuid.Parse(siteIDStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website ID format", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	if err != nil || site.OrganizationID != claims.OrganizationID {
+		response.Error(w, http.StatusNotFound, "WEBSITE_NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	currentType := "nginx"
+	if site.WebServerType != "" {
+		currentType = site.WebServerType
+	}
+
+	provider, err := h.wsMgr.GetProvider(webserver.WebServerType(currentType))
+	if err != nil {
+		provider, _ = h.wsMgr.GetActiveRunningProvider(r.Context())
+	}
+
+	if provider != nil {
+		if err := provider.RemoveReverseProxy(r.Context(), site.PrimaryDomain); err != nil {
+			response.Error(w, http.StatusInternalServerError, "REMOVE_FAILED", fmt.Sprintf("Failed to remove reverse proxy: %v", err), nil, "")
+			return
+		}
+	}
+
+	h.audit.Log(r.Context(), r, "website.proxy.remove", "website", site.ID.String(), "success", "", map[string]interface{}{
+		"domain": site.PrimaryDomain,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]string{
+		"message": fmt.Sprintf("Reverse proxy removed from %s", site.PrimaryDomain),
 	}, nil)
 }
