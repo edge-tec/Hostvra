@@ -1017,6 +1017,13 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/enable", firewallHandler.Enable)
 				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/disable", firewallHandler.Disable)
 
+				// ICMP Ping control (aaPanel parity)
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/ping", firewallHandler.GetPingStatus)
+				r.With(rbac.RequirePermission(rbac.PermFirewallManage)).Post("/ping", firewallHandler.SetPingStatus)
+
+				// Active Listening Ports inspection (aaPanel parity)
+				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/ports", firewallHandler.GetListeningPorts)
+
 				// Fail2ban intrusion defense
 				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/jails", firewallHandler.ListJails)
 				r.With(rbac.RequirePermission(rbac.PermFirewallView)).Get("/fail2ban/banned", firewallHandler.ListBannedIPs)

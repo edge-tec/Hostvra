@@ -687,6 +687,16 @@ export interface FirewallStatus {
   fail2ban_active: boolean;
   jails_count: number;
   total_banned_ips: number;
+  ping_prohibited?: boolean;
+}
+
+export interface ListeningPort {
+  protocol: string;
+  port: number;
+  process: string;
+  pid: number;
+  local_addr: string;
+  is_open: boolean;
 }
 
 export interface FirewallRule {

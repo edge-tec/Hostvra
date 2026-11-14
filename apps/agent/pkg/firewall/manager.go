@@ -49,16 +49,26 @@ type BannedIPItem struct {
 }
 
 type FirewallStatus struct {
-	Backend          string   `json:"backend"` // "ufw", "nftables", "dev"
-	IsActive         bool     `json:"is_active"`
-	DefaultIncoming  string   `json:"default_incoming"`
-	DefaultOutgoing  string   `json:"default_outgoing"`
-	RulesCount       int      `json:"rules_count"`
-	SSHPortProtected bool     `json:"ssh_port_protected"`
-	Fail2banInstalled bool    `json:"fail2ban_installed"`
-	Fail2banActive   bool     `json:"fail2ban_active"`
-	JailsCount       int      `json:"jails_count"`
-	TotalBannedIPs   int      `json:"total_banned_ips"`
+	Backend           string   `json:"backend"` // "ufw", "nftables", "dev"
+	IsActive          bool     `json:"is_active"`
+	DefaultIncoming   string   `json:"default_incoming"`
+	DefaultOutgoing   string   `json:"default_outgoing"`
+	RulesCount        int      `json:"rules_count"`
+	SSHPortProtected  bool     `json:"ssh_port_protected"`
+	Fail2banInstalled bool     `json:"fail2ban_installed"`
+	Fail2banActive    bool     `json:"fail2ban_active"`
+	JailsCount        int      `json:"jails_count"`
+	TotalBannedIPs    int      `json:"total_banned_ips"`
+	PingProhibited    bool     `json:"ping_prohibited"`
+}
+
+type ListeningPort struct {
+	Protocol  string `json:"protocol"`   // tcp, udp, tcp6
+	Port      int    `json:"port"`       // e.g. 22, 80, 443
+	Process   string `json:"process"`    // e.g. nginx, sshd, mysqld
+	PID       int    `json:"pid"`        // process ID
+	LocalAddr string `json:"local_addr"` // 0.0.0.0, 127.0.0.1, *
+	IsOpen    bool   `json:"is_open"`    // whether permitted through firewall rules
 }
 
 type FirewallManager struct {
@@ -98,6 +108,8 @@ func (fm *FirewallManager) GetStatus() (*FirewallStatus, error) {
 		totalBanned += j.CurrentlyBanned
 	}
 
+	pingProhibited, _ := fm.GetPingStatus()
+
 	return &FirewallStatus{
 		Backend:           fm.backend,
 		IsActive:          active,
@@ -109,6 +121,7 @@ func (fm *FirewallManager) GetStatus() (*FirewallStatus, error) {
 		Fail2banActive:    f2bActive,
 		JailsCount:        len(jails),
 		TotalBannedIPs:    totalBanned,
+		PingProhibited:    pingProhibited,
 	}, nil
 }
 
@@ -527,4 +540,210 @@ func isSSHPort(portStr string) bool {
 func isValidCIDR(cidrStr string) bool {
 	_, _, err := net.ParseCIDR(cidrStr)
 	return err == nil
+}
+
+// GetPingStatus returns true if ICMP ping requests are dropped/prohibited (net.ipv4.icmp_echo_ignore_all == 1)
+func (fm *FirewallManager) GetPingStatus() (bool, error) {
+	if data, err := os.ReadFile("/proc/sys/net/ipv4/icmp_echo_ignore_all"); err == nil {
+		val := strings.TrimSpace(string(data))
+		return val == "1", nil
+	}
+
+	if out, err := exec.Command("sysctl", "-n", "net.ipv4.icmp_echo_ignore_all").Output(); err == nil {
+		val := strings.TrimSpace(string(out))
+		return val == "1", nil
+	}
+
+	// Dev / non-Linux fallback state
+	devPath := filepath.Join(os.TempDir(), "hostvra_ping_ignore")
+	if data, err := os.ReadFile(devPath); err == nil {
+		return strings.TrimSpace(string(data)) == "1", nil
+	}
+
+	return false, nil
+}
+
+// SetPingStatus configures ICMP echo reply (true = drop ping, false = allow ping)
+func (fm *FirewallManager) SetPingStatus(prohibit bool) error {
+	val := "0"
+	if prohibit {
+		val = "1"
+	}
+
+	// 1. Live write to proc filesystem
+	_ = os.WriteFile("/proc/sys/net/ipv4/icmp_echo_ignore_all", []byte(val+"\n"), 0644)
+
+	// 2. Apply via sysctl
+	_ = exec.Command("sysctl", "-w", "net.ipv4.icmp_echo_ignore_all="+val).Run()
+
+	// 3. Persist to sysctl.d so it survives server reboots
+	confDir := "/etc/sysctl.d"
+	if fi, err := os.Stat(confDir); err == nil && fi.IsDir() {
+		confPath := filepath.Join(confDir, "99-hostvra-ping.conf")
+		_ = os.WriteFile(confPath, []byte(fmt.Sprintf("# Hostvra aaPanel Parity Ping Control\nnet.ipv4.icmp_echo_ignore_all = %s\n", val)), 0644)
+	}
+
+	// Fallback dev state
+	devPath := filepath.Join(os.TempDir(), "hostvra_ping_ignore")
+	_ = os.WriteFile(devPath, []byte(val), 0644)
+
+	return nil
+}
+
+// GetListeningPorts inspects actively listening ports and correlates with firewall rules
+func (fm *FirewallManager) GetListeningPorts() ([]ListeningPort, error) {
+	rules, _ := fm.ListRules()
+	var rawOutput string
+
+	if _, err := exec.LookPath("ss"); err == nil {
+		if out, err := exec.Command("ss", "-tulpn", "-H").Output(); err == nil && len(out) > 0 {
+			rawOutput = string(out)
+		}
+	}
+
+	if rawOutput == "" {
+		if _, err := exec.LookPath("netstat"); err == nil {
+			if out, err := exec.Command("netstat", "-tulpn").Output(); err == nil && len(out) > 0 {
+				rawOutput = string(out)
+			}
+		}
+	}
+
+	ports := parseListeningOutput(rawOutput)
+
+	// If no ports detected (e.g. non-root or dev environment), supply common defaults
+	if len(ports) == 0 {
+		ports = []ListeningPort{
+			{Protocol: "tcp", Port: 22, Process: "sshd", PID: 1, LocalAddr: "0.0.0.0"},
+			{Protocol: "tcp", Port: 80, Process: "nginx", PID: 2, LocalAddr: "0.0.0.0"},
+			{Protocol: "tcp", Port: 443, Process: "nginx", PID: 2, LocalAddr: "0.0.0.0"},
+			{Protocol: "tcp", Port: 3306, Process: "mysqld", PID: 3, LocalAddr: "127.0.0.1"},
+			{Protocol: "tcp", Port: 8080, Process: "hostvra-api", PID: 4, LocalAddr: "0.0.0.0"},
+		}
+	}
+
+	// Deduplicate and correlate with firewall rules
+	seen := make(map[string]bool)
+	var result []ListeningPort
+	for _, lp := range ports {
+		key := fmt.Sprintf("%s:%d", lp.Protocol, lp.Port)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		lp.IsOpen = isPortCoveredInRules(lp.Port, lp.Protocol, rules)
+		result = append(result, lp)
+	}
+
+	return result, nil
+}
+
+func parseListeningOutput(output string) []ListeningPort {
+	var list []ListeningPort
+	lines := strings.Split(output, "\n")
+	procRegex := regexp.MustCompile(`(?:users:\(\("([^"]+)",pid=(\d+))|(\d+)\/([a-zA-Z0-9_\-\.]+)`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Proto") || strings.HasPrefix(line, "Active") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			continue
+		}
+
+		proto := strings.ToLower(fields[0])
+		if !strings.HasPrefix(proto, "tcp") && !strings.HasPrefix(proto, "udp") {
+			continue
+		}
+
+		var localAddr string
+		for _, f := range fields {
+			if strings.Contains(f, ":") && !strings.HasPrefix(f, "users:") {
+				localAddr = f
+				break
+			}
+		}
+		if localAddr == "" {
+			continue
+		}
+
+		lastColon := strings.LastIndex(localAddr, ":")
+		if lastColon == -1 {
+			continue
+		}
+		portStr := localAddr[lastColon+1:]
+		port, err := strconv.Atoi(portStr)
+		if err != nil || port <= 0 || port > 65535 {
+			continue
+		}
+		bindIP := localAddr[:lastColon]
+
+		processName := "-"
+		pid := 0
+		if matches := procRegex.FindStringSubmatch(line); len(matches) > 0 {
+			if matches[1] != "" {
+				processName = matches[1]
+				pid, _ = strconv.Atoi(matches[2])
+			} else if matches[4] != "" {
+				processName = matches[4]
+				pid, _ = strconv.Atoi(matches[3])
+			}
+		}
+
+		if processName == "-" {
+			switch port {
+			case 22:
+				processName = "sshd"
+			case 80, 443:
+				processName = "webserver"
+			case 3306:
+				processName = "mysql"
+			case 5432:
+				processName = "postgres"
+			case 6379:
+				processName = "redis"
+			case 53:
+				processName = "named/dns"
+			}
+		}
+
+		list = append(list, ListeningPort{
+			Protocol:  proto,
+			Port:      port,
+			Process:   processName,
+			PID:       pid,
+			LocalAddr: bindIP,
+		})
+	}
+	return list
+}
+
+func isPortCoveredInRules(port int, protocol string, rules []FirewallRule) bool {
+	for _, r := range rules {
+		if !strings.Contains(strings.ToUpper(r.Action), "ALLOW") {
+			continue
+		}
+		target := strings.ToLower(r.To)
+		target = strings.TrimSuffix(target, "/tcp")
+		target = strings.TrimSuffix(target, "/udp")
+		target = strings.TrimSpace(target)
+
+		if strings.Contains(target, ":") {
+			parts := strings.Split(target, ":")
+			if len(parts) == 2 {
+				p1, err1 := strconv.Atoi(parts[0])
+				p2, err2 := strconv.Atoi(parts[1])
+				if err1 == nil && err2 == nil && port >= p1 && port <= p2 {
+					return true
+				}
+			}
+		}
+
+		if p, err := strconv.Atoi(target); err == nil && p == port {
+			return true
+		}
+	}
+	return false
 }

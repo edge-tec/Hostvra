@@ -273,3 +273,71 @@ func (h *FirewallHandler) UnbanIP(w http.ResponseWriter, r *http.Request) {
 		"message": "IP successfully unbanned",
 	}, nil)
 }
+
+// GetPingStatus returns current ICMP ping response status
+func (h *FirewallHandler) GetPingStatus(w http.ResponseWriter, r *http.Request) {
+	prohibited, err := h.firewallMgr.GetPingStatus()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "PING_STATUS_ERROR", err.Error(), nil, "")
+		return
+	}
+	statusStr := "allowed"
+	if prohibited {
+		statusStr = "prohibited"
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"prohibited": prohibited,
+		"status":     statusStr,
+	}, nil)
+}
+
+type SetPingRequest struct {
+	Prohibit bool `json:"prohibit"`
+}
+
+// SetPingStatus updates ICMP ping policy (prohibit drop vs allow echo)
+func (h *FirewallHandler) SetPingStatus(w http.ResponseWriter, r *http.Request) {
+	var req SetPingRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	if err := h.firewallMgr.SetPingStatus(req.Prohibit); err != nil {
+		response.Error(w, http.StatusInternalServerError, "SET_PING_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	statusStr := "allowed"
+	action := "allow"
+	if req.Prohibit {
+		statusStr = "prohibited"
+		action = "prohibit"
+	}
+
+	h.audit.Log(r.Context(), r, "firewall.ping_toggle", "firewall", "icmp", "success",
+		"Set ICMP ping status to "+statusStr, map[string]interface{}{
+			"action":     action,
+			"prohibited": req.Prohibit,
+		})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"prohibited": req.Prohibit,
+		"status":     statusStr,
+		"message":    "ICMP ping policy updated to " + statusStr,
+	}, nil)
+}
+
+// GetListeningPorts lists active network listening sockets and firewall permissions
+func (h *FirewallHandler) GetListeningPorts(w http.ResponseWriter, r *http.Request) {
+	ports, err := h.firewallMgr.GetListeningPorts()
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "LISTENING_PORTS_ERROR", err.Error(), nil, "")
+		return
+	}
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"ports": ports,
+		"count": len(ports),
+	}, nil)
+}

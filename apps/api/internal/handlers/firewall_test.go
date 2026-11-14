@@ -104,4 +104,31 @@ func TestFirewallHandler_LifecycleAndSafety(t *testing.T) {
 	if recJails.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK for ListJails, got %d: %s", recJails.Code, recJails.Body.String())
 	}
+
+	// 7. ICMP Ping Status & Toggle
+	reqPingGet := httptest.NewRequest(http.MethodGet, "/api/v1/firewall/ping", nil)
+	reqPingGet = reqPingGet.WithContext(context.WithValue(reqPingGet.Context(), auth.UserContextKey, claims))
+	recPingGet := httptest.NewRecorder()
+	h.GetPingStatus(recPingGet, reqPingGet)
+	if recPingGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GetPingStatus, got %d: %s", recPingGet.Code, recPingGet.Body.String())
+	}
+
+	setPingBody, _ := json.Marshal(SetPingRequest{Prohibit: true})
+	reqPingPost := httptest.NewRequest(http.MethodPost, "/api/v1/firewall/ping", bytes.NewReader(setPingBody))
+	reqPingPost = reqPingPost.WithContext(context.WithValue(reqPingPost.Context(), auth.UserContextKey, claims))
+	recPingPost := httptest.NewRecorder()
+	h.SetPingStatus(recPingPost, reqPingPost)
+	if recPingPost.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SetPingStatus, got %d: %s", recPingPost.Code, recPingPost.Body.String())
+	}
+
+	// 8. Listening Ports
+	reqPorts := httptest.NewRequest(http.MethodGet, "/api/v1/firewall/ports", nil)
+	reqPorts = reqPorts.WithContext(context.WithValue(reqPorts.Context(), auth.UserContextKey, claims))
+	recPorts := httptest.NewRecorder()
+	h.GetListeningPorts(recPorts, reqPorts)
+	if recPorts.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GetListeningPorts, got %d: %s", recPorts.Code, recPorts.Body.String())
+	}
 }

@@ -17,6 +17,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Unlock,
+  Activity,
+  Network,
+  ShieldOff,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import {
@@ -25,19 +28,25 @@ import {
   FirewallRule,
   Fail2banJail,
   BannedIPItem,
+  ListeningPort,
 } from '@/lib/api';
 
 export default function FirewallPage() {
-  const [activeTab, setActiveTab] = useState<'rules' | 'fail2ban'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'ports' | 'fail2ban'>('rules');
 
   // Status & Data
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [rules, setRules] = useState<FirewallRule[]>([]);
+  const [listeningPorts, setListeningPorts] = useState<ListeningPort[]>([]);
   const [jails, setJails] = useState<Fail2banJail[]>([]);
   const [bannedIPs, setBannedIPs] = useState<BannedIPItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+
+  // ICMP Ping state
+  const [pingProhibited, setPingProhibited] = useState(false);
+  const [togglingPing, setTogglingPing] = useState(false);
 
   // Alerts & Messages
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -100,6 +109,18 @@ export default function FirewallPage() {
       if (bannedRes.success && bannedRes.data && bannedRes.data.banned_ips) {
         setBannedIPs(bannedRes.data.banned_ips);
       }
+
+      // 5. Fetch ICMP Ping Policy
+      const pingRes = await apiFetch<{ prohibited: boolean; status: string }>('/api/v1/firewall/ping');
+      if (pingRes.success && pingRes.data) {
+        setPingProhibited(pingRes.data.prohibited);
+      }
+
+      // 6. Fetch Active Listening Ports
+      const portsRes = await apiFetch<{ ports: ListeningPort[]; count: number }>('/api/v1/firewall/ports');
+      if (portsRes.success && portsRes.data && portsRes.data.ports) {
+        setListeningPorts(portsRes.data.ports);
+      }
     } catch (err: any) {
       showNotification(err.message || 'Failed to fetch firewall status from server', true);
     } finally {
@@ -111,6 +132,47 @@ export default function FirewallPage() {
   useEffect(() => {
     loadData(false);
   }, [loadData]);
+
+  // Toggle ICMP Ping (aaPanel Parity)
+  const handleTogglePing = async () => {
+    const nextVal = !pingProhibited;
+    setTogglingPing(true);
+    const res = await apiFetch<any>('/api/v1/firewall/ping', {
+      method: 'POST',
+      body: JSON.stringify({ prohibit: nextVal }),
+    });
+    setTogglingPing(false);
+
+    if (res.success) {
+      setPingProhibited(nextVal);
+      showNotification(nextVal ? 'ICMP Ping is now prohibited (kernel drops echo requests)' : 'ICMP Ping is now allowed');
+      loadData(false);
+    } else {
+      showNotification(res.error?.message || 'Failed to update ICMP ping status', true);
+    }
+  };
+
+  // Quick 1-click open port from listening sockets table
+  const handleQuickAllowPort = async (p: ListeningPort) => {
+    setActionLoadingId(`allow-port-${p.port}`);
+    const res = await apiFetch<any>('/api/v1/firewall/rules', {
+      method: 'POST',
+      body: JSON.stringify({
+        port: p.port.toString(),
+        protocol: p.protocol.startsWith('tcp') ? 'tcp' : 'udp',
+        action: 'allow',
+        comment: `Service: ${p.process}`,
+      }),
+    });
+    setActionLoadingId(null);
+
+    if (res.success) {
+      showNotification(`Port ${p.port} (${p.process}) opened in firewall`);
+      loadData(false);
+    } else {
+      showNotification(res.error?.message || 'Failed to open port in firewall', true);
+    }
+  };
 
   // Toggle Firewall (Enable/Disable)
   const handleToggleFirewall = async () => {
@@ -264,6 +326,14 @@ export default function FirewallPage() {
       r.action.toLowerCase().includes(search.toLowerCase())
   );
 
+  const filteredPorts = listeningPorts.filter(
+    (lp) =>
+      lp.port.toString().includes(search.toLowerCase()) ||
+      lp.process.toLowerCase().includes(search.toLowerCase()) ||
+      lp.protocol.toLowerCase().includes(search.toLowerCase()) ||
+      lp.local_addr.toLowerCase().includes(search.toLowerCase())
+  );
+
   const filteredBanned = bannedIPs.filter(
     (b) =>
       b.ip.toLowerCase().includes(search.toLowerCase()) ||
@@ -314,7 +384,7 @@ export default function FirewallPage() {
             <button
               onClick={() => loadData(true)}
               disabled={refreshing}
-              className="p-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition-colors shadow-xs shrink-0"
+              className="p-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition-colors shadow-xs shrink-0 cursor-pointer"
               title="Refresh status"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-indigo-500' : ''}`} />
@@ -323,15 +393,23 @@ export default function FirewallPage() {
             {activeTab === 'rules' ? (
               <button
                 onClick={() => setAddModalOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-sm font-semibold shadow-sm transition-all flex-1 sm:flex-none"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-sm font-semibold shadow-sm transition-all flex-1 sm:flex-none cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Add Firewall Rule
               </button>
+            ) : activeTab === 'ports' ? (
+              <button
+                onClick={() => setAddModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:bg-[#166534] text-white text-sm font-semibold shadow-sm transition-all flex-1 sm:flex-none cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                Open Custom Port
+              </button>
             ) : (
               <button
                 onClick={() => setBanModalOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold shadow-md shadow-rose-600/20 transition-all flex-1 sm:flex-none"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold shadow-md shadow-rose-600/20 transition-all flex-1 sm:flex-none cursor-pointer"
               >
                 <UserX className="w-4 h-4" />
                 Manual Ban IP
@@ -341,18 +419,18 @@ export default function FirewallPage() {
         </div>
 
         {/* Status Dashboard Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Card 1: Firewall Status */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5">
-            <div className="flex items-center gap-3.5 min-w-0">
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               <div
-                className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                   status?.is_active
                     ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                     : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                 }`}
               >
-                {status?.is_active ? <ShieldCheck className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+                {status?.is_active ? <ShieldCheck className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -365,10 +443,8 @@ export default function FirewallPage() {
                     }`}
                   />
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate">
-                  {status?.is_active
-                    ? 'Default Ingress: DENY • Egress: ALLOW'
-                    : 'Packet filtering disabled'}
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  {status?.is_active ? 'Drop Ingress • Allow Egress' : 'Packet filtering off'}
                 </p>
               </div>
             </div>
@@ -376,57 +452,115 @@ export default function FirewallPage() {
             <button
               onClick={handleToggleFirewall}
               disabled={togglingFirewall}
-              className={`w-full sm:w-auto shrink-0 justify-center px-4 py-2 rounded-xl transition-all text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer ${
+              className={`w-full py-1.5 px-3 rounded-xl transition-all text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer ${
                 status?.is_active
                   ? 'border border-rose-300 hover:border-rose-400 dark:border-rose-900/60 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400'
-                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white border border-emerald-600 shadow-sm'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600'
               }`}
             >
-              <Power className={`w-4 h-4 ${status?.is_active ? 'text-rose-600 dark:text-rose-400' : 'text-white'}`} />
-              <span>{togglingFirewall ? 'Updating...' : status?.is_active ? 'Disable Firewall' : 'Enable Firewall'}</span>
+              <Power className="w-3.5 h-3.5" />
+              <span>{togglingFirewall ? 'Updating...' : status?.is_active ? 'Disable' : 'Enable'}</span>
             </button>
           </div>
 
-          {/* Card 2: SSH Lockout Guard */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
-              <Lock className="w-6 h-6" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-950 dark:text-white text-sm">SSH Lockout Guard</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                  Enforced
-                </span>
+          {/* Card 2: ICMP Ping Switch (aaPanel Parity) */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                  pingProhibited
+                    ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                }`}
+              >
+                {pingProhibited ? <ShieldOff className="w-5 h-5" /> : <Activity className="w-5 h-5" />}
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate sm:whitespace-normal">
-                Port 22 deny actions blocked to preserve admin connectivity
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-950 dark:text-white text-sm">Ping Defense</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                      pingProhibited
+                        ? 'bg-purple-500/20 text-purple-600 dark:text-purple-300'
+                        : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-300'
+                    }`}
+                  >
+                    {pingProhibited ? 'Prohibited' : 'Normal'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  {pingProhibited ? 'ICMP Echo Dropped' : 'Responds to ICMP Echo'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleTogglePing}
+              disabled={togglingPing}
+              className={`w-full py-1.5 px-3 rounded-xl transition-all text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer ${
+                pingProhibited
+                  ? 'border border-slate-300 dark:border-surface-700 bg-slate-50 hover:bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300'
+                  : 'border border-purple-300 hover:border-purple-400 dark:border-purple-900/60 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400'
+              }`}
+            >
+              <Activity className="w-3.5 h-3.5" />
+              <span>{togglingPing ? 'Setting...' : pingProhibited ? 'Allow Ping' : 'Prohibit Ping'}</span>
+            </button>
+          </div>
+
+          {/* Card 3: SSH Lockout Guard */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 flex items-center justify-center shrink-0">
+                <Lock className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-950 dark:text-white text-sm">SSH Lockout Guard</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                    Active
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  Port 22 deny blocked
+                </p>
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-surface-950 p-1.5 rounded-lg border border-slate-200 dark:border-surface-800 text-center font-mono">
+              Auto-Protected (Port 22)
             </div>
           </div>
 
-          {/* Card 3: Fail2ban Summary */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
-              <Radio className="w-6 h-6" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-950 dark:text-white text-sm">Fail2ban Intrusion</span>
-                <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase shrink-0 ${
-                    status?.fail2ban_active
-                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                      : 'bg-slate-100 dark:bg-surface-800 text-slate-500'
-                  }`}
-                >
-                  {status?.fail2ban_active ? 'Running' : 'Offline'}
-                </span>
+          {/* Card 4: Fail2ban Summary */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 flex items-center justify-center shrink-0">
+                <Radio className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium truncate">
-                {jails.length} Jails Active • {bannedIPs.length} Banned IPs
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-slate-950 dark:text-white text-sm">Fail2ban Defense</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${
+                      status?.fail2ban_active
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                        : 'bg-slate-100 dark:bg-surface-800 text-slate-500'
+                    }`}
+                  >
+                    {status?.fail2ban_active ? 'Running' : 'Offline'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                  {jails.length} Jails • {bannedIPs.length} Banned IPs
+                </p>
+              </div>
             </div>
+            <button
+              onClick={() => setActiveTab('fail2ban')}
+              className="w-full py-1.5 px-3 rounded-xl border border-slate-300 dark:border-surface-700 bg-slate-50 hover:bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold text-center cursor-pointer"
+            >
+              View Jails & Bans
+            </button>
           </div>
         </div>
 
@@ -444,6 +578,19 @@ export default function FirewallPage() {
           >
             <ShieldCheck className="w-4 h-4 shrink-0" />
             <span>Firewall Rules ({rules.length})</span>
+          </button>
+          <button
+            role="tab"
+            data-tab="true"
+            onClick={() => setActiveTab('ports')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all cursor-pointer font-medium whitespace-nowrap shrink-0 ${
+              activeTab === 'ports'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-white/40 dark:hover:bg-slate-700/40'
+            }`}
+          >
+            <Network className="w-4 h-4 shrink-0" />
+            <span>Listening Ports ({listeningPorts.length})</span>
           </button>
           <button
             role="tab"
@@ -466,13 +613,19 @@ export default function FirewallPage() {
             <Search className="w-4 h-4 text-slate-400 flex-shrink-0" />
             <input
               type="text"
-              placeholder={activeTab === 'rules' ? 'Search port, source IP, comments...' : 'Search banned IP or jail...'}
+              placeholder={
+                activeTab === 'rules'
+                  ? 'Search port, source IP, comments...'
+                  : activeTab === 'ports'
+                  ? 'Search port, process, address...'
+                  : 'Search banned IP or jail...'
+              }
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full bg-transparent text-xs font-medium text-slate-950 dark:text-white placeholder:text-slate-400 focus:outline-none"
             />
             {search && (
-              <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5">
+              <button onClick={() => setSearch('')} className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5 cursor-pointer">
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
@@ -480,6 +633,8 @@ export default function FirewallPage() {
           <div className="text-xs font-semibold text-slate-600 dark:text-slate-400 px-2 self-end sm:self-center">
             {activeTab === 'rules'
               ? `Showing ${filteredRules.length} of ${rules.length} rules`
+              : activeTab === 'ports'
+              ? `Showing ${filteredPorts.length} of ${listeningPorts.length} listening ports`
               : `Showing ${filteredBanned.length} of ${bannedIPs.length} banned IPs`}
           </div>
         </div>
@@ -574,7 +729,130 @@ export default function FirewallPage() {
           </div>
         )}
 
-        {/* TAB 2: FAIL2BAN JAILS & BANNED IPS */}
+        {/* TAB 2: ACTIVE LISTENING PORTS & SERVICES (aaPanel Parity) */}
+        {activeTab === 'ports' && (
+          <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl overflow-hidden shadow-xs">
+            <div className="p-4 border-b border-slate-200 dark:border-surface-800 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="flex items-center gap-2 font-bold text-slate-950 dark:text-white text-sm">
+                  <Network className="w-4 h-4 text-indigo-500" />
+                  <span>Server Listening Ports & Firewall Status</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  Real-time network sockets listening on the host. Ports marked blocked can be opened with 1-click.
+                </p>
+              </div>
+              <span className="text-xs font-mono px-2.5 py-1 rounded-full bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 font-semibold">
+                {listeningPorts.length} Sockets Detected
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm border-collapse min-w-[700px]">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-surface-800 bg-slate-50 dark:bg-[#121824] text-slate-700 dark:text-slate-300 text-[11px] font-bold uppercase tracking-wider">
+                    <th className="px-6 py-3.5">Listening Port</th>
+                    <th className="px-6 py-3.5">Protocol</th>
+                    <th className="px-6 py-3.5">Process / Program</th>
+                    <th className="px-6 py-3.5">PID</th>
+                    <th className="px-6 py-3.5">Bind Address</th>
+                    <th className="px-6 py-3.5">Firewall Status</th>
+                    <th className="px-6 py-3.5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-surface-800/80">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
+                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-indigo-500" />
+                        Scanning active kernel listening sockets...
+                      </td>
+                    </tr>
+                  ) : filteredPorts.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-slate-500 font-medium text-sm">
+                        No listening ports matched your search criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPorts.map((lp) => {
+                      const isSSH = lp.port === 22;
+                      const isWeb = lp.port === 80 || lp.port === 443;
+                      const isLocalOnly = lp.local_addr === '127.0.0.1' || lp.local_addr === '::1';
+
+                      return (
+                        <tr key={`${lp.protocol}-${lp.port}-${lp.local_addr}`} className="hover:bg-slate-50/80 dark:hover:bg-[#151d2d] transition-colors">
+                          <td className="px-6 py-4 font-mono font-bold text-slate-950 dark:text-white flex items-center gap-2">
+                            {isSSH && (
+                              <span title="Administrative SSH Port">
+                                <Lock className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                              </span>
+                            )}
+                            <span className="text-sm">{lp.port}</span>
+                          </td>
+                          <td className="px-6 py-4 uppercase font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
+                            {lp.protocol}
+                          </td>
+                          <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 font-mono text-xs border border-indigo-200 dark:border-indigo-900/40">
+                                {lp.process}
+                              </span>
+                              {isWeb && (
+                                <span className="text-[10px] text-slate-400 font-normal">Web Traffic</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 font-mono text-xs text-slate-500">
+                            {lp.pid > 0 ? lp.pid : '-'}
+                          </td>
+                          <td className="px-6 py-4 font-mono text-xs">
+                            <span className={isLocalOnly ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-slate-600 dark:text-slate-300'}>
+                              {lp.local_addr}
+                            </span>
+                            {isLocalOnly && (
+                              <span className="ml-2 text-[10px] uppercase font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">Local</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4">
+                            {lp.is_open ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Allowed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase bg-slate-100 dark:bg-surface-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-surface-700">
+                                Not in Rules
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            {lp.is_open ? (
+                              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
+                                Active in Rules
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleQuickAllowPort(lp)}
+                                disabled={actionLoadingId === `allow-port-${lp.port}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-all cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3" />
+                                {actionLoadingId === `allow-port-${lp.port}` ? 'Opening...' : 'Open in Firewall'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: FAIL2BAN JAILS & BANNED IPS */}
         {activeTab === 'fail2ban' && (
           <div className="space-y-6">
             {/* Jails Cards Grid */}
