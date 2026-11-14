@@ -186,7 +186,51 @@ func (cm *CronManager) ListJobs() ([]CronJob, error) {
 		return nil, err
 	}
 
-	return cm.parseCrontab(string(data)), nil
+	jobs := cm.parseCrontab(string(data))
+	for i := range jobs {
+		if lr, ok := cm.lastRuns[jobs[i].ID]; ok {
+			jobs[i].LastRunAt = lr.Timestamp
+			if lr.Success {
+				jobs[i].LastStatus = "success"
+			} else {
+				jobs[i].LastStatus = "failed"
+			}
+			if lr.Stdout != "" {
+				jobs[i].LastOutput = lr.Stdout
+			} else {
+				jobs[i].LastOutput = lr.Stderr
+			}
+		}
+	}
+
+	return jobs, nil
+}
+
+// GetJobLog retrieves the last execution log of a cron task
+func (cm *CronManager) GetJobLog(id string) (*ExecutionResult, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+
+	if res, ok := cm.lastRuns[id]; ok {
+		return res, nil
+	}
+
+	logFile := filepath.Join("/var/log/hostvra-cron", id+".log")
+	if data, err := os.ReadFile(logFile); err == nil {
+		return &ExecutionResult{
+			JobID:     id,
+			Stdout:    string(data),
+			Success:   true,
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}, nil
+	}
+
+	return &ExecutionResult{
+		JobID:     id,
+		Stdout:    "No execution log recorded yet. Click 'Run Now' to execute task and view output.",
+		Success:   true,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}, nil
 }
 
 // AddJob validates and saves a new scheduled task
@@ -411,6 +455,18 @@ func (cm *CronManager) ExecuteJobNow(id string) (*ExecutionResult, error) {
 	cm.mu.Lock()
 	cm.lastRuns[id] = res
 	cm.mu.Unlock()
+
+	// Persist log file for historical inspection
+	logDir := "/var/log/hostvra-cron"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		logDir = filepath.Join(os.TempDir(), "hostvra-cron")
+		_ = os.MkdirAll(logDir, 0755)
+	}
+	outText := res.Stdout
+	if outText == "" {
+		outText = res.Stderr
+	}
+	_ = os.WriteFile(filepath.Join(logDir, id+".log"), []byte(outText), 0644)
 
 	return res, nil
 }

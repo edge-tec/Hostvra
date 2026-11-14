@@ -228,6 +228,18 @@ func TestCronHandler_NonAdminForbiddenFromRunningRootJob(t *testing.T) {
 	if recToggle.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 Forbidden for non-admin toggling root cron job, got %d: %s", recToggle.Code, recToggle.Body.String())
 	}
+
+	// 8. Get Job Logs as admin
+	rLogs := chi.NewRouter()
+	rLogs.Get("/api/v1/cron/jobs/{id}/logs", h.GetJobLogs)
+	reqLogs := httptest.NewRequest(http.MethodGet, "/api/v1/cron/jobs/"+jobID+"/logs", nil)
+	reqLogs = reqLogs.WithContext(context.WithValue(reqLogs.Context(), auth.UserContextKey, adminClaims))
+	recLogs := httptest.NewRecorder()
+	rLogs.ServeHTTP(recLogs, reqLogs)
+
+	if recLogs.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for GetJobLogs, got %d: %s", recLogs.Code, recLogs.Body.String())
+	}
 }
 
 

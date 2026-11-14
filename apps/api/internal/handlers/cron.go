@@ -354,6 +354,29 @@ func (h *CronHandler) RunJob(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, res, nil)
 }
 
+// GetJobLogs returns the last execution output for a specific cron job
+func (h *CronHandler) GetJobLogs(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	if jobID == "" {
+		response.Error(w, http.StatusBadRequest, "MISSING_ID", "Job ID required", nil, "")
+		return
+	}
+
+	claims, _ := auth.GetClaims(r.Context())
+	if !h.isJobOwnedByTenant(r.Context(), claims, jobID) {
+		response.Error(w, http.StatusForbidden, "CRON_JOB_FORBIDDEN", "Cron job does not belong to your organization", nil, "")
+		return
+	}
+
+	logRes, err := h.cronMgr.GetJobLog(jobID)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "LOG_FETCH_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	response.JSON(w, http.StatusOK, logRes, nil)
+}
+
 // TestCommand executes an ad-hoc command to verify output and exit code
 func (h *CronHandler) TestCommand(w http.ResponseWriter, r *http.Request) {
 	var req TestCronCommandRequest

@@ -1076,6 +1076,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Delete("/jobs/{id}", cronHandler.DeleteJob)
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/toggle", cronHandler.ToggleJob)
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/jobs/{id}/run", cronHandler.RunJob)
+				r.With(rbac.RequirePermission(rbac.PermCronView)).Get("/jobs/{id}/logs", cronHandler.GetJobLogs)
 				r.With(rbac.RequirePermission(rbac.PermCronManage)).Post("/test", cronHandler.TestCommand)
 			})
 
