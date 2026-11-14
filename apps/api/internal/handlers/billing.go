@@ -132,20 +132,64 @@ func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *sto
 				return err
 			}
 
-			// If linked to subscription, activate it
+			// 1. If linked to subscription, automatically renew it and extend the billing period
 			if billingInv.SubscriptionID != nil {
 				if sub, err := h.store.GetSubscriptionByID(ctx, *billingInv.SubscriptionID); err == nil && sub != nil {
+					baseDate := sub.NextBillingDate
+					if baseDate.Before(now) {
+						baseDate = now
+					}
+					if sub.BillingCycle == "yearly" {
+						sub.NextBillingDate = baseDate.AddDate(1, 0, 0)
+					} else {
+						sub.NextBillingDate = baseDate.AddDate(0, 1, 0)
+					}
 					sub.Status = store.SubStatusActive
 					_ = h.store.UpdateSubscription(ctx, sub)
+
+					// Sync hosting accounts, unsuspend if suspended, and update quotas
+					if plan, err := h.store.GetPlanByID(ctx, sub.PlanID); err == nil && plan != nil {
+						h.provisionUserForPlan(ctx, billingInv.UserID, billingInv.OrganizationID, plan, sub)
+					}
+				}
+			} else if billingInv.PlanID != uuid.Nil {
+				// 2. New package purchase without existing subscription: create and activate
+				plan, _ := h.store.GetPlanByID(ctx, billingInv.PlanID)
+				planName := billingInv.Description
+				if plan != nil {
+					planName = plan.Name
+				}
+				subID := uuid.New()
+				newSub := &store.Subscription{
+					ID:              subID,
+					UserID:          billingInv.UserID,
+					OrganizationID:  billingInv.OrganizationID,
+					PlanID:          billingInv.PlanID,
+					PlanName:        planName,
+					BillingCycle:    "monthly",
+					Amount:          billingInv.Total,
+					Currency:        billingInv.Currency,
+					Status:          store.SubStatusActive,
+					NextBillingDate: now.AddDate(0, 1, 0),
+					CreatedAt:       now,
+					UpdatedAt:       now,
+				}
+				if err := h.store.CreateSubscription(ctx, newSub); err == nil {
+					billingInv.SubscriptionID = &subID
+					_ = h.store.UpdateInvoice(ctx, billingInv)
+					if plan != nil {
+						h.provisionUserForPlan(ctx, billingInv.UserID, billingInv.OrganizationID, plan, newSub)
+					}
 				}
 			}
 
-			// If linked to domain order, mark paid and provision
+			// 3. If linked to domain order, mark paid and provision
 			if domainOrder, err := h.store.GetDomainOrderByInvoiceID(ctx, billingInv.ID); err == nil && domainOrder != nil {
 				domainOrder.PaymentStatus = "paid"
 				_ = h.store.UpdateDomainOrder(ctx, domainOrder)
 			}
 
+			// 4. Send payment and order confirmation emails
 			h.notifyInvoicePaid(ctx, billingInv)
 		}
 	}
