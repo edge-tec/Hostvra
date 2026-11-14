@@ -35,6 +35,7 @@ import {
   X,
   Flame,
   CreditCard,
+  Coins,
   LifeBuoy,
 } from 'lucide-react';
 import { clearStoredAuth, getStoredUserRole, apiFetch } from '@/lib/api';
@@ -101,6 +102,7 @@ const adminNavGroups: NavGroup[] = [
     items: [
       { label: 'User Management', href: '/admin/users', icon: Users, badge: 'Tenants', badgeColor: 'purple' },
       { label: 'Billing & Plans', href: '/billing', icon: CreditCard, badge: 'Cloud', badgeColor: 'amber' },
+      { label: 'Crypto Gateway', href: '/admin/crypto', icon: Coins, badge: 'Treasury', badgeColor: 'emerald' },
       { label: 'Domain Reseller', href: '/admin/domains', icon: Globe, badge: 'Admin', badgeColor: 'purple' },
       { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
       { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },

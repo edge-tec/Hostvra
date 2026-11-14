@@ -24,6 +24,7 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/crypto"
 	"hostvra/api/internal/dns"
 	"hostvra/api/internal/domains"
 	"hostvra/api/internal/domains/resellerclub"
@@ -148,6 +149,12 @@ func main() {
 	accountHandler := handlers.NewAccountHandler(cfg, dataStore, auditLogger)
 	provisioningHandler := handlers.NewProvisioningHandler(cfg, dataStore, auditLogger)
 	resellerHandler := handlers.NewResellerHandler(cfg, dataStore, auditLogger)
+
+	// Initialize In-House Crypto Payment & Treasury Engine
+	cryptoService := crypto.NewCryptoService(dataStore, billingHandler.SettleCryptoPayment)
+	cryptoHandler := handlers.NewCryptoHandler(cfg, dataStore, auditLogger, cryptoService)
+	cryptoScanner := crypto.NewBackgroundScanner(cryptoService, 20*time.Second)
+	cryptoScanner.Start(context.Background())
 
 	// Initialize ResellerClub Client & Domain Subsystem
 	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
@@ -441,6 +448,14 @@ func main() {
 		r.Get("/support/articles", supportHandler.ListArticles)
 		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
 		r.Post("/support/ai-assistant", supportHandler.AskAIAssistant)
+
+		// Public & Agency Client Crypto Payment Gateway Endpoints
+		r.Route("/crypto", func(r chi.Router) {
+			r.Get("/currencies", cryptoHandler.ListCurrencies)
+			r.Post("/invoices", cryptoHandler.CreateInvoice)
+			r.Get("/invoices/{code}", cryptoHandler.GetInvoice)
+			r.Post("/invoices/{code}/verify", cryptoHandler.VerifyInvoice)
+		})
 
 		// Standalone Webmail Operations (Strict Authentication Gate & Session Security)
 		r.Route("/webmail", func(r chi.Router) {
@@ -1397,6 +1412,18 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/logs", domainAdminHandler.ListAuditLogs)
 			})
 
+			// Super Admin In-House Crypto Payment Gateway & Treasury Management
+			r.Route("/admin/crypto", func(r chi.Router) {
+				r.Use(rbac.RequireAdmin())
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/invoices", cryptoHandler.AdminListInvoices)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/treasuries", cryptoHandler.AdminListTreasuries)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/treasuries", cryptoHandler.AdminSaveTreasury)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/ledger", cryptoHandler.AdminListLedger)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/settings", cryptoHandler.AdminGetSettings)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/settings", cryptoHandler.AdminUpdateSettings)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/invoices/{code}/force-verify", cryptoHandler.VerifyInvoice)
+			})
+
 			// Support Tickets, Stats & Canned Macros
 			r.Route("/support", func(r chi.Router) {
 				r.Get("/stats", supportHandler.GetStats)
@@ -1463,6 +1490,7 @@ func main() {
 		logger.Error("Server forced to shutdown", "error", err)
 	}
 
+	cryptoScanner.Stop()
 	logger.Info("Hostvra API server stopped.")
 }
 

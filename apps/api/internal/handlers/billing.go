@@ -106,6 +106,52 @@ func (h *BillingHandler) notifyInvoicePaid(ctx context.Context, inv *store.Invoi
 	}()
 }
 
+// SettleCryptoPayment handles atomic billing invoice & order settlement when a crypto invoice is paid on-chain.
+func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *store.CryptoPaymentInvoice) error {
+	if cryptoInv == nil || cryptoInv.Status != "paid" {
+		return nil
+	}
+
+	if cryptoInv.PayableType == "invoice" && cryptoInv.PayableID != "" {
+		invUUID, err := uuid.Parse(cryptoInv.PayableID)
+		if err != nil {
+			return err
+		}
+		billingInv, err := h.store.GetInvoiceByID(ctx, invUUID)
+		if err != nil || billingInv == nil {
+			return err
+		}
+
+		if billingInv.Status != store.InvoiceStatusPaid {
+			billingInv.Status = store.InvoiceStatusPaid
+			billingInv.PaymentMethod = "crypto_" + strings.ToLower(cryptoInv.CurrencyID)
+			billingInv.TransactionID = cryptoInv.TxHash
+			now := time.Now().UTC()
+			billingInv.PaidAt = &now
+			if err := h.store.UpdateInvoice(ctx, billingInv); err != nil {
+				return err
+			}
+
+			// If linked to subscription, activate it
+			if billingInv.SubscriptionID != nil {
+				if sub, err := h.store.GetSubscriptionByID(ctx, *billingInv.SubscriptionID); err == nil && sub != nil {
+					sub.Status = store.SubStatusActive
+					_ = h.store.UpdateSubscription(ctx, sub)
+				}
+			}
+
+			// If linked to domain order, mark paid and provision
+			if domainOrder, err := h.store.GetDomainOrderByInvoiceID(ctx, billingInv.ID); err == nil && domainOrder != nil {
+				domainOrder.PaymentStatus = "paid"
+				_ = h.store.UpdateDomainOrder(ctx, domainOrder)
+			}
+
+			h.notifyInvoicePaid(ctx, billingInv)
+		}
+	}
+	return nil
+}
+
 // ----------------------------------------------------------------------------
 // Plans API
 // ----------------------------------------------------------------------------

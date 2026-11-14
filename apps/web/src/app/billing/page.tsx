@@ -209,6 +209,14 @@ const DEFAULT_PLANS: HostingPlan[] = [
 
 const DEFAULT_GATEWAYS: PaymentGatewayConfig[] = [
   {
+    gateway: 'crypto',
+    display_name: 'In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)',
+    enabled: true,
+    test_mode: false,
+    api_key: '',
+    merchant_id: '',
+  },
+  {
     gateway: 'stripe',
     display_name: 'Stripe (Credit / Debit Cards)',
     enabled: false,
@@ -263,6 +271,21 @@ interface GatewayBrandMeta {
 }
 
 const GATEWAY_BRANDS: Record<string, GatewayBrandMeta> = {
+  crypto: {
+    name: 'Private Crypto Gateway',
+    badge: 'Zero Fees • On-Chain',
+    category: 'USDT (TRON, BSC, ETH)',
+    brandColor: '#10B981',
+    accentGradient: 'from-emerald-500 via-teal-500 to-emerald-700',
+    bgAccent: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+    tagBorder: 'border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300',
+    features: ['Zero Processor Fees', 'Trust Wallet Treasury', 'Real-Time Blockchain Verification'],
+    logoSvg: (
+      <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 flex items-center justify-center text-white font-black text-xs shadow-sm">
+        ₮
+      </div>
+    ),
+  },
   bkash: {
     name: 'bKash Direct API',
     badge: 'Mobile Financial Service (MFS)',
@@ -589,6 +612,10 @@ export default function BillingPage() {
 
   // Handle Pay Invoice
   const handlePayInvoice = async (invoice: Invoice, paymentMethod: string = 'stripe') => {
+    if (paymentMethod === 'crypto') {
+      window.location.href = `/billing/crypto/${invoice.id}`;
+      return;
+    }
     setActionLoading(`pay-${invoice.id}`);
     try {
       const res = await apiFetch<any>(`/api/v1/billing/invoices/${invoice.id}/checkout`, {

@@ -1,0 +1,276 @@
+package crypto
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"math/rand"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"hostvra/api/internal/store"
+)
+
+type SettleCallbackFunc func(ctx context.Context, invoice *store.CryptoPaymentInvoice) error
+
+type CreateCryptoInvoiceRequest struct {
+	UserID         uuid.UUID `json:"user_id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	PayableType    string    `json:"payable_type"` // invoice, balance_topup, domain_order
+	PayableID      string    `json:"payable_id"`
+	FiatAmountUSD  float64   `json:"fiat_amount_usd"`
+	NetworkID      string    `json:"network_id"`
+	CurrencyID     string    `json:"currency_id"`
+}
+
+type CryptoService struct {
+	store          store.Store
+	pricing        *PricingService
+	rpc            *MultiChainRpcClient
+	settleCallback SettleCallbackFunc
+	mu             sync.Mutex
+}
+
+func NewCryptoService(st store.Store, settleCb SettleCallbackFunc) *CryptoService {
+	return &CryptoService{
+		store:          st,
+		pricing:        GetPricingService(),
+		rpc:            NewMultiChainRpcClient(),
+		settleCallback: settleCb,
+	}
+}
+
+// SetSettleCallback sets or overrides the billing settlement callback.
+func (s *CryptoService) SetSettleCallback(cb SettleCallbackFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.settleCallback = cb
+}
+
+// CreateInvoice generates a new active crypto invoice with a dedicated deposit address and locked exchange rate.
+func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvoiceRequest) (*store.CryptoPaymentInvoice, error) {
+	if req.FiatAmountUSD <= 0 {
+		return nil, fmt.Errorf("fiat amount must be greater than zero")
+	}
+
+	net, err := s.store.GetCryptoNetworkByID(ctx, req.NetworkID)
+	if err != nil || net == nil || !net.IsActive {
+		return nil, fmt.Errorf("cryptocurrency network '%s' is not active or supported", req.NetworkID)
+	}
+
+	cur, err := s.store.GetCryptoCurrencyByID(ctx, req.CurrencyID)
+	if err != nil || cur == nil || !cur.IsActive {
+		return nil, fmt.Errorf("cryptocurrency '%s' is not active or supported", req.CurrencyID)
+	}
+
+	if req.FiatAmountUSD < cur.MinAmountUSD {
+		return nil, fmt.Errorf("minimum payment amount for %s is $%.2f USD", cur.Symbol, cur.MinAmountUSD)
+	}
+
+	// Calculate crypto token amount based on live exchange rate
+	cryptoAmount, rate, err := s.pricing.ConvertFiatToCrypto(ctx, req.FiatAmountUSD, cur.Symbol, cur.Decimals)
+	if err != nil {
+		return nil, fmt.Errorf("pricing calculation error: %w", err)
+	}
+
+	invoiceID := uuid.New()
+
+	// Acquire dedicated deposit address from address pool
+	depositAddr, err := s.store.AcquireDepositAddress(ctx, net.ID, cur.ID, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("deposit address pool exhausted for %s: %w", net.Name, err)
+	}
+
+	// QR Code URI scheme
+	qrUri := ""
+	switch net.ID {
+	case "tron":
+		qrUri = fmt.Sprintf("tron:%s?amount=%.6f", depositAddr.Address, cryptoAmount)
+	case "ethereum", "bsc", "polygon":
+		if cur.IsToken {
+			qrUri = fmt.Sprintf("ethereum:%s@%d/transfer?address=%s&uint256=%.0f", cur.ContractAddress, net.ChainID, depositAddr.Address, cryptoAmount*math.Pow10(cur.Decimals))
+		} else {
+			qrUri = fmt.Sprintf("ethereum:%s?value=%.18f", depositAddr.Address, cryptoAmount)
+		}
+	case "bitcoin":
+		qrUri = fmt.Sprintf("bitcoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+	default:
+		qrUri = depositAddr.Address
+	}
+
+	now := time.Now().UTC()
+	expiryMinutes := 30
+	if settings, sErr := s.store.GetCryptoSettings(ctx); sErr == nil && settings["invoice_expiry_minutes"] != "" {
+		if exp, pErr := fmt.Sscanf(settings["invoice_expiry_minutes"], "%d", &expiryMinutes); pErr != nil || exp <= 0 {
+			expiryMinutes = 30
+		}
+	}
+
+	invCode := fmt.Sprintf("HV-CRYPTO-%d-%05d", now.Year(), rand.Intn(90000)+10000)
+
+	invoice := &store.CryptoPaymentInvoice{
+		ID:               invoiceID,
+		InvoiceCode:      invCode,
+		UserID:           req.UserID,
+		OrganizationID:   req.OrganizationID,
+		PayableType:      req.PayableType,
+		PayableID:        req.PayableID,
+		FiatAmountUSD:    req.FiatAmountUSD,
+		CryptoAmount:     cryptoAmount,
+		ExchangeRate:     rate,
+		CurrencyID:       cur.ID,
+		NetworkID:        net.ID,
+		DepositAddress:   depositAddr.Address,
+		Confirmations:    0,
+		MinConfirmations: cur.MinConfirmations,
+		AmountReceived:   0,
+		Status:           "pending",
+		QRUri:            qrUri,
+		ExpiresAt:        now.Add(time.Duration(expiryMinutes) * time.Minute),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	if err := s.store.CreateCryptoInvoice(ctx, invoice); err != nil {
+		_ = s.store.ReleaseDepositAddress(ctx, depositAddr.ID)
+		return nil, fmt.Errorf("failed to persist crypto payment invoice: %w", err)
+	}
+
+	return invoice, nil
+}
+
+// GetInvoiceByCode retrieves a crypto payment invoice with calculated time remaining.
+func (s *CryptoService) GetInvoiceByCode(ctx context.Context, code string) (*store.CryptoPaymentInvoice, error) {
+	inv, err := s.store.GetCryptoInvoiceByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// VerifyInvoiceOnChain performs real-time on-chain verification for a specific invoice.
+func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode string, manualTxHash string) (*store.CryptoPaymentInvoice, error) {
+	inv, err := s.store.GetCryptoInvoiceByCode(ctx, invoiceCode)
+	if err != nil {
+		return nil, err
+	}
+
+	if inv.Status == "paid" {
+		return inv, nil
+	}
+
+	now := time.Now().UTC()
+	if inv.ExpiresAt.Before(now) && inv.Status == "pending" {
+		inv.Status = "expired"
+		_ = s.store.UpdateCryptoInvoice(ctx, inv)
+		return inv, nil
+	}
+
+	net, err := s.store.GetCryptoNetworkByID(ctx, inv.NetworkID)
+	if err != nil || net == nil {
+		return nil, fmt.Errorf("network not found: %s", inv.NetworkID)
+	}
+
+	cur, err := s.store.GetCryptoCurrencyByID(ctx, inv.CurrencyID)
+	if err != nil || cur == nil {
+		return nil, fmt.Errorf("currency not found: %s", inv.CurrencyID)
+	}
+
+	var detectedList []*DetectedPayment
+
+	switch inv.NetworkID {
+	case "tron":
+		detectedList, _ = s.rpc.ScanTronTRC20Deposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.MinConfirmations)
+	case "ethereum", "bsc", "polygon":
+		detectedList, _ = s.rpc.ScanEVMTokenDeposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.Decimals, 0)
+	case "bitcoin":
+		detectedList, _ = s.rpc.ScanBitcoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+	}
+
+	// Filter matches: match by manualTxHash if provided, or matching amount within tolerance (1%)
+	toleranceRatio := 0.01 // 1% tolerance
+	var bestMatch *DetectedPayment
+
+	for _, d := range detectedList {
+		if manualTxHash != "" && !strings.EqualFold(d.TxHash, manualTxHash) {
+			continue
+		}
+		// Check amount threshold
+		minExpected := inv.CryptoAmount * (1.0 - toleranceRatio)
+		if d.Amount >= minExpected {
+			bestMatch = d
+			break
+		}
+	}
+
+	if bestMatch != nil {
+		// Verify idempotency: ensure tx_hash isn't already credited to another invoice
+		if existing, _ := s.store.GetCryptoInvoiceByTxHash(ctx, bestMatch.TxHash); existing != nil && existing.ID != inv.ID {
+			return nil, fmt.Errorf("transaction hash '%s' has already been used for another invoice", bestMatch.TxHash)
+		}
+
+		inv.TxHash = bestMatch.TxHash
+		inv.AmountReceived = bestMatch.Amount
+		inv.Confirmations = bestMatch.Confirmations
+		if inv.DetectedAt == nil {
+			inv.DetectedAt = &now
+		}
+
+		if bestMatch.Confirmations >= inv.MinConfirmations {
+			inv.Status = "paid"
+			inv.PaidAt = &now
+
+			if err := s.store.UpdateCryptoInvoice(ctx, inv); err != nil {
+				return nil, err
+			}
+
+			// Record immutable double-entry ledger entry
+			ledger := &store.CryptoInternalLedger{
+				ID:            uuid.New(),
+				InvoiceID:     &inv.ID,
+				EntryType:     "invoice_settled",
+				Amount:        inv.AmountReceived,
+				Currency:      cur.Symbol,
+				Network:       net.ID,
+				FromAddress:   bestMatch.FromAddress,
+				ToAddress:     inv.DepositAddress,
+				TxHash:        inv.TxHash,
+				BlockNumber:   bestMatch.BlockNumber,
+				Confirmations: bestMatch.Confirmations,
+				Notes:         fmt.Sprintf("Payment verified on-chain and settled for %s", inv.InvoiceCode),
+				CreatedAt:     now,
+			}
+			_ = s.store.RecordCryptoLedger(ctx, ledger)
+
+			// Execute billing settlement callback
+			if s.settleCallback != nil {
+				_ = s.settleCallback(ctx, inv)
+			}
+		} else {
+			inv.Status = "confirming"
+			_ = s.store.UpdateCryptoInvoice(ctx, inv)
+		}
+	}
+
+	return inv, nil
+}
+
+// ScanAllPendingInvoices is executed by background workers to continuously update pending invoices.
+func (s *CryptoService) ScanAllPendingInvoices(ctx context.Context) error {
+	pending, err := s.store.ListPendingCryptoInvoices(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, inv := range pending {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			_, _ = s.VerifyInvoiceOnChain(ctx, inv.InvoiceCode, inv.TxHash)
+		}
+	}
+	return nil
+}
