@@ -639,6 +639,35 @@ func main() {
 				})
 			})
 
+			// Direct PHP Management Routes (Single-node / primary server fallback)
+			r.Route("/php", func(r chi.Router) {
+				// Versions
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/versions", phpHandler.ListVersions)
+				r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Post("/versions/install", phpHandler.InstallVersion)
+				r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Delete("/versions/{version}", phpHandler.RemoveVersion)
+				r.With(rbac.RequirePermission(rbac.PermPHPVersionManage)).Post("/versions/{version}/default-cli", phpHandler.SetDefaultCLI)
+
+				// Extensions
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/extensions", phpHandler.ListExtensions)
+				r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Post("/{version}/extensions/install", phpHandler.InstallExtension)
+				r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Delete("/{version}/extensions/{ext}", phpHandler.RemoveExtension)
+				r.With(rbac.RequirePermission(rbac.PermPHPExtensionManage)).Post("/{version}/extensions/{ext}/toggle", phpHandler.ToggleExtension)
+
+				// PHP.ini Engine
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/ini", phpHandler.GetPHPIni)
+				r.With(rbac.RequirePermission(rbac.PermPHPIniManage)).Put("/{version}/ini", phpHandler.UpdatePHPIni)
+
+				// PHP-FPM Service & Pools
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/fpm", phpHandler.GetFPMStatus)
+				r.With(rbac.RequirePermission(rbac.PermPHPFPMManage)).Post("/{version}/fpm/service", phpHandler.ServiceAction)
+				r.With(rbac.RequirePermission(rbac.PermPHPView)).Get("/{version}/pools", phpHandler.ListFPMPools)
+				r.With(rbac.RequirePermission(rbac.PermPHPPoolManage)).Post("/{version}/pools", phpHandler.CreateFPMPool)
+
+				// Health Check
+				r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Get("/health", phpHandler.GetHealth)
+				r.With(rbac.RequirePermission(rbac.PermPHPHealthCheck)).Get("/{version}/health", phpHandler.GetHealth)
+			})
+
 			// Websites & Vhosts
 			r.Route("/websites", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/", websiteHandler.List)

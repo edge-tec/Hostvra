@@ -206,6 +206,7 @@ func (d *DebianPackageManager) GetAvailableExtensions(ctx context.Context, versi
 		{"ldap", "ldap", "Lightweight Directory Access Protocol"},
 		{"mbstring", "mbstring", "Multibyte string processing (UTF-8)"},
 		{"memcached", "memcached", "Memcached distributed memory object cache"},
+		{"mongodb", "mongodb", "MongoDB NoSQL database connector"},
 		{"msgpack", "msgpack", "Binary JSON-like data serialization"},
 		{"mysqli", "mysql", "MySQL database driver (MySQLi)"},
 		{"opcache", "opcache", "PHP opcode byte-cache booster"},
@@ -214,11 +215,16 @@ func (d *DebianPackageManager) GetAvailableExtensions(ctx context.Context, versi
 		{"redis", "redis", "Redis in-memory key-value database connector"},
 		{"soap", "soap", "SOAP protocol client and server"},
 		{"sqlite3", "sqlite3", "SQLite3 embedded database"},
+		{"swoole", "swoole", "High-performance async coroutine and networking framework"},
 		{"tidy", "tidy", "HTML clean and repair library"},
+		{"xdebug", "xdebug", "PHP code debugger and profiler"},
 		{"xml", "xml", "DOM, SimpleXML, and WDDX parser"},
 		{"xmlrpc", "xmlrpc", "XML-RPC protocol client/server"},
 		{"xsl", "xsl", "XSLT stylesheet transform engine"},
 		{"zip", "zip", "ZIP archive reading and writing"},
+		{"igbinary", "igbinary", "High performance binary serializer replacement"},
+		{"fileinfo", "common", "File type and MIME information library"},
+		{"exif", "common", "Exchangeable Image File Format (EXIF) metadata reader"},
 	}
 
 	// Get currently loaded extensions in CLI for this version
@@ -275,6 +281,8 @@ func (d *DebianPackageManager) InstallExtension(ctx context.Context, version str
 		pkgName = fmt.Sprintf("php%s-mysql", version)
 	} else if extName == "pgsql" || extName == "pdo_pgsql" {
 		pkgName = fmt.Sprintf("php%s-pgsql", version)
+	} else if extName == "fileinfo" || extName == "exif" {
+		pkgName = fmt.Sprintf("php%s-common", version)
 	}
 
 	cmd := exec.CommandContext(ctx, "apt-get", "install", "-y", "--no-install-recommends", pkgName)

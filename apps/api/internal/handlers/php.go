@@ -103,17 +103,31 @@ type SwitchWebsitePHPRequest struct {
 	IniOverrides map[string]string `json:"ini_overrides,omitempty"`
 }
 
+func (h *PHPHandler) getServerID(r *http.Request) uuid.UUID {
+	serverIDStr := chi.URLParam(r, "serverID")
+	if serverIDStr == "" {
+		serverIDStr = chi.URLParam(r, "id")
+	}
+	if serverIDStr != "" && serverIDStr != "default" && serverIDStr != "local" {
+		if id, err := uuid.Parse(serverIDStr); err == nil && id != uuid.Nil {
+			return id
+		}
+	}
+	if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil {
+		if servers, err := h.store.ListServersByOrg(r.Context(), claims.OrganizationID); err == nil && len(servers) > 0 {
+			return servers[0].ID
+		}
+	}
+	dummy, _ := uuid.Parse("00000000-0000-0000-0000-000000000001")
+	return dummy
+}
+
 // ----------------------------------------------------------------------------
 // 1. PHP VERSION ENDPOINTS
 // ----------------------------------------------------------------------------
 
 func (h *PHPHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
+	serverID := h.getServerID(r)
 
 	// Read real OS version statuses from Agent Manager
 	realVersions, err := h.phpMgr.ListVersions(r.Context())
@@ -148,12 +162,7 @@ func (h *PHPHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) InstallVersion(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
+	serverID := h.getServerID(r)
 
 	var req InstallPHPVersionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Version == "" {
@@ -196,12 +205,7 @@ func (h *PHPHandler) InstallVersion(w http.ResponseWriter, r *http.Request) {
 
 func (h *PHPHandler) RemoveVersion(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	// SAFETY GUARD: Check whether active websites are bound to this PHP version
@@ -241,12 +245,7 @@ func (h *PHPHandler) RemoveVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) SetDefaultCLI(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, err := uuid.Parse(serverIDStr)
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid server ID format", nil, "")
-		return
-	}
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	if err := h.phpMgr.SetDefaultCLI(r.Context(), version); err != nil {
@@ -284,8 +283,7 @@ func (h *PHPHandler) ListExtensions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) InstallExtension(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	var req InstallPHPExtensionRequest
@@ -320,8 +318,7 @@ func (h *PHPHandler) InstallExtension(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) RemoveExtension(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 	extName := chi.URLParam(r, "ext")
 
@@ -415,8 +412,7 @@ func (h *PHPHandler) GetPHPIni(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) UpdatePHPIni(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	var req UpdatePHPIniRequest
@@ -496,8 +492,7 @@ func (h *PHPHandler) GetFPMStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) ServiceAction(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	var req FPMServiceActionRequest
@@ -538,8 +533,7 @@ func (h *PHPHandler) ServiceAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) ListFPMPools(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	pools, err := h.store.ListPHPFPMPoolsByServer(r.Context(), serverID, version)
@@ -554,8 +548,7 @@ func (h *PHPHandler) ListFPMPools(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PHPHandler) CreateFPMPool(w http.ResponseWriter, r *http.Request) {
-	serverIDStr := chi.URLParam(r, "serverID")
-	serverID, _ := uuid.Parse(serverIDStr)
+	serverID := h.getServerID(r)
 	version := chi.URLParam(r, "version")
 
 	var req CreateFPMPoolRequest

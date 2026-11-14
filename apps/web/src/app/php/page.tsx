@@ -128,8 +128,16 @@ export default function PHPManagementPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [extSearch, setExtSearch] = useState<string>('');
 
-  // Default server ID placeholder for single-node view
-  const serverId = '00000000-0000-0000-0000-000000000001';
+  // Default server ID placeholder with dynamic detection
+  const [serverId, setServerId] = useState<string>('00000000-0000-0000-0000-000000000001');
+
+  useEffect(() => {
+    apiFetch<{ id: string }[]>('/api/v1/servers').then((res) => {
+      if (res?.data && res.data.length > 0) {
+        setServerId(res.data[0].id);
+      }
+    }).catch(() => {});
+  }, []);
 
   // Load versions
   const loadVersions = async () => {
@@ -325,6 +333,27 @@ export default function PHPManagementPage() {
       }
     } catch (e: any) {
       setMessage({ type: 'error', text: e?.message || 'Failed to install extension' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Uninstall Extension
+  const handleUninstallExtension = async (extName: string) => {
+    if (!confirm(`Are you sure you want to uninstall extension "${extName}" for PHP ${selectedVersion}?`)) return;
+    setActionLoading(`ext-uninstall-${extName}`);
+    try {
+      const res = await apiFetch(`/api/v1/servers/${serverId}/php/${selectedVersion}/extensions/${extName}`, {
+        method: 'DELETE',
+      });
+      if (res && res.success) {
+        await loadExtensions(selectedVersion);
+        setMessage({ type: 'success', text: `Extension ${extName} uninstalled successfully` });
+      } else {
+        setMessage({ type: 'error', text: res?.error?.message || 'Uninstall failed' });
+      }
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e?.message || 'Failed to uninstall extension' });
     } finally {
       setActionLoading(null);
     }
@@ -703,17 +732,27 @@ export default function PHPManagementPage() {
 
                   <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-end gap-2">
                     {ext.is_installed ? (
-                      <button
-                        onClick={() => handleToggleExtension(ext.name, ext.is_enabled)}
-                        disabled={actionLoading === `ext-${ext.name}`}
-                        className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
-                          ext.is_enabled
-                            ? 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs'
-                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
-                        }`}
-                      >
-                        {ext.is_enabled ? 'Disable' : 'Enable'}
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleToggleExtension(ext.name, ext.is_enabled)}
+                          disabled={actionLoading === `ext-${ext.name}` || actionLoading === `ext-uninstall-${ext.name}`}
+                          className={`px-3 py-1 rounded text-xs font-semibold transition-colors ${
+                            ext.is_enabled
+                              ? 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
+                          }`}
+                        >
+                          {ext.is_enabled ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          onClick={() => handleUninstallExtension(ext.name)}
+                          disabled={actionLoading === `ext-uninstall-${ext.name}` || actionLoading === `ext-${ext.name}`}
+                          className="px-2.5 py-1 rounded text-xs font-semibold text-rose-600 hover:text-white hover:bg-rose-600 border border-rose-200 dark:border-rose-900/40 transition-colors shadow-xs"
+                          title="Uninstall extension"
+                        >
+                          Uninstall
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => handleInstallExtension(ext.name)}
