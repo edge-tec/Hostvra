@@ -1103,6 +1103,8 @@ func main() {
 			// FTP (Pure-FTPd) Subsystem
 			r.Route("/ftp", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/status", ftpHandler.GetStatus)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/service", ftpHandler.ControlService)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/port", ftpHandler.SetPort)
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/users", ftpHandler.ListUsers)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/users", ftpHandler.CreateUser)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Put("/users/{username}", ftpHandler.UpdateUser)

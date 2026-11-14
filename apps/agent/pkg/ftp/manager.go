@@ -49,15 +49,18 @@ type FTPDaemonStatus struct {
 }
 
 type FTPManager struct {
-	mu           sync.RWMutex
-	passwdFile   string
-	pdbFile      string
-	isPureFtpd   bool
+	mu              sync.RWMutex
+	passwdFile      string
+	pdbFile         string
+	portFile        string
+	isPureFtpd      bool
+	simulatedActive bool
 }
 
 func NewFTPManager() *FTPManager {
 	passwdPath := "/etc/pure-ftpd/pureftpd.passwd"
 	pdbPath := "/etc/pure-ftpd/pureftpd.pdb"
+	portPath := "/etc/pure-ftpd/conf/Bind"
 
 	isPureFtpd := false
 	if _, err := exec.LookPath("pure-pw"); err == nil {
@@ -71,12 +74,15 @@ func NewFTPManager() *FTPManager {
 		_ = os.MkdirAll(base, 0755)
 		passwdPath = filepath.Join(base, "pureftpd.passwd")
 		pdbPath = filepath.Join(base, "pureftpd.pdb")
+		portPath = filepath.Join(base, "Bind")
 	}
 
 	return &FTPManager{
-		passwdFile: passwdPath,
-		pdbFile:    pdbPath,
-		isPureFtpd: isPureFtpd,
+		passwdFile:      passwdPath,
+		pdbFile:         pdbPath,
+		portFile:        portPath,
+		isPureFtpd:      isPureFtpd,
+		simulatedActive: true,
 	}
 }
 
@@ -86,7 +92,83 @@ func (fm *FTPManager) SetStoragePath(passwdPath string) {
 	defer fm.mu.Unlock()
 	fm.passwdFile = passwdPath
 	fm.pdbFile = passwdPath + ".pdb"
+	fm.portFile = filepath.Join(filepath.Dir(passwdPath), "Bind")
 	_ = os.MkdirAll(filepath.Dir(passwdPath), 0755)
+}
+
+// GetPort returns current listening port
+func (fm *FTPManager) GetPort() int {
+	fm.mu.RLock()
+	defer fm.mu.RUnlock()
+	return fm.getPortUnlocked()
+}
+
+func (fm *FTPManager) getPortUnlocked() int {
+	if data, err := os.ReadFile(fm.portFile); err == nil {
+		trimmed := strings.TrimSpace(string(data))
+		if idx := strings.LastIndex(trimmed, ","); idx != -1 {
+			trimmed = trimmed[idx+1:]
+		}
+		if p, err := strconv.Atoi(trimmed); err == nil && p > 0 && p <= 65535 {
+			return p
+		}
+	}
+	return 21
+}
+
+// SetPort sets the FTP daemon listening port
+func (fm *FTPManager) SetPort(port int) error {
+	if port < 20 || port > 65535 {
+		return fmt.Errorf("invalid FTP port: %d (must be between 20 and 65535)", port)
+	}
+
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	_ = os.MkdirAll(filepath.Dir(fm.portFile), 0755)
+	content := fmt.Sprintf(",%d\n", port)
+	if err := os.WriteFile(fm.portFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write FTP port configuration: %w", err)
+	}
+
+	// Try reloading or restarting Pure-FTPd if running on systemd
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		_ = exec.Command("systemctl", "restart", "pure-ftpd").Run()
+	}
+
+	return nil
+}
+
+// ControlService executes start, stop, restart, or reload on the FTP service
+func (fm *FTPManager) ControlService(action string) error {
+	action = strings.ToLower(strings.TrimSpace(action))
+	switch action {
+	case "start", "stop", "restart", "reload":
+	default:
+		return fmt.Errorf("invalid service action %q (supported: start, stop, restart, reload)", action)
+	}
+
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		daemon := "pure-ftpd"
+		if _, errCheck := exec.Command("systemctl", "status", "pure-ftpd").Output(); errCheck != nil {
+			daemon = "vsftpd"
+		}
+		cmd := exec.Command("systemctl", action, daemon)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl %s %s failed: %s (%w)", action, daemon, string(out), err)
+		}
+		return nil
+	}
+
+	// Dev / simulation environment
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	if action == "stop" {
+		fm.simulatedActive = false
+	} else {
+		fm.simulatedActive = true
+	}
+	return nil
 }
 
 // GetStatus checks daemon operational state
@@ -107,8 +189,9 @@ func (fm *FTPManager) GetStatus() (*FTPDaemonStatus, error) {
 			}
 		}
 	} else {
-		// Non-systemd or dev
-		active = true
+		fm.mu.RLock()
+		active = fm.simulatedActive
+		fm.mu.RUnlock()
 		daemon = "dev"
 	}
 
@@ -118,7 +201,7 @@ func (fm *FTPManager) GetStatus() (*FTPDaemonStatus, error) {
 		IsInstalled: fm.isPureFtpd || daemon == "dev",
 		IsActive:    active,
 		DaemonName:  daemon,
-		Port:        21,
+		Port:        fm.GetPort(),
 		UsersCount:  len(users),
 	}, nil
 }

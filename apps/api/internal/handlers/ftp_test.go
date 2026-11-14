@@ -119,4 +119,26 @@ func TestFTPHandler_Lifecycle(t *testing.T) {
 	if recDel.Code != http.StatusOK {
 		t.Fatalf("expected 200 for DeleteUser, got %d: %s", recDel.Code, recDel.Body.String())
 	}
+
+	// 7. Control Service (restart / stop / start)
+	svcBody, _ := json.Marshal(ControlFTPServiceRequest{Action: "restart"})
+	reqSvc := httptest.NewRequest(http.MethodPost, "/api/v1/ftp/service", bytes.NewReader(svcBody))
+	reqSvc = reqSvc.WithContext(context.WithValue(reqSvc.Context(), auth.UserContextKey, claims))
+	recSvc := httptest.NewRecorder()
+	h.ControlService(recSvc, reqSvc)
+
+	if recSvc.Code != http.StatusOK {
+		t.Fatalf("expected 200 for ControlService, got %d: %s", recSvc.Code, recSvc.Body.String())
+	}
+
+	// 8. Set Port
+	portBody, _ := json.Marshal(SetFTPPortRequest{Port: 2121})
+	reqPort := httptest.NewRequest(http.MethodPost, "/api/v1/ftp/port", bytes.NewReader(portBody))
+	reqPort = reqPort.WithContext(context.WithValue(reqPort.Context(), auth.UserContextKey, claims))
+	recPort := httptest.NewRecorder()
+	h.SetPort(recPort, reqPort)
+
+	if recPort.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SetPort, got %d: %s", recPort.Code, recPort.Body.String())
+	}
 }

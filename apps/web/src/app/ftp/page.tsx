@@ -20,6 +20,12 @@ import {
   Activity,
   Edit2,
   ShieldCheck,
+  ExternalLink,
+  Sliders,
+  HelpCircle,
+  Lock,
+  Play,
+  RotateCw,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import {
@@ -63,6 +69,18 @@ export default function FTPPage() {
   const [editUploadSpeed, setEditUploadSpeed] = useState('0');
   const [editDownloadSpeed, setEditDownloadSpeed] = useState('0');
   const [submittingEdit, setSubmittingEdit] = useState(false);
+
+  // Port Configuration Modal
+  const [portModalOpen, setPortModalOpen] = useState(false);
+  const [newPort, setNewPort] = useState('21');
+  const [submittingPort, setSubmittingPort] = useState(false);
+
+  // Service Action Loading
+  const [serviceActionLoading, setServiceActionLoading] = useState<string | null>(null);
+
+  // Connection Info & Client Guide Modal
+  const [connModalUser, setConnModalUser] = useState<FTPUser | null>(null);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
 
   // Action Loading states
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -255,6 +273,48 @@ export default function FTPPage() {
     }
   };
 
+  // Control Service (Restart, Stop, Start)
+  const handleServiceControl = async (action: 'start' | 'stop' | 'restart') => {
+    setServiceActionLoading(action);
+    const res = await apiFetch<any>('/api/v1/ftp/service', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    });
+    setServiceActionLoading(null);
+
+    if (res.success) {
+      showNotification(`FTP service ${action} executed successfully`);
+      loadData(false);
+    } else {
+      showNotification(res.error?.message || `Failed to ${action} FTP service`, true);
+    }
+  };
+
+  // Change Port
+  const handleSetPort = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const portNum = parseInt(newPort, 10);
+    if (isNaN(portNum) || portNum < 20 || portNum > 65535) {
+      showNotification('Port must be a number between 20 and 65535', true);
+      return;
+    }
+
+    setSubmittingPort(true);
+    const res = await apiFetch<any>('/api/v1/ftp/port', {
+      method: 'POST',
+      body: JSON.stringify({ port: portNum }),
+    });
+    setSubmittingPort(false);
+
+    if (res.success) {
+      showNotification(`FTP daemon port updated to ${portNum} successfully`);
+      setPortModalOpen(false);
+      loadData(false);
+    } else {
+      showNotification(res.error?.message || 'Failed to update FTP daemon port', true);
+    }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedItem(id);
@@ -309,6 +369,15 @@ export default function FTPPage() {
 
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setGuideModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 text-xs font-semibold shadow-xs transition-colors"
+              title="FTP Client Setup Guide"
+            >
+              <HelpCircle className="w-4 h-4 text-indigo-500" />
+              <span>Client Guide</span>
+            </button>
+
+            <button
               onClick={() => loadData(true)}
               disabled={refreshing}
               className="p-2.5 rounded-xl border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-900 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition-colors shadow-xs"
@@ -329,31 +398,87 @@ export default function FTPPage() {
 
         {/* Connection Parameters & Status Banner */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Card 1: Daemon Status */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex items-center gap-3.5">
-            <div
-              className={`w-11 h-11 rounded-xl flex items-center justify-center ${
-                status?.is_active
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
-              }`}
-            >
-              <Server className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-950 dark:text-white text-sm">
-                  {status?.is_active ? 'FTP Service Active' : 'FTP Service Offline'}
-                </span>
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    status?.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+          {/* Card 1: Daemon Status & Control */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 shadow-xs flex flex-col justify-between gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    status?.is_active
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                      : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                   }`}
-                />
+                >
+                  <Server className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-950 dark:text-white text-sm">
+                      {status?.is_active ? 'FTP Active' : 'FTP Offline'}
+                    </span>
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        status?.is_active ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                      }`}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                    {status?.daemon_name || 'Pure-FTPd'} Daemon
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-                Standard Port 21 (FTP/FTPS TLS Enabled)
-              </p>
+
+              {/* Port Badge / Button */}
+              <button
+                onClick={() => {
+                  setNewPort((status?.port || 21).toString());
+                  setPortModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 border border-slate-200 dark:border-surface-700 text-xs font-mono font-semibold text-slate-700 dark:text-slate-300 transition-colors"
+                title="Change FTP Port"
+              >
+                <Sliders className="w-3 h-3 text-indigo-500" />
+                <span>Port {status?.port || 21}</span>
+              </button>
+            </div>
+
+            {/* Service Action Controls */}
+            <div className="pt-2 border-t border-slate-100 dark:border-surface-800 flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Service:
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => handleServiceControl('restart')}
+                  disabled={serviceActionLoading !== null}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-indigo-200 dark:border-indigo-800/60 transition-colors"
+                  title="Restart FTP Daemon"
+                >
+                  <RotateCw className={`w-3 h-3 ${serviceActionLoading === 'restart' ? 'animate-spin' : ''}`} />
+                  Restart
+                </button>
+
+                <button
+                  onClick={() => handleServiceControl(status?.is_active ? 'stop' : 'start')}
+                  disabled={serviceActionLoading !== null}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border transition-colors ${
+                    status?.is_active
+                      ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 hover:bg-amber-100 border-amber-200 dark:border-amber-800/60'
+                      : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 border-emerald-200 dark:border-emerald-800/60'
+                  }`}
+                  title={status?.is_active ? 'Stop FTP Daemon' : 'Start FTP Daemon'}
+                >
+                  {status?.is_active ? (
+                    <>
+                      <Power className="w-3 h-3" /> Stop
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3 h-3" /> Start
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -453,7 +578,15 @@ export default function FTPPage() {
                       </td>
                       <td className="px-6 py-4 font-mono text-xs text-slate-700 dark:text-slate-300">
                         <div className="flex items-center gap-2">
-                          <span className="truncate max-w-sm">{u.home_dir}</span>
+                          <a
+                            href={`/files?path=${encodeURIComponent(u.home_dir)}`}
+                            className="inline-flex items-center gap-1.5 truncate max-w-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 hover:underline group"
+                            title="Open in Hostvra File Manager"
+                          >
+                            <Folder className="w-3.5 h-3.5 flex-shrink-0 text-slate-400 group-hover:text-indigo-500" />
+                            <span className="truncate">{u.home_dir}</span>
+                            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          </a>
                           <button
                             onClick={() => copyToClipboard(u.home_dir, u.username)}
                             className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
@@ -488,6 +621,14 @@ export default function FTPPage() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => setConnModalUser(u)}
+                            title="Connection Parameters (FileZilla / WinSCP)"
+                            className="p-1.5 rounded-lg border border-slate-300 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors"
+                          >
+                            <Server className="w-3.5 h-3.5" />
+                          </button>
+
                           <button
                             onClick={() => {
                               setTargetUsername(u.username);
@@ -833,6 +974,253 @@ export default function FTPPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Change FTP Port */}
+        {portModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setPortModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Sliders className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white">Configure FTP Port</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Modify the daemon listening port (default: 21)
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSetPort} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                    FTP Port Number *
+                  </label>
+                  <input
+                    type="number"
+                    min="20"
+                    max="65535"
+                    required
+                    value={newPort}
+                    onChange={(e) => setNewPort(e.target.value)}
+                    placeholder="21"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-300 dark:border-surface-700 text-slate-950 dark:text-slate-100 font-mono text-sm focus:outline-none focus:border-indigo-500"
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">
+                    Common alternative ports: 2121, 2100.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 text-xs text-amber-800 dark:text-amber-300">
+                  <strong>Notice:</strong> Changing the port will update Pure-FTPd configuration and restart the daemon. Ensure this port is open in your cloud firewall / security group.
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setPortModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-surface-800 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingPort}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5"
+                  >
+                    {submittingPort ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                    Save & Restart
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Connection Details */}
+        {connModalUser && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setConnModalUser(null)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <Server className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white">FTP Connection Details</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Credentials for <span className="font-mono font-bold text-indigo-600">{connModalUser.username}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Host / Server IP</span>
+                    <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
+                      {typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1', 'conn-host')}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-indigo-600"
+                    title="Copy Host"
+                  >
+                    {copiedItem === 'conn-host' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Port</span>
+                      <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">{status?.port || 21}</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard((status?.port || 21).toString(), 'conn-port')}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-indigo-600"
+                      title="Copy Port"
+                    >
+                      {copiedItem === 'conn-port' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Username</span>
+                      <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">{connModalUser.username}</span>
+                    </div>
+                    <button
+                      onClick={() => copyToClipboard(connModalUser.username, 'conn-user')}
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-indigo-600"
+                      title="Copy Username"
+                    >
+                      {copiedItem === 'conn-user' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Chroot Root Path</span>
+                    <span className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100 truncate block max-w-sm">
+                      {connModalUser.home_dir}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(connModalUser.home_dir, 'conn-path')}
+                    className="p-1.5 rounded-lg border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-400 hover:text-indigo-600"
+                    title="Copy Path"
+                  >
+                    {copiedItem === 'conn-path' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 text-xs space-y-1">
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Protocol:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">FTP - File Transfer Protocol</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Encryption:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Require explicit FTP over TLS</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Logon Type:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Normal</span>
+                  </div>
+                  <div className="flex items-center justify-between text-slate-600 dark:text-slate-400">
+                    <span>Transfer Mode:</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">Passive (Recommended)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setConnModalUser(null)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: Client Setup Guide */}
+        {guideModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="w-full max-w-xl bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                onClick={() => setGuideModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <HelpCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-950 dark:text-white">FTP Client Quick Connection Guide</h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    How to connect using FileZilla, Cyberduck, or WinSCP
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs text-slate-700 dark:text-slate-300">
+                <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 space-y-2">
+                  <h3 className="font-bold text-sm text-indigo-900 dark:text-indigo-200">Recommended FileZilla Setup</h3>
+                  <ol className="list-decimal pl-4 space-y-1 text-slate-600 dark:text-slate-400">
+                    <li>Open <strong>File &gt; Site Manager</strong> (Ctrl+S / Cmd+S).</li>
+                    <li>Click <strong>New site</strong> and name it Hostvra FTP.</li>
+                    <li><strong>Protocol:</strong> Select <em>FTP - File Transfer Protocol</em>.</li>
+                    <li><strong>Host:</strong> Enter your server IP or domain name.</li>
+                    <li><strong>Port:</strong> Enter <code className="text-indigo-600 font-mono font-bold">{status?.port || 21}</code>.</li>
+                    <li><strong>Encryption:</strong> Select <em>Use explicit FTP over TLS if available</em>.</li>
+                    <li><strong>Logon Type:</strong> Normal, then enter your FTP username and password.</li>
+                    <li>Under the <strong>Transfer Settings</strong> tab, select <strong>Passive</strong> transfer mode.</li>
+                  </ol>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-surface-950 border border-slate-200 dark:border-surface-800 space-y-1.5">
+                  <h4 className="font-bold text-slate-900 dark:text-white">Passive Port Range & Firewall</h4>
+                  <p className="text-slate-500 dark:text-slate-400">
+                    Pure-FTPd passive port range is typically 39000-40000. If connection hangs at <code>MLSD</code> or <code>LIST</code>, ensure passive ports are permitted in your cloud security groups.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setGuideModalOpen(false)}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all"
+                >
+                  Got It
+                </button>
+              </div>
             </div>
           </div>
         )}

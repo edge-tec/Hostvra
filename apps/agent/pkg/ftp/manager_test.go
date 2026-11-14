@@ -104,4 +104,31 @@ func TestFTP_CRUDAndPersistence(t *testing.T) {
 	if len(finalUsers) != 0 {
 		t.Fatalf("expected 0 users after delete, got %d", len(finalUsers))
 	}
+
+	// 8. Service Control & Port Configuration
+	if err := fm.SetPort(2121); err != nil {
+		t.Fatalf("SetPort failed: %v", err)
+	}
+	if p := fm.GetPort(); p != 2121 {
+		t.Fatalf("expected port 2121, got %d", p)
+	}
+
+	if err := fm.ControlService("stop"); err != nil {
+		t.Fatalf("ControlService stop failed: %v", err)
+	}
+	st, err := fm.GetStatus()
+	if err != nil {
+		t.Fatalf("GetStatus failed: %v", err)
+	}
+	if st.IsActive {
+		t.Fatalf("expected simulated daemon to be stopped")
+	}
+
+	if err := fm.ControlService("start"); err != nil {
+		t.Fatalf("ControlService start failed: %v", err)
+	}
+	st2, _ := fm.GetStatus()
+	if !st2.IsActive {
+		t.Fatalf("expected simulated daemon to be active")
+	}
 }

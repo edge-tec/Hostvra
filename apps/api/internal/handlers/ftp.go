@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -58,6 +60,14 @@ type UpdateFTPUserRequest struct {
 	QuotaMB           int    `json:"quota_mb"`
 	UploadBandwidth   int    `json:"upload_bandwidth_kbps"`
 	DownloadBandwidth int    `json:"download_bandwidth_kbps"`
+}
+
+type ControlFTPServiceRequest struct {
+	Action string `json:"action"` // "start", "stop", "restart", "reload"
+}
+
+type SetFTPPortRequest struct {
+	Port int `json:"port"`
 }
 
 // ----------------------------------------------------------------------------
@@ -381,4 +391,58 @@ func (h *FTPHandler) ToggleUser(w http.ResponseWriter, r *http.Request) {
 
 	response.JSON(w, http.StatusOK, target, nil)
 }
+
+// ControlService starts, stops, restarts, or reloads the FTP daemon
+func (h *FTPHandler) ControlService(w http.ResponseWriter, r *http.Request) {
+	var req ControlFTPServiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON request body", nil, "")
+		return
+	}
+
+	if err := h.ftpMgr.ControlService(req.Action); err != nil {
+		response.Error(w, http.StatusInternalServerError, "SERVICE_CONTROL_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "ftp.service_control", "ftp", req.Action, "success", "", map[string]interface{}{
+		"action": req.Action,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("FTP service %s executed successfully", req.Action),
+		"action":  req.Action,
+	}, nil)
+}
+
+// SetPort updates the FTP listening port
+func (h *FTPHandler) SetPort(w http.ResponseWriter, r *http.Request) {
+	var req SetFTPPortRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON request body", nil, "")
+		return
+	}
+
+	if req.Port < 20 || req.Port > 65535 {
+		response.Error(w, http.StatusBadRequest, "INVALID_PORT", "Port must be between 20 and 65535", nil, "")
+		return
+	}
+
+	if err := h.ftpMgr.SetPort(req.Port); err != nil {
+		response.Error(w, http.StatusInternalServerError, "SET_PORT_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "ftp.set_port", "ftp", strconv.Itoa(req.Port), "success", "", map[string]interface{}{
+		"port": req.Port,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("FTP port updated to %d successfully", req.Port),
+		"port":    req.Port,
+	}, nil)
+}
+
 
