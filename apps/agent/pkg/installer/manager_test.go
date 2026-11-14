@@ -260,3 +260,60 @@ func TestDeployDrupalAndPhpMyAdminHardenedPermissions(t *testing.T) {
 	}
 }
 
+func TestDeployJoomlaAndTypecho(t *testing.T) {
+	tempDir := t.TempDir()
+	mgr := NewInstallerManager(
+		WithDBProvisioner(func(ctx context.Context, dbName, dbUser, dbPass, dbType string) error {
+			return nil
+		}),
+	)
+
+	// 1. Joomla
+	joomlaRoot := filepath.Join(tempDir, "joomla_site")
+	reqJoomla := InstallSiteAppRequest{
+		PrimaryDomain: "joomla.test",
+		DocumentRoot:  joomlaRoot,
+		AppID:         "joomla",
+		DBName:        "joomla_db",
+		DBUser:        "joomla_user",
+		DBPassword:    "secpass123",
+		TablePrefix:   "jos_",
+		SiteTitle:     "Joomla Portal",
+	}
+	infoJoomla, err := mgr.InstallApplication(context.Background(), reqJoomla, nil)
+	if err != nil {
+		t.Fatalf("joomla install failed: %v", err)
+	}
+	if infoJoomla.AppID != "joomla" {
+		t.Errorf("expected app_id joomla, got %s", infoJoomla.AppID)
+	}
+	detectedJoomla, err := mgr.DetectInstalledApp(joomlaRoot)
+	if err != nil || detectedJoomla == nil || detectedJoomla.AppID != "joomla" {
+		t.Errorf("expected detected app joomla, got %v", detectedJoomla)
+	}
+
+	// 2. Typecho
+	typechoRoot := filepath.Join(tempDir, "typecho_site")
+	reqTypecho := InstallSiteAppRequest{
+		PrimaryDomain: "typecho.test",
+		DocumentRoot:  typechoRoot,
+		AppID:         "typecho",
+		DBName:        "typecho_db",
+		DBUser:        "typecho_user",
+		DBPassword:    "secpass123",
+		TablePrefix:   "typecho_",
+		SiteTitle:     "My Typecho Blog",
+	}
+	infoTypecho, err := mgr.InstallApplication(context.Background(), reqTypecho, nil)
+	if err != nil {
+		t.Fatalf("typecho install failed: %v", err)
+	}
+	if infoTypecho.AppID != "typecho" {
+		t.Errorf("expected app_id typecho, got %s", infoTypecho.AppID)
+	}
+	detectedTypecho, err := mgr.DetectInstalledApp(typechoRoot)
+	if err != nil || detectedTypecho == nil || detectedTypecho.AppID != "typecho" {
+		t.Errorf("expected detected app typecho, got %v", detectedTypecho)
+	}
+}
+

@@ -73,6 +73,7 @@ export default function AppStorePage() {
   const [websites, setWebsites] = useState<Website[]>([]);
   const [deploySite, setDeploySite] = useState<Website | null>(null);
   const [sitePickerApp, setSitePickerApp] = useState<string | null>(null);
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // Load applications and websites
@@ -445,6 +446,26 @@ export default function AppStorePage() {
                 badge: 'v5.2.1',
                 specs: 'PHP 8.0+ • MySQL / MariaDB',
               },
+              {
+                id: 'joomla',
+                name: 'Joomla',
+                version: '5.x',
+                category: 'Enterprise CMS',
+                desc: 'Corporate intranet and dynamic portal CMS with extensive access control, multi-language support, and extensions.',
+                icon: Layers,
+                badge: 'v5.2 LTS',
+                specs: 'PHP 8.1+ • MySQL 8.0+ • 512MB RAM',
+              },
+              {
+                id: 'typecho',
+                name: 'Typecho',
+                version: '1.2.x',
+                category: 'Lightweight Blogging',
+                desc: 'Ultra-fast minimal blogging platform engineered for high performance, low memory footprint, and Markdown native posts.',
+                icon: Globe,
+                badge: 'v1.2.1',
+                specs: 'PHP 7.4+ • MySQL / SQLite • 256MB RAM',
+              },
             ].map((app) => {
               const Icon = app.icon;
               return (
@@ -474,18 +495,15 @@ export default function AppStorePage() {
                     <button
                       type="button"
                       onClick={() => {
-                        if (websites.length === 0) {
-                          alert('Please add a website under Websites first to deploy applications.');
-                          return;
-                        }
+                        setSitePickerApp(app.id);
                         if (websites.length === 1) {
                           setDeploySite(websites[0]);
-                          setSitePickerApp(app.id);
                         } else {
-                          setSitePickerApp(app.id);
+                          setDeploySite(null);
                         }
+                        setDeployModalOpen(true);
                       }}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs transition-all flex-shrink-0"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-xs transition-all flex-shrink-0 cursor-pointer"
                     >
                       <Zap className="w-3 h-3" />
                       <span>Deploy App</span>
@@ -1032,15 +1050,20 @@ export default function AppStorePage() {
         )}
 
         {/* 1-Click Application Installer Modal */}
-        {deploySite && (
+        {(deploySite || (deployModalOpen && sitePickerApp)) && (
           <OneClickAppModal
-            isOpen={!!deploySite}
+            isOpen={Boolean(deploySite || (deployModalOpen && sitePickerApp))}
             onClose={() => {
               setDeploySite(null);
               setSitePickerApp(null);
+              setDeployModalOpen(false);
             }}
             website={deploySite}
+            websites={websites}
             initialAppId={sitePickerApp || undefined}
+            onCreatedWebsite={(newSite) => {
+              setWebsites((prev) => [newSite, ...prev.filter((s) => s.id !== newSite.id)]);
+            }}
             onSuccess={() => {
               loadApps();
             }}

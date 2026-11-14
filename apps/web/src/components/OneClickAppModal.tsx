@@ -18,35 +18,71 @@ import {
   Copy,
   Check,
   Zap,
+  Server,
+  Key,
+  Folder,
+  Plus,
+  ChevronDown,
 } from 'lucide-react';
 import { apiFetch, Website, OneClickAppTemplate, InstalledAppInfo } from '@/lib/api';
 
 interface OneClickAppModalProps {
-  website: Website;
+  website?: Website | null;
+  websites?: Website[];
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (targetSite?: Website) => void;
   initialAppId?: string;
+  onCreatedWebsite?: (site: Website) => void;
 }
 
-export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialAppId }: OneClickAppModalProps) {
+export function OneClickAppModal({
+  website,
+  websites = [],
+  isOpen,
+  onClose,
+  onSuccess,
+  initialAppId,
+  onCreatedWebsite,
+}: OneClickAppModalProps) {
   const [templates, setTemplates] = useState<OneClickAppTemplate[]>([]);
   const [selectedApp, setSelectedApp] = useState<string>(initialAppId || 'wordpress');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
-  const [siteTitle, setSiteTitle] = useState(`${website.primary_domain} Website`);
+
+  // Target website selection (existing or new)
+  const [targetMode, setTargetMode] = useState<'existing' | 'new'>(website ? 'existing' : websites.length > 0 ? 'existing' : 'new');
+  const [selectedSiteId, setSelectedSiteId] = useState<string>(website?.id || (websites.length > 0 ? websites[0].id : ''));
+  const [newDomain, setNewDomain] = useState('');
+  const [newPhpVersion, setNewPhpVersion] = useState('8.2');
+
+  // Application parameters
+  const [siteTitle, setSiteTitle] = useState('');
   const [adminUser, setAdminUser] = useState('admin');
-  const [adminEmail, setAdminEmail] = useState(`admin@${website.primary_domain}`);
+  const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Database parameters (aaPanel 1-Click Database Parity)
+  const [showDbConfig, setShowDbConfig] = useState(true);
   const [dbType, setDbType] = useState<'mysql' | 'postgresql' | 'sqlite'>('mysql');
+  const [dbName, setDbName] = useState('');
+  const [dbUser, setDbUser] = useState('');
+  const [dbPassword, setDbPassword] = useState('');
+  const [showDbPassword, setShowDbPassword] = useState(false);
+  const [tablePrefix, setTablePrefix] = useState('wp_');
 
   // Deployment state
   const [installing, setInstalling] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
   const [deployedApp, setDeployedApp] = useState<InstalledAppInfo | null>(null);
+  const [deployedSite, setDeployedSite] = useState<Website | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Determine active target domain
+  const effectiveWebsite = website || websites.find((w) => w.id === selectedSiteId) || null;
+  const currentDomain = targetMode === 'existing' ? effectiveWebsite?.primary_domain || '' : newDomain.trim();
 
   useEffect(() => {
     if (isOpen) {
@@ -56,10 +92,49 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
       fetchTemplates();
       generatePassword();
       setDeployedApp(null);
+      setDeployedSite(null);
       setError(null);
       setProgress(0);
+
+      if (website) {
+        setSelectedSiteId(website.id);
+        setTargetMode('existing');
+      } else if (websites.length > 0) {
+        setSelectedSiteId(websites[0].id);
+        setTargetMode('existing');
+      } else {
+        setTargetMode('new');
+      }
     }
-  }, [isOpen, initialAppId]);
+  }, [isOpen, initialAppId, website]);
+
+  // Update default titles & emails when domain changes
+  useEffect(() => {
+    if (currentDomain) {
+      const sanitized = currentDomain.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().slice(0, 8);
+      const randHex = Math.random().toString(36).substring(2, 6);
+      if (!siteTitle || siteTitle.includes('Website')) {
+        setSiteTitle(`${currentDomain} Portal`);
+      }
+      if (!adminEmail || adminEmail.includes('@')) {
+        setAdminEmail(`admin@${currentDomain}`);
+      }
+      setDbName(`db_${sanitized}_${randHex}`);
+      setDbUser(`u_${sanitized}_${randHex}`);
+    }
+  }, [currentDomain]);
+
+  useEffect(() => {
+    if (selectedApp === 'wordpress') {
+      setTablePrefix('wp_');
+    } else if (selectedApp === 'joomla') {
+      setTablePrefix('jos_');
+    } else if (selectedApp === 'typecho') {
+      setTablePrefix('typecho_');
+    } else {
+      setTablePrefix('app_');
+    }
+  }, [selectedApp]);
 
   const fetchTemplates = async () => {
     try {
@@ -82,6 +157,12 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
       pwd += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     setAdminPassword(pwd);
+
+    let dbPwd = '';
+    for (let i = 0; i < 16; i++) {
+      dbPwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setDbPassword(dbPwd);
   };
 
   const handleCopy = (text: string, field: string) => {
@@ -94,29 +175,73 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
     e.preventDefault();
     setError(null);
     setInstalling(true);
-    setProgress(15);
-    setCurrentStep('Validating virtual host document root...');
+    setProgress(10);
+    setCurrentStep('Validating installation target & domain configuration...');
 
-    const stepTimer1 = setTimeout(() => {
-      setProgress(40);
-      setCurrentStep('Provisioning database & isolation credentials...');
-    }, 400);
-
-    const stepTimer2 = setTimeout(() => {
-      setProgress(70);
-      setCurrentStep(`Deploying ${selectedApp} core scaffolding & configuration...`);
-    }, 800);
+    let targetSite: Website | null = effectiveWebsite;
 
     try {
-      const res = await apiFetch<InstalledAppInfo>(`/api/v1/websites/${website.id}/app/install`, {
+      // Step 1: If creating a new site on the fly (aaPanel 1-Click Deployment)
+      if (targetMode === 'new') {
+        const domainClean = newDomain.trim().toLowerCase();
+        if (!domainClean) {
+          throw new Error('Please enter a valid domain name for the new website.');
+        }
+
+        setProgress(20);
+        setCurrentStep(`Provisioning new virtual host for ${domainClean}...`);
+
+        const siteRes = await apiFetch<Website>('/api/v1/websites', {
+          method: 'POST',
+          body: JSON.stringify({
+            primary_domain: domainClean,
+            document_root: `/var/www/${domainClean}/public_html`,
+            php_version: newPhpVersion,
+            app_type: 'php',
+            web_server_type: 'nginx',
+          }),
+        });
+
+        if (!siteRes.success || !siteRes.data) {
+          throw new Error(siteRes.error?.message || 'Failed to create virtual host for new website');
+        }
+
+        targetSite = siteRes.data;
+        setDeployedSite(targetSite);
+        onCreatedWebsite?.(targetSite);
+      }
+
+      if (!targetSite) {
+        throw new Error('No target website selected.');
+      }
+
+      setDeployedSite(targetSite);
+      setProgress(40);
+      setCurrentStep('Provisioning isolated MySQL database & user privileges...');
+
+      const stepTimer1 = setTimeout(() => {
+        setProgress(65);
+        setCurrentStep(`Deploying ${selectedApp.toUpperCase()} core files & configuration...`);
+      }, 500);
+
+      const stepTimer2 = setTimeout(() => {
+        setProgress(85);
+        setCurrentStep('Configuring security salts, permissions & virtual host routing...');
+      }, 1000);
+
+      const res = await apiFetch<InstalledAppInfo>(`/api/v1/websites/${targetSite.id}/app/install`, {
         method: 'POST',
         body: JSON.stringify({
           app_id: selectedApp,
-          site_title: siteTitle,
+          site_title: siteTitle || `${targetSite.primary_domain} Website`,
           admin_user: adminUser,
           admin_email: adminEmail,
           admin_password: adminPassword,
           db_type: dbType,
+          db_name: dbName,
+          db_user: dbUser,
+          db_password: dbPassword,
+          table_prefix: tablePrefix,
         }),
       });
 
@@ -125,15 +250,13 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
 
       if (res.success && res.data) {
         setProgress(100);
-        setCurrentStep('Deployment finalized successfully!');
+        setCurrentStep('Application deployed and running live!');
         setDeployedApp(res.data);
-        onSuccess();
+        onSuccess(targetSite);
       } else {
         setError(res.error?.message || 'Deployment failed');
       }
     } catch (err: any) {
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
       setError(err.message || 'Deployment error');
     } finally {
       setInstalling(false);
@@ -141,8 +264,6 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
   };
 
   if (!isOpen) return null;
-
-  const currentTemplate = templates.find((t) => t.id === selectedApp);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
@@ -155,15 +276,20 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-slate-950 dark:text-white">1-Click App Installer</h2>
+                <h2 className="text-base font-bold text-slate-950 dark:text-white">1-Click App Deployment</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                  {website.primary_domain}
+                  aaPanel Parity
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Instant CMS & Framework Deployment</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Instant CMS, Framework & Database Provisioning
+              </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white">
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-surface-800 transition"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -180,20 +306,31 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                   {deployedApp.name} Successfully Deployed!
                 </h3>
                 <p className="text-xs text-emerald-700/80 dark:text-emerald-400/80 mt-0.5">
-                  The application is live and configured with hardened security salts.
+                  Virtual host, database, and security configurations are active and live.
                 </p>
               </div>
             </div>
 
             <div className="bg-slate-50 dark:bg-[#121824] p-4 rounded-xl border border-slate-200 dark:border-surface-700 space-y-3 text-xs">
               <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
-                <span className="text-slate-500 dark:text-slate-400">Site Title:</span>
-                <span className="font-bold text-slate-950 dark:text-white">{siteTitle}</span>
+                <span className="text-slate-500 dark:text-slate-400">Target Website:</span>
+                <span className="font-bold text-slate-950 dark:text-white">
+                  {deployedSite?.primary_domain || currentDomain}
+                </span>
               </div>
 
               <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
                 <span className="text-slate-500 dark:text-slate-400">Admin Username:</span>
-                <span className="font-mono font-bold text-slate-950 dark:text-white">{adminUser}</span>
+                <div className="flex items-center gap-1.5 font-mono font-bold text-slate-950 dark:text-white">
+                  <span>{adminUser}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(adminUser, 'user')}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5"
+                  >
+                    {copiedField === 'user' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
               </div>
 
               <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
@@ -211,14 +348,41 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
               </div>
 
               {deployedApp.db_name && (
-                <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400">Provisioned Database:</span>
-                  <span className="font-mono text-purple-600 dark:text-purple-400 font-bold">{deployedApp.db_name}</span>
-                </div>
+                <>
+                  <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400">Database Name:</span>
+                    <div className="flex items-center gap-1.5 font-mono font-bold text-purple-600 dark:text-purple-400">
+                      <span>{deployedApp.db_name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(deployedApp.db_name!, 'dbname')}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5"
+                      >
+                        {copiedField === 'dbname' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {deployedApp.db_user && (
+                    <div className="flex justify-between items-center py-1 border-b border-slate-200/60 dark:border-surface-800">
+                      <span className="text-slate-500 dark:text-slate-400">Database User:</span>
+                      <div className="flex items-center gap-1.5 font-mono text-slate-900 dark:text-slate-100 font-bold">
+                        <span>{deployedApp.db_user}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(deployedApp.db_user!, 'dbuser')}
+                          className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-0.5"
+                        >
+                          {copiedField === 'dbuser' ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="flex justify-between items-center py-1">
-                <span className="text-slate-500 dark:text-slate-400">Admin URL:</span>
+                <span className="text-slate-500 dark:text-slate-400">Admin Dashboard:</span>
                 <a
                   href={deployedApp.admin_url}
                   target="_blank"
@@ -235,9 +399,9 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-surface-800 transition"
               >
-                Close
+                Done
               </button>
               <a
                 href={deployedApp.admin_url}
@@ -245,14 +409,14 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                 rel="noreferrer"
                 className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md transition-all"
               >
-                <span>Launch App Admin</span>
+                <span>Launch Admin</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
             </div>
           </div>
         ) : (
           /* DEPLOYMENT FORM */
-          <form onSubmit={handleDeploy} className="p-5 space-y-5">
+          <form onSubmit={handleDeploy} className="p-5 space-y-4">
             {error && (
               <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-700 dark:text-rose-400 text-xs font-medium flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0" />
@@ -260,17 +424,108 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
               </div>
             )}
 
-            {/* Template Selector Cards */}
+            {/* Target Website Choice (Existing vs New) */}
+            <div className="bg-slate-50 dark:bg-[#121824] p-3.5 rounded-xl border border-slate-200 dark:border-surface-700 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  Target Website / Virtual Host
+                </label>
+                {!website && (
+                  <div className="inline-flex rounded-lg bg-slate-200 dark:bg-surface-800 p-0.5 text-[11px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('existing')}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        targetMode === 'existing'
+                          ? 'bg-white dark:bg-surface-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      Existing Site ({websites.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetMode('new')}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        targetMode === 'new'
+                          ? 'bg-white dark:bg-surface-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      + Deploy to New Domain
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {targetMode === 'existing' ? (
+                <div>
+                  {website ? (
+                    <div className="flex items-center justify-between px-3 py-2 bg-white dark:bg-surface-800 rounded-lg border border-slate-300 dark:border-surface-700 text-xs">
+                      <span className="font-bold text-slate-900 dark:text-white">{website.primary_domain}</span>
+                      <span className="text-[11px] text-slate-500 font-mono">{website.document_root}</span>
+                    </div>
+                  ) : websites.length > 0 ? (
+                    <select
+                      value={selectedSiteId}
+                      onChange={(e) => setSelectedSiteId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                    >
+                      {websites.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.primary_domain} ({w.document_root})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      No websites found. Please switch to &quot;Deploy to New Domain&quot; to auto-create one.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="sm:col-span-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. blog.yourdomain.com"
+                      value={newDomain}
+                      onChange={(e) => setNewDomain(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <select
+                      value={newPhpVersion}
+                      onChange={(e) => setNewPhpVersion(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                    >
+                      <option value="8.3">PHP 8.3</option>
+                      <option value="8.2">PHP 8.2 (Recommended)</option>
+                      <option value="8.1">PHP 8.1</option>
+                      <option value="8.0">PHP 8.0</option>
+                      <option value="7.4">PHP 7.4</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Template Selector Cards (aaPanel 1-Click Suite) */}
             <div>
               <label className="block text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
                 Select Application Template
               </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {[
-                  { id: 'wordpress', name: 'WordPress', badge: 'v6.7', icon: Globe, desc: 'World\'s #1 CMS' },
-                  { id: 'laravel', name: 'Laravel', badge: 'v11', icon: Code2, desc: 'PHP MVC Framework' },
-                  { id: 'nextjs', name: 'Next.js', badge: 'v15', icon: Cpu, desc: 'React SSR Fullstack' },
-                  { id: 'drupal', name: 'Drupal', badge: 'v10', icon: Layers, desc: 'Enterprise CMS' },
+                  { id: 'wordpress', name: 'WordPress', badge: 'v6.7 LTS', icon: Globe, desc: 'World #1 CMS' },
+                  { id: 'laravel', name: 'Laravel', badge: 'v11.x', icon: Code2, desc: 'PHP MVC Framework' },
+                  { id: 'nextjs', name: 'Next.js', badge: 'v15.1', icon: Cpu, desc: 'React SSR Fullstack' },
+                  { id: 'drupal', name: 'Drupal', badge: 'v10.3', icon: Layers, desc: 'Enterprise CMS' },
+                  { id: 'joomla', name: 'Joomla', badge: 'v5.x', icon: Layers, desc: 'Corporate CMS' },
+                  { id: 'typecho', name: 'Typecho', badge: 'v1.2', icon: Globe, desc: 'Lightweight Blog' },
                   { id: 'phpmyadmin', name: 'phpMyAdmin', badge: 'v5.2', icon: Database, desc: 'MySQL Web Admin' },
                 ].map((tpl) => {
                   const Icon = tpl.icon;
@@ -281,20 +536,20 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                       key={tpl.id}
                       type="button"
                       onClick={() => setSelectedApp(tpl.id)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
                         isSelected
                           ? 'border-purple-500 bg-purple-50/50 dark:bg-purple-950/20 ring-2 ring-purple-500/20'
                           : 'border-slate-200 dark:border-surface-700 hover:border-slate-300 dark:hover:border-surface-600 bg-slate-50 dark:bg-[#121824]'
                       }`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center justify-between mb-1">
                         <Icon className={`w-4 h-4 ${isSelected ? 'text-purple-600 dark:text-purple-400' : 'text-slate-500'}`} />
-                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-800 text-slate-700 dark:text-slate-300">
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 dark:bg-surface-800 text-slate-700 dark:text-slate-300">
                           {tpl.badge}
                         </span>
                       </div>
                       <div className="font-bold text-xs text-slate-950 dark:text-white">{tpl.name}</div>
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{tpl.desc}</div>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">{tpl.desc}</div>
                     </button>
                   );
                 })}
@@ -302,10 +557,10 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
             </div>
 
             {/* Application Configuration Fields */}
-            <div className="space-y-3.5 bg-slate-50 dark:bg-[#121824] p-4 rounded-xl border border-slate-200 dark:border-surface-700">
+            <div className="space-y-3 bg-slate-50 dark:bg-[#121824] p-3.5 rounded-xl border border-slate-200 dark:border-surface-700">
               <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-                Quick Installation Parameters
+                Site & Admin Account Credentials
               </div>
 
               <div>
@@ -317,11 +572,11 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                   required
                   value={siteTitle}
                   onChange={(e) => setSiteTitle(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                  className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Administrator Username
@@ -331,7 +586,7 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                     required
                     value={adminUser}
                     onChange={(e) => setAdminUser(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
                   />
                 </div>
 
@@ -344,7 +599,7 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                     required
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-medium text-slate-950 dark:text-white"
                   />
                 </div>
               </div>
@@ -359,7 +614,7 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                     onClick={generatePassword}
                     className="text-[10px] text-purple-600 dark:text-purple-400 font-bold hover:underline"
                   >
-                    Generate Random
+                    Regenerate All Passwords
                   </button>
                 </div>
                 <div className="relative">
@@ -368,18 +623,94 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                     required
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
-                    className="w-full pl-3 pr-10 py-2 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
+                    className="w-full pl-3 pr-10 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+                    className="absolute right-3 top-2 text-slate-400 hover:text-slate-600"
                   >
                     {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
               </div>
             </div>
+
+            {/* Database Configuration (aaPanel Parity) */}
+            {selectedApp !== 'nextjs' && (
+              <div className="space-y-3 bg-slate-50 dark:bg-[#121824] p-3.5 rounded-xl border border-slate-200 dark:border-surface-700">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    MySQL Database Auto-Provisioning
+                  </div>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                    Auto Provisioned
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Database Name
+                    </label>
+                    <input
+                      type="text"
+                      value={dbName}
+                      onChange={(e) => setDbName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Database Username
+                    </label>
+                    <input
+                      type="text"
+                      value={dbUser}
+                      onChange={(e) => setDbUser(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Database Password
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showDbPassword ? 'text' : 'password'}
+                        value={dbPassword}
+                        onChange={(e) => setDbPassword(e.target.value)}
+                        className="w-full pl-3 pr-10 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowDbPassword(!showDbPassword)}
+                        className="absolute right-3 top-2 text-slate-400 hover:text-slate-600"
+                      >
+                        {showDbPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Table Prefix
+                    </label>
+                    <input
+                      type="text"
+                      value={tablePrefix}
+                      onChange={(e) => setTablePrefix(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-700 bg-white dark:bg-surface-800 text-xs font-mono text-slate-950 dark:text-white"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Installation Progress Bar */}
             {installing && (
@@ -406,17 +737,19 @@ export function OneClickAppModal({ website, isOpen, onClose, onSuccess, initialA
                 type="button"
                 onClick={onClose}
                 disabled={installing}
-                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-300 disabled:opacity-50"
+                className="px-4 py-2 rounded-xl border border-slate-300 dark:border-surface-700 text-xs font-semibold text-slate-700 dark:text-slate-300 disabled:opacity-50 hover:bg-slate-50 dark:hover:bg-surface-800 transition"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={installing}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-50"
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 cursor-pointer"
               >
                 <Zap className="w-3.5 h-3.5" />
-                <span>{installing ? 'Deploying...' : `Install ${selectedApp === 'wordpress' ? 'WordPress' : selectedApp}`}</span>
+                <span>
+                  {installing ? 'Deploying...' : `One-Click Deploy ${selectedApp.toUpperCase()}`}
+                </span>
               </button>
             </div>
           </form>

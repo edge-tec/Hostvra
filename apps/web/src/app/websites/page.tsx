@@ -184,6 +184,7 @@ export default function WebsitesPage() {
   // Existing Hostvra modules
   const [isolationModalSite, setIsolationModalSite] = useState<Website | null>(null);
   const [appModalSite, setAppModalSite] = useState<Website | null>(null);
+  const [oneClickDeployOpen, setOneClickDeployOpen] = useState(false);
   const [isolationInfo, setIsolationInfo] = useState<UserIsolationInfo | null>(null);
   const [isolationLoading, setIsolationLoading] = useState(false);
   const [isolationSaving, setIsolationSaving] = useState(false);
@@ -1318,6 +1319,16 @@ export default function WebsitesPage() {
             >
               <Plus className="w-3.5 h-3.5 text-white" />
               <span>Add site</span>
+            </button>
+
+            {/* aaPanel One-Click Deployment Button */}
+            <button
+              onClick={() => setOneClickDeployOpen(true)}
+              className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0 hover:ring-2 hover:ring-purple-500/30"
+              title="One-Click Deployment for WordPress, Laravel, Next.js, Drupal, Joomla, and Typecho"
+            >
+              <Zap className="w-3.5 h-3.5 text-white" />
+              <span>One-Click Deployment</span>
             </button>
 
             {/* Sync Configured Domains Button */}
@@ -3802,14 +3813,21 @@ export default function WebsitesPage() {
           </div>
         )}
 
-        {/* 15. 1-Click App Installer Modal */}
-        {appModalSite && (
+        {/* 15. 1-Click App Installer Modal (Website-specific or Global aaPanel One-Click Deploy) */}
+        {(appModalSite || oneClickDeployOpen) && (
           <OneClickAppModal
             website={appModalSite}
-            isOpen={Boolean(appModalSite)}
-            onClose={() => setAppModalSite(null)}
-            onSuccess={() => {
-              showToast(`Application successfully installed on ${appModalSite.primary_domain}!`);
+            websites={websites}
+            isOpen={Boolean(appModalSite || oneClickDeployOpen)}
+            onClose={() => {
+              setAppModalSite(null);
+              setOneClickDeployOpen(false);
+            }}
+            onCreatedWebsite={(newSite) => {
+              setWebsites((prev) => [newSite, ...prev.filter((s) => s.id !== newSite.id)]);
+            }}
+            onSuccess={(targetSite) => {
+              showToast(`Application successfully installed on ${targetSite?.primary_domain || appModalSite?.primary_domain || 'website'}!`);
               fetchData();
             }}
           />
