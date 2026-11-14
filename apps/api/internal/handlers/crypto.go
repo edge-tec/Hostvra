@@ -253,6 +253,7 @@ func (h *CryptoHandler) AdminSaveTreasury(w http.ResponseWriter, r *http.Request
 
 	if tw.ID == uuid.Nil {
 		tw.ID = uuid.New()
+		tw.IsActive = true
 		now := time.Now().UTC()
 		tw.CreatedAt = now
 		tw.UpdatedAt = now

@@ -77,10 +77,10 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 
 	invoiceID := uuid.New()
 
-	// Acquire dedicated deposit address from address pool
+	// Acquire dedicated deposit address from address pool or active treasury
 	depositAddr, err := s.store.AcquireDepositAddress(ctx, net.ID, cur.ID, invoiceID)
 	if err != nil {
-		return nil, fmt.Errorf("deposit address pool exhausted for %s: %w", net.Name, err)
+		return nil, fmt.Errorf("no treasury destination address configured for %s (%s). Super Admin must add an approved Trust Wallet address in Admin Dashboard -> Crypto Gateway (/admin/crypto)", net.Name, cur.Symbol)
 	}
 
 	// QR Code URI scheme

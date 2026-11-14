@@ -244,35 +244,36 @@ export default function CryptoCheckoutPage() {
             )}
           </div>
 
-          {/* Network Selector Tabs (if still pending) */}
-          {invoice && invoice.status === 'pending' && options.length > 0 && (
+          {/* Network Selector Tabs */}
+          {options.length > 0 && (!invoice || invoice.status === 'pending') && (
             <div className="p-4 bg-slate-900/40 border-b border-slate-700/50">
               <label className="block text-[11px] font-semibold uppercase text-slate-400 mb-2">
                 Select Network / Currency:
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {options.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      if (opt.id !== invoice.currency_id) {
+                {options.map((opt) => {
+                  const isSelected = invoice ? invoice.currency_id === opt.id : selectedCurrencyId === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
                         setSelectedCurrencyId(opt.id);
                         initInvoice(opt.id);
-                      }
-                    }}
-                    className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
-                      invoice.currency_id === opt.id
-                        ? 'border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500'
-                        : 'border-slate-700/80 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs">{opt.symbol}</span>
-                      <span className="text-[10px] text-slate-400 uppercase">{opt.network_id}</span>
-                    </div>
-                    <div className="text-[10px] text-slate-400 truncate mt-1">{opt.name}</div>
-                  </button>
-                ))}
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? 'border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500'
+                          : 'border-slate-700/80 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs">{opt.symbol}</span>
+                        <span className="text-[10px] text-slate-400 uppercase">{opt.network_id}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 truncate mt-1">{opt.name}</div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -280,9 +281,29 @@ export default function CryptoCheckoutPage() {
           {/* Body Content */}
           <div className="p-6 space-y-6">
             {error && (
-              <div className="p-4 bg-red-950/40 border border-red-800/60 rounded-xl text-xs text-red-300 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                <span>{error}</span>
+              <div className="p-5 bg-rose-950/30 border border-rose-800/60 rounded-2xl text-xs text-rose-300 space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-rose-200">Treasury Wallet Setup Required</p>
+                    <p className="text-rose-300/90 leading-relaxed">{error}</p>
+                  </div>
+                </div>
+                <div className="pt-2 border-t border-rose-900/40 flex flex-wrap gap-2">
+                  <button
+                    onClick={() => router.push('/admin/crypto')}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <span>Add Trust Wallet Treasury (Admin)</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => router.push('/billing')}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
+                  >
+                    Pay with Stripe / Card
+                  </button>
+                </div>
               </div>
             )}
 
