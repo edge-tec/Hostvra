@@ -2312,4 +2312,93 @@ func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, res, nil)
 }
 
+// RemoteDownloadRequest represents a request to download a file from an external URL
+type RemoteDownloadRequest struct {
+	URL      string `json:"url"`
+	Path     string `json:"path"`      // destination directory
+	FileName string `json:"file_name"` // optional custom filename
+}
+
+// RemoteDownload downloads a file directly from a remote HTTP/HTTPS URL into the server directory
+func (h *FileHandler) RemoteDownload(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	var req RemoteDownloadRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" || req.Path == "" {
+		response.Error(w, http.StatusBadRequest, "INVALID_REQUEST", "URL and target Path are required", nil, "")
+		return
+	}
+
+	parsedURL, err := url.Parse(req.URL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		response.Error(w, http.StatusBadRequest, "INVALID_URL", "Only HTTP and HTTPS URLs are supported", nil, "")
+		return
+	}
+
+	if err := h.checkPathAuthorization(r, req.Path); err != nil {
+		response.Error(w, http.StatusForbidden, "ACCESS_DENIED", err.Error(), nil, "")
+		return
+	}
+
+	fileName := req.FileName
+	if fileName == "" {
+		fileName = filepath.Base(parsedURL.Path)
+		if fileName == "" || fileName == "/" || fileName == "." {
+			fileName = fmt.Sprintf("download_%d", time.Now().Unix())
+		}
+	}
+
+	destPath := filepath.Join(req.Path, fileName)
+
+	// Stream remote download with timeout
+	client := &http.Client{
+		Timeout: 30 * time.Minute,
+	}
+
+	resp, err := client.Get(req.URL)
+	if err != nil {
+		response.Error(w, http.StatusBadGateway, "DOWNLOAD_FAILED", fmt.Sprintf("Failed to fetch remote URL: %v", err), nil, "")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		response.Error(w, http.StatusBadGateway, "DOWNLOAD_FAILED", fmt.Sprintf("Remote server responded with status: %s", resp.Status), nil, "")
+		return
+	}
+
+	outFile, err := os.Create(destPath)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "WRITE_FAILED", fmt.Sprintf("Failed to create destination file: %v", err), nil, "")
+		return
+	}
+	defer outFile.Close()
+
+	bytesWritten, err := io.Copy(outFile, resp.Body)
+	if err != nil {
+		_ = os.Remove(destPath)
+		response.Error(w, http.StatusInternalServerError, "STREAM_FAILED", fmt.Sprintf("Failed during download stream: %v", err), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "file.remote_download", "file", destPath, "success", "", map[string]interface{}{
+		"url":          req.URL,
+		"size_bytes":   bytesWritten,
+		"destination":  destPath,
+		"user_id":      claims.UserID.String(),
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"message":    fmt.Sprintf("Successfully downloaded %s (%.2f MB)", fileName, float64(bytesWritten)/(1024*1024)),
+		"file_name":  fileName,
+		"path":       destPath,
+		"size_bytes": bytesWritten,
+	}, nil)
+}
+
+
 

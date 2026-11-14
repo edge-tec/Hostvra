@@ -16,6 +16,7 @@ import {
   Save,
   ShieldCheck,
   UploadCloud,
+  DownloadCloud,
   Archive,
   FolderArchive,
   ArrowUp,
@@ -209,6 +210,12 @@ export default function FileManagerPage() {
   const [storageModalOpen, setStorageModalOpen] = useState(false);
   const [activityModalOpen, setActivityModalOpen] = useState(false);
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
+
+  // aaPanel Standard: Remote Download State
+  const [remoteDownloadOpen, setRemoteDownloadOpen] = useState(false);
+  const [remoteDownloadUrl, setRemoteDownloadUrl] = useState('');
+  const [remoteDownloadFilename, setRemoteDownloadFilename] = useState('');
+  const [remoteDownloading, setRemoteDownloading] = useState(false);
 
   // Upload Manager Tasks
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
@@ -901,6 +908,37 @@ export default function FileManagerPage() {
     }
   };
 
+  // aaPanel Standard: Handle Remote URL Download directly to server directory
+  const handleRemoteDownload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!remoteDownloadUrl.trim()) return;
+    setRemoteDownloading(true);
+    try {
+      showToast('Downloading remote file on server...');
+      const res = await apiFetch<{ message?: string }>('/api/v1/files/remote-download', {
+        method: 'POST',
+        body: JSON.stringify({
+          url: remoteDownloadUrl.trim(),
+          path: currentPath,
+          file_name: remoteDownloadFilename.trim() || undefined,
+        }),
+      });
+      if (res && res.success) {
+        showToast(res.data?.message || 'Remote download finished!');
+        setRemoteDownloadOpen(false);
+        setRemoteDownloadUrl('');
+        setRemoteDownloadFilename('');
+        fetchDirectory(currentPath);
+      } else {
+        showToast(`Download failed: ${res?.error?.message || 'Failed to download'}`, true);
+      }
+    } catch (err: any) {
+      showToast(`Download error: ${err.message}`, true);
+    } finally {
+      setRemoteDownloading(false);
+    }
+  };
+
   // Breadcrumbs builder
   const breadcrumbs = useMemo(() => {
     const clean = currentPath.replace(/\/+/g, '/').replace(/^\/|\/$/g, '');
@@ -1198,6 +1236,21 @@ export default function FileManagerPage() {
                       <span className="hidden sm:inline">Upload</span>
                     </button>
                   </div>
+
+                  {/* aaPanel Remote Download Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRemoteDownloadUrl('');
+                      setRemoteDownloadFilename('');
+                      setRemoteDownloadOpen(true);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-surface-700 hover:bg-slate-100 dark:hover:bg-surface-800 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+                    title="Download file directly from remote URL into this folder"
+                  >
+                    <DownloadCloud className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="hidden sm:inline">Remote Download</span>
+                  </button>
                 </div>
               )}
 
@@ -2505,6 +2558,92 @@ export default function FileManagerPage() {
                     className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50"
                   >
                     {creating ? 'Creating...' : 'Create'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* aaPanel REMOTE URL DOWNLOAD MODAL */}
+        {remoteDownloadOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => setRemoteDownloadOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-2 mb-1">
+                <DownloadCloud className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                  Remote Download from URL (aaPanel Feature)
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+                Download files directly from external HTTP/HTTPS URLs into this folder.
+              </p>
+
+              <form onSubmit={handleRemoteDownload} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Download URL *
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    value={remoteDownloadUrl}
+                    onChange={(e) => setRemoteDownloadUrl(e.target.value)}
+                    placeholder="https://wordpress.org/latest.zip or https://example.com/backup.sql"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-surface-950 text-slate-900 dark:text-white font-mono focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-800 dark:text-white block mb-1">
+                    Save As File Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={remoteDownloadFilename}
+                    onChange={(e) => setRemoteDownloadFilename(e.target.value)}
+                    placeholder="Leave blank to use original filename from URL"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-surface-950 text-slate-900 dark:text-white focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-100 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 text-slate-600 dark:text-slate-400 text-[11px] space-y-1">
+                  <div><strong>Target Folder:</strong> <span className="font-mono text-indigo-600 dark:text-indigo-400">{currentPath}</span></div>
+                  <div>The server streams and writes the download directly to disk.</div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setRemoteDownloadOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-surface-700 font-bold hover:bg-slate-100 dark:hover:bg-surface-800 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={remoteDownloading || !remoteDownloadUrl.trim()}
+                    className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold disabled:opacity-50 flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    {remoteDownloading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Downloading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <DownloadCloud className="w-3.5 h-3.5" />
+                        <span>Download to Server</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>

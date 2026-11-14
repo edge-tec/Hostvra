@@ -981,6 +981,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/permissions", fileHandler.Permissions)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/archive", fileHandler.Archive)
 				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/extract", fileHandler.Extract)
+				r.With(rbac.RequirePermission(rbac.PermFilesEdit)).Post("/remote-download", fileHandler.RemoteDownload)
 
 				// Enterprise v3.0 Endpoints
 				r.With(rbac.RequirePermission(rbac.PermFilesBrowse)).Get("/quick-access", fileHandler.QuickAccess)
