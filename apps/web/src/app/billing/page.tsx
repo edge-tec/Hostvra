@@ -209,18 +209,18 @@ const DEFAULT_PLANS: HostingPlan[] = [
 
 const DEFAULT_GATEWAYS: PaymentGatewayConfig[] = [
   {
-    gateway: 'crypto',
-    display_name: 'In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)',
+    gateway: 'stripe',
+    display_name: 'Stripe (Credit / Debit Cards)',
     enabled: true,
-    test_mode: false,
+    test_mode: true,
     api_key: '',
     merchant_id: '',
   },
   {
-    gateway: 'stripe',
-    display_name: 'Stripe (Credit / Debit Cards)',
-    enabled: false,
-    test_mode: true,
+    gateway: 'crypto',
+    display_name: 'In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)',
+    enabled: true,
+    test_mode: false,
     api_key: '',
     merchant_id: '',
   },
@@ -1716,13 +1716,26 @@ export default function BillingPage() {
                           <td className="py-4 px-6 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {inv.status === 'unpaid' && (
-                                <button
-                                  onClick={() => handlePayInvoice(inv)}
-                                  disabled={actionLoading === `pay-${inv.id}`}
-                                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
-                                >
-                                  Pay Now
-                                </button>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => handlePayInvoice(inv, 'stripe')}
+                                    disabled={actionLoading === `pay-${inv.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors flex items-center gap-1 shadow-sm"
+                                    title="Pay with Card via Stripe"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    <span>Stripe</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handlePayInvoice(inv, 'crypto')}
+                                    disabled={actionLoading === `pay-${inv.id}`}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors flex items-center gap-1 shadow-sm"
+                                    title="Pay with Crypto (USDT TRC20, BEP20, ERC20 - Zero Fees)"
+                                  >
+                                    <span className="font-bold text-[11px]">₮</span>
+                                    <span>Crypto</span>
+                                  </button>
+                                </div>
                               )}
                               <button
                                 onClick={() => {

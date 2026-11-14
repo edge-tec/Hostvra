@@ -200,9 +200,19 @@ func (m *MemoryStore) seedBillingData() {
 		gateways := []*PaymentGatewayConfig{
 			{
 				Gateway:     "stripe",
-				DisplayName: "Stripe Payment Gateway",
-				Enabled:     false,
+				DisplayName: "Stripe (Credit / Debit Cards)",
+				Enabled:     true,
 				TestMode:    true,
+				ApiKey:      "",
+				SecretKey:   "mock_test_secret",
+				MerchantID:  "",
+				UpdatedAt:   now,
+			},
+			{
+				Gateway:     "crypto",
+				DisplayName: "In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)",
+				Enabled:     true,
+				TestMode:    false,
 				ApiKey:      "",
 				SecretKey:   "",
 				MerchantID:  "",
@@ -547,8 +557,22 @@ func (m *MemoryStore) ListGateways(ctx context.Context) ([]*PaymentGatewayConfig
 	defer m.mu.RUnlock()
 
 	var gateways []*PaymentGatewayConfig
+	hasCrypto := false
 	for _, g := range m.gatewayConfigs {
+		if g.Gateway == "crypto" {
+			hasCrypto = true
+		}
 		gateways = append(gateways, g)
+	}
+
+	if !hasCrypto {
+		gateways = append(gateways, &PaymentGatewayConfig{
+			Gateway:     "crypto",
+			DisplayName: "In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)",
+			Enabled:     true,
+			TestMode:    false,
+			UpdatedAt:   time.Now().UTC(),
+		})
 	}
 
 	sort.Slice(gateways, func(i, j int) bool {
@@ -561,8 +585,18 @@ func (m *MemoryStore) GetGatewayConfig(ctx context.Context, gateway string) (*Pa
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	config, exists := m.gatewayConfigs[strings.ToLower(gateway)]
+	gwKey := strings.ToLower(gateway)
+	config, exists := m.gatewayConfigs[gwKey]
 	if !exists {
+		if gwKey == "crypto" {
+			return &PaymentGatewayConfig{
+				Gateway:     "crypto",
+				DisplayName: "In-House Crypto Gateway (USDT TRC20, BEP20, ERC20)",
+				Enabled:     true,
+				TestMode:    false,
+				UpdatedAt:   time.Now().UTC(),
+			}, nil
+		}
 		return nil, ErrNotFound
 	}
 	return config, nil

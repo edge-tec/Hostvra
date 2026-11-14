@@ -752,3 +752,173 @@ func TestBilling_AutoProvisioningAndLifecycle(t *testing.T) {
 		t.Errorf("expected restored website to be active, got '%s'", siteRestored.Status)
 	}
 }
+
+func TestBillingHandler_StripeNativeWebhook_AutoRenewsAndNotifies(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemoryStore()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(st, log)
+	handler := NewBillingHandler(&config.Config{}, st, auditLogger)
+
+	r := chi.NewRouter()
+	r.Post("/billing/webhooks/{gateway}", handler.HandleWebhook)
+
+	// Configure Stripe Gateway with secret key
+	stripeSecret := "whsec_test_secret_stripe_123"
+	_ = st.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:     "stripe",
+		DisplayName: "Stripe",
+		Enabled:     true,
+		TestMode:    false,
+		SecretKey:   stripeSecret,
+	})
+
+	userID := uuid.New()
+	orgID := uuid.New()
+	testUser := &store.User{
+		ID:        userID,
+		Email:     "stripe-client@example.com",
+		FullName:  "Stripe Client",
+		Role:      "user",
+		CreatedAt: time.Now().UTC(),
+	}
+	_ = st.CreateUser(ctx, testUser, orgID, "user")
+
+	planID := uuid.New()
+	_ = st.CreatePlan(ctx, &store.HostingPlan{
+		ID:           planID,
+		Name:         "Business SSD",
+		PriceMonthly: 25.00,
+		Currency:     "USD",
+		IsActive:     true,
+		DiskSpaceMB:  25000,
+	})
+
+	now := time.Now().UTC()
+	subID := uuid.New()
+	sub := &store.Subscription{
+		ID:              subID,
+		UserID:          userID,
+		OrganizationID:  orgID,
+		PlanID:          planID,
+		PlanName:        "Business SSD",
+		BillingCycle:    "monthly",
+		Amount:          25.00,
+		Currency:        "USD",
+		Status:          store.SubStatusActive,
+		NextBillingDate: now.Add(-24 * time.Hour), // Expired/due
+		CreatedAt:       now.AddDate(0, -1, 0),
+		UpdatedAt:       now,
+	}
+	_ = st.CreateSubscription(ctx, sub)
+
+	accID := uuid.New()
+	suspendedAt := now.Add(-12 * time.Hour)
+	acc := &store.HostingAccount{
+		ID:             accID,
+		UserID:         userID,
+		OrganizationID: orgID,
+		Domain:         "stripe-client.com",
+		Username:       "stripeclient",
+		Status:         store.AccountStatusSuspended,
+		SuspendReason:  "Overdue invoice past grace period",
+		SuspendedAt:    &suspendedAt,
+		CreatedAt:      now.AddDate(0, -1, 0),
+	}
+	_ = st.CreateHostingAccount(ctx, acc)
+
+	invID := uuid.New()
+	inv := &store.Invoice{
+		ID:             invID,
+		InvoiceNumber:  "INV-STRIPE-001",
+		UserID:         userID,
+		OrganizationID: orgID,
+		SubscriptionID: &subID,
+		PlanID:         planID,
+		Description:    "Business SSD Renewal",
+		Total:          25.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+		PaymentMethod:  "stripe",
+		CreatedAt:      now,
+	}
+	_ = st.CreateInvoice(ctx, inv)
+
+	// Construct native Stripe checkout.session.completed event
+	stripePayload := map[string]interface{}{
+		"id":   "evt_test_checkout_session_001",
+		"type": "checkout.session.completed",
+		"data": map[string]interface{}{
+			"object": map[string]interface{}{
+				"id":                  "cs_test_session_abc123",
+				"client_reference_id": invID.String(),
+				"metadata": map[string]interface{}{
+					"invoice_id": invID.String(),
+					"user_id":    userID.String(),
+				},
+				"amount_total":   2500, // 2500 cents = $25.00
+				"currency":       "usd",
+				"payment_status": "paid",
+				"payment_intent": "pi_test_intent_789",
+			},
+		},
+	}
+	bodyBytes, _ := json.Marshal(stripePayload)
+
+	// Generate official Stripe HMAC signature (t=...,v1=...)
+	ts := fmt.Sprintf("%d", now.Unix())
+	mac := hmac.New(sha256.New, []byte(stripeSecret))
+	mac.Write([]byte(ts + "."))
+	mac.Write(bodyBytes)
+	sig := hex.EncodeToString(mac.Sum(nil))
+	stripeSigHeader := fmt.Sprintf("t=%s,v1=%s", ts, sig)
+
+	req := httptest.NewRequest("POST", "/billing/webhooks/stripe", bytes.NewReader(bodyBytes))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Stripe-Signature", stripeSigHeader)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for native Stripe webhook, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 1. Verify Invoice is marked Paid
+	paidInv, err := st.GetInvoiceByID(ctx, invID)
+	if err != nil {
+		t.Fatalf("Failed to fetch invoice: %v", err)
+	}
+	if paidInv.Status != store.InvoiceStatusPaid {
+		t.Errorf("Expected invoice status paid, got %s", paidInv.Status)
+	}
+	if paidInv.PaidAt == nil {
+		t.Error("Expected paid_at timestamp to be set")
+	}
+	if paidInv.TransactionID != "pi_test_intent_789" {
+		t.Errorf("Expected transaction ID pi_test_intent_789, got %s", paidInv.TransactionID)
+	}
+
+	// 2. Verify Subscription is Renewed and NextBillingDate is in the future
+	renewedSub, err := st.GetSubscriptionByID(ctx, subID)
+	if err != nil {
+		t.Fatalf("Failed to fetch subscription: %v", err)
+	}
+	if renewedSub.Status != store.SubStatusActive {
+		t.Errorf("Expected subscription status active, got %s", renewedSub.Status)
+	}
+	if !renewedSub.NextBillingDate.After(now) {
+		t.Errorf("Expected NextBillingDate (%v) to be after now (%v)", renewedSub.NextBillingDate, now)
+	}
+
+	// 3. Verify Suspended Account is Un-suspended
+	activeAcc, err := st.GetHostingAccountByID(ctx, accID)
+	if err != nil {
+		t.Fatalf("Failed to fetch hosting account: %v", err)
+	}
+	if activeAcc.Status != store.AccountStatusActive {
+		t.Errorf("Expected account status active, got %s", activeAcc.Status)
+	}
+	if activeAcc.SuspendReason != "" {
+		t.Errorf("Expected suspend reason to be cleared, got %s", activeAcc.SuspendReason)
+	}
+}
