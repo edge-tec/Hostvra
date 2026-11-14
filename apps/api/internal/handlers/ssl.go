@@ -118,6 +118,63 @@ func (h *SSLHandler) ListCertificates(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, enrichedList, nil)
 }
 
+// GetCertificatePEM returns the raw public certificate fullchain and private key for download or viewing
+func (h *SSLHandler) GetCertificatePEM(w http.ResponseWriter, r *http.Request) {
+	claims, hasClaims := auth.GetClaims(r.Context())
+	if !hasClaims {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	certID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid certificate UUID", nil, "")
+		return
+	}
+
+	cert, err := h.store.GetSSLByID(r.Context(), certID)
+	if err != nil || cert == nil {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Certificate not found", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner"
+	if cert.WebsiteID != uuid.Nil {
+		if site, sErr := h.store.GetWebsiteByID(r.Context(), cert.WebsiteID); sErr == nil && site != nil {
+			if site.OrganizationID != claims.OrganizationID && !isAdmin {
+				response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+				return
+			}
+		}
+	} else if !isAdmin {
+		response.Error(w, http.StatusForbidden, "FORBIDDEN", "Access denied", nil, "")
+		return
+	}
+
+	var certPEM, keyPEM string
+	if cert.CertPath != "" {
+		if data, err := os.ReadFile(cert.CertPath); err == nil {
+			certPEM = string(data)
+		}
+	}
+	if cert.KeyPath != "" {
+		if data, err := os.ReadFile(cert.KeyPath); err == nil {
+			keyPEM = string(data)
+		}
+	}
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"id":         cert.ID,
+		"domain":     cert.DomainList,
+		"issuer":     cert.Issuer,
+		"cert_pem":   certPEM,
+		"key_pem":    keyPEM,
+		"cert_path":  cert.CertPath,
+		"key_path":   cert.KeyPath,
+		"expires_at": cert.ExpiresAt,
+	}, nil)
+}
+
 // PrepareChallenge creates a DNS-01 challenge for manual or automated verification
 func (h *SSLHandler) PrepareChallenge(w http.ResponseWriter, r *http.Request) {
 	var req ssl.IssueRequest

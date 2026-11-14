@@ -691,6 +691,7 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermWebsitesDelete)).Delete("/{id}", websiteHandler.Delete)
 				r.With(rbac.RequirePermission(rbac.PermSSLView)).Get("/{id}/ssl", websiteHandler.GetSSL)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl", websiteHandler.IssueSSL)
+				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/{id}/ssl/disable", websiteHandler.DisableSSL)
 
 				// Realtime Conf, Logs, Backup, WAF, Batch, Statistics
 				r.With(rbac.RequirePermission(rbac.PermWebsitesView)).Get("/statistics", websiteHandler.Statistics)
@@ -1058,6 +1059,7 @@ func main() {
 			// SSL Certificates & Wildcard DNS-01
 			r.Route("/ssl", func(r chi.Router) {
 				r.With(rbac.RequirePermission(rbac.PermSSLView)).Get("/certificates", sslHandler.ListCertificates)
+				r.With(rbac.RequirePermission(rbac.PermSSLView)).Get("/certificates/{id}/pem", sslHandler.GetCertificatePEM)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/issue", sslHandler.Issue)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/challenge", sslHandler.PrepareChallenge)
 				r.With(rbac.RequirePermission(rbac.PermSSLManage)).Post("/verify-challenge", sslHandler.VerifyChallenge)

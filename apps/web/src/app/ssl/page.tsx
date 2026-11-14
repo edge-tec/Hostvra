@@ -38,6 +38,9 @@ export default function SSLPage() {
   const [showIssueModal, setShowIssueModal] = useState(false);
   const [showCustomModal, setShowCustomModal] = useState(false);
   const [selectedCert, setSelectedCert] = useState<SSLCertificate | null>(null);
+  const [certDetailsTab, setCertDetailsTab] = useState<'info' | 'cert_pem' | 'key_pem'>('info');
+  const [certPemData, setCertPemData] = useState<{ cert_pem?: string; key_pem?: string } | null>(null);
+  const [loadingPem, setLoadingPem] = useState(false);
   const [deleteCert, setDeleteCert] = useState<SSLCertificate | null>(null);
   
   // Issuance State
@@ -98,6 +101,22 @@ export default function SSLPage() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (selectedCert) {
+      setCertDetailsTab('info');
+      setCertPemData(null);
+      setLoadingPem(true);
+      apiFetch<any>(`/api/v1/ssl/certificates/${selectedCert.id}/pem`)
+        .then((res) => {
+          if (res.success && res.data) {
+            setCertPemData(res.data);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setLoadingPem(false));
+    }
+  }, [selectedCert]);
 
   const handleCopy = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -1053,10 +1072,10 @@ export default function SSLPage() {
           </div>
         )}
 
-        {/* VIEW CERTIFICATE DETAILS MODAL */}
+        {/* VIEW CERTIFICATE DETAILS MODAL (aaPanel Full Parity) */}
         {selectedCert && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-            <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
+            <div className="bg-white dark:bg-[#10141d] border border-slate-200 dark:border-surface-800 rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-surface-800">
                 <div className="flex items-center gap-2">
                   <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
@@ -1074,52 +1093,137 @@ export default function SSLPage() {
                 </button>
               </div>
 
-              <div className="p-5 space-y-3.5 text-xs">
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400">Certificate Authority</span>
-                  <span className="font-bold text-slate-950 dark:text-white">{selectedCert.issuer}</span>
-                </div>
-
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400">Type</span>
-                  <span className="font-bold text-purple-600 dark:text-purple-400">
-                    {selectedCert.is_wildcard ? 'Wildcard DNS-01' : 'Single Domain'}
-                  </span>
-                </div>
-
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400">Issued On</span>
-                  <span className="font-medium text-slate-950 dark:text-white">
-                    {new Date(selectedCert.issued_at).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400">Expires On</span>
-                  <span className="font-medium text-slate-950 dark:text-white">
-                    {new Date(selectedCert.expires_at).toLocaleString()} ({selectedCert.days_remaining} days remaining)
-                  </span>
-                </div>
-
-                <div className="py-1.5 border-b border-slate-100 dark:border-surface-800">
-                  <span className="text-slate-500 dark:text-slate-400 block mb-1">Subject Alternative Names (SANs)</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedCert.domain_list.map((d, i) => (
-                      <span key={i} className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 font-mono text-[11px] text-slate-800 dark:text-slate-200">
-                        {d}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="py-1.5">
-                  <span className="text-slate-500 dark:text-slate-400 block mb-1">Filesystem Storage</span>
-                  <div className="font-mono text-[11px] text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#121824] p-2 rounded-xl border border-slate-200 dark:border-surface-700 space-y-1">
-                    <div>Cert: {selectedCert.cert_path}</div>
-                    <div>Key:  {selectedCert.key_path}</div>
-                  </div>
-                </div>
+              {/* Sub-tabs */}
+              <div className="flex border-b border-slate-200 dark:border-surface-800 px-5 bg-slate-50 dark:bg-[#121824] text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCertDetailsTab('info')}
+                  className={`py-2.5 px-3 font-bold border-b-2 transition ${
+                    certDetailsTab === 'info'
+                      ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+                      : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Overview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCertDetailsTab('cert_pem')}
+                  className={`py-2.5 px-3 font-bold border-b-2 transition ${
+                    certDetailsTab === 'cert_pem'
+                      ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+                      : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Certificate (fullchain.pem)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCertDetailsTab('key_pem')}
+                  className={`py-2.5 px-3 font-bold border-b-2 transition ${
+                    certDetailsTab === 'key_pem'
+                      ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+                      : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Private Key (privkey.pem)
+                </button>
               </div>
+
+              {certDetailsTab === 'info' ? (
+                <div className="p-5 space-y-3 text-xs max-h-[60vh] overflow-y-auto">
+                  <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400">Certificate Authority</span>
+                    <span className="font-bold text-slate-950 dark:text-white">{selectedCert.issuer}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400">Type</span>
+                    <span className="font-bold text-purple-600 dark:text-purple-400">
+                      {selectedCert.is_wildcard ? 'Wildcard DNS-01' : 'Single Domain'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400">Issued On</span>
+                    <span className="font-medium text-slate-950 dark:text-white">
+                      {new Date(selectedCert.issued_at).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400">Expires On</span>
+                    <span className="font-medium text-slate-950 dark:text-white">
+                      {new Date(selectedCert.expires_at).toLocaleString()} ({selectedCert.days_remaining} days remaining)
+                    </span>
+                  </div>
+
+                  <div className="py-1.5 border-b border-slate-100 dark:border-surface-800">
+                    <span className="text-slate-500 dark:text-slate-400 block mb-1">Subject Alternative Names (SANs)</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedCert.domain_list.map((d, i) => (
+                        <span key={i} className="px-2 py-0.5 rounded bg-slate-100 dark:bg-surface-800 font-mono text-[11px] text-slate-800 dark:text-slate-200">
+                          {d}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="py-1.5">
+                    <span className="text-slate-500 dark:text-slate-400 block mb-1">Filesystem Storage</span>
+                    <div className="font-mono text-[11px] text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-[#121824] p-2 rounded-xl border border-slate-200 dark:border-surface-700 space-y-1">
+                      <div>Cert: {selectedCert.cert_path}</div>
+                      <div>Key:  {selectedCert.key_path}</div>
+                    </div>
+                  </div>
+                </div>
+              ) : certDetailsTab === 'cert_pem' ? (
+                <div className="p-5 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <span>Public Certificate Chain</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(certPemData?.cert_pem || '', 'cert_pem')}
+                        disabled={!certPemData?.cert_pem}
+                        className="inline-flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
+                      >
+                        {copiedField === 'cert_pem' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'cert_pem' ? 'Copied' : 'Copy PEM'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    readOnly
+                    rows={12}
+                    value={loadingPem ? 'Reading certificate from disk...' : certPemData?.cert_pem || 'Certificate PEM unavailable.'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-[#121824] font-mono text-[11px] text-slate-900 dark:text-slate-100 leading-tight focus:outline-none"
+                  />
+                </div>
+              ) : (
+                <div className="p-5 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                    <span>Private Key</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(certPemData?.key_pem || '', 'key_pem')}
+                        disabled={!certPemData?.key_pem}
+                        className="inline-flex items-center gap-1 text-[11px] text-purple-600 dark:text-purple-400 hover:underline disabled:opacity-50"
+                      >
+                        {copiedField === 'key_pem' ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedField === 'key_pem' ? 'Copied' : 'Copy Key'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    readOnly
+                    rows={12}
+                    value={loadingPem ? 'Reading private key from disk...' : certPemData?.key_pem || 'Private key PEM unavailable.'}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-surface-700 bg-slate-50 dark:bg-[#121824] font-mono text-[11px] text-slate-900 dark:text-slate-100 leading-tight focus:outline-none"
+                  />
+                </div>
+              )}
 
               <div className="p-4 bg-slate-50 dark:bg-[#121824] border-t border-slate-200 dark:border-surface-800 flex justify-end">
                 <button

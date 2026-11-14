@@ -409,6 +409,7 @@ server {
   const [customKey, setCustomKey] = useState('');
   const [isIssuingSsl, setIsIssuingSsl] = useState(false);
   const [isDeployingCustomCert, setIsDeployingCustomCert] = useState(false);
+  const [isDisablingSsl, setIsDisablingSsl] = useState(false);
   const [sslDetails, setSslDetails] = useState<{
     installed: boolean;
     ssl_enabled: boolean;
@@ -513,6 +514,30 @@ server {
       showToast(err.message || 'Failed to deploy custom certificate', true);
     } finally {
       setIsDeployingCustomCert(false);
+    }
+  };
+
+  const handleDisableSsl = async () => {
+    if (!website) return;
+    if (!confirm(`Are you sure you want to disable SSL for ${website.primary_domain}? HTTP traffic will no longer redirect to HTTPS.`)) return;
+    setIsDisablingSsl(true);
+    try {
+      const res = await apiFetch<any>(`/api/v1/websites/${website.id}/ssl/disable`, {
+        method: 'POST',
+      });
+      if (res.success) {
+        if (onUpdateWebsite) {
+          onUpdateWebsite({ ssl_enabled: false });
+        }
+        showToast(`SSL disabled successfully for '${website.primary_domain}'.`);
+        await fetchSslDetails();
+      } else {
+        showToast(res.error?.message || 'Failed to disable SSL', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to disable SSL', true);
+    } finally {
+      setIsDisablingSsl(false);
     }
   };
 
@@ -1551,6 +1576,16 @@ server {
                         >
                           <RefreshCw className={`w-3 h-3 ${loadingSslDetails ? 'animate-spin' : ''}`} />
                           <span>Refresh</span>
+                        </button>
+
+                        <button
+                          onClick={handleDisableSsl}
+                          disabled={isDisablingSsl}
+                          title="Disable SSL and revert to standard HTTP"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-400 transition cursor-pointer disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                          <span>{isDisablingSsl ? 'Disabling...' : 'Disable SSL'}</span>
                         </button>
                       </div>
                     </div>

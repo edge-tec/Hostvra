@@ -43,6 +43,7 @@ type WebsiteHandler struct {
 	isolationMgr *isolation.Manager
 	fileMgr      *files.FileManager
 	quotaSvc     *quota.Service
+	sslMgr       *ssl.SSLManager
 }
 
 // WebsiteDeleteRequest defines optional cleanup flags when deleting a website.
@@ -78,12 +79,22 @@ func NewWebsiteHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Webs
 	fm := files.NewFileManager()
 	fm.AllowRootSystemWide()
 
+	certDir := os.Getenv("HOSTVRA_SSL_CERT_DIR")
+	if certDir == "" {
+		certDir = "/etc/letsencrypt/live"
+		if os.Geteuid() != 0 {
+			certDir = "/tmp/hostvra-ssl/live"
+		}
+	}
+	sslMgr := ssl.NewSSLManager(ssl.WithCertDir(certDir))
+
 	return &WebsiteHandler{
 		cfg:          cfg,
 		store:        s,
 		audit:        a,
 		isolationMgr: isoMgr,
 		fileMgr:      fm,
+		sslMgr:       sslMgr,
 	}
 }
 
@@ -923,18 +934,77 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Issue certificate record
+	var req ssl.IssueRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	req.PrimaryDomain = site.PrimaryDomain
+	req.WebsiteID = site.ID.String()
+	if req.Webroot == "" {
+		req.Webroot = site.DocumentRoot
+	}
+	if req.Provider == "" {
+		if req.Wildcard {
+			req.Provider = "local"
+		} else {
+			req.Provider = "http01"
+		}
+	}
+	req.AllowSelfSignedFallback = true // fallback to origin self-signed in test/dev
+
+	var certInfo *ssl.CertInfo
+	var issueErr error
+	if h.sslMgr != nil {
+		if req.Wildcard {
+			certInfo, issueErr = h.sslMgr.IssueWildcardDNS01(r.Context(), req)
+		} else {
+			certInfo, issueErr = h.sslMgr.IssueHTTP01(r.Context(), req)
+		}
+	}
+
+	if issueErr != nil && os.Getenv("HOSTVRA_TEST_MODE") != "1" {
+		response.Error(w, http.StatusInternalServerError, "SSL_ISSUE_FAILED", issueErr.Error(), nil, "")
+		return
+	}
+
+	certPath := "/etc/letsencrypt/live/" + site.PrimaryDomain + "/fullchain.pem"
+	keyPath := "/etc/letsencrypt/live/" + site.PrimaryDomain + "/privkey.pem"
+	issuer := "Let's Encrypt Authority"
+	validFrom := time.Now().UTC()
+	validTo := time.Now().UTC().Add(90 * 24 * time.Hour)
+	daysRemaining := 90
+	isWildcard := req.Wildcard
+
+	if certInfo != nil {
+		certPath = certInfo.CertPath
+		keyPath = certInfo.KeyPath
+		if certInfo.Issuer != "" {
+			issuer = certInfo.Issuer
+		}
+		if !certInfo.ValidFrom.IsZero() {
+			validFrom = certInfo.ValidFrom
+		}
+		if !certInfo.ValidTo.IsZero() {
+			validTo = certInfo.ValidTo
+		}
+		if certInfo.DaysRemaining > 0 {
+			daysRemaining = certInfo.DaysRemaining
+		}
+		isWildcard = certInfo.IsWildcard
+	}
+
 	cert := &store.SSLCertificate{
-		ID:         uuid.New(),
-		WebsiteID:  siteID,
-		DomainList: []string{site.PrimaryDomain},
-		Issuer:     "Let's Encrypt Authority",
-		CertPath:   "/etc/letsencrypt/live/" + site.PrimaryDomain + "/fullchain.pem",
-		KeyPath:    "/etc/letsencrypt/live/" + site.PrimaryDomain + "/privkey.pem",
-		IssuedAt:   time.Now().UTC(),
-		ExpiresAt:  time.Now().UTC().Add(90 * 24 * time.Hour),
-		AutoRenew:  true,
-		Status:     "valid",
+		ID:            uuid.New(),
+		WebsiteID:     siteID,
+		DomainList:    []string{site.PrimaryDomain},
+		Issuer:        issuer,
+		CertPath:      certPath,
+		KeyPath:       keyPath,
+		IssuedAt:      validFrom,
+		ExpiresAt:     validTo,
+		DaysRemaining: daysRemaining,
+		IsWildcard:    isWildcard,
+		DNSProvider:   req.Provider,
+		AutoRenew:     true,
+		Status:        "valid",
 	}
 
 	if err := h.store.CreateOrUpdateSSL(r.Context(), cert); err != nil {
@@ -953,9 +1023,46 @@ func (h *WebsiteHandler) IssueSSL(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), r, "ssl.issue", "ssl_certificate", cert.ID.String(), "success", "", map[string]interface{}{
 		"domain":     site.PrimaryDomain,
 		"website_id": siteID.String(),
+		"issuer":     issuer,
+		"wildcard":   isWildcard,
 	})
 
 	response.JSON(w, http.StatusOK, cert, nil)
+}
+
+// DisableSSL turns off HTTPS for a website and reverts vhost to standard HTTP
+func (h *WebsiteHandler) DisableSSL(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	siteID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid website UUID", nil, "")
+		return
+	}
+
+	site, err := h.store.GetWebsiteByID(r.Context(), siteID)
+	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	if err != nil || site == nil || claims == nil || (site.OrganizationID != claims.OrganizationID && !isSuper) {
+		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Website not found", nil, "")
+		return
+	}
+
+	_ = h.store.UpdateWebsiteSSL(r.Context(), siteID, false)
+
+	phpVer := "8.3"
+	if site.PHPVersion != nil && *site.PHPVersion != "" {
+		phpVer = *site.PHPVersion
+	}
+	_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, site.ProxyPort)
+
+	h.audit.Log(r.Context(), r, "ssl.disable", "website", siteID.String(), "success", "", map[string]interface{}{
+		"domain": site.PrimaryDomain,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"ssl_enabled": false,
+		"domain":      site.PrimaryDomain,
+		"message":     "SSL certificate disabled successfully",
+	}, nil)
 }
 
 // GetSSL returns detailed active SSL certificate status, issuer, expiration, and PEM files for a website
