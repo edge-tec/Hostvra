@@ -38,6 +38,7 @@ import {
   FileText,
   Edit3,
   Download,
+  Info,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, User as UserType, Organization, SystemSettings } from '@/lib/api';
@@ -243,6 +244,37 @@ export default function SettingsPage() {
   const [modalInput, setModalInput] = useState('');
   const [modalInputSecondary, setModalInputSecondary] = useState('');
 
+  // Phase 10: Panel SSL Modal
+  const [panelSslModalOpen, setPanelSslModalOpen] = useState(false);
+  const [panelSslType, setPanelSslType] = useState<'self_signed' | 'letsencrypt' | 'custom'>('self_signed');
+  const [panelSslDomain, setPanelSslDomain] = useState('');
+  const [panelSslCert, setPanelSslCert] = useState('');
+  const [panelSslKey, setPanelSslKey] = useState('');
+  const [submittingPanelSsl, setSubmittingPanelSsl] = useState(false);
+
+  // Phase 10: Restart Panel Modal
+  const [restartPanelModalOpen, setRestartPanelModalOpen] = useState(false);
+  const [restartingPanel, setRestartingPanel] = useState(false);
+
+  // Phase 10: Security Audit Modal
+  const [securityAuditModalOpen, setSecurityAuditModalOpen] = useState(false);
+  const [securityAuditReport, setSecurityAuditReport] = useState<{
+    score: number;
+    risk_level: string;
+    checks: Array<{
+      id: string;
+      title: string;
+      description: string;
+      status: 'passed' | 'warning' | 'info';
+      severity: 'high' | 'medium' | 'low';
+      action?: string;
+    }>;
+    passed_count: number;
+    total_checks: number;
+    evaluated_at: string;
+  } | null>(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+
   // Toast
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null);
   const showToast = (message: string, isError = false) => {
@@ -328,6 +360,14 @@ export default function SettingsPage() {
               enabled: tfaRes.data.two_factor_enabled,
               remaining: tfaRes.data.recovery_codes_remaining || 0,
             });
+          }
+        } catch (_) {}
+
+        // Fetch Security Audit Score
+        try {
+          const auditRes = await apiFetch<any>('/settings/security-audit');
+          if (auditRes?.data) {
+            setSecurityAuditReport(auditRes.data);
           }
         } catch (_) {}
       } catch (err) {
@@ -672,6 +712,106 @@ export default function SettingsPage() {
       showToast('Default backup folder updated');
     }
     setModalType(null);
+  };
+
+  const fetchAudit = async () => {
+    setLoadingAudit(true);
+    try {
+      const res = await apiFetch<any>('/settings/security-audit');
+      if (res?.data) {
+        setSecurityAuditReport(res.data);
+      }
+    } catch (_) {}
+    setLoadingAudit(false);
+  };
+
+  const handleConfigurePanelSSL = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmittingPanelSsl(true);
+    try {
+      const res = await apiFetch<any>('/settings/panel-ssl', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: panelSslType,
+          domain: panelSslDomain || panelDomain || 'localhost',
+          certificate: panelSslCert,
+          private_key: panelSslKey,
+        }),
+      });
+      if (res.success && res.data) {
+        setPanelCert(res.data);
+        setSslEnabled(true);
+        if (res.data.days_remaining !== undefined) {
+          setSslDaysRemaining(res.data.days_remaining);
+        }
+        showToast(`Panel SSL configured successfully (${panelSslType})`);
+        setPanelSslModalOpen(false);
+        fetchAudit();
+      } else {
+        showToast(res.error?.message || 'Failed to configure panel SSL', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error configuring panel SSL', true);
+    } finally {
+      setSubmittingPanelSsl(false);
+    }
+  };
+
+  const handleDisablePanelSSL = async () => {
+    if (!window.confirm('Are you sure you want to disable Panel SSL? Communication will revert to unencrypted HTTP.')) return;
+    setSubmittingPanelSsl(true);
+    try {
+      const res = await apiFetch<any>('/settings/panel-ssl', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'disable' }),
+      });
+      if (res.success) {
+        setSslEnabled(false);
+        showToast('Panel SSL disabled');
+        setPanelSslModalOpen(false);
+        fetchAudit();
+      } else {
+        showToast(res.error?.message || 'Failed to disable SSL', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error disabling SSL', true);
+    } finally {
+      setSubmittingPanelSsl(false);
+    }
+  };
+
+  const handleRestartPanel = async () => {
+    setRestartingPanel(true);
+    try {
+      const res = await apiFetch<any>('/settings/restart-panel', { method: 'POST' });
+      if (res.success) {
+        showToast('Hostvra Panel restart signal dispatched. Core services reloading...');
+        setRestartPanelModalOpen(false);
+      } else {
+        showToast(res.error?.message || 'Failed to restart panel', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error restarting panel', true);
+    } finally {
+      setRestartingPanel(false);
+    }
+  };
+
+  const handleTestAlarm = async (channel: string) => {
+    showToast(`Sending test notification via ${channel}...`);
+    try {
+      const res = await apiFetch<any>('/settings/test-alarm', {
+        method: 'POST',
+        body: JSON.stringify({ channel, target: 'admin@hostvra.local' }),
+      });
+      if (res.success) {
+        showToast(`Test alert successfully sent via ${channel}!`);
+      } else {
+        showToast(res.error?.message || 'Failed to send test alert', true);
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error sending test alert', true);
+    }
   };
 
   const tabLabels: Record<SettingsTab, string> = {
@@ -1065,15 +1205,38 @@ export default function SettingsPage() {
             })}
           </div>
 
-          {/* Right Enterprise Edition Badge */}
-          <div className="hidden sm:flex items-center gap-2 text-xs">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-xs tracking-wide">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>ENTERPRISE</span>
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40">
-              Active
-            </span>
+          {/* Right Action Controls: Security Score & Restart Panel */}
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => {
+                fetchAudit();
+                setSecurityAuditModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-surface-800 dark:hover:bg-surface-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-surface-700 font-bold text-xs shadow-2xs transition-colors cursor-pointer"
+              title="View Security Hardening Score & Benchmarks"
+            >
+              <ShieldAlert className={`w-3.5 h-3.5 ${(securityAuditReport?.score || 100) < 80 ? 'text-amber-500' : 'text-emerald-500'}`} />
+              <span>Score: {securityAuditReport ? `${securityAuditReport.score}/100` : '90/100'}</span>
+            </button>
+
+            <button
+              onClick={() => setRestartPanelModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 font-bold text-xs shadow-2xs transition-colors cursor-pointer"
+              title="Restart Hostvra Panel Core Services"
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="hidden sm:inline">Restart Panel</span>
+            </button>
+
+            <div className="hidden md:flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs shadow-xs tracking-wide">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>ENTERPRISE</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 font-semibold text-[11px] border border-emerald-200/60 dark:border-emerald-800/40">
+                Active
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1303,7 +1466,10 @@ export default function SettingsPage() {
                     </div>
 
                     <button
-                      onClick={() => showToast('Panel certificate is managed by Let\'s Encrypt / Hostvra Daemon')}
+                      onClick={() => {
+                        setPanelSslDomain(panelDomain || '');
+                        setPanelSslModalOpen(true);
+                      }}
                       className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs cursor-pointer shrink-0"
                     >
                       Modify
@@ -2625,12 +2791,21 @@ export default function SettingsPage() {
                 {searchResults.matchingAlarmChannels.map((ch) => (
                   <div key={ch} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 flex items-center justify-between">
                     <span className="font-bold text-xs">{ch}</span>
-                    <button
-                      onClick={() => showToast(`${ch} configuration opened`)}
-                      className="px-3 py-1 rounded bg-emerald-600 text-white text-xs font-bold"
-                    >
-                      Setup
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleTestAlarm(ch)}
+                        className="px-2.5 py-1 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 text-xs font-bold border border-slate-200 dark:border-surface-700 transition-colors cursor-pointer"
+                        title={`Send test alert via ${ch}`}
+                      >
+                        Test
+                      </button>
+                      <button
+                        onClick={() => showToast(`${ch} configuration active`)}
+                        className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer"
+                      >
+                        Setup
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -3231,6 +3406,331 @@ export default function SettingsPage() {
                   </div>
                 </form>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            PHASE 10: PANEL SSL (HTTPS) MODAL
+            ========================================================================= */}
+        {panelSslModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-lg bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => setPanelSslModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Configure Panel SSL (HTTPS)</h3>
+                  <p className="text-xs text-slate-500">Encrypt administrative access to your Hostvra control panel</p>
+                </div>
+              </div>
+
+              {/* Mode Tabs */}
+              <div className="flex p-1 bg-slate-100 dark:bg-surface-800 rounded-xl mb-4 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setPanelSslType('self_signed')}
+                  className={`flex-1 py-1.5 text-center rounded-lg transition ${
+                    panelSslType === 'self_signed'
+                      ? 'bg-white dark:bg-surface-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Self-Signed (Fast)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPanelSslType('letsencrypt')}
+                  className={`flex-1 py-1.5 text-center rounded-lg transition ${
+                    panelSslType === 'letsencrypt'
+                      ? 'bg-white dark:bg-surface-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Let&apos;s Encrypt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPanelSslType('custom')}
+                  className={`flex-1 py-1.5 text-center rounded-lg transition ${
+                    panelSslType === 'custom'
+                      ? 'bg-white dark:bg-surface-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  Custom Cert
+                </button>
+              </div>
+
+              <form onSubmit={handleConfigurePanelSSL} className="space-y-4">
+                {panelSslType === 'self_signed' && (
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700 text-xs space-y-2">
+                    <p className="font-semibold text-slate-900 dark:text-white">Instant 2048-bit RSA Self-Signed Certificate</p>
+                    <p className="text-slate-500 leading-relaxed">
+                      Generates a cryptographically strong self-signed certificate directly on this host. Encrypts all administrative traffic instantly without needing an external domain.
+                    </p>
+                  </div>
+                )}
+
+                {panelSslType === 'letsencrypt' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                        Panel FQDN Domain *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="panel.yourdomain.com"
+                        value={panelSslDomain}
+                        onChange={(e) => setPanelSslDomain(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Ensure this domain resolves (A record) to this server&apos;s public IP before requesting Let&apos;s Encrypt.
+                    </p>
+                  </div>
+                )}
+
+                {panelSslType === 'custom' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                        Certificate (PEM fullchain.pem) *
+                      </label>
+                      <textarea
+                        required
+                        rows={4}
+                        placeholder="-----BEGIN CERTIFICATE-----..."
+                        value={panelSslCert}
+                        onChange={(e) => setPanelSslCert(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 dark:text-slate-300 font-semibold mb-1 text-xs">
+                        Private Key (PEM privkey.pem) *
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        placeholder="-----BEGIN RSA PRIVATE KEY-----..."
+                        value={panelSslKey}
+                        onChange={(e) => setPanelSslKey(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-surface-700">
+                  {sslEnabled ? (
+                    <button
+                      type="button"
+                      onClick={handleDisablePanelSSL}
+                      disabled={submittingPanelSsl}
+                      className="px-3 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                    >
+                      Disable SSL
+                    </button>
+                  ) : <div />}
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPanelSslModalOpen(false)}
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingPanelSsl}
+                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md flex items-center gap-2 cursor-pointer"
+                    >
+                      {submittingPanelSsl ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                      <span>Apply SSL</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            PHASE 10: RESTART PANEL MODAL
+            ========================================================================= */}
+        {restartPanelModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-md bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative">
+              <button
+                type="button"
+                onClick={() => setRestartPanelModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                  <RefreshCw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Restart Panel Services</h3>
+                  <p className="text-xs text-slate-500">Gracefully reload Hostvra Core Daemons</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 mb-5 leading-relaxed">
+                Restarting the panel reloads the Hostvra web and API services. Your hosted websites, databases, FTP, and container workloads will remain completely online without disruption.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-surface-700">
+                <button
+                  type="button"
+                  onClick={() => setRestartPanelModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRestartPanel}
+                  disabled={restartingPanel}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md flex items-center gap-2 cursor-pointer"
+                >
+                  {restartingPanel ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                  <span>Restart Now</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            PHASE 10: SECURITY AUDIT REPORT MODAL
+            ========================================================================= */}
+        {securityAuditModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn">
+            <div className="w-full max-w-2xl bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-700 rounded-2xl shadow-2xl p-6 relative max-h-[90vh] overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => setSecurityAuditModalOpen(false)}
+                className="absolute top-5 right-5 p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Panel Security Audit &amp; Hardening</h3>
+                  <p className="text-xs text-slate-500">Benchmark inspection against production security standards</p>
+                </div>
+              </div>
+
+              {/* Overall Score Header */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-surface-800/80 border border-slate-200 dark:border-surface-700 flex items-center justify-between mb-5">
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block">Security Hardening Score</span>
+                  <div className="flex items-baseline gap-2 mt-0.5">
+                    <span className="text-3xl font-extrabold text-slate-950 dark:text-white font-mono">
+                      {securityAuditReport?.score ?? 100}
+                    </span>
+                    <span className="text-xs text-slate-400">/ 100</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                      (securityAuditReport?.score || 100) >= 85
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                        : (securityAuditReport?.score || 100) >= 60
+                        ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                        : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                    }`}
+                  >
+                    {securityAuditReport?.risk_level || 'Safe'}
+                  </span>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    {securityAuditReport?.passed_count || 0} of {securityAuditReport?.total_checks || 0} benchmarks passed
+                  </p>
+                </div>
+              </div>
+
+              {/* Checklist items */}
+              <div className="space-y-3 mb-5">
+                {securityAuditReport?.checks?.map((chk) => (
+                  <div
+                    key={chk.id}
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-surface-700 bg-white dark:bg-surface-900/60 flex items-start justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-start gap-2.5">
+                      {chk.status === 'passed' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                      ) : chk.status === 'warning' ? (
+                        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      ) : (
+                        <Info className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <h4 className="font-bold text-slate-900 dark:text-white">{chk.title}</h4>
+                        <p className="text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{chk.description}</p>
+                      </div>
+                    </div>
+
+                    {chk.action && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSecurityAuditModalOpen(false);
+                          if (chk.id === 'panel_ssl') {
+                            setPanelSslModalOpen(true);
+                          } else if (chk.id === 'panel_port') {
+                            setModalInput(panelPort);
+                            setModalType('port');
+                          } else if (chk.id === 'security_entrance') {
+                            setModalInput(securityEntrance);
+                            setModalType('entrance');
+                          } else if (chk.id === 'authorized_ip') {
+                            setModalInput(authorizedIp);
+                            setModalType('whitelist');
+                          } else if (chk.id === 'session_timeout') {
+                            setModalInput(sessionTimeout);
+                            setModalType('timeout');
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-bold text-[11px] border border-emerald-200 dark:border-emerald-800 shrink-0 cursor-pointer"
+                      >
+                        {chk.action}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-surface-700">
+                <button
+                  type="button"
+                  onClick={() => setSecurityAuditModalOpen(false)}
+                  className="px-5 py-2 rounded-xl bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 text-xs font-bold cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}

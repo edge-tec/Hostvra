@@ -1504,7 +1504,11 @@ func main() {
 			r.Route("/settings", func(r chi.Router) {
 				r.Get("/", settingsHandler.Get)
 				r.Get("/panel-cert", settingsHandler.GetPanelCert)
+				r.Get("/security-audit", settingsHandler.GetSecurityAudit)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Put("/", settingsHandler.Update)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/panel-ssl", settingsHandler.ConfigurePanelSSL)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/restart-panel", settingsHandler.RestartPanel)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/test-alarm", settingsHandler.TestAlarmNotification)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/sync-time", settingsHandler.SyncTime)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/detect-ip", settingsHandler.DetectPublicIP)
 			})

@@ -100,4 +100,92 @@ func TestSettingsHandler(t *testing.T) {
 			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 		}
 	})
+
+	t.Run("Configure Panel SSL - Self Signed", func(t *testing.T) {
+		reqBody, _ := json.Marshal(PanelSSLRequest{
+			Type:   "self_signed",
+			Domain: "panel.test.local",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/panel-ssl", bytes.NewReader(reqBody))
+		rec := httptest.NewRecorder()
+
+		h.ConfigurePanelSSL(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
+		}
+
+		var resp struct {
+			Success bool          `json:"success"`
+			Data    PanelCertInfo `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if !resp.Data.HasSSL {
+			t.Errorf("expected HasSSL true after self-signed generation")
+		}
+	})
+
+	t.Run("Configure Panel SSL - Disable", func(t *testing.T) {
+		reqBody, _ := json.Marshal(PanelSSLRequest{
+			Type: "disable",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/panel-ssl", bytes.NewReader(reqBody))
+		rec := httptest.NewRecorder()
+
+		h.ConfigurePanelSSL(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("Restart Panel", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/restart-panel", nil)
+		rec := httptest.NewRecorder()
+
+		h.RestartPanel(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("Test Alarm Notification", func(t *testing.T) {
+		reqBody, _ := json.Marshal(TestAlarmRequest{
+			Channel: "email",
+			Target:  "alerts@test.com",
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/test-alarm", bytes.NewReader(reqBody))
+		rec := httptest.NewRecorder()
+
+		h.TestAlarmNotification(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+	})
+
+	t.Run("Security Audit", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/security-audit", nil)
+		rec := httptest.NewRecorder()
+
+		h.GetSecurityAudit(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+		}
+
+		var resp struct {
+			Success bool                `json:"success"`
+			Data    SecurityAuditReport `json:"data"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if resp.Data.Score <= 0 || resp.Data.TotalChecks == 0 {
+			t.Errorf("expected valid audit score and checks, got score=%d, total=%d", resp.Data.Score, resp.Data.TotalChecks)
+		}
+	})
 }

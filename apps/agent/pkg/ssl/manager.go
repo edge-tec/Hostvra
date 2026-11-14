@@ -587,6 +587,11 @@ func (m *SSLManager) RevokeOrDeleteCertificate(ctx context.Context, domain strin
 	return nil
 }
 
+// GenerateSelfSignedCert creates an X.509 self-signed certificate and RSA key
+func GenerateSelfSignedCert(primaryDomain string, sans []string, certPath, keyPath string) error {
+	return generateSelfSignedCert(primaryDomain, sans, certPath, keyPath)
+}
+
 // Helper: generateSelfSignedCert generates valid X.509 cert and key
 func generateSelfSignedCert(primaryDomain string, sans []string, certPath, keyPath string) error {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
