@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Globe,
   Plus,
@@ -114,6 +114,7 @@ export default function WebsitesPage() {
   const [repairingRouting, setRepairingRouting] = useState(false);
   const [nginxServiceLoading, setNginxServiceLoading] = useState<string | null>(null);
   const [nginxServiceOutput, setNginxServiceOutput] = useState<string | null>(null);
+  const hasAutoSyncedRef = useRef(false);
 
   // Realtime Stateful Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -231,6 +232,25 @@ export default function WebsitesPage() {
 
       if (sitesRes.success && sitesRes.data) {
         setWebsites(sitesRes.data);
+        if (
+          sitesRes.data.length === 0 &&
+          availRes.success &&
+          availRes.data &&
+          availRes.data.some((d) => !d.has_website) &&
+          !hasAutoSyncedRef.current
+        ) {
+          hasAutoSyncedRef.current = true;
+          apiFetch<{ synced_count: number; sites: Website[] }>('/api/v1/websites/sync-domains', {
+            method: 'POST',
+          })
+            .then((syncRes) => {
+              if (syncRes.success && syncRes.data?.sites && syncRes.data.sites.length > 0) {
+                setWebsites(syncRes.data.sites);
+                showToast(`Automatically imported ${syncRes.data.synced_count} domain(s) from your hosting account!`);
+              }
+            })
+            .catch(() => {});
+        }
       }
       if (serversRes.success && serversRes.data) {
         setServers(serversRes.data);
@@ -1640,8 +1660,18 @@ export default function WebsitesPage() {
                           No websites found matching your search filter.
                         </p>
                         <p className="text-xs text-slate-500">
-                          You can click &apos;Add site&apos; to create a new virtual host, or click &apos;Sync Domains&apos; to import domains already added to Hostvra.
+                          You can click &apos;Add site&apos; to create a new virtual host, or click &apos;Sync Configured Domains&apos; to import domains already added to Hostvra.
                         </p>
+                        {availableDomains.filter((d) => !d.has_website).length > 0 && (
+                          <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg p-3 text-left">
+                            <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                              Discovered {availableDomains.filter((d) => !d.has_website).length} domain(s) configured in your hosting:
+                            </p>
+                            <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1 font-mono break-all">
+                              {availableDomains.filter((d) => !d.has_website).map((d) => d.domain).join(', ')}
+                            </p>
+                          </div>
+                        )}
                         <div className="flex items-center justify-center gap-2 pt-1">
                           <button
                             onClick={() => setAddSiteOpen(true)}
@@ -1652,9 +1682,10 @@ export default function WebsitesPage() {
                           <button
                             onClick={handleSyncDomains}
                             disabled={syncingDomains}
-                            className="px-3.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-xs transition"
+                            className="px-3.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 font-semibold text-xs transition flex items-center gap-1.5"
                           >
-                            {syncingDomains ? 'Syncing...' : 'Sync Configured Domains'}
+                            {syncingDomains && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                            {syncingDomains ? 'Syncing...' : availableDomains.filter((d) => !d.has_website).length > 0 ? `Sync Configured Domains (${availableDomains.filter((d) => !d.has_website).length})` : 'Sync Configured Domains'}
                           </button>
                         </div>
                       </div>

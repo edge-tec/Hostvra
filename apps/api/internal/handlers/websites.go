@@ -249,6 +249,7 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 	accByUsername := make(map[string]*store.HostingAccount)
 	accByDomain := make(map[string]*store.HostingAccount)
 	var userAccounts []string
+	var userDomains []string
 
 	for _, acc := range accounts {
 		if acc == nil {
@@ -260,8 +261,97 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 		if acc.Domain != "" {
 			accByDomain[strings.ToLower(acc.Domain)] = acc
 		}
-		if claims != nil && acc.UserID == claims.UserID {
-			userAccounts = append(userAccounts, strings.ToLower(acc.Username))
+		if claims != nil && (acc.UserID == claims.UserID || (claims.OrganizationID != uuid.Nil && acc.OrganizationID == claims.OrganizationID)) {
+			if acc.UserID == claims.UserID {
+				if acc.Username != "" {
+					userAccounts = append(userAccounts, strings.ToLower(acc.Username))
+				}
+				if acc.Domain != "" {
+					userDomains = append(userDomains, strings.ToLower(acc.Domain))
+				}
+			}
+		}
+	}
+
+	existingSiteDomains := make(map[string]*store.Website)
+	for _, s := range sites {
+		if s != nil && s.DeletedAt == nil {
+			existingSiteDomains[strings.ToLower(strings.TrimSpace(s.PrimaryDomain))] = s
+		}
+	}
+
+	// Auto-reconcile user's HostingAccount domains into Websites table if websites list is empty
+	if len(sites) == 0 {
+		for _, acc := range accounts {
+			if acc == nil || acc.Domain == "" {
+				continue
+			}
+			// In customer view, only reconcile accounts belonging to the current user or organization
+			if !isSuper && claims != nil {
+				if acc.OrganizationID != claims.OrganizationID && acc.UserID != claims.UserID {
+					continue
+				}
+			}
+			cleanDomain := strings.ToLower(strings.TrimSpace(acc.Domain))
+			if _, exists := existingSiteDomains[cleanDomain]; !exists {
+				validOrgID := acc.OrganizationID
+				if validOrgID == uuid.Nil && claims != nil {
+					validOrgID = claims.OrganizationID
+				}
+				validOrgID = h.resolveOrgID(r.Context(), validOrgID)
+				serverID := h.resolveServerID(r.Context(), "", validOrgID)
+				if acc.ServerID != nil && *acc.ServerID != uuid.Nil {
+					serverID = *acc.ServerID
+				}
+
+				docRoot := acc.DocumentRoot
+				if docRoot == "" {
+					if _, sErr := os.Stat("/www/wwwroot/" + cleanDomain); sErr == nil {
+						docRoot = "/www/wwwroot/" + cleanDomain
+					} else {
+						docRoot = "/var/www/" + cleanDomain + "/public_html"
+					}
+				}
+
+				sysUser := acc.Username
+				if sysUser == "" {
+					sysUser = isolation.DeriveUsername(cleanDomain)
+				}
+
+				var phpVerPtr *string
+				if acc.PHPVersion != "" {
+					pVer := acc.PHPVersion
+					phpVerPtr = &pVer
+				} else {
+					defaultPHP := "8.3"
+					phpVerPtr = &defaultPHP
+				}
+
+				statusStr := string(acc.Status)
+				if statusStr == "" {
+					statusStr = "active"
+				}
+
+				newSite := &store.Website{
+					ID:             uuid.New(),
+					ServerID:       serverID,
+					OrganizationID: validOrgID,
+					PrimaryDomain:  cleanDomain,
+					DocumentRoot:   docRoot,
+					SystemUser:     sysUser,
+					PHPVersion:     phpVerPtr,
+					AppType:        "php",
+					Status:         statusStr,
+					SSLEnabled:     acc.SSLActive,
+					CreatedAt:      time.Now().UTC(),
+					UpdatedAt:      time.Now().UTC(),
+				}
+				if err := h.store.CreateWebsite(r.Context(), newSite); err == nil {
+					sites = append(sites, newSite)
+					existingSiteDomains[cleanDomain] = newSite
+					_ = deployNginxVHost(newSite.PrimaryDomain, newSite.DocumentRoot, *phpVerPtr, newSite.AppType, nil)
+				}
+			}
 		}
 	}
 
@@ -305,11 +395,49 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 			if s == nil {
 				continue
 			}
+			// 1. Direct Organization match (Standard multi-tenancy)
+			if s.OrganizationID != uuid.Nil && s.OrganizationID == claims.OrganizationID {
+				// If customer has specific UserID-scoped hosting accounts, scope down to their assigned accounts
+				if len(userAccounts) > 0 || len(userDomains) > 0 {
+					matched := false
+					for _, uName := range userAccounts {
+						if strings.EqualFold(s.AccountUsername, uName) || strings.EqualFold(s.SystemUser, uName) {
+							matched = true
+							break
+						}
+					}
+					if !matched {
+						for _, dName := range userDomains {
+							if strings.EqualFold(s.PrimaryDomain, dName) || strings.EqualFold(s.AccountDomain, dName) {
+								matched = true
+								break
+							}
+						}
+					}
+					if matched {
+						customerSites = append(customerSites, s)
+					}
+					continue
+				}
+				// If no sub-account isolation is defined, user sees all websites in their organization
+				customerSites = append(customerSites, s)
+				continue
+			}
+
+			// 2. Hosting account or domain match across user accounts
 			matched := false
 			for _, uName := range userAccounts {
 				if strings.EqualFold(s.AccountUsername, uName) || strings.EqualFold(s.SystemUser, uName) {
 					matched = true
 					break
+				}
+			}
+			if !matched {
+				for _, dName := range userDomains {
+					if strings.EqualFold(s.PrimaryDomain, dName) || strings.EqualFold(s.AccountDomain, dName) {
+						matched = true
+						break
+					}
 				}
 			}
 			if matched || (claims.Email != "" && strings.Contains(strings.ToLower(s.PrimaryDomain), strings.ToLower(claims.Email))) {
@@ -339,7 +467,7 @@ func (h *WebsiteHandler) List(w http.ResponseWriter, r *http.Request) {
 
 type AvailableDomainItem struct {
 	Domain     string `json:"domain"`
-	Source     string `json:"source"` // "email" | "registrar"
+	Source     string `json:"source"` // "email" | "registrar" | "hosting" | "filesystem"
 	HasWebsite bool   `json:"has_website"`
 	WebsiteID  string `json:"website_id,omitempty"`
 }
@@ -362,25 +490,50 @@ func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request
 
 	domainMap := make(map[string]AvailableDomainItem)
 
-	// 2. Email domains
-	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
-		for _, ed := range emailDomains {
-			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
-				d := strings.ToLower(strings.TrimSpace(ed.Domain))
-				item := AvailableDomainItem{
-					Domain: d,
-					Source: "email",
+	// 2. Hosting account domains
+	if accounts, err := h.store.ListHostingAccounts(r.Context(), orgID, nil); err == nil {
+		for _, acc := range accounts {
+			if acc != nil && acc.Domain != "" {
+				if claims != nil && orgID != uuid.Nil && acc.OrganizationID != orgID && acc.UserID != claims.UserID {
+					continue
 				}
-				if site, ok := siteMap[d]; ok {
-					item.HasWebsite = true
-					item.WebsiteID = site.ID.String()
+				d := strings.ToLower(strings.TrimSpace(acc.Domain))
+				if _, exists := domainMap[d]; !exists {
+					item := AvailableDomainItem{
+						Domain: d,
+						Source: "hosting",
+					}
+					if site, ok := siteMap[d]; ok {
+						item.HasWebsite = true
+						item.WebsiteID = site.ID.String()
+					}
+					domainMap[d] = item
 				}
-				domainMap[d] = item
 			}
 		}
 	}
 
-	// 3. Registered domains
+	// 3. Email domains
+	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
+		for _, ed := range emailDomains {
+			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+				d := strings.ToLower(strings.TrimSpace(ed.Domain))
+				if _, exists := domainMap[d]; !exists {
+					item := AvailableDomainItem{
+						Domain: d,
+						Source: "email",
+					}
+					if site, ok := siteMap[d]; ok {
+						item.HasWebsite = true
+						item.WebsiteID = site.ID.String()
+					}
+					domainMap[d] = item
+				}
+			}
+		}
+	}
+
+	// 4. Registered domains
 	if claims != nil {
 		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
 			for _, rd := range regDomains {
@@ -390,6 +543,34 @@ func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request
 						item := AvailableDomainItem{
 							Domain: d,
 							Source: "registrar",
+						}
+						if site, ok := siteMap[d]; ok {
+							item.HasWebsite = true
+							item.WebsiteID = site.ID.String()
+						}
+						domainMap[d] = item
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Filesystem directories (/www/wwwroot and /var/www)
+	for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
+		if entries, rErr := os.ReadDir(rootDir); rErr == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				d := strings.ToLower(strings.TrimSpace(entry.Name()))
+				if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
+					continue
+				}
+				if strings.Contains(d, ".") {
+					if _, exists := domainMap[d]; !exists {
+						item := AvailableDomainItem{
+							Domain: d,
+							Source: "filesystem",
 						}
 						if site, ok := siteMap[d]; ok {
 							item.HasWebsite = true
@@ -429,25 +610,82 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var candidates []string
-	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
-		for _, ed := range emailDomains {
-			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
-				d := strings.ToLower(strings.TrimSpace(ed.Domain))
+	type CandidateMeta struct {
+		Domain     string
+		DocRoot    string
+		SystemUser string
+		PHPVersion string
+		SSLEnabled bool
+	}
+	candidates := make(map[string]CandidateMeta)
+
+	// 1. Hosting accounts
+	if accounts, err := h.store.ListHostingAccounts(r.Context(), orgID, nil); err == nil {
+		for _, acc := range accounts {
+			if acc != nil && acc.Domain != "" {
+				if claims != nil && orgID != uuid.Nil && acc.OrganizationID != orgID && acc.UserID != claims.UserID {
+					continue
+				}
+				d := strings.ToLower(strings.TrimSpace(acc.Domain))
 				if !siteMap[d] {
-					candidates = append(candidates, d)
+					docRoot := acc.DocumentRoot
+					if docRoot == "" {
+						if _, sErr := os.Stat("/www/wwwroot/" + d); sErr == nil {
+							docRoot = "/www/wwwroot/" + d
+						} else {
+							docRoot = "/var/www/" + d + "/public_html"
+						}
+					}
+					candidates[d] = CandidateMeta{
+						Domain:     d,
+						DocRoot:    docRoot,
+						SystemUser: acc.Username,
+						PHPVersion: acc.PHPVersion,
+						SSLEnabled: acc.SSLActive,
+					}
 					siteMap[d] = true
 				}
 			}
 		}
 	}
+
+	// 2. Email domains
+	if emailDomains, err := h.store.ListEmailDomainsByOrg(r.Context(), orgID); err == nil {
+		for _, ed := range emailDomains {
+			if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+				d := strings.ToLower(strings.TrimSpace(ed.Domain))
+				if !siteMap[d] {
+					docRoot := "/var/www/" + d + "/public_html"
+					if _, sErr := os.Stat("/www/wwwroot/" + d); sErr == nil {
+						docRoot = "/www/wwwroot/" + d
+					}
+					candidates[d] = CandidateMeta{
+						Domain:     d,
+						DocRoot:    docRoot,
+						PHPVersion: "8.3",
+					}
+					siteMap[d] = true
+				}
+			}
+		}
+	}
+
+	// 3. Registered domains
 	if claims != nil {
 		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
 			for _, rd := range regDomains {
 				if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
 					d := strings.ToLower(strings.TrimSpace(rd.DomainName))
 					if !siteMap[d] {
-						candidates = append(candidates, d)
+						docRoot := "/var/www/" + d + "/public_html"
+						if _, sErr := os.Stat("/www/wwwroot/" + d); sErr == nil {
+							docRoot = "/www/wwwroot/" + d
+						}
+						candidates[d] = CandidateMeta{
+							Domain:     d,
+							DocRoot:    docRoot,
+							PHPVersion: "8.3",
+						}
 						siteMap[d] = true
 					}
 				}
@@ -455,19 +693,31 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Also check /var/www for directories that don't have a website record yet
-	if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			d := strings.ToLower(strings.TrimSpace(entry.Name()))
-			if d == "html" || d == "default" || d == "hostvra-temp" || strings.HasPrefix(d, ".") {
-				continue
-			}
-			if strings.Contains(d, ".") && !siteMap[d] {
-				candidates = append(candidates, d)
-				siteMap[d] = true
+	// 4. Filesystem directories (/www/wwwroot and /var/www)
+	for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
+		if entries, rErr := os.ReadDir(rootDir); rErr == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				d := strings.ToLower(strings.TrimSpace(entry.Name()))
+				if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
+					continue
+				}
+				if strings.Contains(d, ".") && !siteMap[d] {
+					docPath := filepath.Join(rootDir, d)
+					if rootDir == "/var/www" {
+						if _, sErr := os.Stat(filepath.Join(docPath, "public_html")); sErr == nil {
+							docPath = filepath.Join(docPath, "public_html")
+						}
+					}
+					candidates[d] = CandidateMeta{
+						Domain:     d,
+						DocRoot:    docPath,
+						PHPVersion: "8.3",
+					}
+					siteMap[d] = true
+				}
 			}
 		}
 	}
@@ -475,14 +725,24 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 	validOrgID := h.resolveOrgID(r.Context(), orgID)
 	serverID := h.resolveServerID(r.Context(), "", validOrgID)
 	createdSites := make([]*store.Website, 0)
-	defaultPHP := "8.3"
 
-	for _, domain := range candidates {
-		docRoot := "/var/www/" + domain + "/public_html"
-		systemUser := isolation.DeriveUsername(domain)
-		limits := isolation.DefaultResourceLimits()
-		if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), domain, defaultPHP, &limits); err == nil && isoInfo != nil {
-			systemUser = isoInfo.Username
+	for domain, cm := range candidates {
+		docRoot := cm.DocRoot
+		if docRoot == "" {
+			docRoot = "/var/www/" + domain + "/public_html"
+		}
+		phpVer := cm.PHPVersion
+		if phpVer == "" {
+			phpVer = "8.3"
+		}
+
+		systemUser := cm.SystemUser
+		if systemUser == "" {
+			systemUser = isolation.DeriveUsername(domain)
+			limits := isolation.DefaultResourceLimits()
+			if isoInfo, err := h.isolationMgr.ProvisionWebsiteIsolation(r.Context(), domain, phpVer, &limits); err == nil && isoInfo != nil {
+				systemUser = isoInfo.Username
+			}
 		}
 
 		site := &store.Website{
@@ -492,14 +752,14 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 			PrimaryDomain:  domain,
 			DocumentRoot:   docRoot,
 			SystemUser:     systemUser,
-			PHPVersion:     &defaultPHP,
+			PHPVersion:     &phpVer,
 			AppType:        "php",
 			Status:         "active",
-			SSLEnabled:     false,
+			SSLEnabled:     cm.SSLEnabled,
 		}
 
 		if err := h.store.CreateWebsite(r.Context(), site); err == nil {
-			_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, defaultPHP, site.AppType, nil)
+			_ = deployNginxVHost(site.PrimaryDomain, site.DocumentRoot, phpVer, site.AppType, nil)
 			createdSites = append(createdSites, site)
 			h.audit.Log(r.Context(), r, "website.sync", "website", site.ID.String(), "success", fmt.Sprintf("Auto-synced website for domain %s", domain), nil)
 		} else {

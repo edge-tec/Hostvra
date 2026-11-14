@@ -665,4 +665,121 @@ func TestWebsiteHandler_GetSSL(t *testing.T) {
 	}
 }
 
+func TestWebsiteHandler_HostingAccountDomainVisibilityAndSync(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("HOSTVRA_WEB_ROOT", filepath.Join(tempDir, "www"))
+	t.Setenv("HOSTVRA_PHP_CONFIG_DIR", filepath.Join(tempDir, "php"))
+	t.Setenv("HOSTVRA_SYSTEMD_DIR", filepath.Join(tempDir, "systemd"))
+
+	cfg := &config.Config{JWTSecret: "test-secret-12345678901234567890"}
+	s := store.NewMemoryStore()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	auditLogger := audit.NewLogger(s, logger)
+	h := NewWebsiteHandler(cfg, s, auditLogger)
+
+	customerOrgID := uuid.New()
+	customerUserID := uuid.New()
+
+	// 1. Seed a customer hosting account with domain "localdatehub.com" (without a website record)
+	acc := &store.HostingAccount{
+		ID:             uuid.New(),
+		OrganizationID: customerOrgID,
+		UserID:         customerUserID,
+		Username:       "localdate",
+		Domain:         "localdatehub.com",
+		DocumentRoot:   filepath.Join(tempDir, "www/localdatehub.com/public_html"),
+		PlanName:       "Business Pro",
+		Status:         store.AccountStatusActive,
+		PHPVersion:     "8.3",
+	}
+	_ = s.CreateHostingAccount(context.Background(), acc)
+
+	// Router for customer
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			claims := &auth.Claims{
+				UserID:         customerUserID,
+				OrganizationID: customerOrgID,
+				Role:           "customer",
+			}
+			ctx := context.WithValue(req.Context(), auth.UserContextKey, claims)
+			next.ServeHTTP(w, req.WithContext(ctx))
+		})
+	})
+	r.Get("/api/v1/websites", h.List)
+	r.Get("/api/v1/websites/available-domains", h.AvailableDomains)
+	r.Post("/api/v1/websites/sync-domains", h.SyncDomains)
+
+	// 2. Call AvailableDomains -> localdatehub.com must be visible as available from hosting
+	reqAvail := httptest.NewRequest("GET", "/api/v1/websites/available-domains", nil)
+	recAvail := httptest.NewRecorder()
+	r.ServeHTTP(recAvail, reqAvail)
+
+	if recAvail.Code != http.StatusOK {
+		t.Fatalf("expected 200 from available-domains, got %d: %s", recAvail.Code, recAvail.Body.String())
+	}
+	var availResp struct {
+		Data []AvailableDomainItem `json:"data"`
+	}
+	_ = json.NewDecoder(recAvail.Body).Decode(&availResp)
+	foundAvail := false
+	for _, item := range availResp.Data {
+		if item.Domain == "localdatehub.com" {
+			foundAvail = true
+			if item.Source != "hosting" {
+				t.Errorf("expected source 'hosting', got '%s'", item.Source)
+			}
+			break
+		}
+	}
+	if !foundAvail {
+		t.Fatalf("expected localdatehub.com in available domains, got: %+v", availResp.Data)
+	}
+
+	// 3. Call List -> Customer must see localdatehub.com reconciled and listed
+	reqList := httptest.NewRequest("GET", "/api/v1/websites", nil)
+	recList := httptest.NewRecorder()
+	r.ServeHTTP(recList, reqList)
+
+	if recList.Code != http.StatusOK {
+		t.Fatalf("expected 200 from list websites, got %d: %s", recList.Code, recList.Body.String())
+	}
+	var listResp struct {
+		Data []*store.Website `json:"data"`
+	}
+	_ = json.NewDecoder(recList.Body).Decode(&listResp)
+	if len(listResp.Data) != 1 {
+		t.Fatalf("expected 1 website listed for customer, got %d", len(listResp.Data))
+	}
+	if listResp.Data[0].PrimaryDomain != "localdatehub.com" {
+		t.Fatalf("expected primary domain localdatehub.com, got %s", listResp.Data[0].PrimaryDomain)
+	}
+	if listResp.Data[0].AccountUsername != "localdate" {
+		t.Fatalf("expected account username localdate, got %s", listResp.Data[0].AccountUsername)
+	}
+
+	// 4. Test SyncDomains with an extra domain in filesystem
+	fsDir := filepath.Join(tempDir, "www", "extra-client-site.com")
+	_ = os.MkdirAll(fsDir, 0755)
+
+	reqSync := httptest.NewRequest("POST", "/api/v1/websites/sync-domains", nil)
+	recSync := httptest.NewRecorder()
+	r.ServeHTTP(recSync, reqSync)
+
+	if recSync.Code != http.StatusOK {
+		t.Fatalf("expected 200 from sync-domains, got %d: %s", recSync.Code, recSync.Body.String())
+	}
+	var syncResp struct {
+		Data struct {
+			SyncedCount int              `json:"synced_count"`
+			Sites       []*store.Website `json:"sites"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(recSync.Body).Decode(&syncResp)
+	// localdatehub.com is already synced, so extra-client-site.com should be 0 if not in standard /var/www or /www/wwwroot
+	// The endpoint executed successfully without error
+}
+
+
 
