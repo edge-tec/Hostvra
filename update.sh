@@ -210,7 +210,49 @@ fi
 
 echo "=== [4/6] Building Next.js Web UI Production Bundle ==="
 rm -rf apps/web/.next .next
-(cd apps/web && npm install --no-audit && npm run build)
+
+# Ensure execute permissions on all npm binaries before building
+chmod -R +x node_modules/.bin apps/web/node_modules/.bin 2>/dev/null || true
+find node_modules apps/web/node_modules -type f -name "next" -exec chmod +x {} + 2>/dev/null || true
+
+# Install dependencies cleanly supporting workspaces
+if [[ -f package.json ]]; then
+    npm install --no-audit 2>/dev/null || true
+fi
+(cd apps/web && npm install --no-audit 2>/dev/null || true)
+
+# Re-grant execute permissions after install
+chmod -R +x node_modules/.bin apps/web/node_modules/.bin 2>/dev/null || true
+find node_modules apps/web/node_modules -type f -name "next" -exec chmod +x {} + 2>/dev/null || true
+
+# Determine Next.js binary location for direct Node runner fallback
+NEXT_DIST_BIN=""
+if [[ -f "node_modules/next/dist/bin/next" ]]; then
+    NEXT_DIST_BIN="$(pwd)/node_modules/next/dist/bin/next"
+elif [[ -f "apps/web/node_modules/next/dist/bin/next" ]]; then
+    NEXT_DIST_BIN="$(pwd)/apps/web/node_modules/next/dist/bin/next"
+fi
+
+BUILD_SUCCESS=0
+if (cd apps/web && npm run build); then
+    BUILD_SUCCESS=1
+elif [[ -n "$NEXT_DIST_BIN" ]]; then
+    echo "[INFO] Standard 'npm run build' failed; retrying with direct Node runner ($NEXT_DIST_BIN)..."
+    if (cd apps/web && node "$NEXT_DIST_BIN" build); then
+        BUILD_SUCCESS=1
+    fi
+elif command -v npx &>/dev/null; then
+    echo "[INFO] Retrying Next.js build using npx..."
+    if (cd apps/web && npx next build); then
+        BUILD_SUCCESS=1
+    fi
+fi
+
+if [[ "$BUILD_SUCCESS" -ne 1 ]]; then
+    echo "[ERROR] Failed to compile Next.js production bundle." >&2
+    rollback
+fi
+
 # Ensure root .next symlink exists for universal CWD static asset resolution
 ln -sfn apps/web/.next .next 2>/dev/null || true
 

@@ -72,7 +72,8 @@ fi
 # ─── Step 5: Rebuild Next.js Web UI ─────────────────────────────────────────
 if command -v npm &>/dev/null && [[ -f "${REPO_ROOT}/apps/web/package.json" ]]; then
     echo "[INFO] Rebuilding Next.js Web UI..."
-    (cd "${REPO_ROOT}/apps/web" && npm install --no-audit && npm run build) || echo "[WARN] Web build had non-fatal warnings."
+    chmod -R +x "${REPO_ROOT}/node_modules/.bin" "${REPO_ROOT}/apps/web/node_modules/.bin" 2>/dev/null || true
+    (cd "${REPO_ROOT}/apps/web" && npm install --no-audit && chmod -R +x "${REPO_ROOT}/node_modules/.bin" "${REPO_ROOT}/apps/web/node_modules/.bin" 2>/dev/null || true && npm run build) || echo "[WARN] Web build had non-fatal warnings."
 fi
 
 # ─── Step 6: Restart services ───────────────────────────────────────────────

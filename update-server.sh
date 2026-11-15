@@ -133,9 +133,11 @@ fi
 
 # 5. Build Next.js Web UI
 echo -e "${BLUE}[INFO]${NC} Building Next.js Web UI (CSS, assets, and routes)..."
+chmod -R +x "${REPO_DIR}/node_modules/.bin" "${REPO_DIR}/apps/web/node_modules/.bin" 2>/dev/null || true
 cd "${REPO_DIR}/apps/web"
 if command -v npm &>/dev/null; then
-    npm install --silent
+    npm install --silent || true
+    chmod -R +x "${REPO_DIR}/node_modules/.bin" "${REPO_DIR}/apps/web/node_modules/.bin" 2>/dev/null || true
     npm run build
     echo -e "${GREEN}[SUCCESS]${NC} Web UI production build completed."
 else
