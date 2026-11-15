@@ -1988,6 +1988,13 @@ export interface SystemSettings {
   authorized_ip: string;
   not_logged_in_response: string;
   password_expire: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  smtp_user?: string;
+  smtp_password?: string;
+  smtp_from?: string;
+  smtp_from_name?: string;
+  smtp_encryption?: string;
   updated_at?: string;
 }
 

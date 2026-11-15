@@ -106,6 +106,36 @@ func (h *BillingHandler) notifyInvoicePaid(ctx context.Context, inv *store.Invoi
 	}()
 }
 
+func (h *BillingHandler) notifyPaymentFailed(ctx context.Context, inv *store.Invoice, reason string) {
+	if h.emailSvc == nil || inv == nil {
+		return
+	}
+	go func() {
+		bgCtx := context.Background()
+		user, err := h.store.GetUserByID(bgCtx, inv.UserID)
+		if err != nil || user == nil {
+			return
+		}
+		retryURL := h.cfg.AppURL + "/billing"
+		if inv.ID != uuid.Nil {
+			retryURL = fmt.Sprintf("%s/billing?invoice=%s", h.cfg.AppURL, inv.ID.String())
+		}
+		if reason == "" {
+			reason = "Transaction declined by payment network"
+		}
+		_ = h.emailSvc.SendPaymentFailed(
+			bgCtx,
+			user.Email,
+			user.FullName,
+			inv.InvoiceNumber,
+			fmt.Sprintf("%.2f", inv.Total),
+			inv.Currency,
+			reason,
+			retryURL,
+		)
+	}()
+}
+
 // SettleCryptoPayment handles atomic billing invoice & order settlement when a crypto invoice is paid on-chain.
 func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *store.CryptoPaymentInvoice) error {
 	if cryptoInv == nil || cryptoInv.Status != "paid" {
@@ -1539,6 +1569,8 @@ func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Req
 			"payment_ref": paymentRef,
 		})
 
+		h.notifyPaymentFailed(r.Context(), inv, err.Error())
+
 		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
 			ID:               uuid.New(),
 			UserID:           inv.UserID,
@@ -2579,12 +2611,13 @@ func (h *BillingHandler) ListTransactions(w http.ResponseWriter, r *http.Request
 // Automated Billing Lifecycle Engine (Auto-Suspension & Overdue Tracking)
 // ----------------------------------------------------------------------------
 
-// ProcessBillingLifecycle evaluates all unpaid invoices, overdue grace periods, and expired free trials
+// ProcessBillingLifecycle evaluates all unpaid invoices, overdue grace periods, expiring subscriptions, and expired free trials
 func (h *BillingHandler) ProcessBillingLifecycle(ctx context.Context) (map[string]int, error) {
 	stats := map[string]int{
-		"overdue_invoices":   0,
-		"suspended_accounts": 0,
-		"expired_trials":     0,
+		"overdue_invoices":    0,
+		"suspended_accounts":  0,
+		"expired_trials":      0,
+		"expiring_7d_notices": 0,
 	}
 
 	now := time.Now().UTC()
@@ -2630,7 +2663,8 @@ func (h *BillingHandler) ProcessBillingLifecycle(ctx context.Context) (map[strin
 								// Send email notice
 								if h.emailSvc != nil {
 									if u, uErr := h.store.GetUserByID(ctx, inv.UserID); uErr == nil && u != nil {
-										_ = h.emailSvc.SendAccountSuspended(ctx, u.Email, u.FullName, acc.Domain, "Overdue unpaid invoice past grace period", &inv.ID)
+										reactivateURL := fmt.Sprintf("%s/billing?invoice=%s", h.cfg.AppURL, inv.ID.String())
+										_ = h.emailSvc.SendAccountExpired(ctx, u.Email, u.FullName, "Hosting Service", acc.Domain, "Overdue unpaid invoice past grace period", reactivateURL)
 									}
 								}
 							}
@@ -2645,6 +2679,7 @@ func (h *BillingHandler) ProcessBillingLifecycle(ctx context.Context) (map[strin
 	subs, sErr := h.store.ListSubscriptions(ctx, uuid.Nil)
 	if sErr == nil {
 		for _, sub := range subs {
+			// Free trial expiration check
 			if sub.Status == store.SubStatusTrial && sub.TrialEndsAt != nil && sub.TrialEndsAt.Before(now) {
 				sub.Status = store.SubStatusExpired
 				_ = h.store.UpdateSubscription(ctx, sub)
@@ -2670,11 +2705,60 @@ func (h *BillingHandler) ProcessBillingLifecycle(ctx context.Context) (map[strin
 								}
 							}
 
-							// Send suspension notification
+							// Send expiration notification
 							if h.emailSvc != nil {
 								if u, uErr := h.store.GetUserByID(ctx, sub.UserID); uErr == nil && u != nil {
-									_ = h.emailSvc.SendAccountSuspended(ctx, u.Email, u.FullName, acc.Domain, "Free trial period expired", nil)
+									reactivateURL := fmt.Sprintf("%s/billing", h.cfg.AppURL)
+									_ = h.emailSvc.SendAccountExpired(ctx, u.Email, u.FullName, "Trial Account", acc.Domain, "Free trial period expired", reactivateURL)
 								}
+							}
+						}
+					}
+				}
+			}
+
+			// 3. Proactive 7-Day Expiration Warning
+			if sub.Status == store.SubStatusActive || sub.Status == store.SubStatusTrial {
+				expiryDate := sub.NextBillingDate
+				if sub.Status == store.SubStatusTrial && sub.TrialEndsAt != nil {
+					expiryDate = *sub.TrialEndsAt
+				}
+
+				if !expiryDate.IsZero() {
+					diff := expiryDate.Sub(now)
+					if diff > 0 && diff <= 7*24*time.Hour {
+						daysRemaining := int(math.Ceil(diff.Hours() / 24))
+						if daysRemaining <= 0 {
+							daysRemaining = 1
+						}
+						stats["expiring_7d_notices"]++
+
+						if h.emailSvc != nil {
+							if u, uErr := h.store.GetUserByID(ctx, sub.UserID); uErr == nil && u != nil {
+								planName := sub.PlanName
+								if planName == "" {
+									if p, pErr := h.store.GetPlanByID(ctx, sub.PlanID); pErr == nil && p != nil {
+										planName = p.Name
+									} else {
+										planName = "Hosting Package"
+									}
+								}
+								domainName := sub.Domain
+								if domainName == "" {
+									if accounts, aErr := h.store.ListHostingAccounts(ctx, sub.OrganizationID, nil); aErr == nil {
+										for _, acc := range accounts {
+											if acc.UserID == sub.UserID && acc.Domain != "" {
+												domainName = acc.Domain
+												break
+											}
+										}
+									}
+									if domainName == "" {
+										domainName = "Your Website"
+									}
+								}
+								renewURL := fmt.Sprintf("%s/billing", h.cfg.AppURL)
+								_ = h.emailSvc.SendAccountExpiringWarning(ctx, u.Email, u.FullName, planName, domainName, daysRemaining, renewURL)
 							}
 						}
 					}

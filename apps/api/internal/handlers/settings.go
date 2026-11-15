@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -19,15 +20,17 @@ import (
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/iputil"
 	"hostvra/api/internal/response"
 	"hostvra/api/internal/store"
 )
 
 type SettingsHandler struct {
-	cfg   *config.Config
-	store store.Store
-	audit *audit.Logger
+	cfg      *config.Config
+	store    store.Store
+	audit    *audit.Logger
+	emailSvc *email.Service
 }
 
 func NewSettingsHandler(cfg *config.Config, s store.Store, a *audit.Logger) *SettingsHandler {
@@ -36,6 +39,10 @@ func NewSettingsHandler(cfg *config.Config, s store.Store, a *audit.Logger) *Set
 		store: s,
 		audit: a,
 	}
+}
+
+func (h *SettingsHandler) SetEmailService(emailSvc *email.Service) {
+	h.emailSvc = emailSvc
 }
 
 func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -618,6 +625,131 @@ func (h *SettingsHandler) GetSecurityAudit(w http.ResponseWriter, r *http.Reques
 		PassedCount: passedCount,
 		TotalChecks: len(checks),
 		EvaluatedAt: time.Now().UTC().Format(time.RFC3339),
+	}, nil)
+}
+
+type TestSMTPRequest struct {
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	User       string `json:"user"`
+	Password   string `json:"password"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Encryption string `json:"encryption"`
+}
+
+// TestSMTP triggers a live outbound SMTP handshake and test email delivery
+func (h *SettingsHandler) TestSMTP(w http.ResponseWriter, r *http.Request) {
+	if h.emailSvc == nil {
+		response.Error(w, http.StatusInternalServerError, "EMAIL_SERVICE_UNAVAILABLE", "Email service is not initialized", nil, "")
+		return
+	}
+
+	var req TestSMTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	if req.Host == "" {
+		// Default to configured host from DB settings or config
+		resolved := h.emailSvc.GetResolvedConfig(r.Context())
+		req.Host = resolved.Host
+		req.Port = resolved.Port
+		req.User = resolved.User
+		req.Password = resolved.Password
+		req.From = resolved.From
+		req.Encryption = resolved.Encryption
+	}
+
+	if req.To == "" {
+		claims, ok := auth.GetClaims(r.Context())
+		if ok && claims != nil && claims.Email != "" {
+			req.To = claims.Email
+		} else {
+			response.Error(w, http.StatusBadRequest, "MISSING_RECIPIENT", "Recipient test email address is required", nil, "")
+			return
+		}
+	}
+
+	err := h.emailSvc.TestSMTPConnection(r.Context(), req.Host, req.Port, req.User, req.Password, req.From, req.To, req.Encryption)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "SMTP_TEST_FAILED", fmt.Sprintf("SMTP test failed: %s", err.Error()), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "smtp.test_success", "system_settings", "smtp", "success", fmt.Sprintf("Delivered test SMTP email to %s via %s:%d", req.To, req.Host, req.Port), map[string]interface{}{
+		"to":   req.To,
+		"host": req.Host,
+		"port": req.Port,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Test email delivered successfully to %s via %s:%d", req.To, req.Host, req.Port),
+	}, nil)
+}
+
+type BroadcastUpdateRequest struct {
+	Version      string `json:"version"`
+	Title        string `json:"title"`
+	Summary      string `json:"summary"`
+	ChangelogURL string `json:"changelog_url"`
+}
+
+// BroadcastSystemUpdate sends an announcement email to all registered tenant accounts
+func (h *SettingsHandler) BroadcastSystemUpdate(w http.ResponseWriter, r *http.Request) {
+	if h.emailSvc == nil {
+		response.Error(w, http.StatusInternalServerError, "EMAIL_SERVICE_UNAVAILABLE", "Email service is not initialized", nil, "")
+		return
+	}
+
+	var req BroadcastUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	if req.Title == "" {
+		req.Title = "Hostvra System Update"
+	}
+	if req.Version == "" {
+		req.Version = "Latest"
+	}
+
+	// Fetch all users
+	users, err := h.store.ListUsers(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to retrieve user list", nil, "")
+		return
+	}
+
+	sentCount := 0
+	bgCtx := context.Background()
+	for _, u := range users {
+		if u.Email != "" && !strings.Contains(u.Email, "example.com") {
+			userEmail := u.Email
+			userName := u.FullName
+			if userName == "" {
+				userName = "Hostvra User"
+			}
+			go func() {
+				_ = h.emailSvc.SendSystemUpdateNotification(bgCtx, userEmail, userName, req.Version, req.Title, req.Summary, req.ChangelogURL)
+			}()
+			sentCount++
+		}
+	}
+
+	h.audit.Log(r.Context(), r, "system.update_broadcast", "system", req.Version, "success", fmt.Sprintf("Queued system update announcement to %d users", sentCount), map[string]interface{}{
+		"version": req.Version,
+		"title":   req.Title,
+		"users":   sentCount,
+	})
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"message":    fmt.Sprintf("Update notification successfully queued for %d users", sentCount),
+		"recipients": sentCount,
 	}, nil)
 }
 

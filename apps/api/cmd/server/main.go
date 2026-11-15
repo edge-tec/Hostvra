@@ -191,6 +191,7 @@ func main() {
 	fileHandler.SetQuotaService(quotaService)
 	accountHandler.SetQuotaService(quotaService)
 	billingHandler.SetEmailService(emailService)
+	settingsHandler.SetEmailService(emailService)
 	billingHandler.StartLifecycleWorker(context.Background(), 1*time.Hour)
 
 	adminUsersHandler := handlers.NewAdminUsersHandler(cfg, dataStore, quotaService, auditLogger, emailService)
@@ -1509,6 +1510,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/panel-ssl", settingsHandler.ConfigurePanelSSL)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/restart-panel", settingsHandler.RestartPanel)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/test-alarm", settingsHandler.TestAlarmNotification)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/test-smtp", settingsHandler.TestSMTP)
+				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/broadcast-update", settingsHandler.BroadcastSystemUpdate)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/sync-time", settingsHandler.SyncTime)
 				r.With(rbac.RequirePermission(rbac.PermServersManage)).Post("/detect-ip", settingsHandler.DetectPublicIP)
 			})

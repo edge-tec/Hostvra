@@ -42,5 +42,13 @@ type SystemSettings struct {
 	AuthorizedIP        string    `json:"authorized_ip"`
 	NotLoggedInResponse string    `json:"not_logged_in_response"`
 	PasswordExpire      string    `json:"password_expire"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	// Global Transactional Email & SMTP Configuration
+	SMTPHost       string `json:"smtp_host"`
+	SMTPPort       int    `json:"smtp_port"`
+	SMTPUser       string `json:"smtp_user"`
+	SMTPPassword   string `json:"smtp_password"`
+	SMTPFrom       string `json:"smtp_from"`
+	SMTPFromName   string `json:"smtp_from_name"`
+	SMTPEncryption string `json:"smtp_encryption"` // "tls", "starttls", "none"
+	UpdatedAt      time.Time `json:"updated_at"`
 }

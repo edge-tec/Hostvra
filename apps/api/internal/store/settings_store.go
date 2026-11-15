@@ -50,6 +50,13 @@ func defaultSystemSettings() *SystemSettings {
 		AuthorizedIP:        "",
 		NotLoggedInResponse: "404 - Not Found",
 		PasswordExpire:      "Never",
+		SMTPHost:            "",
+		SMTPPort:            587,
+		SMTPUser:            "",
+		SMTPPassword:        "",
+		SMTPFrom:            "noreply@hostvra.com",
+		SMTPFromName:        "Hostvra",
+		SMTPEncryption:      "starttls",
 		UpdatedAt:           time.Now().UTC(),
 	}
 }

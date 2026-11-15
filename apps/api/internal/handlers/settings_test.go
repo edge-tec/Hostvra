@@ -11,6 +11,7 @@ import (
 
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/config"
+	"hostvra/api/internal/email"
 	"hostvra/api/internal/store"
 )
 
@@ -186,6 +187,30 @@ func TestSettingsHandler(t *testing.T) {
 		}
 		if resp.Data.Score <= 0 || resp.Data.TotalChecks == 0 {
 			t.Errorf("expected valid audit score and checks, got score=%d, total=%d", resp.Data.Score, resp.Data.TotalChecks)
+		}
+	})
+
+	t.Run("SMTP Broadcast and Test", func(t *testing.T) {
+		emailSvc := email.New(cfg, memStore)
+		h.SetEmailService(emailSvc)
+
+		// Test Broadcast
+		bPayload := `{"version":"v2.5.0","title":"Release v2.5.0","summary":"High-performance SMTP engine deployed"}`
+		bReq := httptest.NewRequest(http.MethodPost, "/api/v1/settings/broadcast-update", bytes.NewBufferString(bPayload))
+		bRec := httptest.NewRecorder()
+		h.BroadcastSystemUpdate(bRec, bReq)
+		if bRec.Code != http.StatusOK {
+			t.Fatalf("expected status %d for broadcast, got %d: %s", http.StatusOK, bRec.Code, bRec.Body.String())
+		}
+
+		// Test SMTP without configured host should report error or handle cleanly
+		tPayload := `{"host":"127.0.0.1","port":587,"to":"admin@hostvra.com"}`
+		tReq := httptest.NewRequest(http.MethodPost, "/api/v1/settings/test-smtp", bytes.NewBufferString(tPayload))
+		tRec := httptest.NewRecorder()
+		h.TestSMTP(tRec, tReq)
+		// Should return 200 (if local server responded) or 400 (connection refused on 127.0.0.1:587 in mock)
+		if tRec.Code != http.StatusOK && tRec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 200 or 400, got %d: %s", tRec.Code, tRec.Body.String())
 		}
 	})
 }

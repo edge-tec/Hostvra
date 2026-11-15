@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -125,18 +126,27 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send verification email if service is configured
-	if h.emailSvc != nil && h.emailSvc.IsConfigured() && !user.EmailVerified {
-		rawToken, tokenHash := email.GenerateSecureToken()
-		vToken := &store.EmailVerificationToken{
-			ID:        uuid.New(),
-			UserID:    user.ID,
-			TokenHash: tokenHash,
-			ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
-		}
-		if err := h.store.CreateEmailVerificationToken(r.Context(), vToken); err == nil {
-			go h.emailSvc.SendEmailVerification(r.Context(), user.Email, user.FullName, rawToken)
-		}
+	// Send welcome email & verification email if service is available
+	if h.emailSvc != nil {
+		bgCtx := context.Background()
+		userEmail := user.Email
+		userName := user.FullName
+		loginURL := h.cfg.AppURL + "/login"
+		go func() {
+			_ = h.emailSvc.SendWelcomeAccountCreated(bgCtx, userEmail, userName, userEmail, loginURL)
+			if !user.EmailVerified {
+				rawToken, tokenHash := email.GenerateSecureToken()
+				vToken := &store.EmailVerificationToken{
+					ID:        uuid.New(),
+					UserID:    user.ID,
+					TokenHash: tokenHash,
+					ExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+				}
+				if err := h.store.CreateEmailVerificationToken(bgCtx, vToken); err == nil {
+					_ = h.emailSvc.SendEmailVerification(bgCtx, userEmail, userName, rawToken)
+				}
+			}
+		}()
 	}
 
 	// Auto-assign Hosting Package and create initial Subscription
@@ -516,7 +526,12 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Send reset email
 	if h.emailSvc != nil {
-		go h.emailSvc.SendPasswordReset(r.Context(), user.Email, user.FullName, rawToken)
+		bgCtx := context.Background()
+		userEmail := user.Email
+		userName := user.FullName
+		go func() {
+			_ = h.emailSvc.SendPasswordReset(bgCtx, userEmail, userName, rawToken)
+		}()
 	}
 
 	h.audit.Log(r.Context(), r, "auth.forgot_password", "user", user.ID.String(), "success", "", map[string]interface{}{
@@ -593,7 +608,12 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	if h.emailSvc != nil {
 		user, _ := h.store.GetUserByID(r.Context(), resetToken.UserID)
 		if user != nil {
-			go h.emailSvc.SendPasswordChanged(r.Context(), user.Email, user.FullName)
+			bgCtx := context.Background()
+			userEmail := user.Email
+			userName := user.FullName
+			go func() {
+				_ = h.emailSvc.SendPasswordChanged(bgCtx, userEmail, userName)
+			}()
 		}
 	}
 

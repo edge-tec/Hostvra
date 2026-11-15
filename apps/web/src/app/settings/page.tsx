@@ -39,6 +39,8 @@ import {
   Edit3,
   Download,
   Info,
+  Mail,
+  AlertCircle,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch, User as UserType, Organization, SystemSettings } from '@/lib/api';
@@ -275,6 +277,25 @@ export default function SettingsPage() {
   } | null>(null);
   const [loadingAudit, setLoadingAudit] = useState(false);
 
+  // Global SMTP & Automated Email Notification State
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('noreply@hostvra.com');
+  const [smtpFromName, setSmtpFromName] = useState('Hostvra');
+  const [smtpEncryption, setSmtpEncryption] = useState('starttls');
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
+
+  const [testEmailTo, setTestEmailTo] = useState('');
+  const [testingSmtp, setTestingSmtp] = useState(false);
+  const [testSmtpResult, setTestSmtpResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const [broadcastVersion, setBroadcastVersion] = useState('v2.5.0');
+  const [broadcastTitle, setBroadcastTitle] = useState('Hostvra Performance & Security Update');
+  const [broadcastSummary, setBroadcastSummary] = useState('Enhanced Nginx 500M file upload streaming, PHP-FPM optimization, and full-stack automated email notification engine.');
+  const [broadcasting, setBroadcasting] = useState(false);
+
   // Toast
   const [toast, setToast] = useState<{ message: string; isError?: boolean } | null>(null);
   const showToast = (message: string, isError = false) => {
@@ -328,6 +349,13 @@ export default function SettingsPage() {
           if (s.authorized_ip !== undefined) setAuthorizedIp(s.authorized_ip);
           if (s.not_logged_in_response) setNotLoggedInResponse(s.not_logged_in_response);
           if (s.password_expire) setPasswordExpire(s.password_expire);
+          if (s.smtp_host !== undefined) setSmtpHost(s.smtp_host);
+          if (s.smtp_port !== undefined) setSmtpPort(s.smtp_port);
+          if (s.smtp_user !== undefined) setSmtpUser(s.smtp_user);
+          if (s.smtp_password !== undefined) setSmtpPassword(s.smtp_password);
+          if (s.smtp_from !== undefined) setSmtpFrom(s.smtp_from);
+          if (s.smtp_from_name !== undefined) setSmtpFromName(s.smtp_from_name);
+          if (s.smtp_encryption !== undefined) setSmtpEncryption(s.smtp_encryption);
         }
 
         // Fetch live panel SSL certificate info
@@ -546,6 +574,13 @@ export default function SettingsPage() {
       authorized_ip: authorizedIp,
       not_logged_in_response: notLoggedInResponse,
       password_expire: passwordExpire,
+      smtp_host: smtpHost,
+      smtp_port: Number(smtpPort) || 587,
+      smtp_user: smtpUser,
+      smtp_password: smtpPassword,
+      smtp_from: smtpFrom,
+      smtp_from_name: smtpFromName,
+      smtp_encryption: smtpEncryption,
       ...overrides,
     };
     try {
@@ -814,10 +849,88 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveSmtp = async () => {
+    await persistSettings({
+      smtp_host: smtpHost,
+      smtp_port: Number(smtpPort) || 587,
+      smtp_user: smtpUser,
+      smtp_password: smtpPassword,
+      smtp_from: smtpFrom,
+      smtp_from_name: smtpFromName,
+      smtp_encryption: smtpEncryption,
+    });
+    showToast('✓ SMTP configuration saved successfully!');
+  };
+
+  const handleTestSMTP = async () => {
+    if (!testEmailTo.trim()) {
+      showToast('Please enter a recipient email address for the test', true);
+      return;
+    }
+    setTestingSmtp(true);
+    setTestSmtpResult(null);
+    try {
+      const res = await apiFetch<any>('/api/v1/settings/test-smtp', {
+        method: 'POST',
+        body: JSON.stringify({
+          host: smtpHost,
+          port: Number(smtpPort) || 587,
+          user: smtpUser,
+          password: smtpPassword,
+          from: smtpFrom,
+          encryption: smtpEncryption,
+          to: testEmailTo.trim(),
+        }),
+      });
+      if (res.success) {
+        setTestSmtpResult({ success: true, message: res.data?.message || 'Test email delivered successfully!' });
+        showToast('✓ Test email delivered successfully!');
+      } else {
+        const msg = res.error?.message || 'Failed to send test email';
+        setTestSmtpResult({ success: false, message: msg });
+        showToast(msg, true);
+      }
+    } catch (e: any) {
+      const msg = e.message || 'SMTP connection error';
+      setTestSmtpResult({ success: false, message: msg });
+      showToast(msg, true);
+    } finally {
+      setTestingSmtp(false);
+    }
+  };
+
+  const handleBroadcastUpdate = async () => {
+    if (!broadcastTitle.trim() || !broadcastSummary.trim()) {
+      showToast('Please provide an update title and summary', true);
+      return;
+    }
+    setBroadcasting(true);
+    try {
+      const res = await apiFetch<any>('/api/v1/settings/broadcast-update', {
+        method: 'POST',
+        body: JSON.stringify({
+          version: broadcastVersion.trim() || 'Latest',
+          title: broadcastTitle.trim(),
+          summary: broadcastSummary.trim(),
+          changelog_url: '/settings',
+        }),
+      });
+      if (res.success) {
+        showToast(`✓ System update queued for ${res.data?.recipients ?? 0} user(s)!`);
+      } else {
+        showToast(res.error?.message || 'Failed to broadcast update', true);
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Broadcast error', true);
+    } finally {
+      setBroadcasting(false);
+    }
+  };
+
   const tabLabels: Record<SettingsTab, string> = {
     global: 'Global',
     page: 'Page',
-    alarm: 'Alarm',
+    alarm: 'Alarm & Notifications',
     backup: 'Backup Restore',
     migrate: 'Hostvra Migrate',
     other_migrate: 'Other Panel Migrate',
@@ -2781,36 +2894,332 @@ export default function SettingsPage() {
         )}
 
         {activeTab === 'alarm' && (
-          searchQuery.trim() && searchResults.matchingAlarmChannels.length === 0 ? (
-            renderEmptyState('alarm')
-          ) : (
-            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-white">Alarm &amp; Incident Notifications</h3>
-              <p className="text-xs text-slate-500">Integrate Email, Telegram Bot, Slack, and Webhook alert channels</p>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {searchResults.matchingAlarmChannels.map((ch) => (
-                  <div key={ch} className="p-4 rounded-xl border border-slate-200 dark:border-surface-700 flex items-center justify-between">
-                    <span className="font-bold text-xs">{ch}</span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleTestAlarm(ch)}
-                        className="px-2.5 py-1 rounded bg-slate-100 dark:bg-surface-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 text-xs font-bold border border-slate-200 dark:border-surface-700 transition-colors cursor-pointer"
-                        title={`Send test alert via ${ch}`}
-                      >
-                        Test
-                      </button>
-                      <button
-                        onClick={() => showToast(`${ch} configuration active`)}
-                        className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer"
-                      >
-                        Setup
-                      </button>
-                    </div>
+          <div className="space-y-6">
+            {/* Section 1: Outbound SMTP Relay Configuration */}
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-5 shadow-2xs">
+              <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-100 dark:border-surface-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    <Mail className="w-5 h-5" />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                      Global Outbound SMTP &amp; Transactional Mailer
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Configure your primary SMTP relay (Gmail, Brevo, SendGrid, Amazon SES, or Local Postfix) for system emails
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveSmtp}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Save SMTP Settings</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    SMTP Host / Server
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. smtp.gmail.com or 127.0.0.1"
+                    value={smtpHost}
+                    onChange={(e) => setSmtpHost(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    Leave empty to route via server local Postfix relay (127.0.0.1:25)
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    SMTP Port
+                  </label>
+                  <input
+                    type="number"
+                    placeholder="587, 465, or 25"
+                    value={smtpPort}
+                    onChange={(e) => setSmtpPort(Number(e.target.value) || 587)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    587 (STARTTLS), 465 (Direct SSL/TLS), or 25 (Standard)
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    Encryption Mode
+                  </label>
+                  <select
+                    value={smtpEncryption}
+                    onChange={(e) => setSmtpEncryption(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="starttls">STARTTLS (Port 587)</option>
+                    <option value="tls">Direct SSL / TLS (Port 465)</option>
+                    <option value="none">None / Local Loopback (Port 25)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    SMTP Username / Email
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. notifications@yourdomain.com"
+                    value={smtpUser}
+                    onChange={(e) => setSmtpUser(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    SMTP Password / App Key
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showSmtpPass ? 'text' : 'password'}
+                      placeholder="••••••••••••••••"
+                      value={smtpPassword}
+                      onChange={(e) => setSmtpPassword(e.target.value)}
+                      className="w-full px-3 py-2 pr-9 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSmtpPass(!showSmtpPass)}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                    >
+                      {showSmtpPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    Sender Email (&apos;From&apos;)
+                  </label>
+                  <input
+                    type="email"
+                    placeholder="noreply@yourdomain.com"
+                    value={smtpFrom}
+                    onChange={(e) => setSmtpFrom(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+
+                <div className="md:col-span-3">
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">
+                    Sender Display Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Hostvra Cloud"
+                    value={smtpFromName}
+                    onChange={(e) => setSmtpFromName(e.target.value)}
+                    className="w-full max-w-sm px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              {/* Live SMTP Tester Inline */}
+              <div className="p-4 bg-slate-50 dark:bg-surface-800/60 border border-slate-200 dark:border-surface-700/80 rounded-xl space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Send className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">
+                      Live Outbound SMTP Transmission Test
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="email"
+                      placeholder="Enter recipient email (e.g. you@gmail.com)"
+                      value={testEmailTo}
+                      onChange={(e) => setTestEmailTo(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-900 border border-slate-300 dark:border-surface-700 text-xs w-64 text-slate-900 dark:text-white font-mono"
+                    />
+                    <button
+                      type="button"
+                      disabled={testingSmtp}
+                      onClick={handleTestSMTP}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {testingSmtp ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                      <span>Send Test Email</span>
+                    </button>
+                  </div>
+                </div>
+
+                {testSmtpResult && (
+                  <div
+                    className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
+                      testSmtpResult.success
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                        : 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+                    }`}
+                  >
+                    {testSmtpResult.success ? (
+                      <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                    )}
+                    <span className="break-all">{testSmtpResult.message}</span>
+                  </div>
+                )}
               </div>
             </div>
-          )
+
+            {/* Section 2: Automated Notification Matrix */}
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Automated Transactional Email Matrix</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                    7 Active Triggers
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Real-time events managed by Hostvra&apos;s background lifecycle engine with automatic idempotency protection
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">1. Account Created</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Sends branded welcome email with panel login URL, credentials, and getting-started guide immediately upon registration.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">2. Forgot Password</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Delivers cryptographic password reset links expiring in 1 hour with anti-user enumeration security.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">3. Payment Confirmed</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Instant payment confirmation receipt for crypto on-chain settlements, credit cards, or manual invoice approvals.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">4. Payment Rejected</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Alerts customer immediately if payment fails or card is declined, with direct 1-click retry payment URL.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">5. 7-Day Expiry Warning</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Automated hourly lifecycle scan detects subscriptions expiring in 7 days and delivers renewal notice.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-surface-700/80 bg-slate-50/50 dark:bg-surface-800/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white">6. Account Expired</span>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full">Active</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Notifies user when hosting package or free trial ends, with instant reactivation payment link.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3: Broadcast System Update Announcements */}
+            <div className="bg-white dark:bg-surface-900 border border-slate-200 dark:border-surface-800 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                    <Bell className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                      7. System Update Announcement Broadcast
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Send a system-wide email notification to all registered user accounts informing them of new features or updates
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-semibold">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Update Version</label>
+                  <input
+                    type="text"
+                    value={broadcastVersion}
+                    onChange={(e) => setBroadcastVersion(e.target.value)}
+                    placeholder="v2.5.0"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Update Title</label>
+                  <input
+                    type="text"
+                    value={broadcastTitle}
+                    onChange={(e) => setBroadcastTitle(e.target.value)}
+                    placeholder="e.g. Major Performance & Security Release"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1">Release Highlights / Summary</label>
+                  <textarea
+                    rows={3}
+                    value={broadcastSummary}
+                    onChange={(e) => setBroadcastSummary(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-900 dark:text-white font-sans text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  disabled={broadcasting}
+                  onClick={handleBroadcastUpdate}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  {broadcasting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>Broadcast Update to All Users</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {activeTab === 'backup' && (
