@@ -489,6 +489,18 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 		docRoot = "/var/www/" + cleanDomain + "/public_html"
 	}
 	_ = os.MkdirAll(docRoot, 0755)
+
+	// Auto-detect Laravel or framework applications where web root is located in public/
+	if !strings.HasSuffix(docRoot, "/public") {
+		if _, aErr := os.Stat(filepath.Join(docRoot, "artisan")); aErr == nil {
+			if _, pErr := os.Stat(filepath.Join(docRoot, "public", "index.php")); pErr == nil {
+				docRoot = filepath.Join(docRoot, "public")
+			}
+		} else if _, pErr := os.Stat(filepath.Join(docRoot, "public", "index.php")); pErr == nil {
+			docRoot = filepath.Join(docRoot, "public")
+		}
+	}
+
 	for _, sub := range []string{"uploads", "uploads/images", "storage", "public/uploads"} {
 		subPath := filepath.Join(docRoot, sub)
 		if _, err := os.Stat(subPath); err == nil {

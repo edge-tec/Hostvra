@@ -30,7 +30,11 @@ echo "=========================================================="
 # 1. Detect Real Document Root
 PARENT_DIR="/var/www/${DOMAIN}"
 DOC_ROOT=""
-if [[ -f "${PARENT_DIR}/public_html/index.php" || -f "${PARENT_DIR}/public_html/wp-config.php" ]]; then
+if [[ -f "${PARENT_DIR}/public_html/public/index.php" || -f "${PARENT_DIR}/public_html/artisan" ]]; then
+    DOC_ROOT="${PARENT_DIR}/public_html/public"
+elif [[ -f "${PARENT_DIR}/public/index.php" || -f "${PARENT_DIR}/artisan" ]]; then
+    DOC_ROOT="${PARENT_DIR}/public"
+elif [[ -f "${PARENT_DIR}/public_html/index.php" || -f "${PARENT_DIR}/public_html/wp-config.php" ]]; then
     DOC_ROOT="${PARENT_DIR}/public_html"
 elif [[ -f "${PARENT_DIR}/index.php" || -f "${PARENT_DIR}/wp-config.php" ]]; then
     DOC_ROOT="${PARENT_DIR}"
@@ -501,6 +505,10 @@ if [[ "$IS_WP" == true ]]; then
 fi
 mkdir -p "$DOC_ROOT/uploads/images" "$DOC_ROOT/storage" "$DOC_ROOT/public/uploads" 2>/dev/null || true
 chmod -R 777 "$DOC_ROOT/uploads" "$DOC_ROOT/storage" 2>/dev/null || true
+if [[ -d "${PARENT_DIR}/public_html/storage" ]]; then
+    mkdir -p "${PARENT_DIR}/public_html/bootstrap/cache" 2>/dev/null || true
+    chmod -R 777 "${PARENT_DIR}/public_html/storage" "${PARENT_DIR}/public_html/bootstrap/cache" 2>/dev/null || true
+fi
 
 # 11. Validate and reload Nginx
 echo "[*] Testing Nginx configuration..."
