@@ -505,20 +505,92 @@ NGINX_EOF
     fi
 fi
 
+# -----------------------------------------------------------------------------
+# System-Wide Image & File Upload Limits Optimization (Nginx & PHP)
+# -----------------------------------------------------------------------------
+echo "Configuring system-wide upload limits (Nginx 500M & PHP 128M)..."
+
+# 1. Global Nginx upload limit configuration in /etc/nginx/conf.d
+if [[ -d "/etc/nginx/conf.d" ]]; then
+    cat > /etc/nginx/conf.d/00-hostvra-upload-limits.conf << 'UPLOAD_EOF'
+# Hostvra Global Upload Optimization
+client_max_body_size 500M;
+client_body_buffer_size 128k;
+client_header_buffer_size 32k;
+large_client_header_buffers 4 64k;
+client_body_timeout 300s;
+client_header_timeout 300s;
+UPLOAD_EOF
+fi
+
+# 2. Global PHP-FPM and CLI upload limits for all installed PHP versions
+for php_ini_dir in /etc/php/*/fpm /etc/php/*/cli; do
+    if [[ -d "$php_ini_dir/conf.d" ]]; then
+        cat > "$php_ini_dir/conf.d/99-hostvra-uploads.ini" << 'PHP_UPLOAD_EOF'
+; Hostvra Global Upload Optimization
+upload_max_filesize = 128M
+post_max_size = 128M
+memory_limit = 512M
+max_file_uploads = 50
+max_execution_time = 300
+max_input_time = 300
+upload_tmp_dir = /tmp
+PHP_UPLOAD_EOF
+    fi
+done
+
+for pini in /etc/php/*/fpm/php.ini /etc/php/*/cli/php.ini; do
+    if [[ -f "$pini" ]]; then
+        sed -i 's/^upload_max_filesize = .*/upload_max_filesize = 128M/' "$pini" 2>/dev/null || true
+        sed -i 's/^post_max_size = .*/post_max_size = 128M/' "$pini" 2>/dev/null || true
+        sed -i 's/^memory_limit = .*/memory_limit = 512M/' "$pini" 2>/dev/null || true
+    fi
+done
+
+# Restart all PHP-FPM versions so upload limits take effect immediately
+for fpm_svc in $(systemctl list-unit-files 2>/dev/null | grep -E 'php.*-fpm' | awk '{print $1}'); do
+    systemctl restart "$fpm_svc" 2>/dev/null || true
+done
+
+# 3. Ensure global temporary and uploads directories have write permissions
+chmod 1777 /tmp /var/tmp 2>/dev/null || true
+
+for web_base in /var/www /www/wwwroot; do
+    if [[ -d "$web_base" ]]; then
+        for sdir in "$web_base"/*; do
+            if [[ -d "$sdir" ]]; then
+                for udir in "$sdir/uploads" "$sdir/uploads/images" "$sdir/public/uploads" "$sdir/storage" "$sdir/public_html/uploads" "$sdir/public_html/uploads/images"; do
+                    if [[ -d "$udir" ]]; then
+                        chmod -R 777 "$udir" 2>/dev/null || true
+                    fi
+                done
+            fi
+        done
+    fi
+done
+
+if nginx -t &>/dev/null; then
+    systemctl reload nginx 2>/dev/null || true
+fi
+
 # Reconcile all domain virtual hosts & SSL bindings via internal API
 echo "Reconciling all domain virtual hosts and SSL certificates..."
 sleep 2
 curl -s -X POST http://127.0.0.1:8080/api/v1/internal/repair-routing 2>/dev/null || true
 
-# Reconcile all physical website document roots in /var/www
+# Reconcile all physical website document roots in /var/www and /www/wwwroot
 if [[ -f "${HOSTVRA_DIR}/repair-domain.sh" ]]; then
-    for site_dir in /var/www/*; do
-        if [[ -d "$site_dir" ]]; then
-            d_name=$(basename "$site_dir")
-            if [[ "$d_name" != "html" && "$d_name" != "default" && "$d_name" != "hostvra-temp" && "$d_name" =~ \. ]]; then
-                echo "Reconciling virtual host for: $d_name..."
-                bash "${HOSTVRA_DIR}/repair-domain.sh" "$d_name" >/dev/null 2>&1 || true
-            fi
+    for web_root in /var/www /www/wwwroot; do
+        if [[ -d "$web_root" ]]; then
+            for site_dir in "$web_root"/*; do
+                if [[ -d "$site_dir" ]]; then
+                    d_name=$(basename "$site_dir")
+                    if [[ "$d_name" != "html" && "$d_name" != "default" && "$d_name" != "hostvra-temp" && "$d_name" =~ \. ]]; then
+                        echo "Reconciling virtual host for: $d_name..."
+                        bash "${HOSTVRA_DIR}/repair-domain.sh" "$d_name" >/dev/null 2>&1 || true
+                    fi
+                fi
+            done
         fi
     done
 fi

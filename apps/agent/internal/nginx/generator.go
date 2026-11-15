@@ -58,7 +58,7 @@ server {
     access_log /var/log/nginx/{{ .Domain }}.access.log;
     error_log  /var/log/nginx/{{ .Domain }}.error.log warn;
 
-    client_max_body_size 128M;
+    client_max_body_size 500M;
 
 {{- if or (eq .AppType "php") (eq .AppType "wordpress") }}
     location / {

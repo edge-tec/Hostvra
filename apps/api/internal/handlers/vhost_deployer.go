@@ -257,6 +257,48 @@ include fastcgi_params;
 	return nil
 }
 
+// EnsureGlobalUploadLimits writes system-wide Nginx and PHP upload optimization configs.
+// This sets client_max_body_size to 500M globally in Nginx and 128M in PHP-FPM,
+// preventing 413 Request Entity Too Large and "Save failed" across all websites.
+func EnsureGlobalUploadLimits() error {
+	// 1. Nginx global upload & buffer configuration in /etc/nginx/conf.d
+	confD := "/etc/nginx/conf.d"
+	if _, err := os.Stat(confD); err == nil {
+		uploadConfPath := filepath.Join(confD, "00-hostvra-upload-limits.conf")
+		uploadConf := `# Hostvra Global Upload Optimization
+client_max_body_size 500M;
+client_body_buffer_size 128k;
+client_header_buffer_size 32k;
+large_client_header_buffers 4 64k;
+client_body_timeout 300s;
+client_header_timeout 300s;
+`
+		_ = os.WriteFile(uploadConfPath, []byte(uploadConf), 0644)
+	}
+
+	// 2. PHP global upload optimization in /etc/php/*/fpm/conf.d and cli/conf.d
+	phpDirs, _ := filepath.Glob("/etc/php/*")
+	phpUploadIni := `; Hostvra Global Upload Optimization
+upload_max_filesize = 128M
+post_max_size = 128M
+memory_limit = 512M
+max_file_uploads = 50
+max_execution_time = 300
+max_input_time = 300
+upload_tmp_dir = /tmp
+`
+	for _, pDir := range phpDirs {
+		for _, sub := range []string{"fpm", "cli"} {
+			confDir := filepath.Join(pDir, sub, "conf.d")
+			if fi, err := os.Stat(confDir); err == nil && fi.IsDir() {
+				iniFile := filepath.Join(confDir, "99-hostvra-uploads.ini")
+				_ = os.WriteFile(iniFile, []byte(phpUploadIni), 0644)
+			}
+		}
+	}
+	return nil
+}
+
 // EnsureHostvraPanelIsolated ensures that the Hostvra control panel vhost
 // is explicitly bound ONLY to Hostvra domains (hostvra.com, www.hostvra.com, panel.hostvra.com, localhost)
 // and is NEVER configured as default_server or wildcard catch-all.
@@ -440,12 +482,19 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
 	_ = EnsureNeutralDefaultServer()
 	_ = EnsureHostvraPanelIsolated()
 	_ = EnsureFastCGISnippet()
+	_ = EnsureGlobalUploadLimits()
 
-	// 2. Ensure document root exists and has initial placeholder
+	// 2. Ensure document root exists and has initial placeholder & write permissions
 	if docRoot == "" {
 		docRoot = "/var/www/" + cleanDomain + "/public_html"
 	}
 	_ = os.MkdirAll(docRoot, 0755)
+	for _, sub := range []string{"uploads", "uploads/images", "storage", "public/uploads"} {
+		subPath := filepath.Join(docRoot, sub)
+		if _, err := os.Stat(subPath); err == nil {
+			_ = os.Chmod(subPath, 0777)
+		}
+	}
 
 	indexFile := filepath.Join(docRoot, "index.html")
 	if _, err := os.Stat(indexFile); os.IsNotExist(err) {
@@ -537,6 +586,9 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
     listen [::]:80;
     server_name %s www.%s;
 
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
+
     # Allow Let's Encrypt / ACME challenges directly from disk
     location /.well-known/acme-challenge/ {
         root %s;
@@ -552,6 +604,8 @@ func DeployNginxVHost(domain, docRoot, phpVer, appType string, proxyPort *int) e
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
     }
 }
 `, cleanDomain, cleanDomain, docRoot, *proxyPort))
@@ -573,6 +627,9 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
+
     # Allow Let's Encrypt / ACME challenges directly from disk
     location /.well-known/acme-challenge/ {
         root %s;
@@ -588,6 +645,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
     }
 }
 `, cleanDomain, cleanDomain, sslCertPath, sslKeyPath, cipherList, docRoot, *proxyPort))
@@ -610,6 +669,9 @@ server {
         fastcgi_param HTTP_HOST $host;
         fastcgi_param SERVER_NAME $host;
         include fastcgi_params;
+        fastcgi_buffer_size 128k;
+        fastcgi_buffers 4 256k;
+        fastcgi_busy_buffers_size 256k;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;
     }
@@ -626,6 +688,9 @@ server {
         fastcgi_param SERVER_NAME $host;
         fastcgi_param HTTPS on;
         include fastcgi_params;
+        fastcgi_buffer_size 128k;
+        fastcgi_buffers 4 256k;
+        fastcgi_busy_buffers_size 256k;
         fastcgi_read_timeout 600s;
         fastcgi_send_timeout 600s;
     }
@@ -639,6 +704,9 @@ server {
     server_name %s www.%s;
     root %s;
     index index.php index.html index.htm;
+
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
 
     # Security Headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -683,6 +751,9 @@ server {
     ssl_prefer_server_ciphers off;
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
+
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
 
     # Security Headers
     add_header X-Frame-Options "SAMEORIGIN" always;

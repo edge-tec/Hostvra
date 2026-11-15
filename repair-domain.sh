@@ -301,7 +301,8 @@ server {
     root ${DOC_ROOT};
     index index.php index.html index.htm;
 
-    client_max_body_size 256M;
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
     server_tokens off;
 
     # Security Headers
@@ -372,7 +373,8 @@ server {
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;
 
-    client_max_body_size 256M;
+    client_max_body_size 500M;
+    client_body_buffer_size 128k;
     server_tokens off;
 
     # Security Headers
@@ -458,6 +460,8 @@ find "$DOC_ROOT" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$DOC_ROOT" -type f -exec chmod 644 {} + 2>/dev/null || true
 mkdir -p "$DOC_ROOT/wp-content"/{plugins,themes,uploads,upgrade}
 chmod -R 775 "$DOC_ROOT/wp-content" 2>/dev/null || true
+mkdir -p "$DOC_ROOT/uploads/images" "$DOC_ROOT/storage" "$DOC_ROOT/public/uploads" 2>/dev/null || true
+chmod -R 777 "$DOC_ROOT/uploads" "$DOC_ROOT/storage" 2>/dev/null || true
 
 # 11. Validate and reload Nginx
 echo "[*] Testing Nginx configuration..."
