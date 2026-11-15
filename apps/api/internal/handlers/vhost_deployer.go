@@ -697,6 +697,12 @@ server {
 `, phpSocket)
 		}
 
+		// Determine try_files routing directive based on application type
+		tryFilesDirective := "try_files $uri $uri/ /index.php?$args;"
+		if appType == "static" {
+			tryFilesDirective = "try_files $uri $uri/ =404;"
+		}
+
 		// Port 80 Block
 		conf.WriteString(fmt.Sprintf(`server {
     listen 80;
@@ -724,14 +730,14 @@ server {
     }
 
     location / {
-        try_files $uri $uri/ /index.php?$args;
+        %s
     }
 %s
     location ~ /\. {
         deny all;
     }
 }
-`, cleanDomain, cleanDomain, docRoot, cleanDomain, cleanDomain, docRoot, fastcgiBlockHttp))
+`, cleanDomain, cleanDomain, docRoot, cleanDomain, cleanDomain, docRoot, tryFilesDirective, fastcgiBlockHttp))
 
 		// Port 443 Block (Always bound to eliminate Cloudflare 525)
 		if sslCertPath != "" && sslKeyPath != "" {
@@ -771,14 +777,14 @@ server {
     }
 
     location / {
-        try_files $uri $uri/ /index.php?$args;
+        %s
     }
 %s
     location ~ /\. {
         deny all;
     }
 }
-`, cleanDomain, cleanDomain, docRoot, sslCertPath, sslKeyPath, cipherList, cleanDomain, cleanDomain, docRoot, fastcgiBlockHttps))
+`, cleanDomain, cleanDomain, docRoot, sslCertPath, sslKeyPath, cipherList, cleanDomain, cleanDomain, docRoot, tryFilesDirective, fastcgiBlockHttps))
 		}
 	}
 

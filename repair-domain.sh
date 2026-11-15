@@ -48,49 +48,85 @@ chmod 0755 /var/www 2>/dev/null || true
 chmod 0755 "$PARENT_DIR" 2>/dev/null || true
 chmod 0755 "$DOC_ROOT" 2>/dev/null || true
 
-# 2. Check if WordPress core exists, install if missing
-if [[ ! -f "${DOC_ROOT}/wp-load.php" && ! -f "${DOC_ROOT}/index.php" ]]; then
-    echo "[*] WordPress core not found in $DOC_ROOT. Downloading official latest WordPress..."
-    mkdir -p "$DOC_ROOT"
-    rm -f "${DOC_ROOT}/index.html" "${DOC_ROOT}/404.html"
-    (curl -fsSL https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1 -C "$DOC_ROOT"
-    echo "[✓] WordPress core extracted to $DOC_ROOT"
+# 2. Check WordPress Intent & Mode
+WANT_WP=false
+if [[ "${2:-}" == "--wordpress" || "${2:-}" == "--install-wp" || "${2:-}" == "-wp" ]]; then
+    WANT_WP=true
 fi
 
-# 3. Ensure dedicated MySQL Database and wp-config.php exist
-if [[ ! -f "${DOC_ROOT}/wp-config.php" ]]; then
-    echo "[*] Generating wp-config.php and database credentials..."
-    DOMAIN_SLUG=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
-    DB_NAME="wp_${DOMAIN_SLUG}"
-    DB_USER="u_${DOMAIN_SLUG}"
-    # Truncate identifier if over 32 chars
-    if [[ ${#DB_USER} -gt 32 ]]; then
-        DB_USER="${DB_USER:0:32}"
-    fi
-    DB_PASS=$(openssl rand -hex 12)
+IS_WP=false
+if [[ -f "${DOC_ROOT}/wp-config.php" || -f "${DOC_ROOT}/wp-load.php" ]]; then
+    IS_WP=true
+fi
 
-    # Provision MySQL Database and user if mysql is present
-    if command -v mysql &>/dev/null; then
-        echo "[*] Provisioning MySQL database $DB_NAME..."
-        SQL_QUERY="CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
-        if [[ -f "/etc/mysql/debian.cnf" ]]; then
-            mysql --defaults-file=/etc/mysql/debian.cnf -e "$SQL_QUERY" 2>/dev/null || true
-        else
-            mysql -u root -e "$SQL_QUERY" 2>/dev/null || mysql -e "$SQL_QUERY" 2>/dev/null || true
+if [[ "$WANT_WP" == true ]]; then
+    if [[ ! -f "${DOC_ROOT}/wp-load.php" ]]; then
+        echo "[*] WordPress install requested. Downloading official latest WordPress..."
+        mkdir -p "$DOC_ROOT"
+        rm -f "${DOC_ROOT}/index.html" "${DOC_ROOT}/404.html"
+        (curl -fsSL https://wordpress.org/latest.tar.gz || wget -qO- https://wordpress.org/latest.tar.gz) | tar -xz --strip-components=1 -C "$DOC_ROOT"
+        echo "[✓] WordPress core extracted to $DOC_ROOT"
+    fi
+    IS_WP=true
+fi
+
+# Ensure minimal placeholder only if document root is completely empty
+if [[ ! -f "${DOC_ROOT}/index.php" && ! -f "${DOC_ROOT}/index.html" && ! -f "${DOC_ROOT}/index.htm" ]]; then
+    echo "[*] Document root is empty. Writing default placeholder..."
+    cat > "${DOC_ROOT}/index.html" << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Welcome to ${DOMAIN}</title>
+    <style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b1120;color:#f8fafc;text-align:center}.card{padding:40px;background:#1e293b;border-radius:12px;border:1px solid #334155;box-shadow:0 10px 25px rgba(0,0,0,0.5)}h1{color:#10b981;margin-bottom:8px}p{color:#94a3b8}</style>
+</head>
+<body>
+    <div class="card">
+        <h1>Welcome to ${DOMAIN}</h1>
+        <p>Your website is active and powered by <strong>Hostvra Control Panel</strong>.</p>
+    </div>
+</body>
+</html>
+EOF
+    chmod 0644 "${DOC_ROOT}/index.html"
+fi
+
+# 3. Handle WordPress Configuration ONLY if WordPress is actually detected or requested
+if [[ "$IS_WP" == true ]]; then
+    if [[ ! -f "${DOC_ROOT}/wp-config.php" ]]; then
+        echo "[*] Generating wp-config.php and database credentials..."
+        DOMAIN_SLUG=$(echo "$DOMAIN" | tr '.' '_' | tr '-' '_')
+        DB_NAME="wp_${DOMAIN_SLUG}"
+        DB_USER="u_${DOMAIN_SLUG}"
+        # Truncate identifier if over 32 chars
+        if [[ ${#DB_USER} -gt 32 ]]; then
+            DB_USER="${DB_USER:0:32}"
         fi
-    fi
+        DB_PASS=$(openssl rand -hex 12)
 
-    # Generate random salts
-    S1=$(openssl rand -hex 32)
-    S2=$(openssl rand -hex 32)
-    S3=$(openssl rand -hex 32)
-    S4=$(openssl rand -hex 32)
-    S5=$(openssl rand -hex 32)
-    S6=$(openssl rand -hex 32)
-    S7=$(openssl rand -hex 32)
-    S8=$(openssl rand -hex 32)
+        # Provision MySQL Database and user if mysql is present
+        if command -v mysql &>/dev/null; then
+            echo "[*] Provisioning MySQL database $DB_NAME..."
+            SQL_QUERY="CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; CREATE USER IF NOT EXISTS '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}'; ALTER USER '${DB_USER}'@'127.0.0.1' IDENTIFIED BY '${DB_PASS}'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost'; GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'127.0.0.1'; FLUSH PRIVILEGES;"
+            if [[ -f "/etc/mysql/debian.cnf" ]]; then
+                mysql --defaults-file=/etc/mysql/debian.cnf -e "$SQL_QUERY" 2>/dev/null || true
+            else
+                mysql -u root -e "$SQL_QUERY" 2>/dev/null || mysql -e "$SQL_QUERY" 2>/dev/null || true
+            fi
+        fi
 
-    cat > "${DOC_ROOT}/wp-config.php" << WPCONFIG_EOF
+        # Generate random salts
+        S1=$(openssl rand -hex 32)
+        S2=$(openssl rand -hex 32)
+        S3=$(openssl rand -hex 32)
+        S4=$(openssl rand -hex 32)
+        S5=$(openssl rand -hex 32)
+        S6=$(openssl rand -hex 32)
+        S7=$(openssl rand -hex 32)
+        S8=$(openssl rand -hex 32)
+
+        cat > "${DOC_ROOT}/wp-config.php" << WPCONFIG_EOF
 <?php
 /**
  * Hostvra Managed WordPress Configuration for ${DOMAIN}
@@ -128,48 +164,49 @@ if (file_exists(ABSPATH . 'wp-settings.php')) {
     require_once ABSPATH . 'wp-settings.php';
 }
 WPCONFIG_EOF
-    chmod 0644 "${DOC_ROOT}/wp-config.php"
-    echo "[✓] wp-config.php configured successfully."
+        chmod 0644 "${DOC_ROOT}/wp-config.php"
+        echo "[✓] wp-config.php configured successfully."
 
-    # Run automated installation via PHP CLI to create tables and admin if database is accessible
-    if command -v php &>/dev/null; then
-        echo "[*] Initializing WordPress database tables via PHP CLI..."
-        php -r "
-        \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
-        \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
-        \$_SERVER['REQUEST_URI'] = '/';
-        define('WP_INSTALLING', true);
-        require_once '${DOC_ROOT}/wp-load.php';
-        if (!function_exists('wp_install') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
-            require_once ABSPATH . 'wp-admin/includes/upgrade.php';
-        }
-        if (function_exists('wp_install')) {
-            wp_install('${DOMAIN}', 'admin', 'admin@${DOMAIN}', 1, '', '${DB_PASS}');
-        }
-        if (function_exists('update_option')) {
-            update_option('siteurl', 'https://${DOMAIN}');
-            update_option('home', 'https://${DOMAIN}');
-        }
-        " 2>/dev/null || true
+        # Run automated installation via PHP CLI to create tables and admin if database is accessible
+        if command -v php &>/dev/null; then
+            echo "[*] Initializing WordPress database tables via PHP CLI..."
+            php -r "
+            \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
+            \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
+            \$_SERVER['REQUEST_URI'] = '/';
+            define('WP_INSTALLING', true);
+            require_once '${DOC_ROOT}/wp-load.php';
+            if (!function_exists('wp_install') && file_exists(ABSPATH . 'wp-admin/includes/upgrade.php')) {
+                require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+            }
+            if (function_exists('wp_install')) {
+                wp_install('${DOMAIN}', 'admin', 'admin@${DOMAIN}', 1, '', '${DB_PASS}');
+            }
+            if (function_exists('update_option')) {
+                update_option('siteurl', 'https://${DOMAIN}');
+                update_option('home', 'https://${DOMAIN}');
+            }
+            " 2>/dev/null || true
+        fi
     fi
-fi
 
-# Ensure WP_HOME, WP_SITEURL and options table consistency if wp-config.php already exists
-if [[ -f "${DOC_ROOT}/wp-config.php" ]]; then
-    if ! grep -q "WP_HOME" "${DOC_ROOT}/wp-config.php"; then
-        sed -i "/table_prefix/a define('WP_HOME', 'https://${DOMAIN}');\ndefine('WP_SITEURL', 'https://${DOMAIN}');" "${DOC_ROOT}/wp-config.php"
-    fi
-    if command -v php &>/dev/null; then
-        php -r "
-        \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
-        \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
-        \$_SERVER['REQUEST_URI'] = '/';
-        require_once '${DOC_ROOT}/wp-load.php';
-        if (function_exists('update_option')) {
-            update_option('siteurl', 'https://${DOMAIN}');
-            update_option('home', 'https://${DOMAIN}');
-        }
-        " 2>/dev/null || true
+    # Ensure WP_HOME, WP_SITEURL and options table consistency if wp-config.php already exists
+    if [[ -f "${DOC_ROOT}/wp-config.php" ]]; then
+        if ! grep -q "WP_HOME" "${DOC_ROOT}/wp-config.php"; then
+            sed -i "/table_prefix/a define('WP_HOME', 'https://${DOMAIN}');\ndefine('WP_SITEURL', 'https://${DOMAIN}');" "${DOC_ROOT}/wp-config.php"
+        fi
+        if command -v php &>/dev/null && [[ -f "${DOC_ROOT}/wp-load.php" ]]; then
+            php -r "
+            \$_SERVER['HTTP_HOST'] = '${DOMAIN}';
+            \$_SERVER['SERVER_NAME'] = '${DOMAIN}';
+            \$_SERVER['REQUEST_URI'] = '/';
+            require_once '${DOC_ROOT}/wp-load.php';
+            if (function_exists('update_option')) {
+                update_option('siteurl', 'https://${DOMAIN}');
+                update_option('home', 'https://${DOMAIN}');
+            }
+            " 2>/dev/null || true
+        fi
     fi
 fi
 
@@ -458,8 +495,10 @@ chown "${TARGET_USER}:www-data" "$PARENT_DIR" 2>/dev/null || true
 
 find "$DOC_ROOT" -type d -exec chmod 755 {} + 2>/dev/null || true
 find "$DOC_ROOT" -type f -exec chmod 644 {} + 2>/dev/null || true
-mkdir -p "$DOC_ROOT/wp-content"/{plugins,themes,uploads,upgrade}
-chmod -R 775 "$DOC_ROOT/wp-content" 2>/dev/null || true
+if [[ "$IS_WP" == true ]]; then
+    mkdir -p "$DOC_ROOT/wp-content"/{plugins,themes,uploads,upgrade}
+    chmod -R 775 "$DOC_ROOT/wp-content" 2>/dev/null || true
+fi
 mkdir -p "$DOC_ROOT/uploads/images" "$DOC_ROOT/storage" "$DOC_ROOT/public/uploads" 2>/dev/null || true
 chmod -R 777 "$DOC_ROOT/uploads" "$DOC_ROOT/storage" 2>/dev/null || true
 
