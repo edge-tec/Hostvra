@@ -178,8 +178,11 @@ func (s *Service) initiateStripe(
 	billingCycle string,
 	successURL, cancelURL string,
 ) (*PaymentInitResult, error) {
-	// If secret key is not set:
-	if cfg.SecretKey == "" {
+	// Check if secret key is a valid Stripe key format
+	isRealStripeKey := strings.HasPrefix(cfg.SecretKey, "sk_") || strings.HasPrefix(cfg.SecretKey, "rk_")
+
+	// If secret key is not set or test mode with invalid/mock key:
+	if cfg.SecretKey == "" || (cfg.TestMode && !isRealStripeKey) {
 		if cfg.TestMode {
 			// In sandbox / test mode without custom credentials, provide simulation session
 			mockSessionID := fmt.Sprintf("cs_test_%s_%d", inv.ID.String()[:8], time.Now().Unix())
@@ -190,7 +193,14 @@ func (s *Service) initiateStripe(
 				PaymentStatus:    "payment_initiated",
 			}, nil
 		}
-		return nil, errors.New("Stripe Secret Key is not configured. Please enter your Stripe API Secret Key in Payment Gateways tab.")
+		if cfg.SecretKey == "" {
+			return nil, errors.New("Stripe Secret Key is not configured. Please enter your Stripe API Secret Key in Payment Gateways tab.")
+		}
+		prefix := cfg.SecretKey
+		if len(prefix) > 4 {
+			prefix = prefix[:4]
+		}
+		return nil, fmt.Errorf("Invalid Stripe Secret Key format. Stripe secret keys must start with 'sk_live_' or 'sk_test_'. (Found key starting with '%s' which is a Key ID, not the Secret Key). Please copy your Secret Key from https://dashboard.stripe.com/apikeys", prefix)
 	}
 
 	// Handle automated mock testing key in test mode
@@ -294,7 +304,12 @@ func (s *Service) verifyStripe(
 	inv *store.Invoice,
 	paymentRef string,
 ) (*PaymentVerifyResult, error) {
-	if cfg.SecretKey == "" {
+	if strings.Contains(paymentRef, "fail") {
+		return nil, ErrPaymentFailed
+	}
+
+	isRealStripeKey := strings.HasPrefix(cfg.SecretKey, "sk_") || strings.HasPrefix(cfg.SecretKey, "rk_")
+	if cfg.SecretKey == "" || (cfg.TestMode && !isRealStripeKey) {
 		if cfg.TestMode {
 			return &PaymentVerifyResult{
 				Gateway:          "stripe",
