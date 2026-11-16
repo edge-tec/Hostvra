@@ -2930,8 +2930,9 @@ export default function BillingPage() {
             }}
           >
             <div
-              style={{ maxWidth: '440px', width: '100%', margin: 'auto' }}
-              className="relative w-full max-w-sm sm:max-w-md mx-auto my-auto bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-200"
+              style={{ maxWidth: '460px', width: '100%', margin: 'auto' }}
+              className="relative w-full max-w-md mx-auto my-auto bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-200"
+              onClick={(e) => e.stopPropagation()}
             >
               {/* Brand Accent Top Bar */}
               <div className="h-1 w-full bg-blue-600" />
