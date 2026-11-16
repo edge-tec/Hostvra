@@ -1480,6 +1480,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/invoices", cryptoHandler.AdminListInvoices)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/treasuries", cryptoHandler.AdminListTreasuries)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/treasuries", cryptoHandler.AdminSaveTreasury)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/treasuries/quick-setup", cryptoHandler.AdminQuickSetupTreasuries)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Delete("/treasuries/{id}", cryptoHandler.AdminDeleteTreasury)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/ledger", cryptoHandler.AdminListLedger)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/settings", cryptoHandler.AdminGetSettings)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/settings", cryptoHandler.AdminUpdateSettings)

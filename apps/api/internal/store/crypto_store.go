@@ -246,6 +246,29 @@ func (m *MemoryStore) AcquireDepositAddress(ctx context.Context, networkID, curr
 		}
 	}
 
+	// 3. EVM Fallback: if network is bsc, ethereum, or polygon, check if any active EVM treasury exists
+	if networkID == "bsc" || networkID == "ethereum" || networkID == "polygon" {
+		for _, tw := range m.cryptoTreasuries {
+			if (tw.NetworkID == "bsc" || tw.NetworkID == "ethereum" || tw.NetworkID == "polygon") && tw.IsActive && tw.Address != "" {
+				newAddr := &CryptoDepositAddress{
+					ID:                uuid.New(),
+					NetworkID:         networkID,
+					CurrencyID:        currencyID,
+					Address:           tw.Address,
+					DerivationIndex:   0,
+					Status:            "assigned",
+					AssignedInvoiceID: &invoiceID,
+					AssignedAt:        &now,
+					CreatedAt:         now,
+					UpdatedAt:         now,
+				}
+				m.cryptoDepositAddrs[newAddr.ID] = newAddr
+				clone := *newAddr
+				return &clone, nil
+			}
+		}
+	}
+
 	return nil, ErrNoAvailableDepositAddr
 }
 
@@ -709,7 +732,15 @@ func (p *PostgresStore) AcquireDepositAddress(ctx context.Context, networkID, cu
 	// 2. If pool is exhausted, fallback to active treasury address
 	tQ := `SELECT address FROM crypto_treasury_wallets WHERE network_id = $1 AND is_active = TRUE LIMIT 1`
 	var masterAddr string
-	if tErr := tx.QueryRowContext(ctx, tQ, networkID).Scan(&masterAddr); tErr == nil && masterAddr != "" {
+	if tErr := tx.QueryRowContext(ctx, tQ, networkID).Scan(&masterAddr); tErr != nil || masterAddr == "" {
+		// EVM Fallback: if network is bsc, ethereum, or polygon, check for any active EVM treasury
+		if networkID == "bsc" || networkID == "ethereum" || networkID == "polygon" {
+			evmQ := `SELECT address FROM crypto_treasury_wallets WHERE network_id IN ('bsc', 'ethereum', 'polygon') AND is_active = TRUE LIMIT 1`
+			_ = tx.QueryRowContext(ctx, evmQ).Scan(&masterAddr)
+		}
+	}
+
+	if masterAddr != "" {
 		now := time.Now().UTC()
 		newID := uuid.New()
 		insQ := `INSERT INTO crypto_deposit_addresses (id, network_id, currency_id, address, derivation_index, status, assigned_invoice_id, assigned_at, created_at, updated_at)

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -46,6 +47,23 @@ func (h *CryptoHandler) ListCurrencies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	activeTreasuries, _ := h.store.ListCryptoTreasuryWallets(r.Context(), "")
+	activeNetMap := make(map[string]bool)
+	hasAnyEVM := false
+	for _, tw := range activeTreasuries {
+		if tw.IsActive && strings.TrimSpace(tw.Address) != "" {
+			activeNetMap[tw.NetworkID] = true
+			if tw.NetworkID == "bsc" || tw.NetworkID == "ethereum" || tw.NetworkID == "polygon" {
+				hasAnyEVM = true
+			}
+		}
+	}
+	if hasAnyEVM {
+		activeNetMap["bsc"] = true
+		activeNetMap["ethereum"] = true
+		activeNetMap["polygon"] = true
+	}
+
 	type CurrencyOption struct {
 		ID               string  `json:"id"`
 		NetworkID        string  `json:"network_id"`
@@ -58,6 +76,7 @@ func (h *CryptoHandler) ListCurrencies(w http.ResponseWriter, r *http.Request) {
 		MinAmountUSD     float64 `json:"min_amount_usd"`
 		Icon             string  `json:"icon"`
 		PriceUSD         float64 `json:"price_usd"`
+		HasTreasury      bool    `json:"has_treasury"`
 	}
 
 	pricing := crypto.GetPricingService()
@@ -82,6 +101,7 @@ func (h *CryptoHandler) ListCurrencies(w http.ResponseWriter, r *http.Request) {
 				MinAmountUSD:     cur.MinAmountUSD,
 				Icon:             cur.Icon,
 				PriceUSD:         price,
+				HasTreasury:      activeNetMap[net.ID],
 			})
 		}
 	}
@@ -238,13 +258,145 @@ func (h *CryptoHandler) AdminListTreasuries(w http.ResponseWriter, r *http.Reque
 	response.JSON(w, http.StatusOK, treasuries, nil)
 }
 
-// AdminSaveTreasury creates or updates an approved Trust Wallet treasury destination.
-func (h *CryptoHandler) AdminSaveTreasury(w http.ResponseWriter, r *http.Request) {
-	var tw store.CryptoTreasuryWallet
-	if err := json.NewDecoder(r.Body).Decode(&tw); err != nil {
+func (h *CryptoHandler) upsertTreasury(ctx context.Context, networkID, name, address string) error {
+	networkID = strings.ToLower(strings.TrimSpace(networkID))
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return nil
+	}
+	if !crypto.ValidateAddress(networkID, address) {
+		return fmt.Errorf("invalid address for network '%s'", networkID)
+	}
+
+	existing, _ := h.store.ListCryptoTreasuryWallets(ctx, networkID)
+	now := time.Now().UTC()
+	if len(existing) > 0 {
+		target := existing[0]
+		target.Name = name
+		target.Address = address
+		target.IsActive = true
+		target.UpdatedAt = now
+		return h.store.UpdateCryptoTreasuryWallet(ctx, target)
+	}
+
+	tw := &store.CryptoTreasuryWallet{
+		ID:        uuid.New(),
+		NetworkID: networkID,
+		Name:      name,
+		Address:   address,
+		IsActive:  true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	return h.store.CreateCryptoTreasuryWallet(ctx, tw)
+}
+
+// AdminQuickSetupTreasuries configures all Trust Wallet networks in 1 click.
+func (h *CryptoHandler) AdminQuickSetupTreasuries(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TronAddress     string `json:"tron_address"`
+		EVMAddress      string `json:"evm_address"`
+		BitcoinAddress  string `json:"btc_address"`
+		SolanaAddress   string `json:"sol_address"`
+		LitecoinAddress string `json:"ltc_address"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
 		return
 	}
+
+	configuredCount := 0
+	if strings.TrimSpace(req.TronAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "tron", "Trust Wallet TRON (TRC20)", req.TronAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_TRON_ADDRESS", "Invalid TRON address format (must start with T and be 34 characters)", nil, "")
+			return
+		}
+		configuredCount++
+	}
+
+	if strings.TrimSpace(req.EVMAddress) != "" {
+		if !crypto.ValidateAddress("ethereum", strings.TrimSpace(req.EVMAddress)) {
+			response.Error(w, http.StatusBadRequest, "INVALID_EVM_ADDRESS", "Invalid Multi-Chain EVM address format (must start with 0x followed by 40 hex characters)", nil, "")
+			return
+		}
+		_ = h.upsertTreasury(r.Context(), "bsc", "Trust Wallet BNB Smart Chain (BEP20)", req.EVMAddress)
+		_ = h.upsertTreasury(r.Context(), "ethereum", "Trust Wallet Ethereum (ERC20)", req.EVMAddress)
+		_ = h.upsertTreasury(r.Context(), "polygon", "Trust Wallet Polygon (PoS)", req.EVMAddress)
+		configuredCount += 3
+	}
+
+	if strings.TrimSpace(req.BitcoinAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "bitcoin", "Trust Wallet Bitcoin", req.BitcoinAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_BTC_ADDRESS", "Invalid Bitcoin address format", nil, "")
+			return
+		}
+		configuredCount++
+	}
+
+	if strings.TrimSpace(req.SolanaAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "solana", "Trust Wallet Solana", req.SolanaAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_SOL_ADDRESS", "Invalid Solana address format", nil, "")
+			return
+		}
+		configuredCount++
+	}
+
+	if strings.TrimSpace(req.LitecoinAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "litecoin", "Trust Wallet Litecoin", req.LitecoinAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_LTC_ADDRESS", "Invalid Litecoin address format", nil, "")
+			return
+		}
+		configuredCount++
+	}
+
+	if configuredCount == 0 {
+		response.Error(w, http.StatusBadRequest, "NO_ADDRESSES", "Please provide at least one valid wallet address (e.g. TRON or EVM)", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "crypto.treasury.quick_setup", "treasuries", "bulk", "success",
+		fmt.Sprintf("Quick setup completed across %d networks", configuredCount), nil)
+
+	treasuries, _ := h.store.ListCryptoTreasuryWallets(r.Context(), "")
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"configured": configuredCount,
+		"treasuries": treasuries,
+	}, nil)
+}
+
+// AdminDeleteTreasury removes an approved treasury destination.
+func (h *CryptoHandler) AdminDeleteTreasury(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid treasury ID", nil, "")
+		return
+	}
+
+	if err := h.store.DeleteCryptoTreasuryWallet(r.Context(), id); err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete treasury wallet", nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "crypto.treasury.delete", "treasury_wallet", id.String(), "success", "Deleted crypto treasury", nil)
+	response.JSON(w, http.StatusOK, map[string]bool{"success": true}, nil)
+}
+
+// AdminSaveTreasury creates or updates an approved Trust Wallet treasury destination.
+func (h *CryptoHandler) AdminSaveTreasury(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		store.CryptoTreasuryWallet
+		ApplyToAllEVM bool `json:"apply_to_all_evm"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	tw := payload.CryptoTreasuryWallet
+	tw.NetworkID = strings.ToLower(strings.TrimSpace(tw.NetworkID))
+	tw.Address = strings.TrimSpace(tw.Address)
 
 	if !crypto.ValidateAddress(tw.NetworkID, tw.Address) {
 		response.Error(w, http.StatusBadRequest, "INVALID_ADDRESS", fmt.Sprintf("Invalid wallet address for network '%s'", tw.NetworkID), nil, "")
@@ -252,14 +404,25 @@ func (h *CryptoHandler) AdminSaveTreasury(w http.ResponseWriter, r *http.Request
 	}
 
 	if tw.ID == uuid.Nil {
-		tw.ID = uuid.New()
-		tw.IsActive = true
-		now := time.Now().UTC()
-		tw.CreatedAt = now
-		tw.UpdatedAt = now
-		if err := h.store.CreateCryptoTreasuryWallet(r.Context(), &tw); err != nil {
-			response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create treasury wallet", nil, "")
-			return
+		existing, _ := h.store.ListCryptoTreasuryWallets(r.Context(), tw.NetworkID)
+		if len(existing) > 0 {
+			target := existing[0]
+			target.Name = tw.Name
+			target.Address = tw.Address
+			target.IsActive = true
+			target.UpdatedAt = time.Now().UTC()
+			_ = h.store.UpdateCryptoTreasuryWallet(r.Context(), target)
+			tw = *target
+		} else {
+			tw.ID = uuid.New()
+			tw.IsActive = true
+			now := time.Now().UTC()
+			tw.CreatedAt = now
+			tw.UpdatedAt = now
+			if err := h.store.CreateCryptoTreasuryWallet(r.Context(), &tw); err != nil {
+				response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create treasury wallet", nil, "")
+				return
+			}
 		}
 	} else {
 		tw.UpdatedAt = time.Now().UTC()
@@ -267,6 +430,12 @@ func (h *CryptoHandler) AdminSaveTreasury(w http.ResponseWriter, r *http.Request
 			response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update treasury wallet", nil, "")
 			return
 		}
+	}
+
+	if payload.ApplyToAllEVM && (tw.NetworkID == "bsc" || tw.NetworkID == "ethereum" || tw.NetworkID == "polygon") {
+		_ = h.upsertTreasury(r.Context(), "bsc", "Trust Wallet BNB Smart Chain (BEP20)", tw.Address)
+		_ = h.upsertTreasury(r.Context(), "ethereum", "Trust Wallet Ethereum (ERC20)", tw.Address)
+		_ = h.upsertTreasury(r.Context(), "polygon", "Trust Wallet Polygon (PoS)", tw.Address)
 	}
 
 	h.audit.Log(r.Context(), r, "crypto.treasury.save", "treasury_wallet", tw.ID.String(), "success",

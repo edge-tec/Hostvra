@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getStoredUserRole } from '@/lib/api';
 import {
   ShieldCheck,
   Clock,
@@ -15,6 +15,7 @@ import {
   Coins,
   CheckCircle2,
   Sparkles,
+  Zap,
 } from 'lucide-react';
 
 interface CryptoCurrencyOption {
@@ -28,6 +29,7 @@ interface CryptoCurrencyOption {
   min_amount_usd: number;
   icon: string;
   price_usd: number;
+  has_treasury?: boolean;
 }
 
 interface CryptoInvoice {
@@ -70,6 +72,12 @@ export default function CryptoCheckoutPage() {
   const [txHashInput, setTxHashInput] = useState<string>('');
   const [verifyingTx, setVerifyingTx] = useState<boolean>(false);
   const [timeRemainingSec, setTimeRemainingSec] = useState<number>(1800);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  useEffect(() => {
+    const roleInfo = getStoredUserRole();
+    setIsAdmin(roleInfo.role === 'admin' || roleInfo.role === 'superadmin' || roleInfo.isSuperAdmin);
+  }, []);
 
   // 1. Fetch Currency Options
   const fetchCurrencies = useCallback(async () => {
@@ -77,6 +85,10 @@ export default function CryptoCheckoutPage() {
       const res = await apiFetch<CryptoCurrencyOption[]>('/api/v1/crypto/currencies');
       if (res.data && res.data.length > 0) {
         setOptions(res.data);
+        const firstActive = res.data.find((o) => o.has_treasury);
+        if (firstActive) {
+          setSelectedCurrencyId(firstActive.id);
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Failed to load supported crypto networks');
@@ -90,7 +102,14 @@ export default function CryptoCheckoutPage() {
       setCreating(true);
       setError(null);
       try {
-        const selected = options.find((o) => o.id === curId) || options[0];
+        const selected = options.find((o) => o.id === curId) || options.find((o) => o.has_treasury) || options[0];
+        if (options.length > 0 && !options.some((o) => o.has_treasury)) {
+          setError('NO_TREASURY_AVAILABLE');
+          setLoading(false);
+          setCreating(false);
+          return;
+        }
+
         const res = await apiFetch<CryptoInvoice>('/api/v1/crypto/invoices', {
           method: 'POST',
           body: JSON.stringify({
@@ -268,7 +287,12 @@ export default function CryptoCheckoutPage() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-xs">{opt.symbol}</span>
-                        <span className="text-[10px] text-slate-400 uppercase">{opt.network_id}</span>
+                        <div className="flex items-center gap-1">
+                          {opt.has_treasury && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active Treasury" />
+                          )}
+                          <span className="text-[10px] text-slate-400 uppercase">{opt.network_id}</span>
+                        </div>
                       </div>
                       <div className="text-[10px] text-slate-400 truncate mt-1">{opt.name}</div>
                     </button>
@@ -285,18 +309,29 @@ export default function CryptoCheckoutPage() {
                 <div className="flex items-start gap-2.5">
                   <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                   <div className="space-y-1">
-                    <p className="font-bold text-rose-200">Treasury Wallet Setup Required</p>
-                    <p className="text-rose-300/90 leading-relaxed">{error}</p>
+                    <p className="font-bold text-rose-200">
+                      {error === 'NO_TREASURY_AVAILABLE' || error.includes('no treasury destination address')
+                        ? 'Crypto Gateway Under Configuration'
+                        : 'Unable to Generate Crypto Invoice'}
+                    </p>
+                    <p className="text-rose-300/90 leading-relaxed">
+                      {error === 'NO_TREASURY_AVAILABLE' || error.includes('no treasury destination address')
+                        ? 'The merchant has not yet configured on-chain recipient addresses for this token. Please select an active cryptocurrency above or complete payment via Stripe / Card.'
+                        : error}
+                    </p>
                   </div>
                 </div>
                 <div className="pt-2 border-t border-rose-900/40 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => router.push('/admin/crypto')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  >
-                    <span>Add Trust Wallet Treasury (Admin)</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => router.push('/admin/crypto')}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Setup Wallet Addresses in Admin</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   <button
                     onClick={() => router.push('/billing')}
                     className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"

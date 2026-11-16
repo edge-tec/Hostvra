@@ -179,4 +179,40 @@ func TestCryptoHandler_AdminEndpoints(t *testing.T) {
 	if uW.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on AdminUpdateSettings, got %d", uW.Code)
 	}
+
+	// 1-Click Quick Setup
+	quickBody := map[string]string{
+		"tron_address": "TYDzsYUE4jEJTXsyNDoja2d1M7T4ZkYjHn",
+		"evm_address":  "0x55d398326f99059fF775485246999027B3197955",
+		"btc_address":  "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+	}
+	qBytes, _ := json.Marshal(quickBody)
+	qReq := httptest.NewRequest("POST", "/api/v1/admin/crypto/treasuries/quick-setup", bytes.NewReader(qBytes))
+	qW := httptest.NewRecorder()
+	h.AdminQuickSetupTreasuries(qW, qReq)
+	if qW.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on AdminQuickSetupTreasuries, got %d: %s", qW.Code, qW.Body.String())
+	}
+
+	// Verify all networks are active now
+	listReq := httptest.NewRequest("GET", "/api/v1/crypto/currencies", nil)
+	listW := httptest.NewRecorder()
+	h.ListCurrencies(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK on ListCurrencies, got %d", listW.Code)
+	}
+	var currenciesRes []map[string]interface{}
+	if err := json.Unmarshal(listW.Body.Bytes(), &currenciesRes); err != nil {
+		t.Fatalf("failed to decode currencies response: %v", err)
+	}
+	hasActive := false
+	for _, c := range currenciesRes {
+		if hasT, ok := c["has_treasury"].(bool); ok && hasT {
+			hasActive = true
+			break
+		}
+	}
+	if !hasActive {
+		t.Fatalf("expected at least one currency to have has_treasury = true after quick setup")
+	}
 }

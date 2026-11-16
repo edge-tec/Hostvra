@@ -18,6 +18,8 @@ import {
   ArrowRight,
   Send,
   Zap,
+  Trash2,
+  Check,
 } from 'lucide-react';
 
 interface CryptoInvoice {
@@ -82,6 +84,17 @@ export default function AdminCryptoPage() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
 
+  // Quick Setup Wizard State
+  const [showQuickSetup, setShowQuickSetup] = useState<boolean>(false);
+  const [quickForm, setQuickForm] = useState({
+    tron_address: '',
+    evm_address: '',
+    btc_address: '',
+    sol_address: '',
+    ltc_address: '',
+  });
+  const [savingQuick, setSavingQuick] = useState<boolean>(false);
+
   // New Treasury Modal State
   const [showAddTreasury, setShowAddTreasury] = useState<boolean>(false);
   const [newTreasury, setNewTreasury] = useState({
@@ -89,6 +102,7 @@ export default function AdminCryptoPage() {
     name: 'Trust Wallet Cold Treasury',
     address: '',
     is_active: true,
+    apply_to_all_evm: true,
   });
 
   // 1. Fetch Invoices
@@ -149,10 +163,78 @@ export default function AdminCryptoPage() {
     loadAll();
   }, [loadAll]);
 
+  useEffect(() => {
+    if (treasuries.length > 0) {
+      const tron = treasuries.find((t) => t.network_id === 'tron')?.address || '';
+      const evm =
+        treasuries.find((t) => t.network_id === 'bsc' || t.network_id === 'ethereum' || t.network_id === 'polygon')
+          ?.address || '';
+      const btc = treasuries.find((t) => t.network_id === 'bitcoin')?.address || '';
+      const sol = treasuries.find((t) => t.network_id === 'solana')?.address || '';
+      const ltc = treasuries.find((t) => t.network_id === 'litecoin')?.address || '';
+      setQuickForm((prev) => ({
+        ...prev,
+        tron_address: prev.tron_address || tron,
+        evm_address: prev.evm_address || evm,
+        btc_address: prev.btc_address || btc,
+        sol_address: prev.sol_address || sol,
+        ltc_address: prev.ltc_address || ltc,
+      }));
+    }
+  }, [treasuries]);
+
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadAll();
     setRefreshing(false);
+  };
+
+  const handleQuickSetupSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (
+      !quickForm.tron_address.trim() &&
+      !quickForm.evm_address.trim() &&
+      !quickForm.btc_address.trim() &&
+      !quickForm.sol_address.trim() &&
+      !quickForm.ltc_address.trim()
+    ) {
+      alert('Please enter at least one recipient address (e.g. TRON or EVM).');
+      return;
+    }
+    setSavingQuick(true);
+    try {
+      const res = await apiFetch<any>('/api/v1/admin/crypto/treasuries/quick-setup', {
+        method: 'POST',
+        body: JSON.stringify(quickForm),
+      });
+      if (res.data?.success) {
+        alert(`Success! Configured ${res.data.configured} crypto network treasuries.`);
+        setShowQuickSetup(false);
+        await fetchTreasuries();
+      } else {
+        alert(res.error?.message || 'Failed to complete quick setup');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Quick setup failed');
+    } finally {
+      setSavingQuick(false);
+    }
+  };
+
+  const handleDeleteTreasury = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to remove treasury "${name}"?`)) return;
+    try {
+      const res = await apiFetch(`/api/v1/admin/crypto/treasuries/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.data) {
+        await fetchTreasuries();
+      } else {
+        alert(res.error?.message || 'Failed to delete treasury');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete treasury');
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -184,6 +266,7 @@ export default function AdminCryptoPage() {
           name: 'Trust Wallet Cold Treasury',
           address: '',
           is_active: true,
+          apply_to_all_evm: false,
         });
         await fetchTreasuries();
       } else {
@@ -237,14 +320,23 @@ export default function AdminCryptoPage() {
           </div>
         </div>
 
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 transition cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-500' : ''}`} />
-          <span>Refresh Ledger</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowQuickSetup(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-sm shadow-emerald-600/20"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            <span>1-Click Trust Wallet Setup</span>
+          </button>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 transition cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-emerald-500' : ''}`} />
+            <span>Refresh Ledger</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -269,8 +361,14 @@ export default function AdminCryptoPage() {
           </div>
         </div>
 
-        <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-sm">
-          <div className="text-[11px] uppercase font-semibold text-slate-500 dark:text-slate-400">Trust Wallet Treasuries</div>
+        <div
+          onClick={() => setActiveTab('treasuries')}
+          className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-sm cursor-pointer hover:border-sky-500 transition group"
+        >
+          <div className="text-[11px] uppercase font-semibold text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>Trust Wallet Treasuries</span>
+            <span className="text-[10px] text-sky-500 group-hover:underline font-bold">Manage &rarr;</span>
+          </div>
           <div className="text-2xl font-black text-sky-600 dark:text-sky-400 mt-1">
             {treasuries.filter((t) => t.is_active).length} Active
           </div>
@@ -289,6 +387,95 @@ export default function AdminCryptoPage() {
           </div>
         </div>
       </div>
+
+      {/* 1-Click Setup Banner when no treasuries are active */}
+      {treasuries.length === 0 && (
+        <div className="p-6 bg-gradient-to-r from-emerald-950/50 via-slate-900 to-sky-950/40 border border-emerald-500/40 rounded-2xl shadow-xl space-y-4">
+          <div className="flex items-start justify-between flex-wrap gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] uppercase font-bold border border-emerald-500/30">
+                <Zap className="w-3 h-3" />
+                <span>Action Required: Configure Gateway</span>
+              </div>
+              <h2 className="text-base font-bold text-white">
+                Configure Your Trust Wallet Recipient Addresses (0% Gateway Fees)
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                Enter your cold wallet addresses below. Customer payments will be verified directly on-chain and deposited straight into your Trust Wallet with zero middleman fees.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleQuickSetupSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-2">
+            <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2">
+              <label className="block font-bold text-slate-200">
+                1. TRON (TRC-20) Address <span className="text-emerald-400 font-semibold">*Required for USDT (TRC20) &amp; TRX</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. TYDzsYUE4jEJTXsyNDoja2d1M7T4ZkYjHn"
+                value={quickForm.tron_address}
+                onChange={(e) => setQuickForm({ ...quickForm, tron_address: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">Copy your TRON or USDT (TRC20) address from Trust Wallet (starts with T).</p>
+            </div>
+
+            <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2">
+              <label className="block font-bold text-slate-200">
+                2. Multi-Chain EVM Address <span className="text-emerald-400 font-semibold">*Required for BSC, ETH &amp; Polygon</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 0x55d398326f99059fF775485246999027B3197955"
+                value={quickForm.evm_address}
+                onChange={(e) => setQuickForm({ ...quickForm, evm_address: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">Copy your BNB / Ethereum address from Trust Wallet (starts with 0x). Works for USDT BEP20, ERC20 &amp; BNB.</p>
+            </div>
+
+            <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2">
+              <label className="block font-bold text-slate-200">
+                3. Bitcoin (BTC) Address <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+                value={quickForm.btc_address}
+                onChange={(e) => setQuickForm({ ...quickForm, btc_address: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">Native SegWit or Legacy BTC address from Trust Wallet.</p>
+            </div>
+
+            <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2 flex flex-col justify-between">
+              <div>
+                <label className="block font-bold text-slate-200">
+                  4. Solana (SOL) Address <span className="text-slate-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+                  value={quickForm.sol_address}
+                  onChange={(e) => setQuickForm({ ...quickForm, sol_address: e.target.value })}
+                  className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
+                />
+              </div>
+              <div className="pt-2 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={savingQuick}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 disabled:opacity-50"
+                >
+                  <Zap className="w-4 h-4" />
+                  <span>{savingQuick ? 'Activating Gateway...' : 'Save & Enable All Crypto Payments'}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-700 flex gap-2">
@@ -437,50 +624,89 @@ export default function AdminCryptoPage() {
       {/* Tab 2: Treasuries */}
       {activeTab === 'treasuries' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-              Approved Trust Wallet Destinations
-            </h2>
-            <button
-              onClick={() => setShowAddTreasury(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition cursor-pointer shadow-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Treasury Wallet</span>
-            </button>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                Approved Trust Wallet Destinations
+              </h2>
+              <p className="text-xs text-slate-500">
+                Customer payments will be deposited directly to these on-chain addresses.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowQuickSetup(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5 text-emerald-500" />
+                <span>Quick Setup Wizard</span>
+              </button>
+              <button
+                onClick={() => setShowAddTreasury(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition cursor-pointer shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Treasury Wallet</span>
+              </button>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {treasuries.map((tw) => (
-              <div
-                key={tw.id}
-                className="p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-sm space-y-3"
+          {treasuries.length === 0 ? (
+            <div className="p-12 text-center bg-white dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-700 rounded-2xl space-y-3">
+              <Wallet className="w-10 h-10 text-slate-400 mx-auto" />
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-200">No Treasuries Configured</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Configure your Trust Wallet addresses using the 1-click wizard to start accepting cryptocurrency payments immediately.
+              </p>
+              <button
+                onClick={() => setShowQuickSetup(true)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                    {tw.network_id}
-                  </span>
-                  <span className={`text-[11px] font-semibold ${tw.is_active ? 'text-emerald-500' : 'text-slate-400'}`}>
-                    {tw.is_active ? 'Active Destination' : 'Disabled'}
-                  </span>
-                </div>
+                Launch 1-Click Setup Wizard
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {treasuries.map((tw) => (
+                <div
+                  key={tw.id}
+                  className="p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-sm space-y-3 relative group"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
+                      {tw.network_id}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-[11px] font-semibold ${tw.is_active ? 'text-emerald-500' : 'text-slate-400'}`}>
+                        {tw.is_active ? 'Active' : 'Disabled'}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteTreasury(tw.id, tw.name)}
+                        className="p-1 text-slate-400 hover:text-rose-500 rounded transition cursor-pointer"
+                        title="Delete Treasury"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
 
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">{tw.name}</h3>
-                  <div className="font-mono text-xs text-slate-500 break-all select-all mt-1">
-                    {tw.address}
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{tw.name}</h3>
+                    <div className="font-mono text-xs text-slate-500 break-all select-all mt-1 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
+                      {tw.address}
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                    <span className="text-slate-500">Auto-Sweep:</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {tw.auto_sweep_enabled ? 'Enabled' : 'Manual Approval'}
+                    </span>
                   </div>
                 </div>
-
-                <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs">
-                  <span className="text-slate-500">Auto-Sweep:</span>
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">
-                    {tw.auto_sweep_enabled ? 'Enabled' : 'Manual Approval'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* Add Treasury Modal */}
           {showAddTreasury && (
@@ -499,11 +725,13 @@ export default function AdminCryptoPage() {
                       onChange={(e) => setNewTreasury({ ...newTreasury, network_id: e.target.value })}
                       className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                     >
-                      <option value="tron">TRON (TRC20)</option>
-                      <option value="bsc">BNB Smart Chain (BEP20)</option>
-                      <option value="ethereum">Ethereum (ERC20)</option>
-                      <option value="polygon">Polygon</option>
-                      <option value="bitcoin">Bitcoin</option>
+                      <option value="tron">TRON (TRC20) - USDT, TRX</option>
+                      <option value="bsc">BNB Smart Chain (BEP20) - BNB, USDT, USDC</option>
+                      <option value="ethereum">Ethereum (ERC20) - ETH, USDT, USDC</option>
+                      <option value="polygon">Polygon (PoS)</option>
+                      <option value="bitcoin">Bitcoin (BTC)</option>
+                      <option value="solana">Solana (SOL)</option>
+                      <option value="litecoin">Litecoin (LTC)</option>
                     </select>
                   </div>
 
@@ -534,6 +762,24 @@ export default function AdminCryptoPage() {
                     />
                   </div>
 
+                  {(newTreasury.network_id === 'bsc' ||
+                    newTreasury.network_id === 'ethereum' ||
+                    newTreasury.network_id === 'polygon') && (
+                    <label className="flex items-center gap-2 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={newTreasury.apply_to_all_evm}
+                        onChange={(e) =>
+                          setNewTreasury({ ...newTreasury, apply_to_all_evm: e.target.checked })
+                        }
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                        Also apply this address to all EVM chains (BSC, Ethereum, Polygon)
+                      </span>
+                    </label>
+                  )}
+
                   <div className="flex justify-end gap-2 pt-2">
                     <button
                       type="button"
@@ -547,6 +793,122 @@ export default function AdminCryptoPage() {
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer"
                     >
                       Save Destination
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Setup Modal */}
+          {showQuickSetup && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                      <Zap className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        1-Click Multi-Chain Trust Wallet Setup
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Configure recipient addresses once to activate all networks and tokens.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowQuickSetup(false)}
+                    className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                  >
+                    &times;
+                  </button>
+                </div>
+
+                <form onSubmit={handleQuickSetupSubmit} className="space-y-4 text-xs">
+                  <div className="space-y-1">
+                    <label className="block font-bold text-slate-800 dark:text-slate-200">
+                      TRON (TRC20) Address <span className="text-emerald-500 font-semibold">*Required for USDT (TRC20)</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. TYDzsYUE4jEJTXsyNDoja2d1M7T4ZkYjHn"
+                      value={quickForm.tron_address}
+                      onChange={(e) => setQuickForm({ ...quickForm, tron_address: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Your Trust Wallet TRON address starting with T.</p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block font-bold text-slate-800 dark:text-slate-200">
+                      Multi-Chain EVM Address <span className="text-emerald-500 font-semibold">*Required for BSC, ETH &amp; Polygon</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 0x55d398326f99059fF775485246999027B3197955"
+                      value={quickForm.evm_address}
+                      onChange={(e) => setQuickForm({ ...quickForm, evm_address: e.target.value })}
+                      className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono"
+                    />
+                    <p className="text-[10px] text-slate-400">Your Trust Wallet BNB / ETH address starting with 0x (used for USDT BEP20, ERC20 &amp; BNB).</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800 dark:text-slate-200">
+                        Bitcoin (BTC) <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="bc1q..."
+                        value={quickForm.btc_address}
+                        onChange={(e) => setQuickForm({ ...quickForm, btc_address: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800 dark:text-slate-200">
+                        Solana (SOL) <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="7vfC..."
+                        value={quickForm.sol_address}
+                        onChange={(e) => setQuickForm({ ...quickForm, sol_address: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800 dark:text-slate-200">
+                        Litecoin (LTC) <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="ltc1..."
+                        value={quickForm.ltc_address}
+                        onChange={(e) => setQuickForm({ ...quickForm, ltc_address: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setShowQuickSetup(false)}
+                      className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl font-medium text-slate-700 dark:text-slate-300 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingQuick}
+                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      <Zap className="w-4 h-4" />
+                      <span>{savingQuick ? 'Saving...' : 'Save & Enable All Networks'}</span>
                     </button>
                   </div>
                 </form>
