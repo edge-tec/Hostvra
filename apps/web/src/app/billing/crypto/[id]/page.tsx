@@ -511,10 +511,11 @@ export default function CryptoCheckoutPage() {
                     </button>
                   )}
                   <button
-                    onClick={() => router.push('/billing')}
-                    className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm"
+                    onClick={() => router.push(params?.id ? `/billing?pay_invoice=${params.id}&method=card` : '/billing')}
+                    className="px-4 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold transition cursor-pointer border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-1.5"
                   >
-                    Pay with Card / Stripe
+                    <CreditCard className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Pay with Card / Stripe</span>
                   </button>
                 </div>
               </div>
@@ -783,10 +784,10 @@ export default function CryptoCheckoutPage() {
                     {/* 6. ALTERNATIVE PAYMENT & SUPPORT FOOTER */}
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs text-slate-500">
                       <button
-                        onClick={() => router.push('/billing')}
+                        onClick={() => router.push(params?.id ? `/billing?pay_invoice=${params.id}&method=card` : '/billing')}
                         className="hover:text-slate-900 dark:hover:text-slate-200 transition flex items-center gap-1.5 cursor-pointer font-medium"
                       >
-                        <CreditCard className="w-3.5 h-3.5" />
+                        <CreditCard className="w-3.5 h-3.5 text-blue-500" />
                         <span>Pay with Card (Stripe) instead</span>
                       </button>
 
