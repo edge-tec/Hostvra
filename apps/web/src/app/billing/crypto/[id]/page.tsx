@@ -432,11 +432,10 @@ export default function CryptoCheckoutPage() {
                         setSelectedCurrencyId(opt.id);
                         initInvoice(opt.id);
                       }}
-                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 flex flex-col justify-between gap-2 cursor-pointer shadow-sm ${
-                        isSelected
-                          ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-500/10'
-                          : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
-                      }`}
+                      className={`p-3.5 rounded-2xl border text-left transition-all duration-150 flex flex-col justify-between gap-2 cursor-pointer shadow-sm ${isSelected
+                        ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-50/40 dark:bg-emerald-500/10'
+                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                        }`}
                     >
                       <div className="flex items-center justify-between w-full">
                         <div className="flex items-center gap-2">
@@ -594,8 +593,8 @@ export default function CryptoCheckoutPage() {
                             {invoice.status === 'confirming'
                               ? `Confirming On-Chain (${invoice.confirmations} / ${invoice.min_confirmations} blocks)`
                               : invoice.status === 'detecting'
-                              ? 'Deposit Detected! Verifying amount...'
-                              : 'Awaiting On-Chain Deposit'}
+                                ? 'Deposit Detected! Verifying amount...'
+                                : 'Awaiting On-Chain Deposit'}
                           </span>
                         </div>
 
@@ -616,11 +615,10 @@ export default function CryptoCheckoutPage() {
                           <span>1. Created</span>
                         </div>
                         <div
-                          className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${
-                            invoice.status === 'confirming' || invoice.status === 'detecting'
-                              ? 'bg-amber-100 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300'
-                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400'
-                          }`}
+                          className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${invoice.status === 'confirming' || invoice.status === 'detecting'
+                            ? 'bg-amber-100 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/30 text-amber-800 dark:text-amber-300'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400'
+                            }`}
                         >
                           {invoice.status === 'confirming' || invoice.status === 'detecting' ? (
                             <RefreshCw className="w-3 h-3 animate-spin" />
@@ -630,11 +628,10 @@ export default function CryptoCheckoutPage() {
                           <span>Detected</span>
                         </div>
                         <div
-                          className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${
-                            invoice.status === 'paid'
-                              ? 'bg-emerald-100 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
-                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400'
-                          }`}
+                          className={`p-2 rounded-xl border flex items-center justify-center gap-1 ${invoice.status === 'paid'
+                            ? 'bg-emerald-100 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400'
+                            }`}
                         >
                           <span>3.</span>
                           <span>Settled</span>
