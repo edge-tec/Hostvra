@@ -2866,25 +2866,25 @@ export default function BillingPage() {
 
         {/* MODAL: CARD PAYMENT CHECKOUT (STRIPE / CREDIT & DEBIT CARD TERMINAL) */}
         {cardModalOpen && selectedCardInvoice && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/75 backdrop-blur-md animate-in fade-in duration-200">
-            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 animate-in fade-in duration-150">
+            <div className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl border-2 border-slate-300 dark:border-slate-700 shadow-2xl overflow-hidden max-h-[94vh] flex flex-col">
               {/* Brand Accent Top Bar */}
-              <div className="h-1.5 w-full bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-500" />
+              <div className="h-1.5 w-full bg-blue-600" />
 
               {/* Modal Header */}
-              <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-slate-200 dark:border-slate-800">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/20">
+                  <div className="p-2.5 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/30">
                     <CreditCard className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                       <span>Card Payment Checkout</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-600 text-white uppercase tracking-wider">
                         STRIPE
                       </span>
                     </h3>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                       256-bit SSL End-to-End Encrypted Settlement
                     </p>
                   </div>
@@ -2893,50 +2893,51 @@ export default function BillingPage() {
                 <button
                   type="button"
                   onClick={() => setCardModalOpen(false)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-300 transition-colors cursor-pointer"
+                  title="Close"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
               {/* Modal Body */}
-              <div className="p-5 sm:p-6 space-y-5 overflow-y-auto">
+              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto">
                 {cardPaymentSuccess ? (
                   <div className="py-6 flex flex-col items-center text-center space-y-4">
-                    <div className="w-16 h-16 rounded-3xl bg-emerald-500/15 border-2 border-emerald-500/30 flex items-center justify-center text-emerald-500 shadow-lg shadow-emerald-500/10">
+                    <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-lg shadow-emerald-500/20">
                       <CheckCircle2 className="w-10 h-10" />
                     </div>
                     <div className="space-y-1">
                       <h3 className="text-xl font-black text-slate-900 dark:text-white">
                         Payment Successful!
                       </h3>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
                         Invoice #{selectedCardInvoice.invoice_number} has been settled and verified.
                       </p>
                     </div>
 
-                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 w-full text-xs space-y-2.5">
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 w-full text-xs space-y-2.5">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Amount Paid:</span>
-                        <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                        <span className="text-slate-500 dark:text-slate-400 font-semibold">Amount Paid:</span>
+                        <span className="font-black text-slate-900 dark:text-white text-base">
                           {formatPrice(selectedCardInvoice.total)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Payment Gateway:</span>
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        <span className="text-slate-500 dark:text-slate-400 font-semibold">Payment Gateway:</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
                           Stripe Credit/Debit Card
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Transaction ID:</span>
-                        <span className="font-mono text-[11px] text-blue-600 dark:text-blue-400 font-bold">
+                        <span className="text-slate-500 dark:text-slate-400 font-semibold">Transaction ID:</span>
+                        <span className="font-mono text-xs text-blue-600 dark:text-blue-400 font-black">
                           {cardTxnId || 'pi_verified_ok'}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Status:</span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                        <span className="text-slate-500 dark:text-slate-400 font-semibold">Status:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
                           PAID
                         </span>
                       </div>
@@ -2950,7 +2951,7 @@ export default function BillingPage() {
                           setSelectedInvoice(selectedCardInvoice);
                           setReceiptModalOpen(true);
                         }}
-                        className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs transition shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer"
+                        className="flex-1 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition shadow-md shadow-blue-500/25 flex items-center justify-center gap-2 cursor-pointer"
                       >
                         <Printer className="w-4 h-4" />
                         <span>View Official Receipt</span>
@@ -2958,7 +2959,7 @@ export default function BillingPage() {
                       <button
                         type="button"
                         onClick={() => setCardModalOpen(false)}
-                        className="py-3 px-5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs transition cursor-pointer"
+                        className="py-3 px-5 rounded-xl border-2 border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold text-xs transition cursor-pointer"
                       >
                         Done
                       </button>
@@ -2967,85 +2968,80 @@ export default function BillingPage() {
                 ) : (
                   <form onSubmit={handleProcessCardPayment} className="space-y-4">
                     {/* Invoice Summary Card */}
-                    <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                          Invoice Reference
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          INVOICE REFERENCE
                         </div>
-                        <div className="text-sm font-bold text-slate-900 dark:text-white font-mono">
+                        <div className="text-base font-black text-slate-900 dark:text-white font-mono">
                           {selectedCardInvoice.invoice_number}
                         </div>
-                        <div className="text-[11px] text-slate-500 truncate max-w-[220px]">
+                        <div className="text-xs font-medium text-slate-600 dark:text-slate-300 truncate max-w-[240px]">
                           {selectedCardInvoice.description || 'Hostvra Cloud Infrastructure'}
                         </div>
                       </div>
 
-                      <div className="text-right space-y-0.5">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                          Amount Payable
+                      <div className="text-right space-y-1">
+                        <div className="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                          AMOUNT PAYABLE
                         </div>
-                        <div className="text-xl font-black text-blue-600 dark:text-blue-400 font-mono">
+                        <div className="text-2xl font-black text-blue-600 dark:text-blue-400 font-mono">
                           {formatPrice(selectedCardInvoice.total)}
                         </div>
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                          Unpaid
+                        <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                          UNPAID
                         </span>
                       </div>
                     </div>
 
-                    {/* Realistic Visual Virtual Card */}
-                    <div className="relative h-44 rounded-2xl bg-gradient-to-tr from-slate-950 via-slate-900 to-indigo-950 border border-slate-700/60 shadow-xl p-5 text-white flex flex-col justify-between overflow-hidden select-none">
-                      <div className="absolute -right-12 -top-12 w-36 h-36 rounded-full bg-blue-500/20 blur-2xl pointer-events-none" />
-                      <div className="absolute -left-10 -bottom-10 w-36 h-36 rounded-full bg-indigo-500/20 blur-2xl pointer-events-none" />
-
+                    {/* Realistic High-Contrast Virtual Card (NO BLUR, 100% SHARP & VISIBLE) */}
+                    <div className="relative h-44 rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 border-2 border-slate-700 shadow-xl p-5 text-white flex flex-col justify-between select-none">
                       {/* Top: Chip & Brand */}
-                      <div className="flex items-center justify-between relative z-10">
-                        <div className="flex items-center gap-2">
-                          <div className="w-10 h-7 rounded-md bg-gradient-to-br from-amber-300 via-amber-400 to-amber-600 p-0.5 shadow-sm border border-amber-200/50 flex flex-col justify-between overflow-hidden">
-                            <div className="border-b border-amber-600/40 h-1.5" />
-                            <div className="border-b border-amber-600/40 h-1.5" />
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-11 h-8 rounded-lg bg-amber-400 border border-amber-300 shadow flex flex-col justify-evenly px-1 py-0.5">
+                            <div className="border-b border-amber-700/50 h-1" />
+                            <div className="border-b border-amber-700/50 h-1" />
+                            <div className="border-b border-amber-700/50 h-1" />
                           </div>
-                          <span className="text-slate-400 font-mono text-xs">))))</span>
+                          <span className="text-white font-mono text-sm font-bold tracking-tighter">))))</span>
                         </div>
 
-                        <div className="font-black text-sm tracking-widest uppercase italic">
+                        <div className="px-3 py-1 rounded-lg bg-white/10 border border-white/20 text-white font-black text-xs tracking-widest uppercase">
                           {getCardBrand(cardDetails.number) === 'visa' && (
-                            <span className="text-blue-300 font-serif font-black text-lg">VISA</span>
+                            <span className="text-cyan-300 font-black text-sm">VISA</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'mastercard' && (
-                            <div className="flex items-center -space-x-2">
-                              <div className="w-5 h-5 rounded-full bg-rose-500/90" />
-                              <div className="w-5 h-5 rounded-full bg-amber-400/90" />
-                            </div>
+                            <span className="text-amber-300 font-black text-sm">MASTERCARD</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'amex' && (
-                            <span className="text-sky-300 font-bold">AMEX</span>
+                            <span className="text-sky-300 font-black text-sm">AMEX</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'discover' && (
-                            <span className="text-orange-400 font-bold">DISCOVER</span>
+                            <span className="text-orange-300 font-black text-sm">DISCOVER</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'generic' && (
-                            <span className="text-slate-400 text-xs font-semibold">DEBIT / CREDIT</span>
+                            <span className="text-white font-black text-xs">DEBIT / CREDIT</span>
                           )}
                         </div>
                       </div>
 
                       {/* Center: Card Number */}
-                      <div className="relative z-10 font-mono text-lg tracking-widest font-semibold text-slate-100">
+                      <div className="font-mono text-xl tracking-[0.22em] font-extrabold text-white">
                         {cardDetails.number || '•••• •••• •••• ••••'}
                       </div>
 
                       {/* Bottom: Name & Expiry */}
-                      <div className="flex items-center justify-between relative z-10 text-[10px] uppercase tracking-wider text-slate-400 font-medium">
+                      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-slate-300 font-medium">
                         <div>
-                          <div className="text-[8px] text-slate-500">Cardholder</div>
-                          <div className="font-bold text-slate-200 tracking-normal truncate max-w-[190px]">
+                          <div className="text-[9px] font-black text-slate-400">CARDHOLDER</div>
+                          <div className="font-bold text-white tracking-normal truncate max-w-[200px] text-xs">
                             {cardDetails.name || 'YOUR NAME'}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[8px] text-slate-500">Expires</div>
-                          <div className="font-bold text-slate-200 font-mono">
+                          <div className="text-[9px] font-black text-slate-400">EXPIRES</div>
+                          <div className="font-extrabold text-white font-mono text-xs">
                             {cardDetails.expiry || 'MM/YY'}
                           </div>
                         </div>
@@ -3053,15 +3049,15 @@ export default function BillingPage() {
                     </div>
 
                     {/* Quick Test Helper */}
-                    <div className="flex items-center justify-between p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 text-xs">
-                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-medium">
-                        <Zap className="w-3.5 h-3.5 text-blue-500" />
-                        <span>Testing / Sandbox Payment?</span>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border-2 border-blue-200 dark:border-blue-800 text-xs">
+                      <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 font-bold">
+                        <Zap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span>Testing or Sandbox Payment?</span>
                       </div>
                       <button
                         type="button"
                         onClick={fillTestCard}
-                        className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold transition shadow-sm cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition shadow cursor-pointer active:scale-95"
                       >
                         ⚡ 1-Click Fill Test Card
                       </button>
@@ -3070,28 +3066,28 @@ export default function BillingPage() {
                     {/* Inputs */}
                     <div className="space-y-3">
                       <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                        <label className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-1 block">
                           Cardholder Name
                         </label>
                         <div className="relative">
-                          <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
                             required
                             placeholder="John Doe"
                             value={cardDetails.name}
                             onChange={e => setCardDetails({ ...cardDetails, name: e.target.value })}
-                            className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-bold placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                        <label className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-1 block">
                           Card Number
                         </label>
                         <div className="relative">
-                          <CreditCard className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <CreditCard className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                           <input
                             type="text"
                             required
@@ -3104,18 +3100,18 @@ export default function BillingPage() {
                                 number: formatCardNumber(e.target.value),
                               })
                             }
-                            className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                            className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
                           />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                          <label className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-1 block">
                             Expiry Date
                           </label>
                           <div className="relative">
-                            <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <Calendar className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                             <input
                               type="text"
                               required
@@ -3128,17 +3124,17 @@ export default function BillingPage() {
                                   expiry: formatExpiry(e.target.value),
                                 })
                               }
-                              className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                              className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
                             />
                           </div>
                         </div>
 
                         <div>
-                          <label className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 block">
+                          <label className="text-xs font-black text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-1 block">
                             CVC / CVV
                           </label>
                           <div className="relative">
-                            <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                             <input
                               type="password"
                               required
@@ -3151,7 +3147,7 @@ export default function BillingPage() {
                                   cvc: e.target.value.replace(/\D/g, '').slice(0, 4),
                                 })
                               }
-                              className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                              className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs font-mono font-bold placeholder:text-slate-400 focus:border-blue-600 focus:outline-none"
                             />
                           </div>
                         </div>
@@ -3160,8 +3156,8 @@ export default function BillingPage() {
 
                     {/* Error Banner */}
                     {cardError && (
-                      <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0" />
+                      <div className="p-3 rounded-xl bg-rose-500/10 border-2 border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
                         <span>{cardError}</span>
                       </div>
                     )}
@@ -3171,20 +3167,20 @@ export default function BillingPage() {
                       <div className="text-center pt-1">
                         <a
                           href={stripeCheckoutUrl}
-                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 font-semibold"
+                          className="text-xs text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1 font-bold"
                         >
                           <span>Prefer Stripe's Hosted Checkout page? Open Stripe</span>
-                          <ExternalLink className="w-3 h-3" />
+                          <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       </div>
                     )}
 
                     {/* Action Buttons */}
-                    <div className="pt-2 flex items-center justify-end gap-2.5">
+                    <div className="pt-2 flex items-center justify-end gap-3">
                       <button
                         type="button"
                         onClick={() => setCardModalOpen(false)}
-                        className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                        className="px-5 py-2.5 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -3192,7 +3188,7 @@ export default function BillingPage() {
                       <button
                         type="submit"
                         disabled={cardProcessing}
-                        className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-blue-500/25 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
+                        className="flex-1 py-3 px-6 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-lg shadow-blue-500/30 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer active:scale-95"
                       >
                         {cardProcessing ? (
                           <>
@@ -3201,7 +3197,7 @@ export default function BillingPage() {
                           </>
                         ) : (
                           <>
-                            <Lock className="w-3.5 h-3.5" />
+                            <Lock className="w-4 h-4" />
                             <span>Pay {formatPrice(selectedCardInvoice.total)} Now</span>
                           </>
                         )}
@@ -3209,9 +3205,9 @@ export default function BillingPage() {
                     </div>
 
                     {/* Security Footnote */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+                    <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600" />
                         PCI-DSS Level 1 Compliant
                       </span>
                       <span>Encrypted with 256-bit SSL</span>
