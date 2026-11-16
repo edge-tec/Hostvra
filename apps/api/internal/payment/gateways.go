@@ -178,12 +178,23 @@ func (s *Service) initiateStripe(
 	billingCycle string,
 	successURL, cancelURL string,
 ) (*PaymentInitResult, error) {
+	// If secret key is not set:
 	if cfg.SecretKey == "" {
-		return nil, ErrGatewayNotConfigured
+		if cfg.TestMode {
+			// In sandbox / test mode without custom credentials, provide simulation session
+			mockSessionID := fmt.Sprintf("cs_test_%s_%d", inv.ID.String()[:8], time.Now().Unix())
+			return &PaymentInitResult{
+				Gateway:          "stripe",
+				CheckoutURL:      fmt.Sprintf("/billing?invoice_id=%s&session_id=%s&gateway=stripe", inv.ID.String(), mockSessionID),
+				GatewayReference: mockSessionID,
+				PaymentStatus:    "payment_initiated",
+			}, nil
+		}
+		return nil, errors.New("Stripe Secret Key is not configured. Please enter your Stripe API Secret Key in Payment Gateways tab.")
 	}
 
 	// Handle automated mock testing key in test mode
-	if cfg.TestMode && cfg.SecretKey == "mock_test_secret" {
+	if cfg.TestMode && (cfg.SecretKey == "mock_test_secret" || strings.HasPrefix(cfg.SecretKey, "mock_")) {
 		mockSessionID := fmt.Sprintf("cs_test_%s_%d", inv.ID.String()[:8], time.Now().Unix())
 		return &PaymentInitResult{
 			Gateway:          "stripe",
@@ -211,7 +222,14 @@ func (s *Service) initiateStripe(
 	unitAmount := int64(math.Round(inv.Total * 100))
 	data.Set("line_items[0][price_data][currency]", currency)
 	data.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(unitAmount, 10))
-	data.Set("line_items[0][price_data][product_data][name]", fmt.Sprintf("%s (%s Subscription)", plan.Name, strings.Title(billingCycle)))
+
+	productName := "Hosting Invoice Settlement"
+	if plan != nil && plan.Name != "" {
+		productName = fmt.Sprintf("%s (%s Subscription)", plan.Name, strings.Title(billingCycle))
+	} else if inv.Description != "" {
+		productName = inv.Description
+	}
+	data.Set("line_items[0][price_data][product_data][name]", productName)
 	data.Set("line_items[0][quantity]", "1")
 
 	if successURL != "" {
@@ -277,11 +295,22 @@ func (s *Service) verifyStripe(
 	paymentRef string,
 ) (*PaymentVerifyResult, error) {
 	if cfg.SecretKey == "" {
+		if cfg.TestMode {
+			return &PaymentVerifyResult{
+				Gateway:          "stripe",
+				TransactionID:    fmt.Sprintf("pi_test_%s_%d", inv.ID.String()[:8], time.Now().Unix()),
+				GatewayReference: paymentRef,
+				Amount:           inv.Total,
+				Currency:         inv.Currency,
+				Status:           "completed",
+				PaymentMethod:    "stripe_card",
+			}, nil
+		}
 		return nil, ErrGatewayNotConfigured
 	}
 
 	// Automated mock testing key handler in test mode
-	if cfg.TestMode && cfg.SecretKey == "mock_test_secret" {
+	if cfg.TestMode && (cfg.SecretKey == "mock_test_secret" || strings.HasPrefix(cfg.SecretKey, "mock_") || strings.HasPrefix(paymentRef, "cs_test_")) {
 		if strings.Contains(paymentRef, "fail") {
 			return nil, ErrPaymentFailed
 		}

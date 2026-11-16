@@ -581,8 +581,8 @@ export default function BillingPage() {
 
       if (res.data) {
         const checkoutURL = res.data.checkout_url;
-        // If an external payment gateway URL is returned, redirect immediately to genuine gateway
-        if (checkoutURL && (checkoutURL.startsWith('http://') || checkoutURL.startsWith('https://'))) {
+        // If an external or internal payment gateway URL is returned, redirect immediately
+        if (checkoutURL && (checkoutURL.startsWith('http://') || checkoutURL.startsWith('https://') || checkoutURL.startsWith('/'))) {
           showNotify('info', `Redirecting to ${selectedPaymentGateway.toUpperCase()} secure checkout...`);
           setCheckoutModalOpen(false);
           window.location.href = checkoutURL;
@@ -632,14 +632,23 @@ export default function BillingPage() {
           loadData();
           return;
         }
-        if (res.data.checkout_url && (res.data.checkout_url.startsWith('http://') || res.data.checkout_url.startsWith('https://'))) {
-          showNotify('info', `Redirecting to ${paymentMethod.toUpperCase()} secure checkout...`);
-          window.location.href = res.data.checkout_url;
-          return;
+        if (res.data.checkout_url) {
+          const targetUrl = res.data.checkout_url;
+          if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://') || targetUrl.startsWith('/')) {
+            showNotify('info', `Redirecting to ${paymentMethod.toUpperCase()} secure checkout...`);
+            window.location.href = targetUrl;
+            return;
+          }
         }
         showNotify('info', `Checkout initiated for Invoice #${invoice.invoice_number}.`);
       } else {
-        showNotify('error', res.error?.message || 'Failed to initiate invoice payment');
+        const errMsg = res.error?.message || 'Failed to initiate invoice payment';
+        showNotify('error', errMsg);
+        if (paymentMethod === 'stripe' && (errMsg.includes('not configured') || errMsg.includes('Secret Key') || errMsg.includes('disabled'))) {
+          setTimeout(() => {
+            showNotify('info', 'Tip: You can use Instant Crypto Payment (0% Fees) or configure Stripe in Payment Gateways tab.');
+          }, 1200);
+        }
       }
     } catch (err: any) {
       showNotify('error', err.message || 'Failed to initiate invoice payment');

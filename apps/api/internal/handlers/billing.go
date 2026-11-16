@@ -1085,10 +1085,14 @@ func (h *BillingHandler) CreateSubscription(w http.ResponseWriter, r *http.Reque
 
 	// Initiate Payment with Gateway Client
 	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, req.BillingCycle, req.SuccessURL, req.CancelURL, "")
+	if initErr != nil {
+		response.Error(w, http.StatusBadRequest, "PAYMENT_INITIATION_FAILED", fmt.Sprintf("Failed to initiate %s payment: %v", strings.ToUpper(gwName), initErr), nil, "")
+		return
+	}
 
 	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
 	var gwRef string
-	if initErr == nil && initResult != nil {
+	if initResult != nil {
 		if initResult.CheckoutURL != "" {
 			checkoutURL = initResult.CheckoutURL
 		}
@@ -1473,10 +1477,14 @@ func (h *BillingHandler) CheckoutInvoice(w http.ResponseWriter, r *http.Request)
 	})
 
 	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, "monthly", req.SuccessURL, req.CancelURL, "")
+	if initErr != nil {
+		response.Error(w, http.StatusBadRequest, "PAYMENT_INITIATION_FAILED", fmt.Sprintf("Failed to initiate %s card payment: %v", strings.ToUpper(gwName), initErr), nil, "")
+		return
+	}
 
 	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
 	var gwRef string
-	if initErr == nil && initResult != nil {
+	if initResult != nil {
 		if initResult.CheckoutURL != "" {
 			checkoutURL = initResult.CheckoutURL
 		}
@@ -2558,10 +2566,14 @@ func (h *BillingHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Re
 
 	// Initiate Payment with Gateway Client
 	initResult, initErr := h.paymentSvc.InitiatePayment(r.Context(), gwConfig, inv, plan, req.BillingCycle, req.SuccessURL, req.CancelURL, "")
+	if initErr != nil {
+		response.Error(w, http.StatusBadRequest, "PAYMENT_INITIATION_FAILED", fmt.Sprintf("Failed to initiate %s payment: %v", strings.ToUpper(gwName), initErr), nil, "")
+		return
+	}
 
 	checkoutURL := fmt.Sprintf("/billing?invoice_id=%s&pay=true", inv.ID.String())
 	var gwRef string
-	if initErr == nil && initResult != nil {
+	if initResult != nil {
 		if initResult.CheckoutURL != "" {
 			checkoutURL = initResult.CheckoutURL
 		}
