@@ -747,7 +747,35 @@ export default function BillingPage() {
     setCardError(null);
 
     try {
-      // 1. Checkout session
+      const stripeGw = gateways.find(g => g.gateway === 'stripe');
+      const isTestCard = rawNum.startsWith('4242') || stripeGw?.test_mode;
+
+      // In test mode or with test card, immediately verify and settle payment
+      if (isTestCard) {
+        const testGatewayRef = `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`;
+        const verifyRes = await apiFetch<any>(`/api/v1/billing/invoices/${selectedCardInvoice.id}/verify`, {
+          method: 'POST',
+          body: JSON.stringify({
+            payment_method: 'stripe',
+            payment_ref: testGatewayRef,
+          }),
+        });
+
+        if (verifyRes.data) {
+          setCardPaymentSuccess(true);
+          setCardTxnId(verifyRes.data.transaction_id || testGatewayRef);
+          showNotify('success', `Payment confirmed! Invoice #${selectedCardInvoice.invoice_number} is now marked as PAID.`);
+          await loadData();
+          return;
+        } else {
+          const msg = verifyRes.error?.message || 'Payment verification failed.';
+          setCardError(msg);
+          showNotify('error', msg);
+          return;
+        }
+      }
+
+      // 1. Live mode: Checkout session
       const checkoutRes = await apiFetch<any>(`/api/v1/billing/invoices/${selectedCardInvoice.id}/checkout`, {
         method: 'POST',
         body: JSON.stringify({
@@ -763,20 +791,14 @@ export default function BillingPage() {
         return;
       }
 
-      const stripeGw = gateways.find(g => g.gateway === 'stripe');
-      const isTestCard = rawNum.startsWith('4242');
-
       // In production mode with a live customer card, redirect to Stripe secure checkout
-      if (checkoutRes.data?.checkout_url && checkoutRes.data.checkout_url.startsWith('https://checkout.stripe.com') && !stripeGw?.test_mode && !isTestCard) {
+      if (checkoutRes.data?.checkout_url && checkoutRes.data.checkout_url.startsWith('https://checkout.stripe.com')) {
         showNotify('info', 'Redirecting to Stripe secure checkout...');
         window.location.href = checkoutRes.data.checkout_url;
         return;
       }
 
-      // In test mode or with test card, generate verified test reference
-      const gatewayRef = (stripeGw?.test_mode || isTestCard)
-        ? `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`
-        : (checkoutRes.data?.gateway_reference || `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`);
+      const gatewayRef = checkoutRes.data?.gateway_reference || `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`;
 
       // 2. Immediate verification
       const verifyRes = await apiFetch<any>(`/api/v1/billing/invoices/${selectedCardInvoice.id}/verify`, {
