@@ -1701,39 +1701,43 @@ export default function BillingPage() {
                           </td>
                           <td className="py-4 px-6">
                             <span
-                              className={`px-2.5 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wide inline-flex items-center gap-1 ${
+                              className={`px-3 py-1 rounded-full text-[11px] font-extrabold uppercase tracking-wider inline-flex items-center gap-1.5 border ${
                                 inv.status === 'paid'
-                                  ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
                                   : inv.status === 'unpaid'
-                                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                                  : 'bg-rose-500/15 text-rose-600'
+                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                                  : 'bg-rose-500/10 border-rose-500/30 text-rose-600'
                               }`}
                             >
-                              {inv.status === 'paid' && <Check className="w-3 h-3" />}
+                              {inv.status === 'paid' && <Check className="w-3 h-3 text-emerald-500" />}
+                              {inv.status === 'unpaid' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
                               {inv.status === 'paid' ? 'Paid' : inv.status === 'unpaid' ? 'Unpaid' : 'Cancelled'}
                             </span>
                           </td>
                           <td className="py-4 px-6 text-right">
-                            <div className="flex items-center justify-end gap-2">
+                            <div className="flex items-center justify-end flex-wrap gap-2">
                               {inv.status === 'unpaid' && (
                                 <div className="flex items-center gap-1.5">
                                   <button
                                     onClick={() => handlePayInvoice(inv, 'stripe')}
                                     disabled={actionLoading === `pay-${inv.id}`}
-                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition-colors flex items-center gap-1 shadow-sm"
-                                    title="Pay with Card via Stripe"
+                                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white transition-all shadow-sm hover:shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                    title="Pay with Credit / Debit Card via Stripe"
                                   >
                                     <CreditCard className="w-3.5 h-3.5" />
-                                    <span>Stripe</span>
+                                    <span>Card</span>
                                   </button>
                                   <button
                                     onClick={() => handlePayInvoice(inv, 'crypto')}
                                     disabled={actionLoading === `pay-${inv.id}`}
-                                    className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors flex items-center gap-1 shadow-sm"
-                                    title="Pay with Crypto (USDT TRC20, BEP20, ERC20 - Zero Fees)"
+                                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition-all shadow-sm hover:shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 group"
+                                    title="Pay with Crypto (USDT, BTC, ETH, BNB - 0% Fees)"
                                   >
-                                    <span className="font-bold text-[11px]">₮</span>
+                                    <span className="font-extrabold text-[12px] text-emerald-200">₮</span>
                                     <span>Crypto</span>
+                                    <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-black/20 text-emerald-200 font-bold hidden sm:inline">
+                                      0%
+                                    </span>
                                   </button>
                                 </div>
                               )}
@@ -1742,7 +1746,7 @@ export default function BillingPage() {
                                   setSelectedInvoice(inv);
                                   setReceiptModalOpen(true);
                                 }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-1"
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors flex items-center gap-1 cursor-pointer border border-slate-200 dark:border-slate-700"
                               >
                                 <Eye className="w-3.5 h-3.5" />
                                 <span>Receipt</span>
