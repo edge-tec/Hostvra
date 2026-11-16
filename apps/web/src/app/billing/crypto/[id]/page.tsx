@@ -99,12 +99,21 @@ export default function CryptoCheckoutPage() {
   const initInvoice = useCallback(
     async (curId: string) => {
       if (!invoiceId) return;
+      setSelectedCurrencyId(curId);
       setCreating(true);
       setError(null);
+      setInvoice(null);
       try {
         const selected = options.find((o) => o.id === curId) || options.find((o) => o.has_treasury) || options[0];
         if (options.length > 0 && !options.some((o) => o.has_treasury)) {
           setError('NO_TREASURY_AVAILABLE');
+          setLoading(false);
+          setCreating(false);
+          return;
+        }
+
+        if (selected && !selected.has_treasury) {
+          setError(`The merchant has not yet configured on-chain recipient addresses for ${selected.name} (${selected.symbol}). Please select an active cryptocurrency marked with a green dot.`);
           setLoading(false);
           setCreating(false);
           return;
@@ -271,7 +280,8 @@ export default function CryptoCheckoutPage() {
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {options.map((opt) => {
-                  const isSelected = invoice ? invoice.currency_id === opt.id : selectedCurrencyId === opt.id;
+                  const isSelected = selectedCurrencyId === opt.id;
+                  const isAvailable = !!opt.has_treasury;
                   return (
                     <button
                       key={opt.id}
@@ -279,17 +289,23 @@ export default function CryptoCheckoutPage() {
                         setSelectedCurrencyId(opt.id);
                         initInvoice(opt.id);
                       }}
-                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between ${
-                        isSelected
-                          ? 'border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500'
-                          : 'border-slate-700/80 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300'
+                      className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                        !isAvailable
+                          ? isSelected
+                            ? 'border-amber-500/80 bg-amber-500/10 text-amber-200 cursor-pointer'
+                            : 'border-slate-800 bg-slate-900/40 text-slate-400 hover:border-slate-700 cursor-pointer'
+                          : isSelected
+                          ? 'border-emerald-500 bg-emerald-500/10 text-white ring-1 ring-emerald-500 cursor-pointer'
+                          : 'border-slate-700/80 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 cursor-pointer'
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-bold text-xs">{opt.symbol}</span>
                         <div className="flex items-center gap-1">
-                          {opt.has_treasury && (
+                          {isAvailable ? (
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" title="Active Treasury" />
+                          ) : (
+                            <span className="text-[9px] text-slate-400 uppercase font-medium">Inactive</span>
                           )}
                           <span className="text-[10px] text-slate-400 uppercase">{opt.network_id}</span>
                         </div>
@@ -342,7 +358,7 @@ export default function CryptoCheckoutPage() {
               </div>
             )}
 
-            {loading || creating ? (
+            {!error && (loading || creating ? (
               <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-400">
                 <RefreshCw className="w-8 h-8 animate-spin text-emerald-400" />
                 <span className="text-xs">Generating dedicated deposit address on blockchain...</span>
@@ -505,7 +521,7 @@ export default function CryptoCheckoutPage() {
                   </>
                 )}
               </>
-            ) : null}
+            ) : null)}
           </div>
         </div>
       </div>
