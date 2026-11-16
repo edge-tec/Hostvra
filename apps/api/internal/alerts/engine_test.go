@@ -2,22 +2,34 @@ package alerts
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+type roundTripFunc func(req *http.Request) *http.Response
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req), nil
+}
+
 func TestAlertEngineLifecycle(t *testing.T) {
 	webhookHit := make(chan string, 5)
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		webhookHit <- r.Method
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
+
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) *http.Response {
+			webhookHit <- req.Method
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       http.NoBody,
+				Header:     make(http.Header),
+			}
+		}),
+	}
 
 	engine := NewEngine()
+	engine.SetHTTPClient(client)
 	orgID := uuid.New()
 	serverID := uuid.New()
 
@@ -37,7 +49,7 @@ func TestAlertEngineLifecycle(t *testing.T) {
 		OrganizationID: orgID,
 		Name:           "Operations Webhook",
 		Type:           ChannelWebhook,
-		Target:         ts.URL,
+		Target:         "https://webhook.example.com/alerts",
 		Enabled:        true,
 	}
 	engine.AddChannel(ch)

@@ -130,7 +130,8 @@ VALUES
 ('polygon', 'Polygon (PoS)', 137, 'https://polygon-rpc.com', 'https://rpc.ankr.com/polygon', 'https://polygonscan.com/tx/%s', 'https://polygonscan.com/address/%s', 'POL', 5, TRUE),
 ('bitcoin', 'Bitcoin', 0, 'https://blockstream.info/api', 'https://mempool.space/api', 'https://mempool.space/tx/%s', 'https://mempool.space/address/%s', 'BTC', 2, TRUE),
 ('solana', 'Solana', 101, 'https://api.mainnet-beta.solana.com', 'https://rpc.ankr.com/solana', 'https://solscan.io/tx/%s', 'https://solscan.io/account/%s', 'SOL', 1, TRUE),
-('litecoin', 'Litecoin', 0, 'https://litecoinblockhalf.com/api', 'https://blockchair.com', 'https://blockchair.com/litecoin/transaction/%s', 'https://blockchair.com/litecoin/address/%s', 'LTC', 3, TRUE)
+('litecoin', 'Litecoin', 0, 'https://litecoinspace.org/api', 'https://blockchair.com', 'https://blockchair.com/litecoin/transaction/%s', 'https://blockchair.com/litecoin/address/%s', 'LTC', 3, TRUE),
+('dogecoin', 'Dogecoin', 0, 'https://dogechain.info/api/v1', 'https://blockchair.com', 'https://dogechain.info/tx/%s', 'https://dogechain.info/address/%s', 'DOGE', 3, TRUE)
 ON CONFLICT (id) DO UPDATE SET
     rpc_url = EXCLUDED.rpc_url,
     explorer_tx_url = EXCLUDED.explorer_tx_url;
@@ -148,7 +149,8 @@ VALUES
 ('BNB', 'bsc', 'BNB', 'BNB Coin', FALSE, '', 18, 3, 1.0000, 'bnb', TRUE),
 ('TRX', 'tron', 'TRX', 'TRON', FALSE, '', 6, 19, 1.0000, 'trx', TRUE),
 ('SOL', 'solana', 'SOL', 'Solana', FALSE, '', 9, 1, 1.0000, 'sol', TRUE),
-('LTC', 'litecoin', 'LTC', 'Litecoin', FALSE, '', 8, 3, 1.0000, 'ltc', TRUE)
+('LTC', 'litecoin', 'LTC', 'Litecoin', FALSE, '', 8, 3, 1.0000, 'ltc', TRUE),
+('DOGE', 'dogecoin', 'DOGE', 'Dogecoin', FALSE, '', 8, 3, 1.0000, 'doge', TRUE)
 ON CONFLICT (id) DO UPDATE SET
     contract_address = EXCLUDED.contract_address,
     decimals = EXCLUDED.decimals;

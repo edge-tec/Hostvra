@@ -108,6 +108,14 @@ func (e *Engine) SetStore(s store.Store) {
 	e.store = s
 }
 
+func (e *Engine) SetHTTPClient(client *http.Client) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if client != nil {
+		e.httpClient = client
+	}
+}
+
 // AddRule registers an alert threshold rule and persists to store
 func (e *Engine) AddRule(rule *AlertRule) {
 	e.mu.Lock()

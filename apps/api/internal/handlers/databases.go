@@ -397,21 +397,22 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Always preserve user record in database_users registry if username was specified
+	if req.Username != "" && serverID != uuid.Nil {
+		_ = h.store.CreateDatabaseUser(r.Context(), &store.DatabaseUser{
+			ID:        uuid.New(),
+			ServerID:  serverID,
+			DBType:    req.DBType,
+			Username:  req.Username,
+			HostAllow: req.HostAllow,
+		})
+	}
+
 	// Trigger real-time host provision
 	if err := h.dbMgr.ExecuteRealDatabaseCreation(r.Context(), req.Name, req.CharacterSet, req.Collation, req.Username, req.Password, req.HostAllow); err != nil {
 		h.audit.Log(r.Context(), r, "database.create.warning", "database", db.ID.String(), "warning", "live database provisioning warning: "+err.Error(), nil)
 		slog.Warn("Live MySQL provisioning returned warning; database record preserved in registry", "database", db.Name, "error", err)
 	} else {
-		// Also ensure user record is preserved in database_users registry if username was specified
-		if req.Username != "" && serverID != uuid.Nil {
-			_ = h.store.CreateDatabaseUser(r.Context(), &store.DatabaseUser{
-				ID:        uuid.New(),
-				ServerID:  serverID,
-				DBType:    req.DBType,
-				Username:  req.Username,
-				HostAllow: req.HostAllow,
-			})
-		}
 		h.audit.Log(r.Context(), r, "database.create", "database", db.ID.String(), "success", "", map[string]interface{}{
 			"name":      db.Name,
 			"db_type":   db.DBType,
