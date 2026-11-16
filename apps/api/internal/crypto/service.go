@@ -96,6 +96,10 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 		}
 	case "bitcoin":
 		qrUri = fmt.Sprintf("bitcoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+	case "litecoin":
+		qrUri = fmt.Sprintf("litecoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+	case "dogecoin":
+		qrUri = fmt.Sprintf("dogecoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
 	default:
 		qrUri = depositAddr.Address
 	}
@@ -187,6 +191,10 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 		detectedList, _ = s.rpc.ScanEVMTokenDeposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.Decimals, 0)
 	case "bitcoin":
 		detectedList, _ = s.rpc.ScanBitcoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+	case "litecoin":
+		detectedList, _ = s.rpc.ScanLitecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+	case "dogecoin":
+		detectedList, _ = s.rpc.ScanDogecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
 	}
 
 	// Filter matches: match by manualTxHash if provided, or matching amount within tolerance (1%)

@@ -155,6 +155,16 @@ const COIN_THEMES: Record<
     networkTag: 'Scrypt',
     accent: 'text-sky-400',
   },
+  DOGE: {
+    bg: 'bg-amber-500/15',
+    text: 'text-amber-300',
+    border: 'border-amber-500/30',
+    ring: 'ring-amber-500',
+    symbol: 'Ð',
+    tag: 'Dogecoin Core',
+    networkTag: 'Scrypt',
+    accent: 'text-amber-300',
+  },
 };
 
 export default function CryptoCheckoutPage() {
@@ -368,6 +378,12 @@ export default function CryptoCheckoutPage() {
     }
     if (invoice.network_id === 'bitcoin') {
       return `bitcoin:${invoice.deposit_address}?amount=${invoice.crypto_amount}`;
+    }
+    if (invoice.network_id === 'litecoin') {
+      return `litecoin:${invoice.deposit_address}?amount=${invoice.crypto_amount}`;
+    }
+    if (invoice.network_id === 'dogecoin') {
+      return `dogecoin:${invoice.deposit_address}?amount=${invoice.crypto_amount}`;
     }
     return `https://link.trustwallet.com/send?asset=c714&address=${invoice.deposit_address}&amount=${invoice.crypto_amount}`;
   }, [invoice]);

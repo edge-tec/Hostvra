@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +19,41 @@ var (
 	ErrNoAvailableDepositAddr = errors.New("no available deposit address found in pool for this network")
 )
 
+const (
+	primaryTreasuryFile  = "/var/lib/hostvra/crypto_treasuries.json"
+	fallbackTreasuryFile = "crypto_treasuries.json"
+)
+
+func persistTreasuriesToDisk(treasuries []*CryptoTreasuryWallet) {
+	if treasuries == nil {
+		treasuries = []*CryptoTreasuryWallet{}
+	}
+	data, err := json.MarshalIndent(treasuries, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.MkdirAll("/var/lib/hostvra", 0755)
+	_ = os.WriteFile(primaryTreasuryFile, data, 0644)
+	_ = os.WriteFile(fallbackTreasuryFile, data, 0644)
+}
+
+func loadTreasuriesFromDisk() []*CryptoTreasuryWallet {
+	var data []byte
+	var err error
+	data, err = os.ReadFile(primaryTreasuryFile)
+	if err != nil || len(data) == 0 {
+		data, err = os.ReadFile(fallbackTreasuryFile)
+	}
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	var list []*CryptoTreasuryWallet
+	if err := json.Unmarshal(data, &list); err != nil {
+		return nil
+	}
+	return list
+}
+
 // ============================================================================
 // MEMORY STORE IMPLEMENTATION
 // ============================================================================
@@ -27,44 +64,46 @@ func (m *MemoryStore) seedCryptoData() {
 	}
 	now := time.Now().UTC()
 
-	// Networks
+	// 1. Networks
 	networks := []*CryptoNetwork{
 		{ID: "tron", Name: "TRON (TRC20)", ChainID: 728126428, RPCURL: "https://api.trongrid.io", ExplorerTxURL: "https://tronscan.org/#/transaction/%s", ExplorerAddressURL: "https://tronscan.org/#/address/%s", NativeCurrency: "TRX", MinConfirmations: 19, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "bsc", Name: "BNB Smart Chain (BEP20)", ChainID: 56, RPCURL: "https://bsc-dataseed.binance.org", ExplorerTxURL: "https://bscscan.com/tx/%s", ExplorerAddressURL: "https://bscscan.com/address/%s", NativeCurrency: "BNB", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "ethereum", Name: "Ethereum (ERC20)", ChainID: 1, RPCURL: "https://cloudflare-eth.com", ExplorerTxURL: "https://etherscan.io/tx/%s", ExplorerAddressURL: "https://etherscan.io/address/%s", NativeCurrency: "ETH", MinConfirmations: 2, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "polygon", Name: "Polygon (PoS)", ChainID: 137, RPCURL: "https://polygon-rpc.com", ExplorerTxURL: "https://polygonscan.com/tx/%s", ExplorerAddressURL: "https://polygonscan.com/address/%s", NativeCurrency: "POL", MinConfirmations: 5, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "bitcoin", Name: "Bitcoin", ChainID: 0, RPCURL: "https://blockstream.info/api", ExplorerTxURL: "https://mempool.space/tx/%s", ExplorerAddressURL: "https://mempool.space/address/%s", NativeCurrency: "BTC", MinConfirmations: 2, IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "solana", Name: "Solana", ChainID: 101, RPCURL: "https://api.mainnet-beta.solana.com", ExplorerTxURL: "https://solscan.io/tx/%s", ExplorerAddressURL: "https://solscan.io/account/%s", NativeCurrency: "SOL", MinConfirmations: 1, IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "litecoin", Name: "Litecoin", ChainID: 0, RPCURL: "https://litecoinblockhalf.com/api", ExplorerTxURL: "https://blockchair.com/litecoin/transaction/%s", ExplorerAddressURL: "https://blockchair.com/litecoin/address/%s", NativeCurrency: "LTC", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "litecoin", Name: "Litecoin", ChainID: 0, RPCURL: "https://litecoinspace.org/api", ExplorerTxURL: "https://litecoinspace.org/tx/%s", ExplorerAddressURL: "https://litecoinspace.org/address/%s", NativeCurrency: "LTC", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "dogecoin", Name: "Dogecoin", ChainID: 0, RPCURL: "https://dogechain.info/api/v1", ExplorerTxURL: "https://dogechain.info/tx/%s", ExplorerAddressURL: "https://dogechain.info/address/%s", NativeCurrency: "DOGE", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, net := range networks {
 		m.cryptoNetworks[net.ID] = net
 	}
 
-	// Currencies
+	// 2. Currencies: 8 Clean, Proven, Fully Programmed Payment Currencies
 	currencies := []*CryptoCurrency{
 		{ID: "USDT_TRC20", NetworkID: "tron", Symbol: "USDT", Name: "Tether USD (TRC20)", IsToken: true, ContractAddress: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "USDT_BEP20", NetworkID: "bsc", Symbol: "USDT", Name: "Tether USD (BEP20)", IsToken: true, ContractAddress: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "USDT_ERC20", NetworkID: "ethereum", Symbol: "USDT", Name: "Tether USD (ERC20)", IsToken: true, ContractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "USDC_BEP20", NetworkID: "bsc", Symbol: "USDC", Name: "USD Coin (BEP20)", IsToken: true, ContractAddress: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "usdc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "USDC_ERC20", NetworkID: "ethereum", Symbol: "USDC", Name: "USD Coin (ERC20)", IsToken: true, ContractAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", Decimals: 6, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "usdc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "BTC", NetworkID: "bitcoin", Symbol: "BTC", Name: "Bitcoin", IsToken: false, Decimals: 8, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "btc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "BNB", NetworkID: "bsc", Symbol: "BNB", Name: "BNB Coin", IsToken: false, Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "bnb", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "TRX", NetworkID: "tron", Symbol: "TRX", Name: "TRON", IsToken: false, Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "trx", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "SOL", NetworkID: "solana", Symbol: "SOL", Name: "Solana", IsToken: false, Decimals: 9, MinConfirmations: 1, MinAmountUSD: 1.0, Icon: "sol", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "BTC", NetworkID: "bitcoin", Symbol: "BTC", Name: "Bitcoin", IsToken: false, Decimals: 8, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "btc", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "LTC", NetworkID: "litecoin", Symbol: "LTC", Name: "Litecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "ltc", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "DOGE", NetworkID: "dogecoin", Symbol: "DOGE", Name: "Dogecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "doge", IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, cur := range currencies {
 		m.cryptoCurrencies[cur.ID] = cur
 	}
 
-	// Settings
+	// 3. Settings
 	m.cryptoSettings["invoice_expiry_minutes"] = "30"
 	m.cryptoSettings["payment_tolerance_percent"] = "1.0"
 	m.cryptoSettings["auto_settle_confirmations"] = "true"
 	m.cryptoSettings["price_cache_seconds"] = "60"
 	m.cryptoSettings["scanner_interval_seconds"] = "30"
+
+	// 4. Auto-restore disk-backed treasuries so restarts never lose addresses
+	for _, tw := range loadTreasuriesFromDisk() {
+		m.cryptoTreasuries[tw.ID] = tw
+	}
 }
 
 func (m *MemoryStore) ListCryptoNetworks(ctx context.Context, onlyActive bool) ([]*CryptoNetwork, error) {
@@ -637,7 +676,15 @@ func (p *PostgresStore) ListCryptoTreasuryWallets(ctx context.Context, networkID
 	      FROM crypto_treasury_wallets WHERE ($1 = '' OR network_id = $1) ORDER BY created_at DESC`
 	rows, err := p.db.QueryContext(ctx, q, networkID)
 	if err != nil {
-		return nil, err
+		// Fallback to disk if postgres query errors
+		disk := loadTreasuriesFromDisk()
+		var filtered []*CryptoTreasuryWallet
+		for _, tw := range disk {
+			if networkID == "" || tw.NetworkID == networkID {
+				filtered = append(filtered, tw)
+			}
+		}
+		return filtered, nil
 	}
 	defer rows.Close()
 
@@ -656,6 +703,21 @@ func (p *PostgresStore) ListCryptoTreasuryWallets(ctx context.Context, networkID
 		}
 		list = append(list, &w)
 	}
+
+	// If postgres has no records, restore from disk backup if present
+	if len(list) == 0 {
+		disk := loadTreasuriesFromDisk()
+		for _, tw := range disk {
+			_ = p.CreateCryptoTreasuryWallet(ctx, tw)
+			if networkID == "" || tw.NetworkID == networkID {
+				list = append(list, tw)
+			}
+		}
+	} else {
+		// Keep disk backup up to date
+		go persistTreasuriesToDisk(list)
+	}
+
 	return list, nil
 }
 

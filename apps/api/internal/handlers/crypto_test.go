@@ -201,10 +201,13 @@ func TestCryptoHandler_AdminEndpoints(t *testing.T) {
 	if listW.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK on ListCurrencies, got %d", listW.Code)
 	}
-	var currenciesRes []map[string]interface{}
-	if err := json.Unmarshal(listW.Body.Bytes(), &currenciesRes); err != nil {
+	var envelope struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal(listW.Body.Bytes(), &envelope); err != nil {
 		t.Fatalf("failed to decode currencies response: %v", err)
 	}
+	currenciesRes := envelope.Data
 	hasActive := false
 	for _, c := range currenciesRes {
 		if hasT, ok := c["has_treasury"].(bool); ok && hasT {

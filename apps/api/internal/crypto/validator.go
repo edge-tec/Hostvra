@@ -11,6 +11,7 @@ var (
 	evmAddrRegex     = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
 	btcAddrRegex     = regexp.MustCompile(`^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})$`)
 	ltcAddrRegex     = regexp.MustCompile(`^(L[a-km-zA-HJ-NP-Z1-9]{26,33}|M[a-km-zA-HJ-NP-Z1-9]{26,33}|ltc1[a-z0-9]{39,59})$`)
+	dogeAddrRegex    = regexp.MustCompile(`^(D|9|A)[1-9A-HJ-NP-Za-km-z]{32,34}$`)
 	solanaAddrRegex  = regexp.MustCompile(`^[1-9A-HJ-NP-Za-km-z]{32,44}$`)
 )
 
@@ -30,6 +31,8 @@ func ValidateAddress(networkID, address string) bool {
 		return btcAddrRegex.MatchString(addr)
 	case "litecoin":
 		return ltcAddrRegex.MatchString(addr)
+	case "dogecoin", "doge":
+		return dogeAddrRegex.MatchString(addr)
 	case "solana":
 		return solanaAddrRegex.MatchString(addr)
 	default:

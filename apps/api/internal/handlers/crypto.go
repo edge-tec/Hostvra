@@ -297,8 +297,9 @@ func (h *CryptoHandler) AdminQuickSetupTreasuries(w http.ResponseWriter, r *http
 		TronAddress     string `json:"tron_address"`
 		EVMAddress      string `json:"evm_address"`
 		BitcoinAddress  string `json:"btc_address"`
-		SolanaAddress   string `json:"sol_address"`
 		LitecoinAddress string `json:"ltc_address"`
+		DogecoinAddress string `json:"doge_address"`
+		SolanaAddress   string `json:"sol_address"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
@@ -333,17 +334,25 @@ func (h *CryptoHandler) AdminQuickSetupTreasuries(w http.ResponseWriter, r *http
 		configuredCount++
 	}
 
-	if strings.TrimSpace(req.SolanaAddress) != "" {
-		if err := h.upsertTreasury(r.Context(), "solana", "Trust Wallet Solana", req.SolanaAddress); err != nil {
-			response.Error(w, http.StatusBadRequest, "INVALID_SOL_ADDRESS", "Invalid Solana address format", nil, "")
+	if strings.TrimSpace(req.LitecoinAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "litecoin", "Trust Wallet Litecoin", req.LitecoinAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_LTC_ADDRESS", "Invalid Litecoin address format", nil, "")
 			return
 		}
 		configuredCount++
 	}
 
-	if strings.TrimSpace(req.LitecoinAddress) != "" {
-		if err := h.upsertTreasury(r.Context(), "litecoin", "Trust Wallet Litecoin", req.LitecoinAddress); err != nil {
-			response.Error(w, http.StatusBadRequest, "INVALID_LTC_ADDRESS", "Invalid Litecoin address format", nil, "")
+	if strings.TrimSpace(req.DogecoinAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "dogecoin", "Trust Wallet Dogecoin", req.DogecoinAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_DOGE_ADDRESS", "Invalid Dogecoin address format", nil, "")
+			return
+		}
+		configuredCount++
+	}
+
+	if strings.TrimSpace(req.SolanaAddress) != "" {
+		if err := h.upsertTreasury(r.Context(), "solana", "Trust Wallet Solana", req.SolanaAddress); err != nil {
+			response.Error(w, http.StatusBadRequest, "INVALID_SOL_ADDRESS", "Invalid Solana address format", nil, "")
 			return
 		}
 		configuredCount++

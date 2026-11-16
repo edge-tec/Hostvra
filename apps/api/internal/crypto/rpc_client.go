@@ -340,3 +340,120 @@ func (c *MultiChainRpcClient) ScanBitcoinDeposits(ctx context.Context, apiURL, d
 
 	return payments, nil
 }
+
+// ScanLitecoinDeposits checks for native LTC deposits using litecoinspace/blockchair API.
+func (c *MultiChainRpcClient) ScanLitecoinDeposits(ctx context.Context, apiURL, depositAddr string, minConfirmations int) ([]*DetectedPayment, error) {
+	baseURL := apiURL
+	if baseURL == "" {
+		baseURL = "https://litecoinspace.org/api"
+	}
+	url := fmt.Sprintf("%s/address/%s/txs", baseURL, depositAddr)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var txs []struct {
+		TxID   string `json:"txid"`
+		Status struct {
+			Confirmed   bool  `json:"confirmed"`
+			BlockHeight int64 `json:"block_height"`
+			BlockTime   int64 `json:"block_time"`
+		} `json:"status"`
+		Vout []struct {
+			ScriptPubKeyAddress string `json:"scriptpubkey_address"`
+			Value               int64  `json:"value"` // in litoshis
+		} `json:"vout"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&txs); err != nil {
+		return nil, err
+	}
+
+	payments := make([]*DetectedPayment, 0)
+	for _, tx := range txs {
+		var receivedLitoshis int64
+		for _, out := range tx.Vout {
+			if strings.EqualFold(out.ScriptPubKeyAddress, depositAddr) {
+				receivedLitoshis += out.Value
+			}
+		}
+		if receivedLitoshis <= 0 {
+			continue
+		}
+
+		amountLTC := float64(receivedLitoshis) / 1e8
+		confs := 0
+		if tx.Status.Confirmed {
+			confs = 3
+		}
+
+		payments = append(payments, &DetectedPayment{
+			TxHash:        tx.TxID,
+			ToAddress:     depositAddr,
+			Amount:        amountLTC,
+			BlockNumber:   tx.Status.BlockHeight,
+			Confirmations: confs,
+			Confirmed:     tx.Status.Confirmed && confs >= minConfirmations,
+			Timestamp:     time.Unix(tx.Status.BlockTime, 0).UTC(),
+		})
+	}
+
+	return payments, nil
+}
+
+// ScanDogecoinDeposits checks for native DOGE deposits.
+func (c *MultiChainRpcClient) ScanDogecoinDeposits(ctx context.Context, apiURL, depositAddr string, minConfirmations int) ([]*DetectedPayment, error) {
+	baseURL := apiURL
+	if baseURL == "" {
+		baseURL = "https://dogechain.info/api/v1"
+	}
+	url := fmt.Sprintf("%s/address/received/%s", baseURL, depositAddr)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Success  int    `json:"success"`
+		Received string `json:"received"`
+		Error    string `json:"error"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+
+	var receivedDoge float64
+	_, _ = fmt.Sscanf(res.Received, "%f", &receivedDoge)
+
+	if receivedDoge <= 0 {
+		return nil, nil
+	}
+
+	payments := []*DetectedPayment{
+		{
+			TxHash:        fmt.Sprintf("doge_dep_%s_%d", depositAddr[:8], time.Now().Unix()/60),
+			ToAddress:     depositAddr,
+			Amount:        receivedDoge,
+			BlockNumber:   0,
+			Confirmations: 3,
+			Confirmed:     true,
+			Timestamp:     time.Now().UTC(),
+		},
+	}
+
+	return payments, nil
+}

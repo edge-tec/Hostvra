@@ -90,8 +90,8 @@ export default function AdminCryptoPage() {
     tron_address: '',
     evm_address: '',
     btc_address: '',
-    sol_address: '',
     ltc_address: '',
+    doge_address: '',
   });
   const [savingQuick, setSavingQuick] = useState<boolean>(false);
 
@@ -170,15 +170,15 @@ export default function AdminCryptoPage() {
         treasuries.find((t) => t.network_id === 'bsc' || t.network_id === 'ethereum' || t.network_id === 'polygon')
           ?.address || '';
       const btc = treasuries.find((t) => t.network_id === 'bitcoin')?.address || '';
-      const sol = treasuries.find((t) => t.network_id === 'solana')?.address || '';
       const ltc = treasuries.find((t) => t.network_id === 'litecoin')?.address || '';
+      const doge = treasuries.find((t) => t.network_id === 'dogecoin')?.address || '';
       setQuickForm((prev) => ({
         ...prev,
         tron_address: prev.tron_address || tron,
         evm_address: prev.evm_address || evm,
         btc_address: prev.btc_address || btc,
-        sol_address: prev.sol_address || sol,
         ltc_address: prev.ltc_address || ltc,
+        doge_address: prev.doge_address || doge,
       }));
     }
   }, [treasuries]);
@@ -195,8 +195,8 @@ export default function AdminCryptoPage() {
       !quickForm.tron_address.trim() &&
       !quickForm.evm_address.trim() &&
       !quickForm.btc_address.trim() &&
-      !quickForm.sol_address.trim() &&
-      !quickForm.ltc_address.trim()
+      !quickForm.ltc_address.trim() &&
+      !quickForm.doge_address.trim()
     ) {
       alert('Please enter at least one recipient address (e.g. TRON or EVM).');
       return;
@@ -449,18 +449,33 @@ export default function AdminCryptoPage() {
               <p className="text-[10px] text-slate-400">Native SegWit or Legacy BTC address from Trust Wallet.</p>
             </div>
 
+            <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2">
+              <label className="block font-bold text-slate-200">
+                4. Litecoin (LTC) Address <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. ltc1q... or L... or M..."
+                value={quickForm.ltc_address}
+                onChange={(e) => setQuickForm({ ...quickForm, ltc_address: e.target.value })}
+                className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
+              />
+              <p className="text-[10px] text-slate-400">Litecoin address from Trust Wallet.</p>
+            </div>
+
             <div className="p-4 bg-slate-900/80 border border-slate-700 rounded-xl space-y-2 flex flex-col justify-between">
               <div>
                 <label className="block font-bold text-slate-200">
-                  4. Solana (SOL) Address <span className="text-slate-400 font-normal">(Optional)</span>
+                  5. Dogecoin (DOGE) Address <span className="text-slate-400 font-normal">(Optional)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
-                  value={quickForm.sol_address}
-                  onChange={(e) => setQuickForm({ ...quickForm, sol_address: e.target.value })}
+                  placeholder="e.g. D... (34 characters)"
+                  value={quickForm.doge_address}
+                  onChange={(e) => setQuickForm({ ...quickForm, doge_address: e.target.value })}
                   className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-950 text-white font-mono text-xs focus:ring-1 focus:ring-emerald-500"
                 />
+                <p className="text-[10px] text-slate-400">Dogecoin address from Trust Wallet (starts with D).</p>
               </div>
               <div className="pt-2 flex justify-end">
                 <button
@@ -870,18 +885,6 @@ export default function AdminCryptoPage() {
                     </div>
                     <div className="space-y-1">
                       <label className="block font-bold text-slate-800 dark:text-slate-200">
-                        Solana (SOL) <span className="text-slate-400 font-normal">(Optional)</span>
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="7vfC..."
-                        value={quickForm.sol_address}
-                        onChange={(e) => setQuickForm({ ...quickForm, sol_address: e.target.value })}
-                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block font-bold text-slate-800 dark:text-slate-200">
                         Litecoin (LTC) <span className="text-slate-400 font-normal">(Optional)</span>
                       </label>
                       <input
@@ -889,6 +892,18 @@ export default function AdminCryptoPage() {
                         placeholder="ltc1..."
                         value={quickForm.ltc_address}
                         onChange={(e) => setQuickForm({ ...quickForm, ltc_address: e.target.value })}
+                        className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800 dark:text-slate-200">
+                        Dogecoin (DOGE) <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="D..."
+                        value={quickForm.doge_address}
+                        onChange={(e) => setQuickForm({ ...quickForm, doge_address: e.target.value })}
                         className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-[11px]"
                       />
                     </div>

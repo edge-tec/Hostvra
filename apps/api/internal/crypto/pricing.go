@@ -55,6 +55,7 @@ func NewPricingService(cacheTTL time.Duration) *PricingService {
 	ps.cache["POL"] = &PriceInfo{PriceUSD: 0.50, UpdatedAt: now, Source: "seed"}
 	ps.cache["SOL"] = &PriceInfo{PriceUSD: 210.0, UpdatedAt: now, Source: "seed"}
 	ps.cache["LTC"] = &PriceInfo{PriceUSD: 95.0, UpdatedAt: now, Source: "seed"}
+	ps.cache["DOGE"] = &PriceInfo{PriceUSD: 0.38, UpdatedAt: now, Source: "seed"}
 	return ps
 }
 
