@@ -413,6 +413,11 @@ export default function BillingPage() {
   const [cardError, setCardError] = useState<string | null>(null);
   const [stripeCheckoutUrl, setStripeCheckoutUrl] = useState<string | null>(null);
 
+  const isStripeTestMode = useMemo(() => {
+    const gw = gateways.find(g => g.gateway === 'stripe');
+    return Boolean(gw?.test_mode);
+  }, [gateways]);
+
   // Card formatting helpers
   const formatCardNumber = (val: string) => {
     const cleaned = val.replace(/\D/g, '').slice(0, 16);
@@ -437,6 +442,11 @@ export default function BillingPage() {
   };
 
   const fillTestCard = () => {
+    const isStripeTestMode = Boolean(gateways.find(g => g.gateway === 'stripe')?.test_mode);
+    if (!isStripeTestMode) {
+      showNotify('error', 'Test card auto-fill is disabled because Stripe is in Live Mode.');
+      return;
+    }
     setCardDetails({
       number: '4242 4242 4242 4242',
       name: 'HostVra Customer',
@@ -748,10 +758,10 @@ export default function BillingPage() {
 
     try {
       const stripeGw = gateways.find(g => g.gateway === 'stripe');
-      const isTestCard = rawNum.startsWith('4242') || stripeGw?.test_mode;
+      const isStripeTestMode = Boolean(stripeGw?.test_mode);
 
-      // In test mode or with test card, immediately verify and settle payment
-      if (isTestCard) {
+      // Scenario A: Admin enabled Test Mode (Sandbox testing)
+      if (isStripeTestMode) {
         const testGatewayRef = `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`;
         const verifyRes = await apiFetch<any>(`/api/v1/billing/invoices/${selectedCardInvoice.id}/verify`, {
           method: 'POST',
@@ -764,7 +774,7 @@ export default function BillingPage() {
         if (verifyRes.data) {
           setCardPaymentSuccess(true);
           setCardTxnId(verifyRes.data.transaction_id || testGatewayRef);
-          showNotify('success', `Payment confirmed! Invoice #${selectedCardInvoice.invoice_number} is now marked as PAID.`);
+          showNotify('success', `Test payment confirmed! Invoice #${selectedCardInvoice.invoice_number} is now marked as PAID.`);
           await loadData();
           return;
         } else {
@@ -773,6 +783,15 @@ export default function BillingPage() {
           showNotify('error', msg);
           return;
         }
+      }
+
+      // Scenario B: Admin disabled Test Mode (Live Production Mode)
+      // Test cards like 4242... are strictly rejected in live mode!
+      if (rawNum.startsWith('4242') || rawNum.startsWith('0000') || rawNum === '1111111111111111') {
+        const msg = 'Test card (4242) is disabled because Live Mode is active in Admin Settings. Please enter a genuine, active credit or debit card.';
+        setCardError(msg);
+        showNotify('error', msg);
+        return;
       }
 
       // 1. Live mode: Checkout session
@@ -798,9 +817,12 @@ export default function BillingPage() {
         return;
       }
 
-      const gatewayRef = checkoutRes.data?.gateway_reference || `cs_test_${selectedCardInvoice.id.slice(0, 8)}_${Date.now()}`;
+      const gatewayRef = checkoutRes.data?.gateway_reference;
+      if (!gatewayRef) {
+        throw new Error(checkoutRes.error?.message || 'Could not initiate live Stripe checkout session.');
+      }
 
-      // 2. Immediate verification
+      // 2. Verification
       const verifyRes = await apiFetch<any>(`/api/v1/billing/invoices/${selectedCardInvoice.id}/verify`, {
         method: 'POST',
         body: JSON.stringify({
@@ -2907,7 +2929,10 @@ export default function BillingPage() {
               if (e.target === e.currentTarget) setCardModalOpen(false);
             }}
           >
-            <div className="relative w-full max-w-[440px] sm:max-w-[460px] my-auto bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-200">
+            <div
+              style={{ maxWidth: '440px', width: '100%', margin: 'auto' }}
+              className="relative w-full max-w-sm sm:max-w-md mx-auto my-auto bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-200"
+            >
               {/* Brand Accent Top Bar */}
               <div className="h-1 w-full bg-blue-600" />
 
@@ -2920,8 +2945,12 @@ export default function BillingPage() {
                   <div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-black text-slate-900 dark:text-white">Card Checkout</span>
-                      <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 uppercase">
-                        STRIPE
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                        isStripeTestMode
+                          ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-300/40'
+                          : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-300/40'
+                      }`}>
+                        {isStripeTestMode ? 'TEST MODE' : 'LIVE'}
                       </span>
                     </div>
                     <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
@@ -3074,14 +3103,16 @@ export default function BillingPage() {
                       <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400">
                         Enter Card Details
                       </span>
-                      <button
-                        type="button"
-                        onClick={fillTestCard}
-                        className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 rounded-lg px-2.5 py-1 flex items-center gap-1 transition cursor-pointer active:scale-95"
-                      >
-                        <Zap className="w-3 h-3 text-blue-600 dark:text-blue-400" />
-                        <span>⚡ Fill Test Card</span>
-                      </button>
+                      {isStripeTestMode && (
+                        <button
+                          type="button"
+                          onClick={fillTestCard}
+                          className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 rounded-lg px-2.5 py-1 flex items-center gap-1 transition cursor-pointer active:scale-95"
+                        >
+                          <Zap className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                          <span>⚡ Fill Test Card</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Inputs */}
@@ -3093,7 +3124,7 @@ export default function BillingPage() {
                             type="text"
                             required
                             maxLength={19}
-                            placeholder="Card Number (4242 ...)"
+                            placeholder={isStripeTestMode ? "Card Number (e.g. 4242 ...)" : "Card Number (16 digits)"}
                             value={cardDetails.number}
                             onChange={e =>
                               setCardDetails({
