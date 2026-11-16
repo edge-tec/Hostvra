@@ -2994,8 +2994,8 @@ export default function BillingPage() {
                       </div>
                     </div>
 
-                    {/* Realistic High-Contrast Virtual Card (NO BLUR, 100% SHARP & VISIBLE) */}
-                    <div className="relative h-44 rounded-2xl bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 border-2 border-slate-700 shadow-xl p-5 text-white flex flex-col justify-between select-none">
+                    {/* Realistic High-Contrast Luxury White Platinum Virtual Card */}
+                    <div className="relative h-44 rounded-2xl bg-gradient-to-br from-white via-slate-50 to-slate-100 dark:from-slate-100 dark:to-white border-2 border-slate-300 dark:border-slate-400 shadow-md p-5 text-slate-900 flex flex-col justify-between select-none">
                       {/* Top: Chip & Brand */}
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
@@ -3004,44 +3004,44 @@ export default function BillingPage() {
                             <div className="border-b border-amber-700/50 h-1" />
                             <div className="border-b border-amber-700/50 h-1" />
                           </div>
-                          <span className="text-white font-mono text-sm font-bold tracking-tighter">))))</span>
+                          <span className="text-slate-500 font-mono text-sm font-bold tracking-tighter">))))</span>
                         </div>
 
-                        <div className="px-3 py-1 rounded-lg bg-white/10 border border-white/20 text-white font-black text-xs tracking-widest uppercase">
+                        <div className="px-3 py-1 rounded-lg bg-white border border-slate-300 shadow-xs text-slate-900 font-black text-xs tracking-widest uppercase">
                           {getCardBrand(cardDetails.number) === 'visa' && (
-                            <span className="text-cyan-300 font-black text-sm">VISA</span>
+                            <span className="text-blue-700 font-serif font-black text-sm tracking-wider">VISA</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'mastercard' && (
-                            <span className="text-amber-300 font-black text-sm">MASTERCARD</span>
+                            <span className="text-amber-600 font-black text-sm">MASTERCARD</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'amex' && (
-                            <span className="text-sky-300 font-black text-sm">AMEX</span>
+                            <span className="text-blue-600 font-black text-sm">AMEX</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'discover' && (
-                            <span className="text-orange-300 font-black text-sm">DISCOVER</span>
+                            <span className="text-orange-600 font-black text-sm">DISCOVER</span>
                           )}
                           {getCardBrand(cardDetails.number) === 'generic' && (
-                            <span className="text-white font-black text-xs">DEBIT / CREDIT</span>
+                            <span className="text-slate-800 font-black text-xs">DEBIT / CREDIT</span>
                           )}
                         </div>
                       </div>
 
                       {/* Center: Card Number */}
-                      <div className="font-mono text-xl tracking-[0.22em] font-extrabold text-white">
+                      <div className="font-mono text-xl sm:text-2xl tracking-[0.22em] font-black text-slate-900">
                         {cardDetails.number || '•••• •••• •••• ••••'}
                       </div>
 
                       {/* Bottom: Name & Expiry */}
-                      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-slate-300 font-medium">
+                      <div className="flex items-center justify-between text-xs uppercase tracking-wider text-slate-600 font-medium">
                         <div>
-                          <div className="text-[9px] font-black text-slate-400">CARDHOLDER</div>
-                          <div className="font-bold text-white tracking-normal truncate max-w-[200px] text-xs">
+                          <div className="text-[9px] font-black text-slate-500 tracking-wider">CARDHOLDER</div>
+                          <div className="font-black text-slate-900 tracking-normal truncate max-w-[200px] text-xs">
                             {cardDetails.name || 'YOUR NAME'}
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-[9px] font-black text-slate-400">EXPIRES</div>
-                          <div className="font-extrabold text-white font-mono text-xs">
+                          <div className="text-[9px] font-black text-slate-500 tracking-wider">EXPIRES</div>
+                          <div className="font-black text-slate-900 font-mono text-xs">
                             {cardDetails.expiry || 'MM/YY'}
                           </div>
                         </div>
