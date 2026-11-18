@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -19,10 +21,21 @@ var (
 	ErrNoAvailableDepositAddr = errors.New("no available deposit address found in pool for this network")
 )
 
-const (
-	primaryTreasuryFile  = "/var/lib/hostvra/crypto_treasuries.json"
-	fallbackTreasuryFile = "crypto_treasuries.json"
-)
+func getTreasuryStoragePaths() []string {
+	// Under unit testing, do not touch shared global disk files
+	if flag.Lookup("test.v") != nil || (len(os.Args) > 0 && strings.HasSuffix(os.Args[0], ".test")) {
+		return nil
+	}
+	paths := []string{
+		"/var/lib/hostvra/crypto_treasuries.json",
+		"/etc/hostvra/crypto_treasuries.json",
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, ".hostvra", "crypto_treasuries.json"))
+	}
+	paths = append(paths, "crypto_treasuries.json")
+	return paths
+}
 
 func persistTreasuriesToDisk(treasuries []*CryptoTreasuryWallet) {
 	if treasuries == nil {
@@ -32,26 +45,26 @@ func persistTreasuriesToDisk(treasuries []*CryptoTreasuryWallet) {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll("/var/lib/hostvra", 0755)
-	_ = os.WriteFile(primaryTreasuryFile, data, 0644)
-	_ = os.WriteFile(fallbackTreasuryFile, data, 0644)
+	for _, p := range getTreasuryStoragePaths() {
+		dir := filepath.Dir(p)
+		if dir != "." && dir != "" {
+			_ = os.MkdirAll(dir, 0755)
+		}
+		_ = os.WriteFile(p, data, 0644)
+	}
 }
 
 func loadTreasuriesFromDisk() []*CryptoTreasuryWallet {
-	var data []byte
-	var err error
-	data, err = os.ReadFile(primaryTreasuryFile)
-	if err != nil || len(data) == 0 {
-		data, err = os.ReadFile(fallbackTreasuryFile)
+	for _, p := range getTreasuryStoragePaths() {
+		data, err := os.ReadFile(p)
+		if err == nil && len(data) > 0 {
+			var list []*CryptoTreasuryWallet
+			if err := json.Unmarshal(data, &list); err == nil && len(list) > 0 {
+				return list
+			}
+		}
 	}
-	if err != nil || len(data) == 0 {
-		return nil
-	}
-	var list []*CryptoTreasuryWallet
-	if err := json.Unmarshal(data, &list); err != nil {
-		return nil
-	}
-	return list
+	return nil
 }
 
 // ============================================================================
@@ -224,6 +237,13 @@ func (m *MemoryStore) CreateCryptoTreasuryWallet(ctx context.Context, w *CryptoT
 	w.UpdatedAt = now
 	clone := *w
 	m.cryptoTreasuries[w.ID] = &clone
+	m.saveToDiskLocked()
+
+	list := make([]*CryptoTreasuryWallet, 0, len(m.cryptoTreasuries))
+	for _, tw := range m.cryptoTreasuries {
+		list = append(list, tw)
+	}
+	persistTreasuriesToDisk(list)
 	return nil
 }
 
@@ -236,6 +256,13 @@ func (m *MemoryStore) UpdateCryptoTreasuryWallet(ctx context.Context, w *CryptoT
 	w.UpdatedAt = time.Now().UTC()
 	clone := *w
 	m.cryptoTreasuries[w.ID] = &clone
+	m.saveToDiskLocked()
+
+	list := make([]*CryptoTreasuryWallet, 0, len(m.cryptoTreasuries))
+	for _, tw := range m.cryptoTreasuries {
+		list = append(list, tw)
+	}
+	persistTreasuriesToDisk(list)
 	return nil
 }
 
@@ -243,6 +270,13 @@ func (m *MemoryStore) DeleteCryptoTreasuryWallet(ctx context.Context, id uuid.UU
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.cryptoTreasuries, id)
+	m.saveToDiskLocked()
+
+	list := make([]*CryptoTreasuryWallet, 0, len(m.cryptoTreasuries))
+	for _, tw := range m.cryptoTreasuries {
+		list = append(list, tw)
+	}
+	persistTreasuriesToDisk(list)
 	return nil
 }
 
@@ -375,6 +409,7 @@ func (m *MemoryStore) CreateCryptoInvoice(ctx context.Context, inv *CryptoPaymen
 	inv.UpdatedAt = now
 	clone := *inv
 	m.cryptoInvoices[inv.ID] = &clone
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -499,6 +534,7 @@ func (m *MemoryStore) UpdateCryptoInvoice(ctx context.Context, inv *CryptoPaymen
 	inv.UpdatedAt = time.Now().UTC()
 	clone := *inv
 	m.cryptoInvoices[inv.ID] = &clone
+	m.saveToDiskLocked()
 	_ = existing
 	return nil
 }
@@ -577,6 +613,7 @@ func (m *MemoryStore) SetCryptoSetting(ctx context.Context, key, value string) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cryptoSettings[key] = value
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -746,18 +783,33 @@ func (p *PostgresStore) CreateCryptoTreasuryWallet(ctx context.Context, w *Crypt
 	q := `INSERT INTO crypto_treasury_wallets (id, network_id, name, wallet_type, address, xpub, encrypted_private_key, balance, is_active, auto_sweep_enabled, sweep_threshold_usd, created_at, updated_at)
 	      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())`
 	_, err := p.db.ExecContext(ctx, q, w.ID, w.NetworkID, w.Name, w.WalletType, w.Address, w.XPub, w.EncryptedPrivateKey, w.Balance, w.IsActive, w.AutoSweepEnabled, w.SweepThresholdUSD)
+	if err == nil {
+		if list, listErr := p.ListCryptoTreasuryWallets(ctx, ""); listErr == nil {
+			persistTreasuriesToDisk(list)
+		}
+	}
 	return err
 }
 
 func (p *PostgresStore) UpdateCryptoTreasuryWallet(ctx context.Context, w *CryptoTreasuryWallet) error {
 	q := `UPDATE crypto_treasury_wallets SET name = $1, address = $2, xpub = $3, encrypted_private_key = $4, balance = $5, is_active = $6, auto_sweep_enabled = $7, sweep_threshold_usd = $8, updated_at = NOW() WHERE id = $9`
 	_, err := p.db.ExecContext(ctx, q, w.Name, w.Address, w.XPub, w.EncryptedPrivateKey, w.Balance, w.IsActive, w.AutoSweepEnabled, w.SweepThresholdUSD, w.ID)
+	if err == nil {
+		if list, listErr := p.ListCryptoTreasuryWallets(ctx, ""); listErr == nil {
+			persistTreasuriesToDisk(list)
+		}
+	}
 	return err
 }
 
 func (p *PostgresStore) DeleteCryptoTreasuryWallet(ctx context.Context, id uuid.UUID) error {
 	q := `DELETE FROM crypto_treasury_wallets WHERE id = $1`
 	_, err := p.db.ExecContext(ctx, q, id)
+	if err == nil {
+		if list, listErr := p.ListCryptoTreasuryWallets(ctx, ""); listErr == nil {
+			persistTreasuriesToDisk(list)
+		}
+	}
 	return err
 }
 

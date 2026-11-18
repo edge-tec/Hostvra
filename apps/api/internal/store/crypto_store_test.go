@@ -130,3 +130,58 @@ func TestCryptoStore_MemoryLifecycleAndIdempotency(t *testing.T) {
 		t.Fatalf("expected 1 ledger record, got %d (err: %v)", len(records), err)
 	}
 }
+
+func TestCryptoStore_TreasuryPersistenceAcrossRestarts(t *testing.T) {
+	ctx := context.Background()
+	storeFile := t.TempDir() + "/store.json"
+	m1 := NewMemoryStoreWithPath(storeFile)
+
+	tw1 := &CryptoTreasuryWallet{
+		ID:        uuid.New(),
+		NetworkID: "tron",
+		Name:      "Trust Wallet TRON",
+		Address:   "TYDzsYUE4jEJTXsyNDoja2d1M7T4ZkYjHn",
+		IsActive:  true,
+	}
+	if err := m1.CreateCryptoTreasuryWallet(ctx, tw1); err != nil {
+		t.Fatalf("CreateCryptoTreasuryWallet error: %v", err)
+	}
+
+	tw2 := &CryptoTreasuryWallet{
+		ID:        uuid.New(),
+		NetworkID: "bsc",
+		Name:      "Trust Wallet BSC",
+		Address:   "0x1234567890123456789012345678901234567890",
+		IsActive:  true,
+	}
+	if err := m1.CreateCryptoTreasuryWallet(ctx, tw2); err != nil {
+		t.Fatalf("CreateCryptoTreasuryWallet error: %v", err)
+	}
+
+	// Verify before restart
+	list1, err := m1.ListCryptoTreasuryWallets(ctx, "")
+	if err != nil || len(list1) != 2 {
+		t.Fatalf("expected 2 treasuries before restart, got %d (err: %v)", len(list1), err)
+	}
+
+	// Close store to ensure all buffers are flushed
+	_ = m1.Close()
+
+	// Simulate server restart / update by creating brand new store instance from same path
+	m2 := NewMemoryStoreWithPath(storeFile)
+
+	list2, err := m2.ListCryptoTreasuryWallets(ctx, "")
+	if err != nil || len(list2) != 2 {
+		t.Fatalf("expected 2 treasuries after restart, got %d (err: %v)", len(list2), err)
+	}
+
+	tronWallet, err := m2.ListCryptoTreasuryWallets(ctx, "tron")
+	if err != nil || len(tronWallet) != 1 || tronWallet[0].Address != tw1.Address {
+		t.Fatalf("expected TRON wallet address '%s' to persist, got %+v", tw1.Address, tronWallet)
+	}
+
+	bscWallet, err := m2.ListCryptoTreasuryWallets(ctx, "bsc")
+	if err != nil || len(bscWallet) != 1 || bscWallet[0].Address != tw2.Address {
+		t.Fatalf("expected BSC wallet address '%s' to persist, got %+v", tw2.Address, bscWallet)
+	}
+}

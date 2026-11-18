@@ -141,6 +141,12 @@ fi
 if [[ -f "/var/lib/hostvra/store.json" ]]; then
     cp -p "/var/lib/hostvra/store.json" "${BACKUP_DIR}/store.json.bak" 2>/dev/null || true
 fi
+if [[ -f "/var/lib/hostvra/crypto_treasuries.json" ]]; then
+    cp -p "/var/lib/hostvra/crypto_treasuries.json" "${BACKUP_DIR}/crypto_treasuries.json.bak" 2>/dev/null || true
+fi
+if [[ -f "/etc/hostvra/crypto_treasuries.json" ]]; then
+    cp -p "/etc/hostvra/crypto_treasuries.json" "${BACKUP_DIR}/crypto_treasuries_etc.json.bak" 2>/dev/null || true
+fi
 if command -v pg_dump &>/dev/null; then
     sudo -u postgres pg_dump hostvra > "${BACKUP_DIR}/hostvra_db.sql" 2>/dev/null || true
 fi
@@ -158,6 +164,9 @@ rollback() {
     fi
     if [[ -f "${BACKUP_DIR}/store.json.bak" ]] && [[ ! -s "/var/lib/hostvra/store.json" ]] && [[ -w "/var/lib/hostvra" ]]; then
         cp -fp "${BACKUP_DIR}/store.json.bak" "/var/lib/hostvra/store.json" 2>/dev/null || true
+    fi
+    if [[ -f "${BACKUP_DIR}/crypto_treasuries.json.bak" ]] && [[ ! -s "/var/lib/hostvra/crypto_treasuries.json" ]] && [[ -w "/var/lib/hostvra" ]]; then
+        cp -fp "${BACKUP_DIR}/crypto_treasuries.json.bak" "/var/lib/hostvra/crypto_treasuries.json" 2>/dev/null || true
     fi
     if command -v systemctl &>/dev/null; then
         systemctl restart hostvra-api hostvra-web hostvra-agent 2>/dev/null || true

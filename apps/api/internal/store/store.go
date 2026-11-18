@@ -814,6 +814,13 @@ type memoryDumpData struct {
 	BackupIncrementalSnapshots map[uuid.UUID]*BackupIncrementalSnapshotRecord `json:"backup_incremental_snapshots,omitempty"`
 	BackupRetentionPolicies  map[uuid.UUID]*BackupRetentionPolicyRecord   `json:"backup_retention_policies,omitempty"`
 	BackupFileRestoreRequests map[uuid.UUID]*BackupFileRestoreRequestRecord `json:"backup_file_restore_requests,omitempty"`
+	CryptoNetworks           map[string]*CryptoNetwork                    `json:"crypto_networks,omitempty"`
+	CryptoCurrencies         map[string]*CryptoCurrency                   `json:"crypto_currencies,omitempty"`
+	CryptoTreasuries         map[uuid.UUID]*CryptoTreasuryWallet          `json:"crypto_treasuries,omitempty"`
+	CryptoDepositAddrs       map[uuid.UUID]*CryptoDepositAddress          `json:"crypto_deposit_addresses,omitempty"`
+	CryptoInvoices           map[uuid.UUID]*CryptoPaymentInvoice          `json:"crypto_invoices,omitempty"`
+	CryptoLedger             []*CryptoInternalLedger                      `json:"crypto_ledger,omitempty"`
+	CryptoSettings           map[string]string                            `json:"crypto_settings,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -930,6 +937,13 @@ func (m *MemoryStore) saveToDiskLocked() {
 		BackupIncrementalSnapshots: m.backupIncrementalSnapshots,
 		BackupRetentionPolicies:  m.backupRetentionPolicies,
 		BackupFileRestoreRequests: m.backupFileRestoreRequests,
+		CryptoNetworks:           m.cryptoNetworks,
+		CryptoCurrencies:         m.cryptoCurrencies,
+		CryptoTreasuries:         m.cryptoTreasuries,
+		CryptoDepositAddrs:       m.cryptoDepositAddrs,
+		CryptoInvoices:           m.cryptoInvoices,
+		CryptoLedger:             m.cryptoLedger,
+		CryptoSettings:           m.cryptoSettings,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -1218,6 +1232,48 @@ func (m *MemoryStore) loadFromDisk() {
 	}
 	if data.BackupFileRestoreRequests != nil {
 		m.backupFileRestoreRequests = data.BackupFileRestoreRequests
+	}
+	if data.CryptoNetworks != nil && len(data.CryptoNetworks) > 0 {
+		for k, v := range data.CryptoNetworks {
+			m.cryptoNetworks[k] = v
+		}
+	}
+	if data.CryptoCurrencies != nil && len(data.CryptoCurrencies) > 0 {
+		for k, v := range data.CryptoCurrencies {
+			m.cryptoCurrencies[k] = v
+		}
+	}
+	if data.CryptoTreasuries != nil && len(data.CryptoTreasuries) > 0 {
+		for k, v := range data.CryptoTreasuries {
+			m.cryptoTreasuries[k] = v
+		}
+	}
+	if data.CryptoDepositAddrs != nil && len(data.CryptoDepositAddrs) > 0 {
+		m.cryptoDepositAddrs = data.CryptoDepositAddrs
+	}
+	if data.CryptoInvoices != nil && len(data.CryptoInvoices) > 0 {
+		m.cryptoInvoices = data.CryptoInvoices
+	}
+	if data.CryptoLedger != nil && len(data.CryptoLedger) > 0 {
+		m.cryptoLedger = data.CryptoLedger
+	}
+	if data.CryptoSettings != nil && len(data.CryptoSettings) > 0 {
+		for k, v := range data.CryptoSettings {
+			m.cryptoSettings[k] = v
+		}
+	}
+
+	// Double-shield: if store.json had no treasuries, fallback to disk backup files
+	if len(m.cryptoTreasuries) == 0 {
+		for _, tw := range loadTreasuriesFromDisk() {
+			m.cryptoTreasuries[tw.ID] = tw
+		}
+	} else {
+		list := make([]*CryptoTreasuryWallet, 0, len(m.cryptoTreasuries))
+		for _, tw := range m.cryptoTreasuries {
+			list = append(list, tw)
+		}
+		persistTreasuriesToDisk(list)
 	}
 }
 

@@ -41,3 +41,4 @@ yarn-error.log*
 venv/
 __pycache__/
 *.pyc
+*crypto_treasuries*.json
