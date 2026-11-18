@@ -54,7 +54,7 @@ import {
   History,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits, ResourceQuotaEvent } from '@/lib/api';
+import { apiFetch, Website, Server, UserIsolationInfo, ResourceLimits, ResourceQuotaEvent, getStoredUserRole } from '@/lib/api';
 import { OneClickAppModal } from '@/components/OneClickAppModal';
 import { SiteModificationModal, SiteModalTab } from '@/components/SiteModificationModal';
 
@@ -78,6 +78,13 @@ export default function WebsitesPage() {
   const [availableDomains, setAvailableDomains] = useState<Array<{ domain: string; source: string; has_website: boolean; website_id?: string }>>([]);
   const [syncingDomains, setSyncingDomains] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [userRole, setUserRole] = useState<{ role: string; isSuperAdmin: boolean }>({ role: 'customer', isSuperAdmin: false });
+
+  useEffect(() => {
+    setUserRole(getStoredUserRole());
+  }, []);
+
+  const isPrivileged = userRole.isSuperAdmin || userRole.role === 'admin' || userRole.role === 'owner' || userRole.role === 'superadmin' || userRole.role === 'reseller';
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All categories');
   const [selectedAccount, setSelectedAccount] = useState('All accounts');
@@ -1438,25 +1445,29 @@ export default function WebsitesPage() {
               <span>Statistics</span>
             </button>
 
-            {/* Nginx Status / Engine Control */}
-            <button
-              onClick={() => setNginxControlOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-mono flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer shrink-0"
-            >
-              <span className="font-semibold">Nginx 1.24.0</span>
-              <Play className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 fill-emerald-600 dark:fill-emerald-400" />
-            </button>
+            {/* Nginx Status / Engine Control (Admin & Reseller only) */}
+            {isPrivileged && (
+              <>
+                <button
+                  onClick={() => setNginxControlOpen(true)}
+                  className="px-3 py-1.5 rounded-lg bg-white dark:bg-surface-800 hover:bg-slate-50 dark:hover:bg-surface-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-surface-700 hover:border-slate-400 font-mono flex items-center gap-1.5 text-xs shadow-2xs cursor-pointer shrink-0"
+                >
+                  <span className="font-semibold">Nginx 1.24.0</span>
+                  <Play className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400 fill-emerald-600 dark:fill-emerald-400" />
+                </button>
 
-            {/* Repair All Routing (100% Real API sysadmin action) */}
-            <button
-              onClick={handleRepairAllRouting}
-              disabled={repairingRouting}
-              title="Atomic reconciliation of all domain vHosts, port 80/443 bindings & Nginx syntax"
-              className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 font-bold transition shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
-            >
-              <Zap className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${repairingRouting ? 'animate-spin' : ''}`} />
-              <span>{repairingRouting ? 'Repairing...' : 'Repair Routing'}</span>
-            </button>
+                {/* Repair All Routing (Real API sysadmin action) */}
+                <button
+                  onClick={handleRepairAllRouting}
+                  disabled={repairingRouting}
+                  title="Atomic reconciliation of all domain vHosts, port 80/443 bindings & Nginx syntax"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 font-bold transition shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0 disabled:opacity-50"
+                >
+                  <Zap className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${repairingRouting ? 'animate-spin' : ''}`} />
+                  <span>{repairingRouting ? 'Repairing...' : 'Repair Routing'}</span>
+                </button>
+              </>
+            )}
           </div>
 
           {/* Right Filters & Settings */}
@@ -1491,20 +1502,22 @@ export default function WebsitesPage() {
               </button>
             </div>
 
-            {/* Client Account Selector Dropdown */}
-            <select
-              value={selectedAccount}
-              onChange={(e) => setSelectedAccount(e.target.value)}
-              className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer max-w-[170px] truncate"
-              title="Filter by Client Hosting Account"
-            >
-              <option value="All accounts">All Accounts (WHM)</option>
-              {accountOptions.map((acc) => (
-                <option key={acc.username} value={acc.username}>
-                  {acc.username} ({acc.count})
-                </option>
-              ))}
-            </select>
+            {/* Client Account Selector Dropdown (only for admin/reseller or multi-account users) */}
+            {(isPrivileged || accountOptions.length > 1) && (
+              <select
+                value={selectedAccount}
+                onChange={(e) => setSelectedAccount(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-surface-800 border border-slate-300 dark:border-surface-700 text-slate-700 dark:text-slate-200 text-xs font-semibold focus:outline-none shadow-2xs cursor-pointer max-w-[170px] truncate"
+                title="Filter by Client Hosting Account"
+              >
+                <option value="All accounts">{isPrivileged ? 'All Accounts (WHM)' : 'All Accounts'}</option>
+                {accountOptions.map((acc) => (
+                  <option key={acc.username} value={acc.username}>
+                    {acc.username} ({acc.count})
+                  </option>
+                ))}
+              </select>
+            )}
 
             {/* Category Dropdown */}
             <select
@@ -1552,8 +1565,8 @@ export default function WebsitesPage() {
           </div>
         </div>
 
-        {/* Banner if unlinked domains exist in system */}
-        {availableDomains.some((d) => !d.has_website) && (
+        {/* Banner if unlinked domains exist in account */}
+        {availableDomains.some((d) => !d.has_website && (isPrivileged || d.source !== 'filesystem')) && (
           <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/50 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-emerald-900/30 border border-emerald-200 dark:border-emerald-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs animate-fadeIn">
             <div className="flex items-center gap-2.5">
               <div className="w-8 h-8 rounded-lg bg-emerald-600/10 dark:bg-emerald-400/10 flex items-center justify-center shrink-0">
@@ -1561,11 +1574,11 @@ export default function WebsitesPage() {
               </div>
               <div>
                 <p className="font-bold text-slate-900 dark:text-white">
-                  Configured domain(s) detected in Hostvra without a Website VirtualHost:
+                  Configured domain(s) detected without a Website VirtualHost:
                 </p>
                 <div className="flex items-center gap-1.5 flex-wrap mt-1">
                   {availableDomains
-                    .filter((d) => !d.has_website)
+                    .filter((d) => !d.has_website && (isPrivileged || d.source !== 'filesystem'))
                     .map((d) => (
                       <button
                         key={d.domain}

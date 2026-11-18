@@ -276,10 +276,7 @@ func (h *DatabaseHandler) List(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !isAdmin && claims != nil {
-			if d.OrganizationID != uuid.Nil && d.OrganizationID != claims.OrganizationID {
-				continue
-			}
-			if d.OrganizationID == uuid.Nil && !allowedServers[d.ServerID] {
+			if d.OrganizationID != claims.OrganizationID {
 				continue
 			}
 		}

@@ -474,9 +474,19 @@ type AvailableDomainItem struct {
 
 func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner"
 	orgID := uuid.Nil
-	if claims != nil && claims.Role != "admin" && claims.Role != "owner" && claims.Role != "superadmin" {
+	if !isAdmin {
 		orgID = claims.OrganizationID
+		if orgID == uuid.Nil {
+			// Prevent uuid.Nil wildcard leakage for non-admin callers
+			orgID = uuid.New()
+		}
 	}
 
 	// 1. Existing websites
@@ -494,8 +504,11 @@ func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request
 	if accounts, err := h.store.ListHostingAccounts(r.Context(), orgID, nil); err == nil {
 		for _, acc := range accounts {
 			if acc != nil && acc.Domain != "" {
-				if claims != nil && orgID != uuid.Nil && acc.OrganizationID != orgID && acc.UserID != claims.UserID {
-					continue
+				if !isAdmin {
+					// Strict isolation: must match customer's UserID or OrganizationID
+					if acc.UserID != claims.UserID && (claims.OrganizationID == uuid.Nil || acc.OrganizationID != claims.OrganizationID) {
+						continue
+					}
 				}
 				d := strings.ToLower(strings.TrimSpace(acc.Domain))
 				if _, exists := domainMap[d]; !exists {
@@ -534,49 +547,52 @@ func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request
 	}
 
 	// 4. Registered domains
-	if claims != nil {
-		if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
-			for _, rd := range regDomains {
-				if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
-					d := strings.ToLower(strings.TrimSpace(rd.DomainName))
-					if _, exists := domainMap[d]; !exists {
-						item := AvailableDomainItem{
-							Domain: d,
-							Source: "registrar",
-						}
-						if site, ok := siteMap[d]; ok {
-							item.HasWebsite = true
-							item.WebsiteID = site.ID.String()
-						}
-						domainMap[d] = item
+	if regDomains, err := h.store.ListDomainsByUserID(r.Context(), claims.UserID); err == nil {
+		for _, rd := range regDomains {
+			if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
+				d := strings.ToLower(strings.TrimSpace(rd.DomainName))
+				if _, exists := domainMap[d]; !exists {
+					item := AvailableDomainItem{
+						Domain: d,
+						Source: "registrar",
 					}
+					if site, ok := siteMap[d]; ok {
+						item.HasWebsite = true
+						item.WebsiteID = site.ID.String()
+					}
+					domainMap[d] = item
 				}
 			}
 		}
 	}
 
 	// 5. Filesystem directories (/www/wwwroot and /var/www)
-	for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
-		if entries, rErr := os.ReadDir(rootDir); rErr == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				d := strings.ToLower(strings.TrimSpace(entry.Name()))
-				if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
-					continue
-				}
-				if strings.Contains(d, ".") {
-					if _, exists := domainMap[d]; !exists {
-						item := AvailableDomainItem{
-							Domain: d,
-							Source: "filesystem",
+	// STRICT MULTI-TENANT ISOLATION:
+	// ONLY privileged administrators may inspect global filesystem unlinked VirtualHosts.
+	// Regular customers/tenants must NEVER see other tenants' filesystem directories or unlinked domains!
+	if isAdmin {
+		for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
+			if entries, rErr := os.ReadDir(rootDir); rErr == nil {
+				for _, entry := range entries {
+					if !entry.IsDir() {
+						continue
+					}
+					d := strings.ToLower(strings.TrimSpace(entry.Name()))
+					if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
+						continue
+					}
+					if strings.Contains(d, ".") {
+						if _, exists := domainMap[d]; !exists {
+							item := AvailableDomainItem{
+								Domain: d,
+								Source: "filesystem",
+							}
+							if site, ok := siteMap[d]; ok {
+								item.HasWebsite = true
+								item.WebsiteID = site.ID.String()
+							}
+							domainMap[d] = item
 						}
-						if site, ok := siteMap[d]; ok {
-							item.HasWebsite = true
-							item.WebsiteID = site.ID.String()
-						}
-						domainMap[d] = item
 					}
 				}
 			}
@@ -596,13 +612,22 @@ func (h *WebsiteHandler) AvailableDomains(w http.ResponseWriter, r *http.Request
 
 func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
+	if claims == nil {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner"
 	orgID := uuid.Nil
-	if claims != nil {
+	if !isAdmin {
 		orgID = claims.OrganizationID
+		if orgID == uuid.Nil {
+			orgID = uuid.New()
+		}
 	}
 
 	// Find all candidate domains
-	sites, _ := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
+	sites, _ := h.store.ListWebsitesByOrg(r.Context(), orgID)
 	siteMap := make(map[string]bool)
 	for _, s := range sites {
 		if s != nil && s.DeletedAt == nil {
@@ -623,8 +648,10 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 	if accounts, err := h.store.ListHostingAccounts(r.Context(), orgID, nil); err == nil {
 		for _, acc := range accounts {
 			if acc != nil && acc.Domain != "" {
-				if claims != nil && orgID != uuid.Nil && acc.OrganizationID != orgID && acc.UserID != claims.UserID {
-					continue
+				if !isAdmin {
+					if acc.UserID != claims.UserID && (claims.OrganizationID == uuid.Nil || acc.OrganizationID != claims.OrganizationID) {
+						continue
+					}
 				}
 				d := strings.ToLower(strings.TrimSpace(acc.Domain))
 				if !siteMap[d] {
@@ -694,29 +721,34 @@ func (h *WebsiteHandler) SyncDomains(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Filesystem directories (/www/wwwroot and /var/www)
-	for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
-		if entries, rErr := os.ReadDir(rootDir); rErr == nil {
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
-				}
-				d := strings.ToLower(strings.TrimSpace(entry.Name()))
-				if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
-					continue
-				}
-				if strings.Contains(d, ".") && !siteMap[d] {
-					docPath := filepath.Join(rootDir, d)
-					if rootDir == "/var/www" {
-						if _, sErr := os.Stat(filepath.Join(docPath, "public_html")); sErr == nil {
-							docPath = filepath.Join(docPath, "public_html")
+	// STRICT MULTI-TENANT ISOLATION:
+	// Only administrators may sync arbitrary unlinked filesystem directories.
+	// Regular users cannot import unmapped server-wide filesystem directories.
+	if isAdmin {
+		for _, rootDir := range []string{"/www/wwwroot", "/var/www"} {
+			if entries, rErr := os.ReadDir(rootDir); rErr == nil {
+				for _, entry := range entries {
+					if !entry.IsDir() {
+						continue
+					}
+					d := strings.ToLower(strings.TrimSpace(entry.Name()))
+					if d == "html" || d == "default" || d == "hostvra-temp" || d == "phpmyadmin" || strings.HasPrefix(d, ".") {
+						continue
+					}
+					if strings.Contains(d, ".") && !siteMap[d] {
+						docPath := filepath.Join(rootDir, d)
+						if rootDir == "/var/www" {
+							if _, sErr := os.Stat(filepath.Join(docPath, "public_html")); sErr == nil {
+								docPath = filepath.Join(docPath, "public_html")
+							}
 						}
+						candidates[d] = CandidateMeta{
+							Domain:     d,
+							DocRoot:    docPath,
+							PHPVersion: "8.3",
+						}
+						siteMap[d] = true
 					}
-					candidates[d] = CandidateMeta{
-						Domain:     d,
-						DocRoot:    docPath,
-						PHPVersion: "8.3",
-					}
-					siteMap[d] = true
 				}
 			}
 		}
@@ -848,8 +880,8 @@ func (h *WebsiteHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.DocumentRoot = cleanDocRoot
 	}
 
-	// Enforce distinct document roots: different domains must not share the same directory
-	if existingSites, err := h.store.ListWebsitesByOrg(r.Context(), orgID); err == nil {
+	// Enforce distinct document roots: different domains must not share the same directory across any tenant
+	if existingSites, err := h.store.ListWebsitesByOrg(r.Context(), uuid.Nil); err == nil {
 		for _, es := range existingSites {
 			if es != nil && !strings.EqualFold(es.PrimaryDomain, req.PrimaryDomain) {
 				if strings.EqualFold(filepath.Clean(es.DocumentRoot), req.DocumentRoot) {
