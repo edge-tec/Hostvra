@@ -22,7 +22,7 @@ import {
   FolderPlus,
   ChevronLeft,
 } from 'lucide-react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, getStoredUserRole } from '@/lib/api';
 
 export interface QuickAccessFavorite {
   id: string;
@@ -124,6 +124,13 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
 
   // Drag over highlighting for folders
   const [dragOverPath, setDragOverPath] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<{ role: string; isSuperAdmin: boolean }>({ role: 'customer', isSuperAdmin: false });
+
+  useEffect(() => {
+    setUserRole(getStoredUserRole());
+  }, []);
+
+  const isPrivileged = userRole.isSuperAdmin || userRole.role === 'admin' || userRole.role === 'owner' || userRole.role === 'superadmin' || userRole.role === 'reseller';
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -612,42 +619,44 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
 
             {expandedSections.shortcuts && (
               <div className="mt-1 space-y-0.5">
-                {/* Root Directory */}
+                {/* Root Directory / Document Root */}
                 <div
-                  onClick={() => onNavigate(data?.root_directory || '/var/www')}
+                  onClick={() => onNavigate(data?.root_directory || (isPrivileged ? '/var/www' : ''))}
                   className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition ${
-                    currentPath === (data?.root_directory || '/var/www') && !isTrashActive
+                    currentPath === data?.root_directory && !isTrashActive
                       ? 'bg-emerald-50 text-emerald-900 font-semibold border-l-2 border-emerald-600'
                       : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-surface-800'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <Folder className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Root Directory</span>
+                    <span>{isPrivileged ? 'Root Directory' : 'Document Root'}</span>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {data?.root_directory || '/var/www'}
+                    {data?.root_directory || (isPrivileged ? '/var/www' : '')}
                   </span>
                 </div>
 
-                {/* Backups */}
-                <div
-                  onClick={() => onNavigate('/var/backups')}
-                  className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition ${
-                    currentPath === '/var/backups' && !isTrashActive
-                      ? 'bg-emerald-50 text-emerald-900 font-semibold border-l-2 border-emerald-600'
-                      : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-surface-800'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Archive className="w-3.5 h-3.5 text-purple-500" />
-                    <span>Backups</span>
+                {/* Backups (Admin only) */}
+                {isPrivileged && (
+                  <div
+                    onClick={() => onNavigate('/var/backups')}
+                    className={`flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer transition ${
+                      currentPath === '/var/backups' && !isTrashActive
+                        ? 'bg-emerald-50 text-emerald-900 font-semibold border-l-2 border-emerald-600'
+                        : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-surface-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Archive className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Backups</span>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Uploads */}
                 <div
-                  onClick={() => onNavigate(data?.root_directory + '/uploads')}
+                  onClick={() => onNavigate((data?.root_directory || '') + '/uploads')}
                   className="flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-surface-800"
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -658,7 +667,7 @@ export const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
 
                 {/* Downloads */}
                 <div
-                  onClick={() => onNavigate(data?.root_directory + '/downloads')}
+                  onClick={() => onNavigate((data?.root_directory || '') + '/downloads')}
                   className="flex items-center justify-between px-2 py-1.5 rounded-lg cursor-pointer text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-surface-800"
                 >
                   <div className="flex items-center gap-2 min-w-0">

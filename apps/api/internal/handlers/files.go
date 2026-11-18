@@ -51,9 +51,105 @@ func (h *FileHandler) SetQuotaService(q *quota.Service) {
 	h.quotaSvc = q
 }
 
+// getUserAllowedWebsites resolves strictly the websites and system usernames belonging to the authenticated caller.
+func (h *FileHandler) getUserAllowedWebsites(r *http.Request) ([]*store.Website, []string, []string) {
+	ctx := r.Context()
+	claims, ok := auth.GetClaims(ctx)
+	if !ok || claims == nil {
+		return nil, nil, nil
+	}
+
+	isAdmin := claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner"
+	if isAdmin {
+		sites, _ := h.store.ListWebsitesByOrg(ctx, uuid.Nil)
+		var validSites []*store.Website
+		for _, s := range sites {
+			if s != nil && s.DeletedAt == nil {
+				validSites = append(validSites, s)
+			}
+		}
+		return validSites, nil, nil
+	}
+
+	// Non-admin customer: find their specific hosting accounts and domains
+	accounts, _ := h.store.ListHostingAccounts(ctx, uuid.Nil, nil)
+	var userAccounts []string
+	var userDomains []string
+
+	for _, acc := range accounts {
+		if acc == nil {
+			continue
+		}
+		if acc.UserID == claims.UserID || (claims.OrganizationID != uuid.Nil && acc.OrganizationID == claims.OrganizationID) {
+			if acc.UserID == claims.UserID {
+				if acc.Username != "" {
+					userAccounts = append(userAccounts, strings.ToLower(strings.TrimSpace(acc.Username)))
+				}
+				if acc.Domain != "" {
+					userDomains = append(userDomains, strings.ToLower(strings.TrimSpace(acc.Domain)))
+				}
+			}
+		}
+	}
+
+	// Also check registered domains
+	if regDomains, err := h.store.ListDomainsByUserID(ctx, claims.UserID); err == nil {
+		for _, rd := range regDomains {
+			if rd != nil && rd.Status != "cancelled" && rd.DomainName != "" {
+				userDomains = append(userDomains, strings.ToLower(strings.TrimSpace(rd.DomainName)))
+			}
+		}
+	}
+
+	// Also check email domains
+	if claims.OrganizationID != uuid.Nil {
+		if emailDoms, err := h.store.ListEmailDomainsByOrg(ctx, claims.OrganizationID); err == nil {
+			for _, ed := range emailDoms {
+				if ed != nil && ed.DeletedAt == nil && ed.Domain != "" {
+					userDomains = append(userDomains, strings.ToLower(strings.TrimSpace(ed.Domain)))
+				}
+			}
+		}
+	}
+
+	sites, _ := h.store.ListWebsitesByOrg(ctx, claims.OrganizationID)
+	var allowedSites []*store.Website
+	for _, s := range sites {
+		if s == nil || s.DeletedAt != nil {
+			continue
+		}
+		// Match against user's accounts or domains
+		matched := false
+		if len(userAccounts) > 0 || len(userDomains) > 0 {
+			for _, uName := range userAccounts {
+				if strings.EqualFold(s.AccountUsername, uName) || strings.EqualFold(s.SystemUser, uName) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				for _, dName := range userDomains {
+					if strings.EqualFold(s.PrimaryDomain, dName) || strings.EqualFold(s.AccountDomain, dName) {
+						matched = true
+						break
+					}
+				}
+			}
+		} else if s.OrganizationID != uuid.Nil && s.OrganizationID == claims.OrganizationID {
+			matched = true
+		}
+
+		if matched {
+			allowedSites = append(allowedSites, s)
+		}
+	}
+
+	return allowedSites, userAccounts, userDomains
+}
+
 // checkPathAuthorization enforces multi-tenant and role-based boundaries on file operations.
-// Non-admin roles (manager, developer) are strictly confined to /var/www, /home, or /tmp and
-// forbidden from reading, writing, or traversing sensitive system files (/etc, /root, /boot, etc.)
+// Non-admin roles (customer, manager, developer) are strictly confined to their own domain/docroot and
+// forbidden from reading, writing, or traversing sensitive system files or other tenants' data.
 func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string) error {
 	claims, ok := auth.GetClaims(r.Context())
 	if !ok || claims == nil {
@@ -91,11 +187,12 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 		}
 	}
 
-	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
 	if !isAdmin {
 		restrictedRoots := []string{
 			"/etc", "/root", "/boot", "/proc", "/sys", "/dev", "/run", "/var/run",
 			"/var/lib/hostvra", "/var/lib/docker", "/usr", "/bin", "/sbin", "/lib", "/lib64",
+			"/var/backups",
 		}
 		if clean == "/" {
 			return fmt.Errorf("root directory access forbidden for role '%s'", claims.Role)
@@ -106,31 +203,31 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 			}
 		}
 		// Confinement to application and user spaces
-		if !strings.HasPrefix(clean, "/var/www") && !strings.HasPrefix(clean, "/home") && !strings.HasPrefix(clean, "/tmp") {
+		if !strings.HasPrefix(clean, "/var/www") && !strings.HasPrefix(clean, "/www/wwwroot") && !strings.HasPrefix(clean, "/home") && !strings.HasPrefix(clean, "/tmp") {
 			return fmt.Errorf("role '%s' is confined to web and home directories", claims.Role)
 		}
 
-		// Multi-Tenant Isolation: Ensure non-admin cannot access another tenant's /var/www domains
-		if strings.HasPrefix(clean, "/var/www") {
-			if clean == "/var/www" || clean == "/var/www/" {
-				return fmt.Errorf("direct access to root /var/www forbidden; select your domain directory")
-			}
-			sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
-			if err != nil || len(sites) == 0 {
-				return fmt.Errorf("no websites registered for your organization")
+		allowedSites, userAccounts, _ := h.getUserAllowedWebsites(r)
+
+		// Multi-Tenant Isolation: Ensure non-admin cannot access server roots or another tenant's /var/www or /www/wwwroot domains
+		if strings.HasPrefix(clean, "/var/www") || strings.HasPrefix(clean, "/www/wwwroot") {
+			if clean == "/var/www" || clean == "/var/www/" || clean == "/www/wwwroot" || clean == "/www/wwwroot/" {
+				return fmt.Errorf("direct access to server root forbidden; select your domain directory")
 			}
 			allowed := false
-			for _, s := range sites {
+			for _, s := range allowedSites {
 				docRoot := filepath.Clean(s.DocumentRoot)
-				siteDir := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+				siteDir1 := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+				siteDir2 := filepath.Clean(filepath.Join("/www/wwwroot", s.PrimaryDomain))
 				if clean == docRoot || strings.HasPrefix(clean, docRoot+"/") ||
-					clean == siteDir || strings.HasPrefix(clean, siteDir+"/") {
+					clean == siteDir1 || strings.HasPrefix(clean, siteDir1+"/") ||
+					clean == siteDir2 || strings.HasPrefix(clean, siteDir2+"/") {
 					allowed = true
 					break
 				}
 			}
 			if !allowed {
-				return fmt.Errorf("access denied: path '%s' does not belong to your organization's websites", clean)
+				return fmt.Errorf("access denied: path '%s' does not belong to your account's websites", clean)
 			}
 		}
 
@@ -144,34 +241,20 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 			targetUser := homeParts[0]
 
 			allowedHome := false
-			if claims.Email != "" {
+			for _, uName := range userAccounts {
+				if strings.EqualFold(targetUser, uName) {
+					allowedHome = true
+					break
+				}
+			}
+			if !allowedHome && claims.Email != "" {
 				userPrefix := strings.Split(claims.Email, "@")[0]
 				if strings.EqualFold(targetUser, userPrefix) {
 					allowedHome = true
 				}
 			}
-			if !allowedHome && h.store != nil {
-				if accounts, err := h.store.ListHostingAccounts(r.Context(), claims.OrganizationID, nil); err == nil {
-					for _, acc := range accounts {
-						if strings.EqualFold(acc.Username, targetUser) {
-							allowedHome = true
-							break
-						}
-					}
-				}
-			}
-			if !allowedHome && h.store != nil {
-				if sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID); err == nil {
-					for _, s := range sites {
-						if s.SystemUser != "" && strings.EqualFold(s.SystemUser, targetUser) {
-							allowedHome = true
-							break
-						}
-					}
-				}
-			}
 			if !allowedHome {
-				return fmt.Errorf("access denied: home directory '/home/%s' does not belong to your organization", targetUser)
+				return fmt.Errorf("access denied: home directory '/home/%s' does not belong to your account", targetUser)
 			}
 		}
 
@@ -182,26 +265,27 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 					return fmt.Errorf("symlink target '%s' is restricted for role '%s'", resolved, claims.Role)
 				}
 			}
-			if !strings.HasPrefix(resolved, "/var/www") && !strings.HasPrefix(resolved, "/home") && !strings.HasPrefix(resolved, "/tmp") {
+			if !strings.HasPrefix(resolved, "/var/www") && !strings.HasPrefix(resolved, "/www/wwwroot") && !strings.HasPrefix(resolved, "/home") && !strings.HasPrefix(resolved, "/tmp") {
 				return fmt.Errorf("symlink target '%s' escapes authorized user spaces", resolved)
 			}
-			if strings.HasPrefix(resolved, "/var/www") {
-				sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID)
-				if err != nil || len(sites) == 0 {
-					return fmt.Errorf("symlink target escapes your organization's websites")
+			if strings.HasPrefix(resolved, "/var/www") || strings.HasPrefix(resolved, "/www/wwwroot") {
+				if resolved == "/var/www" || resolved == "/var/www/" || resolved == "/www/wwwroot" || resolved == "/www/wwwroot/" {
+					return fmt.Errorf("symlink target escapes to server root")
 				}
 				allowed := false
-				for _, s := range sites {
+				for _, s := range allowedSites {
 					docRoot := filepath.Clean(s.DocumentRoot)
-					siteDir := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+					siteDir1 := filepath.Clean(filepath.Join("/var/www", s.PrimaryDomain))
+					siteDir2 := filepath.Clean(filepath.Join("/www/wwwroot", s.PrimaryDomain))
 					if resolved == docRoot || strings.HasPrefix(resolved, docRoot+"/") ||
-						resolved == siteDir || strings.HasPrefix(resolved, siteDir+"/") {
+						resolved == siteDir1 || strings.HasPrefix(resolved, siteDir1+"/") ||
+						resolved == siteDir2 || strings.HasPrefix(resolved, siteDir2+"/") {
 						allowed = true
 						break
 					}
 				}
 				if !allowed {
-					return fmt.Errorf("symlink target '%s' does not belong to your organization's websites", resolved)
+					return fmt.Errorf("symlink target '%s' does not belong to your account's websites", resolved)
 				}
 			}
 
@@ -214,34 +298,20 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 				targetUser := homeParts[0]
 
 				allowedHome := false
-				if claims.Email != "" {
+				for _, uName := range userAccounts {
+					if strings.EqualFold(targetUser, uName) {
+						allowedHome = true
+						break
+					}
+				}
+				if !allowedHome && claims.Email != "" {
 					userPrefix := strings.Split(claims.Email, "@")[0]
 					if strings.EqualFold(targetUser, userPrefix) {
 						allowedHome = true
 					}
 				}
-				if !allowedHome && h.store != nil {
-					if accounts, err := h.store.ListHostingAccounts(r.Context(), claims.OrganizationID, nil); err == nil {
-						for _, acc := range accounts {
-							if strings.EqualFold(acc.Username, targetUser) {
-								allowedHome = true
-								break
-							}
-						}
-					}
-				}
-				if !allowedHome && h.store != nil {
-					if sites, err := h.store.ListWebsitesByOrg(r.Context(), claims.OrganizationID); err == nil {
-						for _, s := range sites {
-							if s.SystemUser != "" && strings.EqualFold(s.SystemUser, targetUser) {
-								allowedHome = true
-								break
-							}
-						}
-					}
-				}
 				if !allowedHome {
-					return fmt.Errorf("symlink target '/home/%s' does not belong to your organization", targetUser)
+					return fmt.Errorf("symlink target escapes to another user's home directory '/home/%s'", targetUser)
 				}
 			}
 		}
@@ -254,11 +324,12 @@ func (h *FileHandler) checkPathAuthorization(r *http.Request, targetPath string)
 					return fmt.Errorf("parent directory symlink '%s' is restricted for role '%s'", resolvedParent, claims.Role)
 				}
 			}
-			if !strings.HasPrefix(resolvedParent, "/var/www") && !strings.HasPrefix(resolvedParent, "/home") && !strings.HasPrefix(resolvedParent, "/tmp") {
+			if !strings.HasPrefix(resolvedParent, "/var/www") && !strings.HasPrefix(resolvedParent, "/www/wwwroot") && !strings.HasPrefix(resolvedParent, "/home") && !strings.HasPrefix(resolvedParent, "/tmp") {
 				return fmt.Errorf("parent directory symlink '%s' escapes authorized user spaces", resolvedParent)
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -316,11 +387,23 @@ type ExtractRequest struct {
 
 // List returns contents of a directory
 func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
+
 	dirPath := r.URL.Query().Get("path")
-	if dirPath == "" {
-		dirPath = "/var/www"
-		if _, err := os.Stat(dirPath); os.IsNotExist(err) {
-			dirPath = "/"
+	if dirPath == "" || (!isAdmin && (dirPath == "/var/www" || dirPath == "/var/www/" || dirPath == "/www/wwwroot" || dirPath == "/www/wwwroot/" || dirPath == "/")) {
+		allowedSites, _, _ := h.getUserAllowedWebsites(r)
+		if len(allowedSites) > 0 && allowedSites[0].DocumentRoot != "" {
+			dirPath = allowedSites[0].DocumentRoot
+		} else if isAdmin {
+			dirPath = "/var/www"
+			if _, err := os.Stat("/www/wwwroot"); err == nil {
+				dirPath = "/www/wwwroot"
+			} else if _, err := os.Stat(dirPath); os.IsNotExist(err) {
+				dirPath = "/"
+			}
+		} else {
+			dirPath = "/tmp"
 		}
 	}
 
@@ -1208,6 +1291,8 @@ type EmptyTrashRequest struct {
 func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	userID := h.getUserID(r)
+	claims, _ := auth.GetClaims(ctx)
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
 
 	favs, err := h.store.ListFileManagerFavorites(ctx, userID)
 	if err != nil {
@@ -1215,9 +1300,9 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	validFavs := make([]*store.FileManagerFavorite, 0, len(favs))
 	for _, f := range favs {
-		if _, statErr := os.Stat(f.Path); statErr == nil {
+		if _, statErr := os.Stat(f.Path); statErr == nil && h.checkPathAuthorization(r, f.Path) == nil {
 			validFavs = append(validFavs, f)
-		} else {
+		} else if statErr != nil {
 			_ = h.store.DeleteFileManagerFavorite(ctx, userID, f.Path)
 		}
 	}
@@ -1228,11 +1313,11 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 		recent = []*store.FileManagerRecent{}
 	}
 	validRecent := make([]*store.FileManagerRecent, 0, len(recent))
-	for _, r := range recent {
-		if info, statErr := os.Stat(r.Path); statErr == nil && info.IsDir() {
-			validRecent = append(validRecent, r)
-		} else {
-			_ = h.store.DeleteFileManagerRecent(ctx, r.Path)
+	for _, rec := range recent {
+		if info, statErr := os.Stat(rec.Path); statErr == nil && info.IsDir() && h.checkPathAuthorization(r, rec.Path) == nil {
+			validRecent = append(validRecent, rec)
+		} else if statErr != nil {
+			_ = h.store.DeleteFileManagerRecent(ctx, rec.Path)
 		}
 	}
 	recent = validRecent
@@ -1243,36 +1328,30 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	validLabels := make([]*store.FolderLabel, 0, len(labels))
 	for _, l := range labels {
-		if _, statErr := os.Stat(l.Path); statErr == nil {
+		if _, statErr := os.Stat(l.Path); statErr == nil && h.checkPathAuthorization(r, l.Path) == nil {
 			validLabels = append(validLabels, l)
-		} else {
+		} else if statErr != nil {
 			_ = h.store.DeleteFolderLabel(ctx, l.Path)
 		}
 	}
 	labels = validLabels
 
-	// Fetch websites/domains for My Domains section
-	orgID := uuid.Nil
-	if claims, ok := auth.GetClaims(ctx); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
-		orgID = claims.OrganizationID
-	}
-	sites, _ := h.store.ListWebsitesByOrg(ctx, orgID)
+	// Fetch websites/domains for My Domains section - STRICT MULTI-TENANT ISOLATION
+	allowedSites, _, _ := h.getUserAllowedWebsites(r)
 	type DomainItem struct {
 		ID           string `json:"id"`
 		Domain       string `json:"domain"`
 		DocumentRoot string `json:"document_root"`
 		Status       string `json:"status"`
 	}
-	domainItems := make([]DomainItem, 0)
-	for _, s := range sites {
-		if s.DeletedAt == nil {
-			domainItems = append(domainItems, DomainItem{
-				ID:           s.ID.String(),
-				Domain:       s.PrimaryDomain,
-				DocumentRoot: s.DocumentRoot,
-				Status:       s.Status,
-			})
-		}
+	domainItems := make([]DomainItem, 0, len(allowedSites))
+	for _, s := range allowedSites {
+		domainItems = append(domainItems, DomainItem{
+			ID:           s.ID.String(),
+			Domain:       s.PrimaryDomain,
+			DocumentRoot: s.DocumentRoot,
+			Status:       s.Status,
+		})
 	}
 
 	// Trash stats
@@ -1287,6 +1366,31 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat("/www/wwwroot"); err == nil {
 		rootDirectory = "/www/wwwroot"
 	}
+	if !isAdmin {
+		if len(allowedSites) > 0 && allowedSites[0].DocumentRoot != "" {
+			rootDirectory = allowedSites[0].DocumentRoot
+		} else {
+			rootDirectory = "/tmp"
+		}
+	}
+
+	var shortcuts []map[string]string
+	if isAdmin {
+		shortcuts = []map[string]string{
+			{"name": "Root Directory", "path": rootDirectory, "icon": "folder"},
+			{"name": "Trash Bin", "path": "/trash", "icon": "trash-2"},
+			{"name": "Backups", "path": "/var/backups", "icon": "archive"},
+			{"name": "Uploads", "path": filepath.Join(rootDirectory, "uploads"), "icon": "upload"},
+			{"name": "Downloads", "path": filepath.Join(rootDirectory, "downloads"), "icon": "download"},
+		}
+	} else {
+		shortcuts = []map[string]string{
+			{"name": "Document Root", "path": rootDirectory, "icon": "folder"},
+			{"name": "Trash Bin", "path": "/trash", "icon": "trash-2"},
+			{"name": "Uploads", "path": filepath.Join(rootDirectory, "uploads"), "icon": "upload"},
+			{"name": "Downloads", "path": filepath.Join(rootDirectory, "downloads"), "icon": "download"},
+		}
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"favorites":      favs,
@@ -1294,13 +1398,7 @@ func (h *FileHandler) QuickAccess(w http.ResponseWriter, r *http.Request) {
 		"domains":        domainItems,
 		"folder_labels":  labels,
 		"root_directory": rootDirectory,
-		"shortcuts": []map[string]string{
-			{"name": "Root Directory", "path": rootDirectory, "icon": "folder"},
-			{"name": "Trash Bin", "path": "/trash", "icon": "trash-2"},
-			{"name": "Backups", "path": "/var/backups", "icon": "archive"},
-			{"name": "Uploads", "path": filepath.Join(rootDirectory, "uploads"), "icon": "upload"},
-			{"name": "Downloads", "path": filepath.Join(rootDirectory, "downloads"), "icon": "download"},
-		},
+		"shortcuts":      shortcuts,
 		"trash_stats": map[string]interface{}{
 			"count": len(trashItems),
 			"bytes": trashSize,
@@ -1453,13 +1551,23 @@ func (h *FileHandler) DeleteFolderLabel(w http.ResponseWriter, r *http.Request) 
 
 // Tree returns lazy subdirectories for the Windows/VS Code folder tree
 func (h *FileHandler) Tree(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
+
 	targetPath := r.URL.Query().Get("path")
-	if targetPath == "" {
-		targetPath = "/var/www"
-		if _, err := os.Stat("/www/wwwroot"); err == nil {
-			targetPath = "/www/wwwroot"
-		} else if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-			targetPath = "/"
+	if targetPath == "" || (!isAdmin && (targetPath == "/var/www" || targetPath == "/var/www/" || targetPath == "/www/wwwroot" || targetPath == "/www/wwwroot/" || targetPath == "/")) {
+		allowedSites, _, _ := h.getUserAllowedWebsites(r)
+		if len(allowedSites) > 0 && allowedSites[0].DocumentRoot != "" {
+			targetPath = allowedSites[0].DocumentRoot
+		} else if isAdmin {
+			targetPath = "/var/www"
+			if _, err := os.Stat("/www/wwwroot"); err == nil {
+				targetPath = "/www/wwwroot"
+			} else if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+				targetPath = "/"
+			}
+		} else {
+			targetPath = "/tmp"
 		}
 	}
 
@@ -1985,6 +2093,9 @@ func (h *FileHandler) DeleteTrashItem(w http.ResponseWriter, r *http.Request) {
 
 // Search performs full-text or filter-based global search across directories and domains
 func (h *FileHandler) Search(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
+
 	query := r.URL.Query().Get("query")
 	targetPath := r.URL.Query().Get("path")
 	filterType := r.URL.Query().Get("type")
@@ -1999,27 +2110,28 @@ func (h *FileHandler) Search(w http.ResponseWriter, r *http.Request) {
 		maxSize, _ = strconv.ParseInt(s, 10, 64)
 	}
 
+	allowedSites, _, _ := h.getUserAllowedWebsites(r)
 	var rootsToSearch []string
 
 	if allDomains {
-		orgID := uuid.Nil
-		if claims, ok := auth.GetClaims(r.Context()); ok && claims != nil && claims.Role != "owner" && claims.Role != "admin" {
-			orgID = claims.OrganizationID
-		}
-		if sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID); err == nil && len(sites) > 0 {
-			for _, s := range sites {
-				if s.DeletedAt == nil && s.DocumentRoot != "" {
-					rootsToSearch = append(rootsToSearch, s.DocumentRoot)
-				}
+		for _, s := range allowedSites {
+			if s.DeletedAt == nil && s.DocumentRoot != "" {
+				rootsToSearch = append(rootsToSearch, s.DocumentRoot)
 			}
 		}
 	}
 
 	if len(rootsToSearch) == 0 {
-		if targetPath == "" {
-			targetPath = "/var/www"
-			if _, err := os.Stat("/www/wwwroot"); err == nil {
-				targetPath = "/www/wwwroot"
+		if targetPath == "" || (!isAdmin && (targetPath == "/var/www" || targetPath == "/var/www/" || targetPath == "/www/wwwroot" || targetPath == "/www/wwwroot/" || targetPath == "/")) {
+			if len(allowedSites) > 0 && allowedSites[0].DocumentRoot != "" {
+				targetPath = allowedSites[0].DocumentRoot
+			} else if isAdmin {
+				targetPath = "/var/www"
+				if _, err := os.Stat("/www/wwwroot"); err == nil {
+					targetPath = "/www/wwwroot"
+				}
+			} else {
+				targetPath = "/tmp"
 			}
 		}
 		if err := h.checkPathAuthorization(r, targetPath); err != nil {
@@ -2245,19 +2357,9 @@ func (h *FileHandler) ActivityLogs(w http.ResponseWriter, r *http.Request) {
 // ListDomains returns website domains for multi-domain directory switching
 func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.GetClaims(r.Context())
-	isSuper := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin")
+	isAdmin := claims != nil && (claims.IsSuperAdmin || claims.Role == "superadmin" || claims.Role == "admin" || claims.Role == "owner")
 
-	orgID := uuid.Nil
-	if !isSuper && claims != nil {
-		orgID = claims.OrganizationID
-	}
-	sites, err := h.store.ListWebsitesByOrg(r.Context(), orgID)
-	if err != nil {
-		sites, _ = h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
-	}
-	if len(sites) == 0 && orgID != uuid.Nil {
-		sites, _ = h.store.ListWebsitesByOrg(r.Context(), uuid.Nil)
-	}
+	allowedSites, _, _ := h.getUserAllowedWebsites(r)
 
 	type SimpleDomain struct {
 		ID           string `json:"id"`
@@ -2266,9 +2368,9 @@ func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 		Status       string `json:"status"`
 	}
 
-	res := make([]SimpleDomain, 0)
+	res := make([]SimpleDomain, 0, len(allowedSites))
 	seen := make(map[string]bool)
-	for _, s := range sites {
+	for _, s := range allowedSites {
 		if s != nil && s.DeletedAt == nil && s.PrimaryDomain != "" {
 			d := strings.ToLower(strings.TrimSpace(s.PrimaryDomain))
 			if !seen[d] {
@@ -2283,28 +2385,30 @@ func (h *FileHandler) ListDomains(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Auto-discover any domain directory under /var/www that isn't yet in sites
-	if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			dName := strings.ToLower(entry.Name())
-			if dName == "html" || dName == "default" || dName == "hostvra-temp" || strings.HasPrefix(dName, ".") {
-				continue
-			}
-			if !seen[dName] && strings.Contains(dName, ".") {
-				seen[dName] = true
-				docRoot := filepath.Join("/var/www", dName, "public_html")
-				if _, sErr := os.Stat(docRoot); os.IsNotExist(sErr) {
-					docRoot = filepath.Join("/var/www", dName)
+	// Auto-discover any domain directory under /var/www - ADMIN ONLY!
+	if isAdmin {
+		if entries, rErr := os.ReadDir("/var/www"); rErr == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
 				}
-				res = append(res, SimpleDomain{
-					ID:           uuid.New().String(),
-					Domain:       dName,
-					DocumentRoot: docRoot,
-					Status:       "active",
-				})
+				dName := strings.ToLower(entry.Name())
+				if dName == "html" || dName == "default" || dName == "hostvra-temp" || strings.HasPrefix(dName, ".") {
+					continue
+				}
+				if !seen[dName] && strings.Contains(dName, ".") {
+					seen[dName] = true
+					docRoot := filepath.Join("/var/www", dName, "public_html")
+					if _, sErr := os.Stat(docRoot); os.IsNotExist(sErr) {
+						docRoot = filepath.Join("/var/www", dName)
+					}
+					res = append(res, SimpleDomain{
+						ID:           uuid.New().String(),
+						Domain:       dName,
+						DocumentRoot: docRoot,
+						Status:       "active",
+					})
+				}
 			}
 		}
 	}

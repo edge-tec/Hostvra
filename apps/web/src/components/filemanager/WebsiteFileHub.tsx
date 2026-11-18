@@ -18,6 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { FileItem } from '@/app/files/page';
+import { getStoredUserRole } from '@/lib/api';
 
 interface DomainWebsite {
   id: string;
@@ -59,8 +60,12 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
   const [configsModalOpen, setConfigsModalOpen] = useState(false);
   const [fixConfirmOpen, setFixConfirmOpen] = useState(false);
 
-  const selectedDomainObj = domains.find((d) => d.domain === activeDomain);
-  const docRoot = selectedDomainObj?.document_root || (currentPath.startsWith('/var/www') ? currentPath : '/var/www');
+  const userRole = getStoredUserRole();
+  const isPrivileged = userRole.isSuperAdmin || userRole.role === 'admin' || userRole.role === 'owner' || userRole.role === 'superadmin' || userRole.role === 'reseller';
+  const effectiveDomain = activeDomain || (!isPrivileged && domains.length > 0 ? domains[0].domain : '');
+
+  const selectedDomainObj = domains.find((d) => d.domain === effectiveDomain);
+  const docRoot = selectedDomainObj?.document_root || (currentPath.startsWith('/var/www') ? currentPath : (isPrivileged ? '/var/www' : (domains[0]?.document_root || currentPath)));
 
   return (
     <div className="bg-white/90 dark:bg-surface-900/90 backdrop-blur-xs border-b border-slate-200/80 dark:border-surface-800 px-3 sm:px-4 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2 shadow-2xs">
@@ -70,11 +75,11 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-surface-800 border border-slate-200 dark:border-surface-700 text-xs shrink-0 select-none">
           <Globe className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
           <span className="font-medium text-slate-500 text-[11px] hidden sm:inline">Website:</span>
-          {activeDomain ? (
+          {effectiveDomain ? (
             <div className="flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               <span className="font-bold font-mono text-emerald-700 dark:text-emerald-400 text-xs truncate max-w-[140px] sm:max-w-[200px]">
-                {activeDomain}
+                {effectiveDomain}
               </span>
             </div>
           ) : (
@@ -83,7 +88,7 @@ export const WebsiteFileHub: React.FC<WebsiteFileHubProps> = ({
         </div>
 
         {/* Quick Directory Jump Pills with active state highlighting */}
-        {activeDomain && (
+        {effectiveDomain && (
           <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 text-xs min-w-0 flex-1">
             {/* Root */}
             <button

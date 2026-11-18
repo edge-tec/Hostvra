@@ -265,3 +265,139 @@ func TestFileManager_MoveAndTree(t *testing.T) {
 		t.Fatalf("Tree returned %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestFileManager_StrictMultiTenantIsolation(t *testing.T) {
+	handler, tempDir, cleanup := setupTestFileManagerHandler(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	userA := uuid.New()
+	orgA := uuid.New()
+	userB := uuid.New()
+	orgB := uuid.New()
+
+	docRootA := filepath.Join(tempDir, "userA_site")
+	docRootB := filepath.Join(tempDir, "userB_site")
+	_ = os.MkdirAll(docRootA, 0755)
+	_ = os.MkdirAll(docRootB, 0755)
+	_ = os.WriteFile(filepath.Join(docRootA, "indexA.html"), []byte("siteA"), 0644)
+	_ = os.WriteFile(filepath.Join(docRootB, "indexB.html"), []byte("siteB"), 0644)
+
+	// Register hosting accounts and websites
+	_ = handler.store.CreateHostingAccount(ctx, &store.HostingAccount{
+		ID:             uuid.New(),
+		UserID:         userA,
+		OrganizationID: orgA,
+		Username:       "usera",
+		Domain:         "customera.com",
+		Status:         "active",
+	})
+	_ = handler.store.CreateHostingAccount(ctx, &store.HostingAccount{
+		ID:             uuid.New(),
+		UserID:         userB,
+		OrganizationID: orgB,
+		Username:       "userb",
+		Domain:         "customerb.com",
+		Status:         "active",
+	})
+
+	_ = handler.store.CreateWebsite(ctx, &store.Website{
+		ID:              uuid.New(),
+		OrganizationID:  orgA,
+		AccountUsername: "usera",
+		PrimaryDomain:   "customera.com",
+		DocumentRoot:    docRootA,
+		Status:          "running",
+	})
+	_ = handler.store.CreateWebsite(ctx, &store.Website{
+		ID:              uuid.New(),
+		OrganizationID:  orgB,
+		AccountUsername: "userb",
+		PrimaryDomain:   "customerb.com",
+		DocumentRoot:    docRootB,
+		Status:          "running",
+	})
+
+	ctxCustomerA := auth.WithClaims(ctx, &auth.Claims{
+		UserID:         userA,
+		OrganizationID: orgA,
+		Role:           "customer",
+	})
+
+	ctxAdmin := auth.WithClaims(ctx, &auth.Claims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.Nil,
+		Role:           "admin",
+		IsSuperAdmin:   true,
+	})
+
+	// 1. Customer A ListDomains must only return customera.com
+	reqA := httptest.NewRequest(http.MethodGet, "/api/v1/filemanager/domains", nil).WithContext(ctxCustomerA)
+	wA := httptest.NewRecorder()
+	handler.ListDomains(wA, reqA)
+	if wA.Code != http.StatusOK {
+		t.Fatalf("Customer A ListDomains failed: %d: %s", wA.Code, wA.Body.String())
+	}
+	var domRespA struct {
+		Data []struct {
+			Domain string `json:"domain"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wA.Body.Bytes(), &domRespA)
+	if len(domRespA.Data) != 1 || domRespA.Data[0].Domain != "customera.com" {
+		t.Fatalf("Expected customer A to see only customera.com, got: %+v", domRespA.Data)
+	}
+
+	// 2. Admin ListDomains returns all domains
+	reqAdmin := httptest.NewRequest(http.MethodGet, "/api/v1/filemanager/domains", nil).WithContext(ctxAdmin)
+	wAdmin := httptest.NewRecorder()
+	handler.ListDomains(wAdmin, reqAdmin)
+	if wAdmin.Code != http.StatusOK {
+		t.Fatalf("Admin ListDomains failed: %d: %s", wAdmin.Code, wAdmin.Body.String())
+	}
+	var domRespAdmin struct {
+		Data []struct {
+			Domain string `json:"domain"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wAdmin.Body.Bytes(), &domRespAdmin)
+	if len(domRespAdmin.Data) < 2 {
+		t.Fatalf("Expected admin to see at least 2 domains, got: %+v", domRespAdmin.Data)
+	}
+
+	// 3. Customer A QuickAccess must have only customera.com in domain_items
+	reqQA := httptest.NewRequest(http.MethodGet, "/api/v1/filemanager/quick-access", nil).WithContext(ctxCustomerA)
+	wQA := httptest.NewRecorder()
+	handler.QuickAccess(wQA, reqQA)
+	if wQA.Code != http.StatusOK {
+		t.Fatalf("Customer A QuickAccess failed: %d: %s", wQA.Code, wQA.Body.String())
+	}
+	var qaResp struct {
+		Data struct {
+			Domains []struct {
+				Domain string `json:"domain"`
+			} `json:"domains"`
+			Shortcuts []struct {
+				Name string `json:"name"`
+			} `json:"shortcuts"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(wQA.Body.Bytes(), &qaResp)
+	if len(qaResp.Data.Domains) != 1 || qaResp.Data.Domains[0].Domain != "customera.com" {
+		t.Fatalf("Expected customer A QuickAccess to see only customera.com, got: %+v", qaResp.Data.Domains)
+	}
+	for _, sc := range qaResp.Data.Shortcuts {
+		if sc.Name == "Backups" {
+			t.Fatalf("Customer A must never see Backups shortcut!")
+		}
+	}
+
+	// 4. Customer A attempting to access Customer B's path must be forbidden
+	reqForbidden := httptest.NewRequest(http.MethodGet, "/api/v1/files/list?path="+docRootB, nil).WithContext(ctxCustomerA)
+	wForbidden := httptest.NewRecorder()
+	handler.List(wForbidden, reqForbidden)
+	if wForbidden.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden when Customer A accesses Customer B directory, got: %d (%s)", wForbidden.Code, wForbidden.Body.String())
+	}
+}

@@ -63,7 +63,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { DashboardShell } from '@/components/DashboardShell';
-import { apiFetch, getApiBaseUrl } from '@/lib/api';
+import { apiFetch, getApiBaseUrl, getStoredUserRole } from '@/lib/api';
 import { QuickAccessSidebar } from '@/components/filemanager/QuickAccessSidebar';
 import { FilePreviewPanel } from '@/components/filemanager/FilePreviewPanel';
 import { FileContextMenu } from '@/components/filemanager/FileContextMenu';
@@ -115,6 +115,13 @@ export default function FileManagerPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeDomain, setActiveDomain] = useState<string>('');
   const [domains, setDomains] = useState<DomainWebsite[]>([]);
+  const [userRole, setUserRole] = useState<{ role: string; isSuperAdmin: boolean }>({ role: 'customer', isSuperAdmin: false });
+
+  useEffect(() => {
+    setUserRole(getStoredUserRole());
+  }, []);
+
+  const isPrivileged = userRole.isSuperAdmin || userRole.role === 'admin' || userRole.role === 'owner' || userRole.role === 'superadmin' || userRole.role === 'reseller';
   const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [showHidden, setShowHidden] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -255,19 +262,32 @@ export default function FileManagerPage() {
   const fetchDomains = useCallback(async () => {
     try {
       const res = await apiFetch<DomainWebsite[]>('/api/v1/filemanager/domains');
+      let loadedDomains: DomainWebsite[] = [];
       if (res.success && res.data) {
+        loadedDomains = res.data;
         setDomains(res.data);
       } else {
         const altRes = await apiFetch<any[]>('/api/v1/websites');
         if (altRes.success && altRes.data) {
-          setDomains(
-            altRes.data.map((w) => ({
-              id: w.id,
-              domain: w.primary_domain,
-              document_root: w.document_root,
-              status: w.status,
-            }))
-          );
+          loadedDomains = altRes.data.map((w) => ({
+            id: w.id,
+            domain: w.primary_domain,
+            document_root: w.document_root,
+            status: w.status,
+          }));
+          setDomains(loadedDomains);
+        }
+      }
+
+      // Strict multi-tenant isolation:
+      // If customer has allowed domains, default activeDomain to their domain
+      const roleInfo = getStoredUserRole();
+      const privileged = roleInfo.isSuperAdmin || roleInfo.role === 'admin' || roleInfo.role === 'owner' || roleInfo.role === 'superadmin' || roleInfo.role === 'reseller';
+      if (!privileged && loadedDomains.length > 0) {
+        const params = new URLSearchParams(window.location.search);
+        const domParam = params.get('domain');
+        if (!domParam) {
+          setActiveDomain(loadedDomains[0].domain);
         }
       }
     } catch (err) {
@@ -1187,7 +1207,7 @@ export default function FileManagerPage() {
                   }}
                   className="bg-transparent text-slate-800 dark:text-slate-100 font-bold focus:outline-hidden cursor-pointer max-w-[120px] sm:max-w-[170px] truncate text-xs"
                 >
-                  <option value="">All Domains / Server</option>
+                  {isPrivileged && <option value="">All Domains / Server</option>}
                   {domains.map((d) => (
                     <option key={d.domain} value={d.domain}>
                       {d.domain}
@@ -1326,15 +1346,17 @@ export default function FileManagerPage() {
                       </select>
                     </div>
 
-                    <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-                      <input
-                        type="checkbox"
-                        checked={searchAllDomains}
-                        onChange={(e) => setSearchAllDomains(e.target.checked)}
-                        className="rounded text-emerald-600 focus:ring-emerald-500"
-                      />
-                      <span>Search All Domains on Server</span>
-                    </label>
+                    {isPrivileged && (
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={searchAllDomains}
+                          onChange={(e) => setSearchAllDomains(e.target.checked)}
+                          className="rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span>Search All Domains on Server</span>
+                      </label>
+                    )}
 
                     <button
                       type="button"
