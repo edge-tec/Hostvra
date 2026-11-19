@@ -182,41 +182,158 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 		return nil, fmt.Errorf("currency not found: %s", inv.CurrencyID)
 	}
 
-	var detectedList []*DetectedPayment
+	var bestMatch *DetectedPayment
+	manualTxHash = strings.TrimSpace(manualTxHash)
 
-	switch inv.NetworkID {
-	case "tron":
-		detectedList, _ = s.rpc.ScanTronTRC20Deposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.MinConfirmations)
-	case "ethereum", "bsc", "polygon":
-		detectedList, _ = s.rpc.ScanEVMTokenDeposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.Decimals, 0)
-	case "bitcoin":
-		detectedList, _ = s.rpc.ScanBitcoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
-	case "litecoin":
-		detectedList, _ = s.rpc.ScanLitecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
-	case "dogecoin":
-		detectedList, _ = s.rpc.ScanDogecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+	// 1. If manualTxHash is provided, verify directly on-chain first
+	if manualTxHash != "" {
+		switch inv.NetworkID {
+		case "bsc", "ethereum", "polygon":
+			match, err := s.rpc.VerifyEVMTransaction(ctx, net.RPCURL, manualTxHash, inv.DepositAddress, cur.ContractAddress, cur.Decimals, cur.IsToken, inv.CryptoAmount)
+			if err == nil && match != nil {
+				bestMatch = match
+			}
+		case "tron":
+			match, err := s.rpc.VerifyTronTransaction(ctx, net.RPCURL, manualTxHash, inv.DepositAddress, cur.ContractAddress, cur.IsToken, inv.CryptoAmount)
+			if err == nil && match != nil {
+				bestMatch = match
+			}
+		case "bitcoin", "litecoin", "dogecoin":
+			var detected []*DetectedPayment
+			if inv.NetworkID == "bitcoin" {
+				detected, _ = s.rpc.ScanBitcoinDeposits(ctx, net.RPCURL, inv.DepositAddress, 1)
+			} else if inv.NetworkID == "litecoin" {
+				detected, _ = s.rpc.ScanLitecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, 1)
+			} else {
+				detected, _ = s.rpc.ScanDogecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, 1)
+			}
+			for _, d := range detected {
+				if strings.EqualFold(d.TxHash, manualTxHash) && d.Amount >= inv.CryptoAmount*0.97 {
+					bestMatch = d
+					break
+				}
+			}
+		}
 	}
 
-	// Filter matches: match by manualTxHash if provided, or matching amount within tolerance (1%)
-	toleranceRatio := 0.01 // 1% tolerance
-	var bestMatch *DetectedPayment
+	// 2. Automatic on-chain detection (polling or fallback)
+	if bestMatch == nil {
+		minExpected := inv.CryptoAmount * 0.97 // 3% tolerance for price fluctuation / gas deduction
 
-	for _, d := range detectedList {
-		if manualTxHash != "" && !strings.EqualFold(d.TxHash, manualTxHash) {
-			continue
+		switch inv.NetworkID {
+		case "tron":
+			if cur.IsToken {
+				detectedList, _ := s.rpc.ScanTronTRC20Deposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.MinConfirmations)
+				for _, d := range detectedList {
+					if d.Amount >= minExpected {
+						bestMatch = d
+						break
+					}
+				}
+			} else {
+				if tronBal, err := s.rpc.GetTronBalance(ctx, net.RPCURL, inv.DepositAddress); err == nil && tronBal >= minExpected {
+					bestMatch = &DetectedPayment{
+						TxHash:        fmt.Sprintf("tron_trx_%s_%s", inv.InvoiceCode, inv.DepositAddress[len(inv.DepositAddress)-6:]),
+						ToAddress:     inv.DepositAddress,
+						Amount:        tronBal,
+						Confirmations: 3,
+						Confirmed:     true,
+						Timestamp:     now,
+					}
+				}
+			}
+
+		case "bsc", "ethereum", "polygon":
+			if cur.IsToken {
+				// Token transfer: scan logs first
+				detectedList, _ := s.rpc.ScanEVMTokenDeposits(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.Decimals, 0)
+				for _, d := range detectedList {
+					if d.Amount >= minExpected {
+						bestMatch = d
+						break
+					}
+				}
+				// Fallback to token balance check
+				if bestMatch == nil {
+					if tokBal, err := s.rpc.GetEVMTokenBalance(ctx, net.RPCURL, cur.ContractAddress, inv.DepositAddress, cur.Decimals); err == nil && tokBal >= minExpected {
+						bestMatch = &DetectedPayment{
+							TxHash:          fmt.Sprintf("%s_tok_%s", inv.NetworkID, inv.InvoiceCode),
+							ToAddress:       inv.DepositAddress,
+							ContractAddress: cur.ContractAddress,
+							Amount:          tokBal,
+							Confirmations:   3,
+							Confirmed:       true,
+							Timestamp:       now,
+						}
+					}
+				}
+			} else {
+				// Native coin transfer (BNB, ETH, POL):
+				// First: scan recent blocks
+				if match, err := s.rpc.ScanEVMLatestBlocks(ctx, net.RPCURL, inv.DepositAddress, 25, inv.CryptoAmount); err == nil && match != nil {
+					bestMatch = match
+				}
+				// Second: check on-chain balance directly
+				if bestMatch == nil {
+					if evmBal, err := s.rpc.GetEVMBalance(ctx, net.RPCURL, inv.DepositAddress); err == nil && evmBal >= minExpected {
+						bestMatch = &DetectedPayment{
+							TxHash:        fmt.Sprintf("%s_native_%s", inv.NetworkID, inv.InvoiceCode),
+							ToAddress:     inv.DepositAddress,
+							Amount:        evmBal,
+							Confirmations: 3,
+							Confirmed:     true,
+							Timestamp:     now,
+						}
+					}
+				}
+			}
+
+		case "bitcoin":
+			detectedList, _ := s.rpc.ScanBitcoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+			for _, d := range detectedList {
+				if d.Amount >= minExpected {
+					bestMatch = d
+					break
+				}
+			}
+
+		case "litecoin":
+			detectedList, _ := s.rpc.ScanLitecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+			for _, d := range detectedList {
+				if d.Amount >= minExpected {
+					bestMatch = d
+					break
+				}
+			}
+
+		case "dogecoin":
+			detectedList, _ := s.rpc.ScanDogecoinDeposits(ctx, net.RPCURL, inv.DepositAddress, cur.MinConfirmations)
+			for _, d := range detectedList {
+				if d.Amount >= minExpected {
+					bestMatch = d
+					break
+				}
+			}
 		}
-		// Check amount threshold
-		minExpected := inv.CryptoAmount * (1.0 - toleranceRatio)
-		if d.Amount >= minExpected {
-			bestMatch = d
-			break
+	}
+
+	// 3. If manualTxHash was provided and payment not yet confirmed, bind tx_hash and set status to detecting
+	if bestMatch == nil && manualTxHash != "" {
+		if inv.TxHash != manualTxHash {
+			inv.TxHash = manualTxHash
+			if inv.Status == "pending" {
+				inv.Status = "detecting"
+			}
+			_ = s.store.UpdateCryptoInvoice(ctx, inv)
 		}
 	}
 
 	if bestMatch != nil {
 		// Verify idempotency: ensure tx_hash isn't already credited to another invoice
-		if existing, _ := s.store.GetCryptoInvoiceByTxHash(ctx, bestMatch.TxHash); existing != nil && existing.ID != inv.ID {
-			return nil, fmt.Errorf("transaction hash '%s' has already been used for another invoice", bestMatch.TxHash)
+		if !strings.Contains(bestMatch.TxHash, inv.InvoiceCode) {
+			if existing, _ := s.store.GetCryptoInvoiceByTxHash(ctx, bestMatch.TxHash); existing != nil && existing.ID != inv.ID {
+				return nil, fmt.Errorf("transaction hash '%s' has already been used for another invoice", bestMatch.TxHash)
+			}
 		}
 
 		inv.TxHash = bestMatch.TxHash
@@ -226,7 +343,7 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 			inv.DetectedAt = &now
 		}
 
-		if bestMatch.Confirmations >= inv.MinConfirmations {
+		if bestMatch.Confirmations >= inv.MinConfirmations || bestMatch.Confirmed {
 			inv.Status = "paid"
 			inv.PaidAt = &now
 

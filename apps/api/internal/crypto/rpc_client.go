@@ -175,12 +175,264 @@ func (c *MultiChainRpcClient) ScanEVMTokenDeposits(ctx context.Context, rpcURL, 
 			Amount:          tokenAmount,
 			BlockNumber:     blk,
 			Confirmations:   confs,
-			Confirmed:       confs >= 2,
+			Confirmed:       confs >= 1,
 			Timestamp:       time.Now().UTC(),
 		})
 	}
 
 	return payments, nil
+}
+
+// GetEVMBalance queries the native coin balance (BNB, ETH, POL) in float units.
+func (c *MultiChainRpcClient) GetEVMBalance(ctx context.Context, rpcURL, address string) (float64, error) {
+	cleanAddr := strings.TrimSpace(address)
+	raw, err := c.callEVM(ctx, rpcURL, "eth_getBalance", []interface{}{cleanAddr, "latest"})
+	if err != nil {
+		return 0, err
+	}
+	var hexStr string
+	if err := json.Unmarshal(raw, &hexStr); err != nil {
+		return 0, err
+	}
+	clean := strings.TrimPrefix(hexStr, "0x")
+	valBig := new(big.Int)
+	valBig.SetString(clean, 16)
+
+	fVal := new(big.Float).SetInt(valBig)
+	divider := new(big.Float).SetFloat64(1e18)
+	balance, _ := new(big.Float).Quo(fVal, divider).Float64()
+	return balance, nil
+}
+
+// GetEVMTokenBalance queries the ERC20/BEP20 token balance.
+func (c *MultiChainRpcClient) GetEVMTokenBalance(ctx context.Context, rpcURL, contractAddr, address string, decimals int) (float64, error) {
+	cleanContract := strings.ToLower(strings.TrimSpace(contractAddr))
+	cleanAddr := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(address), "0x"))
+	paddedAddr := strings.Repeat("0", 64-len(cleanAddr)) + cleanAddr
+	callData := "0x70a08231" + paddedAddr // balanceOf(address) selector
+
+	raw, err := c.callEVM(ctx, rpcURL, "eth_call", []interface{}{
+		map[string]interface{}{
+			"to":   cleanContract,
+			"data": callData,
+		},
+		"latest",
+	})
+	if err != nil {
+		return 0, err
+	}
+	var hexStr string
+	if err := json.Unmarshal(raw, &hexStr); err != nil {
+		return 0, err
+	}
+	clean := strings.TrimPrefix(hexStr, "0x")
+	valBig := new(big.Int)
+	valBig.SetString(clean, 16)
+
+	fVal := new(big.Float).SetInt(valBig)
+	divider := new(big.Float).SetFloat64(float64(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil).Int64()))
+	balance, _ := new(big.Float).Quo(fVal, divider).Float64()
+	return balance, nil
+}
+
+// VerifyEVMTransaction directly queries on-chain transaction status, recipient, and amount.
+func (c *MultiChainRpcClient) VerifyEVMTransaction(ctx context.Context, rpcURL, txHash, depositAddr, contractAddr string, decimals int, isToken bool, expectedAmount float64) (*DetectedPayment, error) {
+	cleanTxHash := strings.TrimSpace(txHash)
+	if !strings.HasPrefix(cleanTxHash, "0x") {
+		cleanTxHash = "0x" + cleanTxHash
+	}
+
+	// 1. Query transaction details
+	rawTx, err := c.callEVM(ctx, rpcURL, "eth_getTransactionByHash", []interface{}{cleanTxHash})
+	if err != nil {
+		return nil, err
+	}
+	if len(rawTx) == 0 || string(rawTx) == "null" {
+		return nil, fmt.Errorf("transaction not found on blockchain")
+	}
+
+	var tx struct {
+		Hash        string `json:"hash"`
+		From        string `json:"from"`
+		To          string `json:"to"`
+		Value       string `json:"value"`
+		Input       string `json:"input"`
+		BlockNumber string `json:"blockNumber"`
+	}
+	if err := json.Unmarshal(rawTx, &tx); err != nil {
+		return nil, err
+	}
+
+	// 2. Query transaction receipt for status
+	rawReceipt, err := c.callEVM(ctx, rpcURL, "eth_getTransactionReceipt", []interface{}{cleanTxHash})
+	if err != nil || len(rawReceipt) == 0 || string(rawReceipt) == "null" {
+		return nil, fmt.Errorf("transaction is still pending in mempool (awaiting block inclusion)")
+	}
+
+	var receipt struct {
+		Status      string `json:"status"` // "0x1" = success, "0x0" = failure
+		BlockNumber string `json:"blockNumber"`
+		Logs        []struct {
+			Address string   `json:"address"`
+			Topics  []string `json:"topics"`
+			Data    string   `json:"data"`
+		} `json:"logs"`
+	}
+	if err := json.Unmarshal(rawReceipt, &receipt); err != nil {
+		return nil, err
+	}
+
+	if receipt.Status == "0x0" {
+		return nil, fmt.Errorf("transaction failed/reverted on blockchain")
+	}
+
+	txBlock, _ := strconv.ParseInt(strings.TrimPrefix(receipt.BlockNumber, "0x"), 16, 64)
+	currentBlock, _ := c.GetEVMCurrentBlock(ctx, rpcURL)
+	confirmations := int(currentBlock - txBlock + 1)
+	if confirmations < 1 {
+		confirmations = 1
+	}
+
+	cleanDeposit := strings.ToLower(strings.TrimSpace(depositAddr))
+
+	if !isToken {
+		// Native coin transfer (BNB, ETH, POL)
+		if !strings.EqualFold(tx.To, cleanDeposit) {
+			return nil, fmt.Errorf("transaction recipient (%s) does not match deposit address (%s)", tx.To, cleanDeposit)
+		}
+		rawHex := strings.TrimPrefix(tx.Value, "0x")
+		valBig := new(big.Int)
+		valBig.SetString(rawHex, 16)
+		fVal := new(big.Float).SetInt(valBig)
+		divider := new(big.Float).SetFloat64(1e18)
+		amount, _ := new(big.Float).Quo(fVal, divider).Float64()
+
+		minExpected := expectedAmount * 0.97
+		if amount < minExpected {
+			return nil, fmt.Errorf("transaction amount (%.8f) is less than required (%.8f)", amount, expectedAmount)
+		}
+
+		return &DetectedPayment{
+			TxHash:        tx.Hash,
+			ToAddress:     depositAddr,
+			FromAddress:   tx.From,
+			Amount:        amount,
+			BlockNumber:   txBlock,
+			Confirmations: confirmations,
+			Confirmed:     confirmations >= 1,
+			Timestamp:     time.Now().UTC(),
+		}, nil
+	}
+
+	// Token transfer (USDT BEP20/ERC20)
+	cleanContract := strings.ToLower(strings.TrimSpace(contractAddr))
+	transferTopic := "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+	for _, l := range receipt.Logs {
+		if !strings.EqualFold(l.Address, cleanContract) {
+			continue
+		}
+		if len(l.Topics) >= 3 && strings.EqualFold(l.Topics[0], transferTopic) {
+			toTopic := strings.TrimPrefix(l.Topics[2], "0x")
+			if len(toTopic) >= 40 {
+				logTo := "0x" + toTopic[len(toTopic)-40:]
+				if strings.EqualFold(logTo, cleanDeposit) {
+					rawHex := strings.TrimPrefix(l.Data, "0x")
+					valBig := new(big.Int)
+					valBig.SetString(rawHex, 16)
+					fVal := new(big.Float).SetInt(valBig)
+					div := new(big.Float).SetFloat64(float64(new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(decimals)), nil).Int64()))
+					amount, _ := new(big.Float).Quo(fVal, div).Float64()
+
+					minExpected := expectedAmount * 0.97
+					if amount >= minExpected {
+						fromAddr := ""
+						fromTopic := strings.TrimPrefix(l.Topics[1], "0x")
+						if len(fromTopic) >= 40 {
+							fromAddr = "0x" + fromTopic[len(fromTopic)-40:]
+						}
+						return &DetectedPayment{
+							TxHash:          tx.Hash,
+							ToAddress:       depositAddr,
+							FromAddress:     fromAddr,
+							ContractAddress: contractAddr,
+							Amount:          amount,
+							BlockNumber:     txBlock,
+							Confirmations:   confirmations,
+							Confirmed:       confirmations >= 1,
+							Timestamp:       time.Now().UTC(),
+						}, nil
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no matching token transfer to %s found in transaction %s", depositAddr, cleanTxHash)
+}
+
+// ScanEVMLatestBlocks scans transactions in recent blocks for native transfers to depositAddr.
+func (c *MultiChainRpcClient) ScanEVMLatestBlocks(ctx context.Context, rpcURL, depositAddr string, maxBlocks int, expectedAmount float64) (*DetectedPayment, error) {
+	currentBlock, err := c.GetEVMCurrentBlock(ctx, rpcURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if maxBlocks <= 0 || maxBlocks > 30 {
+		maxBlocks = 20
+	}
+
+	cleanDeposit := strings.ToLower(strings.TrimSpace(depositAddr))
+	minExpected := expectedAmount * 0.97
+
+	for blk := currentBlock; blk >= currentBlock-int64(maxBlocks) && blk > 0; blk-- {
+		rawBlock, err := c.callEVM(ctx, rpcURL, "eth_getBlockByNumber", []interface{}{fmt.Sprintf("0x%x", blk), true})
+		if err != nil {
+			continue
+		}
+
+		var blockData struct {
+			Transactions []struct {
+				Hash  string `json:"hash"`
+				From  string `json:"from"`
+				To    string `json:"to"`
+				Value string `json:"value"`
+			} `json:"transactions"`
+		}
+		if err := json.Unmarshal(rawBlock, &blockData); err != nil {
+			continue
+		}
+
+		for _, tx := range blockData.Transactions {
+			if strings.EqualFold(tx.To, cleanDeposit) {
+				rawHex := strings.TrimPrefix(tx.Value, "0x")
+				valBig := new(big.Int)
+				valBig.SetString(rawHex, 16)
+				fVal := new(big.Float).SetInt(valBig)
+				divider := new(big.Float).SetFloat64(1e18)
+				amount, _ := new(big.Float).Quo(fVal, divider).Float64()
+
+				if amount >= minExpected {
+					confs := int(currentBlock - blk + 1)
+					if confs < 1 {
+						confs = 1
+					}
+					return &DetectedPayment{
+						TxHash:        tx.Hash,
+						ToAddress:     depositAddr,
+						FromAddress:   tx.From,
+						Amount:        amount,
+						BlockNumber:   blk,
+						Confirmations: confs,
+						Confirmed:     confs >= 1,
+						Timestamp:     time.Now().UTC(),
+					}, nil
+				}
+			}
+		}
+	}
+
+	return nil, nil
 }
 
 // ----------------------------------------------------------------------------
@@ -269,6 +521,127 @@ func (c *MultiChainRpcClient) ScanTronTRC20Deposits(ctx context.Context, rpcURL,
 	}
 
 	return payments, nil
+}
+
+// GetTronBalance queries native TRX balance of an address in TRX.
+func (c *MultiChainRpcClient) GetTronBalance(ctx context.Context, rpcURL, depositAddr string) (float64, error) {
+	baseURL := rpcURL
+	if baseURL == "" {
+		baseURL = "https://api.trongrid.io"
+	}
+	url := fmt.Sprintf("%s/v1/accounts/%s", baseURL, depositAddr)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	var accResp struct {
+		Data []struct {
+			Balance int64 `json:"balance"` // in SUN
+		} `json:"data"`
+		Success bool `json:"success"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&accResp); err != nil {
+		return 0, err
+	}
+	if len(accResp.Data) == 0 {
+		return 0, nil
+	}
+	return float64(accResp.Data[0].Balance) / 1e6, nil
+}
+
+// VerifyTronTransaction directly verifies a TRON transaction hash.
+func (c *MultiChainRpcClient) VerifyTronTransaction(ctx context.Context, rpcURL, txHash, depositAddr, contractAddr string, isToken bool, expectedAmount float64) (*DetectedPayment, error) {
+	baseURL := rpcURL
+	if baseURL == "" {
+		baseURL = "https://api.trongrid.io"
+	}
+
+	cleanTx := strings.TrimSpace(txHash)
+	url := fmt.Sprintf("%s/wallet/gettransactionbyid", baseURL)
+	body, _ := json.Marshal(map[string]string{"value": cleanTx})
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var txInfo struct {
+		TxID    string `json:"txID"`
+		RawData struct {
+			Contract []struct {
+				Parameter struct {
+					Value struct {
+						Amount          int64  `json:"amount"` // in SUN
+						ToAddress       string `json:"to_address"`
+						OwnerAddress     string `json:"owner_address"`
+						ContractAddress string `json:"contract_address"`
+						Data            string `json:"data"`
+					} `json:"value"`
+				} `json:"parameter"`
+				Type string `json:"type"`
+			} `json:"contract"`
+			Timestamp int64 `json:"timestamp"`
+		} `json:"raw_data"`
+		Ret []struct {
+			ContractRet string `json:"contractRet"`
+		} `json:"ret"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&txInfo); err != nil {
+		return nil, err
+	}
+
+	if txInfo.TxID == "" {
+		return nil, fmt.Errorf("tron transaction not found on-chain")
+	}
+
+	if len(txInfo.Ret) > 0 && txInfo.Ret[0].ContractRet != "SUCCESS" {
+		return nil, fmt.Errorf("tron transaction failed on blockchain: %s", txInfo.Ret[0].ContractRet)
+	}
+
+	txTime := time.UnixMilli(txInfo.RawData.Timestamp).UTC()
+	minExpected := expectedAmount * 0.97
+
+	if isToken {
+		detected, _ := c.ScanTronTRC20Deposits(ctx, rpcURL, contractAddr, depositAddr, 1)
+		for _, d := range detected {
+			if strings.EqualFold(d.TxHash, cleanTx) {
+				return d, nil
+			}
+		}
+	} else {
+		for _, cItem := range txInfo.RawData.Contract {
+			if cItem.Type == "TransferContract" {
+				trxAmount := float64(cItem.Parameter.Value.Amount) / 1e6
+				if trxAmount >= minExpected {
+					return &DetectedPayment{
+						TxHash:        txInfo.TxID,
+						ToAddress:     depositAddr,
+						FromAddress:   cItem.Parameter.Value.OwnerAddress,
+						Amount:        trxAmount,
+						BlockNumber:   0,
+						Confirmations: 3,
+						Confirmed:     true,
+						Timestamp:     txTime,
+					}, nil
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("transaction %s does not match expected deposit to %s", cleanTx, depositAddr)
 }
 
 // ----------------------------------------------------------------------------

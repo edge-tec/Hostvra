@@ -599,14 +599,25 @@ export default function CryptoCheckoutPage() {
                           </span>
                         </div>
 
-                        <button
-                          onClick={() => copyToClipboard(invoice.invoice_code, 'code')}
-                          className="text-[11px] font-mono text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 cursor-pointer bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm"
-                          title="Copy Invoice Code"
-                        >
-                          <span>{invoice.invoice_code}</span>
-                          {copiedCode ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleManualVerify}
+                            disabled={verifyingTx}
+                            className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-500/20 shadow-sm flex items-center gap-1.5 cursor-pointer transition active:scale-95 disabled:opacity-50"
+                            title="Check Blockchain for Payment Now"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${verifyingTx ? 'animate-spin' : ''}`} />
+                            <span>{verifyingTx ? 'Checking...' : 'Check On-Chain'}</span>
+                          </button>
+                          <button
+                            onClick={() => copyToClipboard(invoice.invoice_code, 'code')}
+                            className="text-[11px] font-mono text-slate-500 hover:text-slate-800 dark:hover:text-white flex items-center gap-1 cursor-pointer bg-white dark:bg-slate-900 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm"
+                            title="Copy Invoice Code"
+                          >
+                            <span>{invoice.invoice_code}</span>
+                            {copiedCode ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Visual Stepper */}
@@ -763,18 +774,18 @@ export default function CryptoCheckoutPage() {
                           <div className="flex gap-2">
                             <input
                               type="text"
-                              placeholder="0x... or transaction hash..."
+                              placeholder="0x... or transaction hash (optional)..."
                               value={txHashInput}
                               onChange={(e) => setTxHashInput(e.target.value)}
                               className="flex-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 dark:text-slate-200 focus:outline-none focus:border-emerald-500 shadow-inner"
                             />
                             <button
                               onClick={handleManualVerify}
-                              disabled={verifyingTx || !txHashInput.trim()}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold rounded-xl text-white transition cursor-pointer flex items-center gap-1.5 shadow-md"
+                              disabled={verifyingTx}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold rounded-xl text-white transition cursor-pointer flex items-center gap-1.5 shadow-md shrink-0"
                             >
                               {verifyingTx && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                              <span>Verify Tx</span>
+                              <span>{txHashInput.trim() ? 'Verify Tx' : 'Check On-Chain Now'}</span>
                             </button>
                           </div>
                         </div>
