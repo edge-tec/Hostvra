@@ -78,6 +78,11 @@ export default function AdminCryptoPage() {
   const [initializingHD, setInitializingHD] = useState<boolean>(false);
   const [togglingPause, setTogglingPause] = useState<boolean>(false);
   const [executingSweepId, setExecutingSweepId] = useState<string | null>(null);
+  const [showMnemonicModal, setShowMnemonicModal] = useState<boolean>(false);
+  const [mnemonicInput, setMnemonicInput] = useState<string>('');
+  const [showMnemonicPlain, setShowMnemonicPlain] = useState<boolean>(false);
+  const [mnemonicConfirmBackup, setMnemonicConfirmBackup] = useState<boolean>(false);
+  const [mnemonicError, setMnemonicError] = useState<string>('');
   const [settings, setSettings] = useState<Record<string, string>>({
     invoice_expiry_minutes: '30',
     rate_tolerance_percent: '1.0',
@@ -313,21 +318,51 @@ export default function AdminCryptoPage() {
     fetchHDWalletAndSweeps();
   }, [fetchHDWalletAndSweeps]);
 
-  const handleInitHDWallet = async () => {
+  const handleInitHDWallet = async (customMnemonic?: string) => {
+    setMnemonicError('');
+    const trimmed = (customMnemonic || '').trim().replace(/\s+/g, ' ');
+    if (trimmed) {
+      const words = trimmed.split(' ').filter(Boolean);
+      if (words.length !== 12 && words.length !== 24) {
+        setMnemonicError(`Invalid phrase length: found ${words.length} words. Please enter a valid 12-word or 24-word BIP-39 secret phrase.`);
+        return;
+      }
+      if (!mnemonicConfirmBackup) {
+        setMnemonicError('Please confirm that you have safely backed up this secret phrase offline.');
+        return;
+      }
+    }
+
     setInitializingHD(true);
     try {
       const res = await apiFetch<any>('/api/v1/admin/crypto/hd-wallet/initialize', {
         method: 'POST',
-        body: JSON.stringify({ force_rotate: false }),
+        body: JSON.stringify({
+          mnemonic: trimmed,
+          force_rotate: Boolean(trimmed),
+        }),
       });
       if (res.data) {
+        // Immediately wipe mnemonic from browser memory
+        setMnemonicInput('');
+        setShowMnemonicPlain(false);
+        setMnemonicConfirmBackup(false);
+        setShowMnemonicModal(false);
         await fetchHDWalletAndSweeps();
-        alert('Enterprise HD Wallet Vault & Watch-Only Accounts initialized across all networks!');
+        alert(
+          trimmed
+            ? 'Your HD Mnemonic has been encrypted (AES-256-GCM) into the isolated server vault! Watch-only accounts are active.'
+            : 'Enterprise HD Wallet Vault & Watch-Only Accounts initialized across all networks!'
+        );
       } else {
-        alert(res.error?.message || 'Failed to initialize HD Wallet vault');
+        const errMsg = res.error?.message || 'Failed to initialize HD Wallet vault';
+        setMnemonicError(errMsg);
+        if (!trimmed) alert(errMsg);
       }
     } catch (e: any) {
-      alert(e.message || 'Failed to initialize HD Wallet vault');
+      const errMsg = e.message || 'Failed to initialize HD Wallet vault';
+      setMnemonicError(errMsg);
+      if (!trimmed) alert(errMsg);
     } finally {
       setInitializingHD(false);
     }
@@ -1049,15 +1084,27 @@ export default function AdminCryptoPage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => {
+                  setMnemonicError('');
+                  setMnemonicInput('');
+                  setMnemonicConfirmBackup(false);
+                  setShowMnemonicModal(true);
+                }}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                <span>{hdOverview?.signer_status?.initialized ? 'Set / Update HD Mnemonic' : 'Set HD Mnemonic (12/24 Words)'}</span>
+              </button>
               {!hdOverview?.signer_status?.initialized && (
                 <button
-                  onClick={handleInitHDWallet}
+                  onClick={() => handleInitHDWallet()}
                   disabled={initializingHD}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
                 >
                   <Zap className="w-3.5 h-3.5" />
-                  <span>{initializingHD ? 'Initializing Vault...' : 'Initialize HD Vault'}</span>
+                  <span>{initializingHD ? 'Initializing Vault...' : 'Auto-Generate Vault'}</span>
                 </button>
               )}
               <button
@@ -1076,6 +1123,112 @@ export default function AdminCryptoPage() {
               </button>
             </div>
           </div>
+
+          {/* Secure Write-Only HD Mnemonic Configuration Panel */}
+          {showMnemonicModal && (
+            <div className="bg-slate-900 border border-indigo-500/40 rounded-2xl p-5 shadow-xl space-y-4 text-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-indigo-400" />
+                    <span>Configure Server HD Wallet Mnemonic (HOSTVRA_HD_MNEMONIC)</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Paste your dedicated 12-word or 24-word BIP-39 secret phrase. It is sealed into the server&apos;s AES-256-GCM encrypted OS vault (<code className="text-indigo-300">0600</code>) outside SQL and will never be displayed again.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setMnemonicInput('');
+                    setShowMnemonicModal(false);
+                  }}
+                  className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg border border-slate-700 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 leading-relaxed">
+                <strong>Security Best Practice:</strong> Create a <strong>brand-new dedicated wallet</strong> in Trust Wallet for Hostvra Gateway (do NOT paste your personal savings wallet seed). Keep your 12/24 words written offline so you can always recover 100% of funds.
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <label className="font-bold text-slate-200">
+                    BIP-39 Secret Recovery Phrase (12 or 24 words, space-separated)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowMnemonicPlain(!showMnemonicPlain)}
+                    className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer"
+                  >
+                    {showMnemonicPlain ? 'Hide Words' : 'Show Words'}
+                  </button>
+                </div>
+                {showMnemonicPlain ? (
+                  <textarea
+                    rows={3}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12"
+                    value={mnemonicInput}
+                    onChange={(e) => setMnemonicInput(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                ) : (
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    placeholder="•••••••• •••••••• •••••••• (paste 12 or 24 words)"
+                    value={mnemonicInput}
+                    onChange={(e) => setMnemonicInput(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+                  />
+                )}
+                <div className="text-[11px] text-slate-400">
+                  Word count: <strong className="text-white">{mnemonicInput.trim() ? mnemonicInput.trim().split(/\s+/).length : 0}</strong> (must be 12 or 24)
+                </div>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={mnemonicConfirmBackup}
+                  onChange={(e) => setMnemonicConfirmBackup(e.target.checked)}
+                  className="rounded border-slate-600"
+                />
+                <span>I confirm I have backed up this 12/24-word phrase offline and understand it will never be shown again in the admin panel.</span>
+              </label>
+
+              {mnemonicError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-300">
+                  {mnemonicError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMnemonicInput('');
+                    setShowMnemonicModal(false);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={initializingHD || !mnemonicInput.trim()}
+                  onClick={() => handleInitHDWallet(mnemonicInput)}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer flex items-center gap-1.5 shadow-md"
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  <span>{initializingHD ? 'Encrypting & Sealing Vault...' : 'Encrypt & Save to Isolated Vault'}</span>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* KPI Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">

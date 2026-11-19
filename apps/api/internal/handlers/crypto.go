@@ -535,13 +535,21 @@ func (h *CryptoHandler) AdminInitializeHDWallet(w http.ResponseWriter, r *http.R
 	}
 
 	var req struct {
-		ForceRotate bool `json:"force_rotate"`
+		Mnemonic    string `json:"mnemonic"`
+		ForceRotate bool   `json:"force_rotate"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	status, err := h.cryptoSvc.Signer().InitializeOrBootstrapVault("", req.ForceRotate)
+	cleanMnemonic := strings.TrimSpace(req.Mnemonic)
+	forceRotate := req.ForceRotate
+	if cleanMnemonic != "" {
+		// Explicit mnemonic import always updates the vault when confirmed
+		forceRotate = true
+	}
+
+	status, err := h.cryptoSvc.Signer().InitializeOrBootstrapVault(cleanMnemonic, forceRotate)
 	if err != nil {
-		response.Error(w, http.StatusInternalServerError, "VAULT_INIT_FAILED", err.Error(), nil, "")
+		response.Error(w, http.StatusBadRequest, "VAULT_INIT_FAILED", err.Error(), nil, "")
 		return
 	}
 
