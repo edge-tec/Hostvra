@@ -29,18 +29,32 @@ type CryptoService struct {
 	store          store.Store
 	pricing        *PricingService
 	rpc            *MultiChainRpcClient
+	signer         *IsolatedSigner
+	hdWallet       *HDWalletService
+	treasury       *TreasurySweepEngine
 	settleCallback SettleCallbackFunc
 	mu             sync.Mutex
 }
 
 func NewCryptoService(st store.Store, settleCb SettleCallbackFunc) *CryptoService {
+	rpc := NewMultiChainRpcClient()
+	signer := NewIsolatedSigner()
+	hdWallet := NewHDWalletService(st, signer)
+	treasury := NewTreasurySweepEngine(st, rpc, signer)
 	return &CryptoService{
 		store:          st,
 		pricing:        GetPricingService(),
-		rpc:            NewMultiChainRpcClient(),
+		rpc:            rpc,
+		signer:         signer,
+		hdWallet:       hdWallet,
+		treasury:       treasury,
 		settleCallback: settleCb,
 	}
 }
+
+func (s *CryptoService) Signer() *IsolatedSigner         { return s.signer }
+func (s *CryptoService) HDWallet() *HDWalletService      { return s.hdWallet }
+func (s *CryptoService) Treasury() *TreasurySweepEngine  { return s.treasury }
 
 // SetSettleCallback sets or overrides the billing settlement callback.
 func (s *CryptoService) SetSettleCallback(cb SettleCallbackFunc) {
@@ -77,39 +91,68 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 
 	invoiceID := uuid.New()
 
-	// Acquire dedicated deposit address from address pool or active treasury
-	depositAddr, err := s.store.AcquireDepositAddress(ctx, net.ID, cur.ID, invoiceID)
-	if err != nil {
-		return nil, fmt.Errorf("no treasury destination address configured for %s (%s). Super Admin must add an approved Trust Wallet address in Admin Dashboard -> Crypto Gateway (/admin/crypto)", net.Name, cur.Symbol)
+	now := time.Now().UTC()
+	expiryMinutes := 30
+	settings, _ := s.store.GetCryptoSettings(ctx)
+	if settings["invoice_expiry_minutes"] != "" {
+		if exp, pErr := fmt.Sscanf(settings["invoice_expiry_minutes"], "%d", &expiryMinutes); pErr != nil || exp <= 0 {
+			expiryMinutes = 30
+		}
+	}
+	expiresAt := now.Add(time.Duration(expiryMinutes) * time.Minute)
+
+	// Acquire unique HD deposit address (Phase 5) when HD wallet is enabled & initialized,
+	// falling back to configured treasury pool for backward compatibility.
+	var depositAddressStr string
+	var poolAddrID uuid.UUID
+	useHD := !strings.EqualFold(settings["hd_wallet_enabled"], "false") && s.signer.Status().Initialized
+
+	// Verify merchant has an active Trust Wallet destination configured before accepting deposits
+	if _, tErr := s.treasury.resolveTreasuryDestination(ctx, net.ID); tErr != nil {
+		// Allow existing pool addresses if any are manually seeded
+		depositAddr, pErr := s.store.AcquireDepositAddress(ctx, net.ID, cur.ID, invoiceID)
+		if pErr != nil {
+			return nil, fmt.Errorf("no treasury destination address configured for %s (%s). Super Admin must add an approved Trust Wallet address in Admin Dashboard -> Crypto Gateway (/admin/crypto)", net.Name, cur.Symbol)
+		}
+		depositAddressStr = depositAddr.Address
+		poolAddrID = depositAddr.ID
+	} else if useHD {
+		hdAddr, hdErr := s.hdWallet.AllocateUserAddress(ctx, req.UserID, invoiceID, net.ID, cur.ID, expiresAt)
+		if hdErr == nil && hdAddr != nil {
+			depositAddressStr = hdAddr.DepositAddress
+		}
+	}
+
+	if depositAddressStr == "" {
+		depositAddr, pErr := s.store.AcquireDepositAddress(ctx, net.ID, cur.ID, invoiceID)
+		if pErr != nil {
+			return nil, fmt.Errorf("no treasury destination address configured for %s (%s). Super Admin must add an approved Trust Wallet address in Admin Dashboard -> Crypto Gateway (/admin/crypto)", net.Name, cur.Symbol)
+		}
+		depositAddressStr = depositAddr.Address
+		poolAddrID = depositAddr.ID
 	}
 
 	// QR Code URI scheme
 	qrUri := ""
 	switch net.ID {
 	case "tron":
-		qrUri = fmt.Sprintf("tron:%s?amount=%.6f", depositAddr.Address, cryptoAmount)
+		qrUri = fmt.Sprintf("tron:%s?amount=%.6f", depositAddressStr, cryptoAmount)
 	case "ethereum", "bsc", "polygon":
 		if cur.IsToken {
-			qrUri = fmt.Sprintf("ethereum:%s@%d/transfer?address=%s&uint256=%.0f", cur.ContractAddress, net.ChainID, depositAddr.Address, cryptoAmount*math.Pow10(cur.Decimals))
+			qrUri = fmt.Sprintf("ethereum:%s@%d/transfer?address=%s&uint256=%.0f", cur.ContractAddress, net.ChainID, depositAddressStr, cryptoAmount*math.Pow10(cur.Decimals))
 		} else {
-			qrUri = fmt.Sprintf("ethereum:%s?value=%.18f", depositAddr.Address, cryptoAmount)
+			qrUri = fmt.Sprintf("ethereum:%s?value=%.18f", depositAddressStr, cryptoAmount)
 		}
 	case "bitcoin":
-		qrUri = fmt.Sprintf("bitcoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+		qrUri = fmt.Sprintf("bitcoin:%s?amount=%.8f", depositAddressStr, cryptoAmount)
+	case "solana":
+		qrUri = fmt.Sprintf("solana:%s?amount=%.9f", depositAddressStr, cryptoAmount)
 	case "litecoin":
-		qrUri = fmt.Sprintf("litecoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+		qrUri = fmt.Sprintf("litecoin:%s?amount=%.8f", depositAddressStr, cryptoAmount)
 	case "dogecoin":
-		qrUri = fmt.Sprintf("dogecoin:%s?amount=%.8f", depositAddr.Address, cryptoAmount)
+		qrUri = fmt.Sprintf("dogecoin:%s?amount=%.8f", depositAddressStr, cryptoAmount)
 	default:
-		qrUri = depositAddr.Address
-	}
-
-	now := time.Now().UTC()
-	expiryMinutes := 30
-	if settings, sErr := s.store.GetCryptoSettings(ctx); sErr == nil && settings["invoice_expiry_minutes"] != "" {
-		if exp, pErr := fmt.Sscanf(settings["invoice_expiry_minutes"], "%d", &expiryMinutes); pErr != nil || exp <= 0 {
-			expiryMinutes = 30
-		}
+		qrUri = depositAddressStr
 	}
 
 	invCode := fmt.Sprintf("HV-CRYPTO-%d-%05d", now.Year(), rand.Intn(90000)+10000)
@@ -126,19 +169,21 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 		ExchangeRate:     rate,
 		CurrencyID:       cur.ID,
 		NetworkID:        net.ID,
-		DepositAddress:   depositAddr.Address,
+		DepositAddress:   depositAddressStr,
 		Confirmations:    0,
 		MinConfirmations: cur.MinConfirmations,
 		AmountReceived:   0,
 		Status:           "pending",
 		QRUri:            qrUri,
-		ExpiresAt:        now.Add(time.Duration(expiryMinutes) * time.Minute),
+		ExpiresAt:        expiresAt,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
 
 	if err := s.store.CreateCryptoInvoice(ctx, invoice); err != nil {
-		_ = s.store.ReleaseDepositAddress(ctx, depositAddr.ID)
+		if poolAddrID != uuid.Nil {
+			_ = s.store.ReleaseDepositAddress(ctx, poolAddrID)
+		}
 		return nil, fmt.Errorf("failed to persist crypto payment invoice: %w", err)
 	}
 
@@ -195,6 +240,11 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 			}
 		case "tron":
 			match, err := s.rpc.VerifyTronTransaction(ctx, net.RPCURL, manualTxHash, inv.DepositAddress, cur.ContractAddress, cur.IsToken, inv.CryptoAmount)
+			if err == nil && match != nil {
+				bestMatch = match
+			}
+		case "solana":
+			match, err := s.rpc.VerifySolanaTransaction(ctx, net.RPCURL, manualTxHash, inv.DepositAddress, inv.CryptoAmount)
 			if err == nil && match != nil {
 				bestMatch = match
 			}
@@ -314,6 +364,18 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 					break
 				}
 			}
+
+		case "solana":
+			if solBal, err := s.rpc.GetSolanaBalance(ctx, net.RPCURL, inv.DepositAddress); err == nil && solBal >= minExpected {
+				bestMatch = &DetectedPayment{
+					TxHash:        fmt.Sprintf("sol_native_%s", inv.InvoiceCode),
+					ToAddress:     inv.DepositAddress,
+					Amount:        solBal,
+					Confirmations: 1,
+					Confirmed:     true,
+					Timestamp:     now,
+				}
+			}
 		}
 	}
 
@@ -369,9 +431,14 @@ func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode st
 			}
 			_ = s.store.RecordCryptoLedger(ctx, ledger)
 
-			// Execute billing settlement callback
+			// Execute billing settlement callback (package activation & subscription renewal)
 			if s.settleCallback != nil {
 				_ = s.settleCallback(ctx, inv)
+			}
+
+			// Decoupled Phase 5 Automated Treasury Sweep enqueue (non-blocking: sweep failure never affects user package)
+			if s.treasury != nil {
+				_, _ = s.treasury.EnqueueSweepForInvoice(ctx, inv)
 			}
 		} else {
 			inv.Status = "confirming"

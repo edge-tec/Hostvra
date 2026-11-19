@@ -500,3 +500,144 @@ func (h *CryptoHandler) AdminUpdateSettings(w http.ResponseWriter, r *http.Reque
 	h.audit.Log(r.Context(), r, "crypto.settings.update", "crypto_settings", "global", "success", "Updated crypto payment settings", nil)
 	response.JSON(w, http.StatusOK, map[string]string{"message": "Settings updated successfully"}, nil)
 }
+
+
+// ----------------------------------------------------------------------------
+// Phase 5: Enterprise HD Wallet & Automated Treasury Sweep Admin Endpoints
+// ----------------------------------------------------------------------------
+
+// AdminGetHDWalletOverview returns watch-only HD accounts, derived user addresses, signer status, and audit logs.
+// Never returns master seeds, mnemonics, or private keys.
+func (h *CryptoHandler) AdminGetHDWalletOverview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	accounts, _ := h.store.ListHDWalletAccounts(ctx)
+	addresses, _ := h.store.ListHDWalletAddresses(ctx, r.URL.Query().Get("network_id"))
+	audits, _ := h.store.ListWalletDerivationAudits(ctx, 50)
+	dailySwept, _ := h.store.GetDailySweptUSD(ctx, time.Now().UTC().Add(-24*time.Hour))
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"signer_status":     h.cryptoSvc.Signer().Status(),
+		"derivation_specs":  crypto.NetworkDerivationSpecs,
+		"accounts":          accounts,
+		"addresses":         addresses,
+		"total_addresses":   len(addresses),
+		"audit_logs":        audits,
+		"daily_swept_usd":   dailySwept,
+	}, nil)
+}
+
+// AdminInitializeHDWallet initializes the server-side isolated HD vault and watch-only accounts for all networks.
+func (h *CryptoHandler) AdminInitializeHDWallet(w http.ResponseWriter, r *http.Request) {
+	claims, _ := auth.GetClaims(r.Context())
+	actor := "admin"
+	if claims != nil {
+		actor = claims.Email
+	}
+
+	var req struct {
+		ForceRotate bool `json:"force_rotate"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	status, err := h.cryptoSvc.Signer().InitializeOrBootstrapVault("", req.ForceRotate)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "VAULT_INIT_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	accounts, err := h.cryptoSvc.HDWallet().InitializeWalletAccounts(r.Context(), actor)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "HD_ACCOUNT_INIT_FAILED", err.Error(), nil, "")
+		return
+	}
+
+	h.audit.Log(r.Context(), r, "crypto.hd_wallet.initialize", "hd_wallet", "vault", "success",
+		fmt.Sprintf("Initialized enterprise HD wallet vault (mode=%s, accounts=%d)", status.Mode, len(accounts)), nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"signer_status": status,
+		"accounts":      accounts,
+	}, nil)
+}
+
+// AdminListSweepJobs returns all treasury sweep jobs and aggregate metrics.
+func (h *CryptoHandler) AdminListSweepJobs(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	status := r.URL.Query().Get("status")
+	networkID := r.URL.Query().Get("network_id")
+	jobs, err := h.store.ListTreasurySweepJobs(ctx, status, networkID, 100)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list sweep jobs", nil, "")
+		return
+	}
+
+	var queued, completed, failed int
+	var totalSweptUSD float64
+	for _, j := range jobs {
+		switch j.Status {
+		case "queued", "signing", "broadcast", "confirming":
+			queued++
+		case "completed":
+			completed++
+			totalSweptUSD += j.AmountUSD
+		case "failed":
+			failed++
+		}
+	}
+	dailySwept, _ := h.store.GetDailySweptUSD(ctx, time.Now().UTC().Add(-24*time.Hour))
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"jobs":            jobs,
+		"queued_count":    queued,
+		"completed_count": completed,
+		"failed_count":    failed,
+		"total_swept_usd": totalSweptUSD,
+		"daily_swept_usd": dailySwept,
+		"emergency_pause": h.cryptoSvc.Signer().IsEmergencyPaused(),
+	}, nil)
+}
+
+// AdminExecuteSweepJob manually triggers or retries an authorized treasury sweep job.
+func (h *CryptoHandler) AdminExecuteSweepJob(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	jobID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid sweep job UUID", nil, "")
+		return
+	}
+
+	if err := h.cryptoSvc.Treasury().ExecuteSweepJob(r.Context(), jobID, true); err != nil {
+		response.Error(w, http.StatusBadRequest, "SWEEP_EXECUTION_ERROR", err.Error(), nil, "")
+		return
+	}
+
+	job, _ := h.store.GetTreasurySweepJobByID(r.Context(), jobID)
+	h.audit.Log(r.Context(), r, "crypto.sweep.manual_execute", "treasury_sweep", jobID.String(), "success", "Manually executed treasury sweep job", nil)
+	response.JSON(w, http.StatusOK, job, nil)
+}
+
+// AdminToggleEmergencyPause immediately halts or resumes all signing and sweeping operations.
+func (h *CryptoHandler) AdminToggleEmergencyPause(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paused bool `json:"paused"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
+		return
+	}
+
+	h.cryptoSvc.Signer().SetEmergencyPause(req.Paused)
+	val := "false"
+	if req.Paused {
+		val = "true"
+	}
+	_ = h.store.SetCryptoSetting(r.Context(), "emergency_sweep_pause", val)
+
+	h.audit.Log(r.Context(), r, "crypto.emergency_pause", "treasury_engine", "global", "success",
+		fmt.Sprintf("Emergency sweep pause set to %s", val), nil)
+
+	response.JSON(w, http.StatusOK, map[string]interface{}{
+		"emergency_paused": req.Paused,
+		"signer_status":    h.cryptoSvc.Signer().Status(),
+	}, nil)
+}

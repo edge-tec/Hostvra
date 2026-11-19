@@ -84,6 +84,7 @@ func (m *MemoryStore) seedCryptoData() {
 		{ID: "ethereum", Name: "Ethereum (ERC20)", ChainID: 1, RPCURL: "https://cloudflare-eth.com", ExplorerTxURL: "https://etherscan.io/tx/%s", ExplorerAddressURL: "https://etherscan.io/address/%s", NativeCurrency: "ETH", MinConfirmations: 2, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "polygon", Name: "Polygon (PoS)", ChainID: 137, RPCURL: "https://polygon-rpc.com", ExplorerTxURL: "https://polygonscan.com/tx/%s", ExplorerAddressURL: "https://polygonscan.com/address/%s", NativeCurrency: "POL", MinConfirmations: 5, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "bitcoin", Name: "Bitcoin", ChainID: 0, RPCURL: "https://blockstream.info/api", ExplorerTxURL: "https://mempool.space/tx/%s", ExplorerAddressURL: "https://mempool.space/address/%s", NativeCurrency: "BTC", MinConfirmations: 2, IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "solana", Name: "Solana", ChainID: 101, RPCURL: "https://api.mainnet-beta.solana.com", ExplorerTxURL: "https://solscan.io/tx/%s", ExplorerAddressURL: "https://solscan.io/account/%s", NativeCurrency: "SOL", MinConfirmations: 1, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "litecoin", Name: "Litecoin", ChainID: 0, RPCURL: "https://litecoinspace.org/api", ExplorerTxURL: "https://litecoinspace.org/tx/%s", ExplorerAddressURL: "https://litecoinspace.org/address/%s", NativeCurrency: "LTC", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "dogecoin", Name: "Dogecoin", ChainID: 0, RPCURL: "https://dogechain.info/api/v1", ExplorerTxURL: "https://dogechain.info/tx/%s", ExplorerAddressURL: "https://dogechain.info/address/%s", NativeCurrency: "DOGE", MinConfirmations: 3, IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}
@@ -91,14 +92,17 @@ func (m *MemoryStore) seedCryptoData() {
 		m.cryptoNetworks[net.ID] = net
 	}
 
-	// 2. Currencies: 8 Clean, Proven, Fully Programmed Payment Currencies
+	// 2. Currencies: All 9 Enterprise Phase 5 Assets + LTC & DOGE
 	currencies := []*CryptoCurrency{
 		{ID: "USDT_TRC20", NetworkID: "tron", Symbol: "USDT", Name: "Tether USD (TRC20)", IsToken: true, ContractAddress: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "USDT_BEP20", NetworkID: "bsc", Symbol: "USDT", Name: "Tether USD (BEP20)", IsToken: true, ContractAddress: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "USDT_ERC20", NetworkID: "ethereum", Symbol: "USDT", Name: "Tether USD (ERC20)", IsToken: true, ContractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "BNB", NetworkID: "bsc", Symbol: "BNB", Name: "BNB Coin", IsToken: false, Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "bnb", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "POL", NetworkID: "polygon", Symbol: "POL", Name: "Polygon (POL/MATIC)", IsToken: false, Decimals: 18, MinConfirmations: 5, MinAmountUSD: 1.0, Icon: "pol", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "TRX", NetworkID: "tron", Symbol: "TRX", Name: "TRON", IsToken: false, Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "trx", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "BTC", NetworkID: "bitcoin", Symbol: "BTC", Name: "Bitcoin", IsToken: false, Decimals: 8, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "btc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "SOL", NetworkID: "solana", Symbol: "SOL", Name: "Solana", IsToken: false, Decimals: 9, MinConfirmations: 1, MinAmountUSD: 1.0, Icon: "sol", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "LTC", NetworkID: "litecoin", Symbol: "LTC", Name: "Litecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "ltc", IsActive: true, CreatedAt: now, UpdatedAt: now},
 		{ID: "DOGE", NetworkID: "dogecoin", Symbol: "DOGE", Name: "Dogecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "doge", IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}
@@ -108,10 +112,16 @@ func (m *MemoryStore) seedCryptoData() {
 
 	// 3. Settings
 	m.cryptoSettings["invoice_expiry_minutes"] = "30"
-	m.cryptoSettings["payment_tolerance_percent"] = "1.0"
+	m.cryptoSettings["payment_tolerance_percent"] = "2.0"
 	m.cryptoSettings["auto_settle_confirmations"] = "true"
 	m.cryptoSettings["price_cache_seconds"] = "60"
-	m.cryptoSettings["scanner_interval_seconds"] = "30"
+	m.cryptoSettings["scanner_interval_seconds"] = "20"
+	m.cryptoSettings["hd_wallet_enabled"] = "true"
+	m.cryptoSettings["auto_sweep_enabled"] = "true"
+	m.cryptoSettings["emergency_sweep_pause"] = "false"
+	m.cryptoSettings["min_sweep_usd"] = "5.0"
+	m.cryptoSettings["max_single_sweep_usd"] = "50000.0"
+	m.cryptoSettings["max_daily_sweep_usd"] = "250000.0"
 
 	// 4. Auto-restore disk-backed treasuries so restarts never lose addresses
 	for _, tw := range loadTreasuriesFromDisk() {

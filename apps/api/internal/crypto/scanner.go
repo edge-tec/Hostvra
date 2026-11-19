@@ -43,6 +43,11 @@ func (b *BackgroundScanner) Start(ctx context.Context) {
 				if err := b.cryptoSvc.ScanAllPendingInvoices(scanCtx); err != nil && scanCtx.Err() == nil {
 					log.Printf("[CRYPTO-WARN] Error during periodic pending invoice scan: %v", err)
 				}
+				if b.cryptoSvc.Treasury() != nil {
+					if err := b.cryptoSvc.Treasury().ProcessPendingSweeps(scanCtx); err != nil && scanCtx.Err() == nil {
+						log.Printf("[CRYPTO-WARN] Error during automated treasury sweep pass: %v", err)
+					}
+				}
 				cancel()
 			}
 		}

@@ -595,6 +595,30 @@ type Store interface {
 	GetCryptoSettings(ctx context.Context) (map[string]string, error)
 	SetCryptoSetting(ctx context.Context, key, value string) error
 
+	// Phase 5: Enterprise HD Wallet & Automated Treasury Sweep Engine
+	UpsertHDWalletAccount(ctx context.Context, acc *HDWalletAccount) error
+	GetHDWalletAccountByNetwork(ctx context.Context, networkID string) (*HDWalletAccount, error)
+	ListHDWalletAccounts(ctx context.Context) ([]*HDWalletAccount, error)
+	ReserveNextDerivationIndex(ctx context.Context, networkID string) (int, *HDWalletAccount, error)
+	CreateHDWalletAddress(ctx context.Context, addr *HDWalletAddress) error
+	GetHDWalletAddressByUserAndNetwork(ctx context.Context, userID uuid.UUID, networkID string) (*HDWalletAddress, error)
+	GetHDWalletAddressByDepositAddress(ctx context.Context, depositAddr string) (*HDWalletAddress, error)
+	ListHDWalletAddresses(ctx context.Context, networkID string) ([]*HDWalletAddress, error)
+	UpdateHDWalletAddressStatus(ctx context.Context, id uuid.UUID, status string) error
+	CreateDepositAddressAllocation(ctx context.Context, alloc *DepositAddressAllocation) error
+	GetDepositAddressAllocationByInvoice(ctx context.Context, invoiceID uuid.UUID) (*DepositAddressAllocation, error)
+	ListDepositAddressAllocations(ctx context.Context, limit int) ([]*DepositAddressAllocation, error)
+	CreateTreasurySweepJob(ctx context.Context, job *TreasurySweepJob) error
+	GetTreasurySweepJobByID(ctx context.Context, id uuid.UUID) (*TreasurySweepJob, error)
+	GetTreasurySweepJobByIdempotencyKey(ctx context.Context, key string) (*TreasurySweepJob, error)
+	ListTreasurySweepJobs(ctx context.Context, status, networkID string, limit int) ([]*TreasurySweepJob, error)
+	UpdateTreasurySweepJob(ctx context.Context, job *TreasurySweepJob) error
+	GetDailySweptUSD(ctx context.Context, since time.Time) (float64, error)
+	RecordTreasurySweepLog(ctx context.Context, entry *TreasurySweepLog) error
+	ListTreasurySweepLogs(ctx context.Context, jobID uuid.UUID) ([]*TreasurySweepLog, error)
+	RecordWalletDerivationAudit(ctx context.Context, entry *WalletDerivationAuditLog) error
+	ListWalletDerivationAudits(ctx context.Context, limit int) ([]*WalletDerivationAuditLog, error)
+
 	// Close
 	Close() error
 }
@@ -723,6 +747,14 @@ type MemoryStore struct {
 	cryptoInvoices    map[uuid.UUID]*CryptoPaymentInvoice
 	cryptoLedger      []*CryptoInternalLedger
 	cryptoSettings    map[string]string
+
+	// Phase 5: HD Wallet & Treasury Sweep Engine
+	hdWalletAccounts       map[string]*HDWalletAccount
+	hdWalletAddresses      map[uuid.UUID]*HDWalletAddress
+	depositAllocations     map[uuid.UUID]*DepositAddressAllocation
+	treasurySweepJobs      map[uuid.UUID]*TreasurySweepJob
+	treasurySweepLogs      []*TreasurySweepLog
+	walletDerivationAudits []*WalletDerivationAuditLog
 
 	filePath            string
 }
@@ -1407,6 +1439,12 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		cryptoInvoices:             make(map[uuid.UUID]*CryptoPaymentInvoice),
 		cryptoLedger:               make([]*CryptoInternalLedger, 0),
 		cryptoSettings:             make(map[string]string),
+		hdWalletAccounts:           make(map[string]*HDWalletAccount),
+		hdWalletAddresses:          make(map[uuid.UUID]*HDWalletAddress),
+		depositAllocations:         make(map[uuid.UUID]*DepositAddressAllocation),
+		treasurySweepJobs:          make(map[uuid.UUID]*TreasurySweepJob),
+		treasurySweepLogs:          make([]*TreasurySweepLog, 0),
+		walletDerivationAudits:     make([]*WalletDerivationAuditLog, 0),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

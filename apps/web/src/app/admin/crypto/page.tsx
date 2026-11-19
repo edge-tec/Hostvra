@@ -69,10 +69,15 @@ interface LedgerEntry {
 }
 
 export default function AdminCryptoPage() {
-  const [activeTab, setActiveTab] = useState<'invoices' | 'treasuries' | 'ledger' | 'settings'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'treasuries' | 'hdwallet' | 'ledger' | 'settings'>('invoices');
   const [invoices, setInvoices] = useState<CryptoInvoice[]>([]);
   const [treasuries, setTreasuries] = useState<TreasuryWallet[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
+  const [hdOverview, setHdOverview] = useState<any>(null);
+  const [sweepData, setSweepData] = useState<any>(null);
+  const [initializingHD, setInitializingHD] = useState<boolean>(false);
+  const [togglingPause, setTogglingPause] = useState<boolean>(false);
+  const [executingSweepId, setExecutingSweepId] = useState<string | null>(null);
   const [settings, setSettings] = useState<Record<string, string>>({
     invoice_expiry_minutes: '30',
     rate_tolerance_percent: '1.0',
@@ -288,6 +293,78 @@ export default function AdminCryptoPage() {
       }
     } catch (e: any) {
       alert(e.message || 'Force scan failed');
+    }
+  };
+
+  const fetchHDWalletAndSweeps = useCallback(async () => {
+    try {
+      const [hdRes, swRes] = await Promise.all([
+        apiFetch<any>('/api/v1/admin/crypto/hd-wallet/overview'),
+        apiFetch<any>('/api/v1/admin/crypto/sweeps'),
+      ]);
+      if (hdRes.data) setHdOverview(hdRes.data);
+      if (swRes.data) setSweepData(swRes.data);
+    } catch {
+      // Graceful fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchHDWalletAndSweeps();
+  }, [fetchHDWalletAndSweeps]);
+
+  const handleInitHDWallet = async () => {
+    setInitializingHD(true);
+    try {
+      const res = await apiFetch<any>('/api/v1/admin/crypto/hd-wallet/initialize', {
+        method: 'POST',
+        body: JSON.stringify({ force_rotate: false }),
+      });
+      if (res.data) {
+        await fetchHDWalletAndSweeps();
+        alert('Enterprise HD Wallet Vault & Watch-Only Accounts initialized across all networks!');
+      } else {
+        alert(res.error?.message || 'Failed to initialize HD Wallet vault');
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to initialize HD Wallet vault');
+    } finally {
+      setInitializingHD(false);
+    }
+  };
+
+  const handleToggleEmergencyPause = async () => {
+    const nextPaused = !(hdOverview?.signer_status?.emergency_paused);
+    setTogglingPause(true);
+    try {
+      const res = await apiFetch<any>('/api/v1/admin/crypto/emergency-pause', {
+        method: 'POST',
+        body: JSON.stringify({ paused: nextPaused }),
+      });
+      if (res.data) {
+        await fetchHDWalletAndSweeps();
+      }
+    } catch (e: any) {
+      alert(e.message || 'Failed to update emergency pause');
+    } finally {
+      setTogglingPause(false);
+    }
+  };
+
+  const handleExecuteSweep = async (jobId: string) => {
+    setExecutingSweepId(jobId);
+    try {
+      const res = await apiFetch<any>(`/api/v1/admin/crypto/sweeps/${jobId}/execute`, {
+        method: 'POST',
+      });
+      if (res.error) {
+        alert(res.error.message || 'Sweep execution error');
+      }
+      await fetchHDWalletAndSweeps();
+    } catch (e: any) {
+      alert(e.message || 'Sweep execution error');
+    } finally {
+      setExecutingSweepId(null);
     }
   };
 
@@ -516,6 +593,21 @@ export default function AdminCryptoPage() {
         >
           <Wallet className="w-4 h-4" />
           <span>Trust Wallet Treasuries ({treasuries.length})</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('hdwallet');
+            fetchHDWalletAndSweeps();
+          }}
+          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'hdwallet'
+              ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+              : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          <span>HD Wallet &amp; Auto-Sweep ({hdOverview?.total_addresses || 0})</span>
         </button>
 
         <button
@@ -930,6 +1022,193 @@ export default function AdminCryptoPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab: Enterprise HD Wallet & Automated Treasury Sweep Engine */}
+      {activeTab === 'hdwallet' && (
+        <div className="space-y-6">
+          {/* Security & Signer Status Banner */}
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-500" />
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Isolated HD Wallet Vault &amp; Policy-Enforced Treasury Engine
+                </h2>
+                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                  hdOverview?.signer_status?.initialized
+                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400'
+                    : 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400'
+                }`}>
+                  {hdOverview?.signer_status?.initialized ? `ACTIVE (${hdOverview?.signer_status?.mode})` : 'UNINITIALIZED'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                BIP-39 / BIP-44 / BIP-84 / SLIP-0010 deterministic derivation. Private keys never enter SQL tables or browser memory.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {!hdOverview?.signer_status?.initialized && (
+                <button
+                  onClick={handleInitHDWallet}
+                  disabled={initializingHD}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>{initializingHD ? 'Initializing Vault...' : 'Initialize HD Vault'}</span>
+                </button>
+              )}
+              <button
+                onClick={handleToggleEmergencyPause}
+                disabled={togglingPause}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50 ${
+                  hdOverview?.signer_status?.emergency_paused
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white'
+                }`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>
+                  {hdOverview?.signer_status?.emergency_paused ? 'Resume Sweeps' : 'Emergency Pause All Sweeps'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl">
+              <div className="text-[11px] text-slate-500 uppercase font-bold">HD Accounts</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{hdOverview?.accounts?.length || 0}</div>
+            </div>
+            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl">
+              <div className="text-[11px] text-slate-500 uppercase font-bold">Unique User Addresses</div>
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{hdOverview?.total_addresses || 0}</div>
+            </div>
+            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl">
+              <div className="text-[11px] text-slate-500 uppercase font-bold">Queued / Failed Sweeps</div>
+              <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                {sweepData?.queued_count || 0} / {sweepData?.failed_count || 0}
+              </div>
+            </div>
+            <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl">
+              <div className="text-[11px] text-slate-500 uppercase font-bold">24h Swept to Trust Wallet</div>
+              <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">
+                ${Number(sweepData?.daily_swept_usd || 0).toFixed(2)}
+              </div>
+            </div>
+          </div>
+
+          {/* Automated Treasury Sweep Jobs Table */}
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700/80 flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                Automated Treasury Sweep Queue (HD Address &rarr; Trust Wallet)
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/80 text-slate-500 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Network / Asset</th>
+                    <th className="p-3">Source HD Address</th>
+                    <th className="p-3">Trust Wallet Destination</th>
+                    <th className="p-3">Amount</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {(!sweepData?.jobs || sweepData.jobs.length === 0) ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400">
+                        No treasury sweep jobs yet. Confirmed HD deposits automatically enqueue sweeps here.
+                      </td>
+                    </tr>
+                  ) : (
+                    sweepData.jobs.map((job: any) => (
+                      <tr key={job.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/40">
+                        <td className="p-3 font-bold uppercase">{job.network_id} / {job.asset_id}</td>
+                        <td className="p-3 font-mono text-[11px]">{job.source_address}</td>
+                        <td className="p-3 font-mono text-[11px] text-emerald-600 dark:text-emerald-400">{job.destination_address}</td>
+                        <td className="p-3 font-mono">{job.requested_amount} (${Number(job.amount_usd || 0).toFixed(2)})</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            job.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : job.status === 'failed'
+                              ? 'bg-rose-100 text-rose-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}>
+                            {job.status}
+                          </span>
+                          {job.last_error && <div className="text-[10px] text-rose-500 mt-0.5 max-w-xs truncate">{job.last_error}</div>}
+                        </td>
+                        <td className="p-3 text-right">
+                          {job.status !== 'completed' && (
+                            <button
+                              onClick={() => handleExecuteSweep(job.id)}
+                              disabled={executingSweepId === job.id}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              {executingSweepId === job.id ? 'Sweeping...' : 'Sweep Now'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Unique Derived Deposit Addresses Table */}
+          <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700/80">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-200">
+                Allocated Unique User Deposit Addresses
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-700/80 text-slate-500 uppercase font-semibold">
+                  <tr>
+                    <th className="p-3">Network</th>
+                    <th className="p-3">Derivation Path</th>
+                    <th className="p-3">Index</th>
+                    <th className="p-3">Unique Deposit Address</th>
+                    <th className="p-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                  {(!hdOverview?.addresses || hdOverview.addresses.length === 0) ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-slate-400">
+                        No unique user addresses allocated yet. Initialize the HD Vault to start issuing per-user addresses.
+                      </td>
+                    </tr>
+                  ) : (
+                    hdOverview.addresses.map((addr: any) => (
+                      <tr key={addr.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-900/40">
+                        <td className="p-3 font-bold uppercase">{addr.network_id}</td>
+                        <td className="p-3 font-mono text-[11px] text-slate-500">{addr.derivation_path}</td>
+                        <td className="p-3 font-mono">#{addr.derivation_index}</td>
+                        <td className="p-3 font-mono text-[11px]">{addr.deposit_address}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-700">
+                            {addr.address_status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
 

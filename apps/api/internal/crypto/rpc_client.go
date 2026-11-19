@@ -830,3 +830,127 @@ func (c *MultiChainRpcClient) ScanDogecoinDeposits(ctx context.Context, apiURL, 
 
 	return payments, nil
 }
+
+
+// ----------------------------------------------------------------------------
+// EVM Signing & Broadcast Helpers (Nonce, Gas Price, Raw Tx Broadcast)
+// ----------------------------------------------------------------------------
+
+func (c *MultiChainRpcClient) GetEVMNonce(ctx context.Context, rpcURL, address string) (uint64, error) {
+	raw, err := c.callEVM(ctx, rpcURL, "eth_getTransactionCount", []interface{}{strings.TrimSpace(address), "pending"})
+	if err != nil {
+		return 0, err
+	}
+	var hexStr string
+	if err := json.Unmarshal(raw, &hexStr); err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(strings.TrimPrefix(hexStr, "0x"), 16, 64)
+}
+
+func (c *MultiChainRpcClient) GetEVMGasPrice(ctx context.Context, rpcURL string) (*big.Int, error) {
+	raw, err := c.callEVM(ctx, rpcURL, "eth_gasPrice", []interface{}{})
+	if err != nil {
+		return nil, err
+	}
+	var hexStr string
+	if err := json.Unmarshal(raw, &hexStr); err != nil {
+		return nil, err
+	}
+	val := new(big.Int)
+	val.SetString(strings.TrimPrefix(hexStr, "0x"), 16)
+	return val, nil
+}
+
+func (c *MultiChainRpcClient) SendEVMRawTransaction(ctx context.Context, rpcURL, rawTxHex string) (string, error) {
+	raw, err := c.callEVM(ctx, rpcURL, "eth_sendRawTransaction", []interface{}{strings.TrimSpace(rawTxHex)})
+	if err != nil {
+		return "", err
+	}
+	var txHash string
+	if err := json.Unmarshal(raw, &txHash); err != nil {
+		return "", err
+	}
+	return txHash, nil
+}
+
+// ----------------------------------------------------------------------------
+// Solana JSON-RPC (SOL Native Transfers & Balance Monitoring)
+// ----------------------------------------------------------------------------
+
+func (c *MultiChainRpcClient) GetSolanaBalance(ctx context.Context, rpcURL, address string) (float64, error) {
+	endpoint := rpcURL
+	if endpoint == "" {
+		endpoint = "https://api.mainnet-beta.solana.com"
+	}
+	raw, err := c.callEVM(ctx, endpoint, "getBalance", []interface{}{strings.TrimSpace(address), map[string]string{"commitment": "finalized"}})
+	if err != nil {
+		return 0, err
+	}
+	var res struct {
+		Value uint64 `json:"value"` // lamports
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return 0, err
+	}
+	return float64(res.Value) / 1e9, nil
+}
+
+func (c *MultiChainRpcClient) VerifySolanaTransaction(ctx context.Context, rpcURL, signature, depositAddr string, expectedAmount float64) (*DetectedPayment, error) {
+	endpoint := rpcURL
+	if endpoint == "" {
+		endpoint = "https://api.mainnet-beta.solana.com"
+	}
+	raw, err := c.callEVM(ctx, endpoint, "getTransaction", []interface{}{
+		strings.TrimSpace(signature),
+		map[string]interface{}{"encoding": "json", "commitment": "finalized", "maxSupportedTransactionVersion": 0},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, fmt.Errorf("solana transaction not found or not yet finalized")
+	}
+
+	var txRes struct {
+		Slot int64 `json:"slot"`
+		Meta struct {
+			Err          interface{} `json:"err"`
+			PreBalances  []uint64    `json:"preBalances"`
+			PostBalances []uint64    `json:"postBalances"`
+		} `json:"meta"`
+		Transaction struct {
+			Message struct {
+				AccountKeys []string `json:"accountKeys"`
+			} `json:"message"`
+		} `json:"transaction"`
+	}
+	if err := json.Unmarshal(raw, &txRes); err != nil {
+		return nil, err
+	}
+	if txRes.Meta.Err != nil {
+		return nil, fmt.Errorf("solana transaction failed on-chain")
+	}
+
+	minExpected := expectedAmount * 0.97
+	for idx, key := range txRes.Transaction.Message.AccountKeys {
+		if strings.EqualFold(key, strings.TrimSpace(depositAddr)) {
+			if idx < len(txRes.Meta.PreBalances) && idx < len(txRes.Meta.PostBalances) && txRes.Meta.PostBalances[idx] > txRes.Meta.PreBalances[idx] {
+				deltaLamports := txRes.Meta.PostBalances[idx] - txRes.Meta.PreBalances[idx]
+				amountSOL := float64(deltaLamports) / 1e9
+				if amountSOL >= minExpected {
+					return &DetectedPayment{
+						TxHash:        strings.TrimSpace(signature),
+						ToAddress:     depositAddr,
+						Amount:        amountSOL,
+						BlockNumber:   txRes.Slot,
+						Confirmations: 1,
+						Confirmed:     true,
+						Timestamp:     time.Now().UTC(),
+					}, nil
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("no matching SOL deposit to %s found in signature %s", depositAddr, signature)
+}

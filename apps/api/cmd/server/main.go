@@ -1486,6 +1486,12 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/settings", cryptoHandler.AdminGetSettings)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/settings", cryptoHandler.AdminUpdateSettings)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/invoices/{code}/force-verify", cryptoHandler.VerifyInvoice)
+				// Phase 5: Enterprise HD Wallet & Automated Treasury Sweep Engine
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/hd-wallet/overview", cryptoHandler.AdminGetHDWalletOverview)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/hd-wallet/initialize", cryptoHandler.AdminInitializeHDWallet)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/sweeps", cryptoHandler.AdminListSweepJobs)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/sweeps/{id}/execute", cryptoHandler.AdminExecuteSweepJob)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/emergency-pause", cryptoHandler.AdminToggleEmergencyPause)
 			})
 
 			// Support Tickets, Stats & Canned Macros
