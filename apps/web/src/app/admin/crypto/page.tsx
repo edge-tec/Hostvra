@@ -86,8 +86,8 @@ export default function AdminCryptoPage() {
   const [settings, setSettings] = useState<Record<string, string>>({
     invoice_expiry_minutes: '30',
     rate_tolerance_percent: '1.0',
-    auto_sweep_enabled: 'false',
-    min_sweep_usd: '100',
+    auto_sweep_enabled: 'true',
+    min_sweep_usd: '0.5',
   });
 
   const [loading, setLoading] = useState<boolean>(true);

@@ -112,7 +112,7 @@ VALUES
 ('hd_wallet_enabled', 'true', 'Generate unique deterministic HD deposit addresses per user/invoice'),
 ('auto_sweep_enabled', 'true', 'Automatically sweep confirmed HD deposit balances to Trust Wallet treasury'),
 ('emergency_sweep_pause', 'false', 'Emergency kill-switch halting all automated and manual treasury sweeps'),
-('min_sweep_usd', '5.0', 'Minimum USD balance threshold before sweeping a deposit address'),
+('min_sweep_usd', '0.5', 'Minimum USD balance threshold before sweeping a deposit address'),
 ('max_single_sweep_usd', '50000.0', 'Maximum USD value permitted in a single automated sweep transaction'),
 ('max_daily_sweep_usd', '250000.0', 'Maximum cumulative USD value permitted to sweep per 24 hours')
 ON CONFLICT (key) DO NOTHING;

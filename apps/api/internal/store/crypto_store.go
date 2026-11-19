@@ -119,7 +119,7 @@ func (m *MemoryStore) seedCryptoData() {
 	m.cryptoSettings["hd_wallet_enabled"] = "true"
 	m.cryptoSettings["auto_sweep_enabled"] = "true"
 	m.cryptoSettings["emergency_sweep_pause"] = "false"
-	m.cryptoSettings["min_sweep_usd"] = "5.0"
+	m.cryptoSettings["min_sweep_usd"] = "0.5"
 	m.cryptoSettings["max_single_sweep_usd"] = "50000.0"
 	m.cryptoSettings["max_daily_sweep_usd"] = "250000.0"
 

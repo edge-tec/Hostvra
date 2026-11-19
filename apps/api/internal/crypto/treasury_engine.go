@@ -62,7 +62,7 @@ func (e *TreasurySweepEngine) EnqueueSweepForInvoice(ctx context.Context, inv *s
 	}
 
 	settings, _ := e.store.GetCryptoSettings(ctx)
-	minSweepUSD := parseSettingFloat(settings["min_sweep_usd"], 5.0)
+	minSweepUSD := parseSettingFloat(settings["min_sweep_usd"], 0.5)
 	amountUSD := inv.FiatAmountUSD
 	if amountUSD < minSweepUSD {
 		// Still record as queued/below-threshold so admin can manually batch-sweep later
@@ -147,7 +147,7 @@ func (e *TreasurySweepEngine) ExecuteSweepJob(ctx context.Context, jobID uuid.UU
 		return fmt.Errorf("sweep halted: emergency pause is active")
 	}
 
-	minSweepUSD := parseSettingFloat(settings["min_sweep_usd"], 5.0)
+	minSweepUSD := parseSettingFloat(settings["min_sweep_usd"], 0.5)
 	maxSingleUSD := parseSettingFloat(settings["max_single_sweep_usd"], 50000.0)
 	maxDailyUSD := parseSettingFloat(settings["max_daily_sweep_usd"], 250000.0)
 
