@@ -2083,6 +2083,45 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC()
+	statusLower := strings.ToLower(payload.Status)
+
+	// Handle verified refund / chargeback webhooks even when invoice is currently Paid,
+	// ensuring affiliate commissions are reversed and replay protection is recorded.
+	if statusLower == "refunded" || statusLower == "chargeback" || statusLower == "reversed" {
+		if inv.Status == store.InvoiceStatusRefunded {
+			response.JSON(w, http.StatusOK, map[string]interface{}{
+				"status":  "idempotent_refunded",
+				"message": "Invoice was already refunded",
+				"invoice": inv,
+			}, nil)
+			return
+		}
+		inv.Status = store.InvoiceStatusRefunded
+		_ = h.store.UpdateInvoice(r.Context(), inv)
+		_ = h.store.ReverseAffiliateCommissionByInvoice(r.Context(), inv.ID)
+		_ = h.store.RecordDomainWebhook(r.Context(), &store.DomainWebhook{
+			ID:              uuid.New(),
+			Provider:        gatewayName,
+			EventType:       "refund",
+			ExternalEventID: eventID,
+			Payload:         string(bodyBytes),
+			Status:          "processed",
+			ProcessedAt:     now,
+			CreatedAt:       now,
+		})
+		h.audit.Log(r.Context(), r, "billing.webhook.refunded", "invoice", inv.ID.String(), "success", fmt.Sprintf("Processed %s refund webhook for %s and reversed affiliate commission", gatewayName, inv.InvoiceNumber), map[string]interface{}{
+			"gateway": gatewayName,
+			"amount":  inv.Total,
+		})
+		response.JSON(w, http.StatusOK, map[string]interface{}{
+			"status":         "refunded",
+			"message":        "Invoice marked refunded and affiliate commission reversed",
+			"invoice_number": inv.InvoiceNumber,
+		}, nil)
+		return
+	}
+
 	// Idempotency: If invoice is already paid with same transaction ID, return 200 OK immediately
 	if inv.Status == store.InvoiceStatusPaid {
 		response.JSON(w, http.StatusOK, map[string]interface{}{
@@ -2093,8 +2132,6 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
-	statusLower := strings.ToLower(payload.Status)
 	if statusLower == "paid" || statusLower == "success" || statusLower == "completed" {
 		inv.Status = store.InvoiceStatusPaid
 		inv.PaidAt = &now

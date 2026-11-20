@@ -159,6 +159,10 @@ func (h *CommercialHandler) ValidateCoupon(w http.ResponseWriter, r *http.Reques
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
 		return
 	}
+	if math.IsNaN(req.OrderAmountUSD) || math.IsInf(req.OrderAmountUSD, 0) || req.OrderAmountUSD < 0 {
+		response.Error(w, http.StatusBadRequest, "INVALID_AMOUNT", "order_amount_usd must be a non-negative finite number", nil, "")
+		return
+	}
 
 	c, err := h.store.GetCouponByCode(r.Context(), req.Code)
 	if err != nil {
@@ -208,17 +212,41 @@ func (h *CommercialHandler) AdminListCoupons(w http.ResponseWriter, r *http.Requ
 	response.JSON(w, http.StatusOK, list, nil)
 }
 
+func validateCouponFields(c *store.Coupon) error {
+	if c.DiscountType == "" {
+		c.DiscountType = "percentage"
+	}
+	c.DiscountType = strings.ToLower(strings.TrimSpace(c.DiscountType))
+	if c.DiscountType != "percentage" && c.DiscountType != "fixed" {
+		return fmt.Errorf("discount_type must be 'percentage' or 'fixed'")
+	}
+	if math.IsNaN(c.DiscountValue) || math.IsInf(c.DiscountValue, 0) || c.DiscountValue <= 0 {
+		return fmt.Errorf("discount_value must be a positive finite number")
+	}
+	if c.DiscountType == "percentage" && c.DiscountValue > 100 {
+		return fmt.Errorf("percentage discount_value cannot exceed 100")
+	}
+	if math.IsNaN(c.MinOrderUSD) || math.IsInf(c.MinOrderUSD, 0) || c.MinOrderUSD < 0 {
+		return fmt.Errorf("min_order_usd cannot be negative")
+	}
+	if c.MaxUses < 0 {
+		return fmt.Errorf("max_uses cannot be negative")
+	}
+	if c.MaxUsesPerUser <= 0 {
+		c.MaxUsesPerUser = 1
+	}
+	return nil
+}
+
 func (h *CommercialHandler) AdminCreateCoupon(w http.ResponseWriter, r *http.Request) {
 	var c store.Coupon
 	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid coupon payload", nil, "")
 		return
 	}
-	if c.DiscountType == "" {
-		c.DiscountType = "percentage"
-	}
-	if c.MaxUsesPerUser <= 0 {
-		c.MaxUsesPerUser = 1
+	if err := validateCouponFields(&c); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_COUPON", err.Error(), nil, "")
+		return
 	}
 	c.IsActive = true
 	if err := h.store.CreateCoupon(r.Context(), &c); err != nil {
@@ -255,11 +283,9 @@ func (h *CommercialHandler) AdminUpdateCoupon(w http.ResponseWriter, r *http.Req
 		return
 	}
 	c.ID = id
-	if c.DiscountType == "" {
-		c.DiscountType = "percentage"
-	}
-	if c.MaxUsesPerUser <= 0 {
-		c.MaxUsesPerUser = 1
+	if err := validateCouponFields(&c); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_COUPON", err.Error(), nil, "")
+		return
 	}
 	if err := h.store.UpdateCoupon(r.Context(), &c); err != nil {
 		response.Error(w, http.StatusBadRequest, "COUPON_UPDATE_FAILED", err.Error(), nil, "")
@@ -318,8 +344,34 @@ func (h *CommercialHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request
 		subtotal = 0
 	}
 
+	payMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if payMethod == "" {
+		payMethod = "crypto"
+	}
+
 	invoiceID := uuid.New()
 	now := time.Now().UTC()
+
+	// Pre-validate credit wallet balance BEFORE burning any single-use coupon or creating an orphan invoice
+	if payMethod == "credit_wallet" {
+		estTotal := subtotal
+		if code := strings.ToUpper(strings.TrimSpace(req.CouponCode)); code != "" {
+			if c, err := h.store.GetCouponByCode(r.Context(), code); err == nil && c != nil && c.IsActive {
+				if strings.EqualFold(c.DiscountType, "fixed") {
+					estTotal = math.Max(0, subtotal-math.Min(c.DiscountValue, subtotal))
+				} else {
+					estTotal = math.Max(0, math.Round((subtotal-(subtotal*(c.DiscountValue/100.0)))*100)/100)
+				}
+			}
+		}
+		if estTotal > 0 {
+			wlt, err := h.store.GetOrCreateCustomerWallet(r.Context(), claims.UserID)
+			if err != nil || wlt.BalanceUSD+1e-9 < estTotal {
+				response.Error(w, http.StatusBadRequest, "INSUFFICIENT_BALANCE", "Insufficient credit wallet balance for this order", nil, "")
+				return
+			}
+		}
+	}
 
 	// 2. Authoritative server-side coupon revalidation & atomic redemption
 	discountUSD := 0.0
@@ -376,11 +428,6 @@ func (h *CommercialHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request
 	if err := h.store.CreateInvoice(r.Context(), inv); err != nil {
 		response.Error(w, http.StatusInternalServerError, "INVOICE_CREATE_FAILED", "Failed to create order invoice", err.Error(), "")
 		return
-	}
-
-	payMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
-	if payMethod == "" {
-		payMethod = "crypto"
 	}
 
 	// 3. Instant settlement if paid by Credit Wallet or 100%-discounted free order
@@ -555,9 +602,18 @@ func (h *CommercialHandler) AdminAdjustWallet(w http.ResponseWriter, r *http.Req
 		response.Error(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user_id", nil, "")
 		return
 	}
+	if math.IsNaN(req.AmountUSD) || math.IsInf(req.AmountUSD, 0) || req.AmountUSD <= 0 {
+		response.Error(w, http.StatusBadRequest, "INVALID_AMOUNT", "amount_usd must be a positive finite number", nil, "")
+		return
+	}
+	dir := strings.ToLower(strings.TrimSpace(req.Direction))
+	if dir != "credit" && dir != "debit" {
+		response.Error(w, http.StatusBadRequest, "INVALID_DIRECTION", "direction must be 'credit' or 'debit'", nil, "")
+		return
+	}
 	idemKey := fmt.Sprintf("admin_adj:%s:%d", uid.String(), time.Now().UnixNano())
 	var entry *store.WalletLedgerEntry
-	if strings.EqualFold(req.Direction, "debit") {
+	if dir == "debit" {
 		entry, err = h.store.DebitWalletAtomic(r.Context(), uid, req.AmountUSD, "admin_adjustment", "admin", idemKey, req.Notes)
 	} else {
 		entry, err = h.store.CreditWalletAtomic(r.Context(), uid, req.AmountUSD, "admin_adjustment", "admin", idemKey, req.Notes)
@@ -608,10 +664,25 @@ func (h *CommercialHandler) RequestAffiliateWithdrawal(w http.ResponseWriter, r 
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid payload", nil, "")
 		return
 	}
-	if req.PayoutMethod == "" {
-		req.PayoutMethod = "credit_wallet"
+	if math.IsNaN(req.AmountUSD) || math.IsInf(req.AmountUSD, 0) || req.AmountUSD <= 0 {
+		response.Error(w, http.StatusBadRequest, "INVALID_AMOUNT", "amount_usd must be a positive finite number", nil, "")
+		return
 	}
-	wd, err := h.store.RequestAffiliateWithdrawal(r.Context(), claims.UserID, req.AmountUSD, req.PayoutMethod, req.PayoutDetails)
+	method := strings.ToLower(strings.TrimSpace(req.PayoutMethod))
+	if method == "" {
+		method = "credit_wallet"
+	}
+	switch method {
+	case "credit_wallet", "usdt_bep20", "usdt_trc20", "bank_transfer", "paypal":
+	default:
+		response.Error(w, http.StatusBadRequest, "INVALID_PAYOUT_METHOD", "Unsupported payout method", nil, "")
+		return
+	}
+	if method != "credit_wallet" && strings.TrimSpace(req.PayoutDetails) == "" {
+		response.Error(w, http.StatusBadRequest, "PAYOUT_DETAILS_REQUIRED", "Receiving wallet address or payout details are required", nil, "")
+		return
+	}
+	wd, err := h.store.RequestAffiliateWithdrawal(r.Context(), claims.UserID, req.AmountUSD, method, strings.TrimSpace(req.PayoutDetails))
 	if err != nil {
 		response.Error(w, http.StatusBadRequest, "WITHDRAWAL_FAILED", err.Error(), nil, "")
 		return
@@ -647,8 +718,8 @@ func (h *CommercialHandler) AdminProcessWithdrawal(w http.ResponseWriter, r *htt
 		response.Error(w, http.StatusBadRequest, "PROCESS_FAILED", err.Error(), nil, "")
 		return
 	}
-	// If approved to credit_wallet, atomically credit customer wallet
-	if req.Approve && strings.EqualFold(wd.PayoutMethod, "credit_wallet") {
+	// If approved and transitioned to paid for credit_wallet, atomically credit customer wallet
+	if req.Approve && wd.Status == "paid" && strings.EqualFold(wd.PayoutMethod, "credit_wallet") {
 		_, _ = h.store.CreditWalletAtomic(r.Context(), wd.UserID, wd.AmountUSD, "affiliate_payout", wd.ID.String(), "aff_payout:"+wd.ID.String(), "Affiliate commission payout to credit wallet")
 	}
 	h.audit.Log(r.Context(), r, "commercial.affiliate.withdrawal", "affiliate_withdrawal", id.String(), "success", fmt.Sprintf("Withdrawal approved=%v", req.Approve), nil)

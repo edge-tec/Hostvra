@@ -3,6 +3,9 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -305,5 +308,229 @@ func TestCommercial_EndToEndReferralCheckoutAndCommission(t *testing.T) {
 	commH.CheckoutOrder(chkW2, chkReq2)
 	if chkW2.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for exhausted coupon, got %d", chkW2.Code)
+	}
+}
+
+func TestP10_WithdrawalRejectThenApproveBlockedAndConcurrentApproval(t *testing.T) {
+	st := store.NewMemoryStore()
+	ctx := context.Background()
+	h := NewCommercialHandler(&config.Config{}, st, audit.NewLogger(st, slog.Default()), nil)
+
+	affUser := uuid.New()
+	refUser := uuid.New()
+	acc, _ := st.GetOrCreateAffiliateAccount(ctx, affUser)
+	_, _ = st.RecordAffiliateReferral(ctx, acc.ID, refUser, "first_click")
+	_, _ = st.RecordAffiliateCommission(ctx, refUser, uuid.New(), 200.0) // $30 approved
+
+	// 1. Request $10 withdrawal, REJECT it, then attempt to APPROVE it -> MUST be blocked and wallet MUST remain $0
+	wd1, err := st.RequestAffiliateWithdrawal(ctx, affUser, 10.0, "credit_wallet", "")
+	if err != nil {
+		t.Fatalf("RequestAffiliateWithdrawal failed: %v", err)
+	}
+	r := chi.NewRouter()
+	r.Post("/withdrawals/{id}/process", h.AdminProcessWithdrawal)
+
+	rejReq := httptest.NewRequest("POST", "/withdrawals/"+wd1.ID.String()+"/process", bytes.NewBufferString(`{"approve":false,"admin_notes":"fraud review"}`))
+	rejW := httptest.NewRecorder()
+	r.ServeHTTP(rejW, rejReq)
+	if rejW.Code != http.StatusOK {
+		t.Fatalf("expected 200 rejecting pending withdrawal, got %d", rejW.Code)
+	}
+
+	// Re-approving the already-rejected withdrawal MUST fail with 400 and NEVER credit the wallet
+	reAppReq := httptest.NewRequest("POST", "/withdrawals/"+wd1.ID.String()+"/process", bytes.NewBufferString(`{"approve":true,"admin_notes":"replay"}`))
+	reAppW := httptest.NewRecorder()
+	r.ServeHTTP(reAppW, reAppReq)
+	if reAppW.Code != http.StatusBadRequest {
+		t.Fatalf("CRITICAL: expected 400 re-approving rejected withdrawal, got %d", reAppW.Code)
+	}
+	wlt, _ := st.GetOrCreateCustomerWallet(ctx, affUser)
+	if wlt.BalanceUSD != 0 {
+		t.Fatalf("CRITICAL: rejected withdrawal credited wallet! balance=%.2f", wlt.BalanceUSD)
+	}
+
+	// 2. Concurrent approval race on a valid $20 withdrawal -> strictly ONE 200 OK and wallet credited ONCE ($20)
+	wd2, err := st.RequestAffiliateWithdrawal(ctx, affUser, 20.0, "credit_wallet", "")
+	if err != nil {
+		t.Fatalf("RequestAffiliateWithdrawal wd2 failed: %v", err)
+	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	okCount := 0
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/withdrawals/"+wd2.ID.String()+"/process", bytes.NewBufferString(`{"approve":true}`))
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code == http.StatusOK {
+				mu.Lock()
+				okCount++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if okCount != 1 {
+		t.Fatalf("expected strictly 1 concurrent approval to succeed, got %d", okCount)
+	}
+	wltAfter, _ := st.GetOrCreateCustomerWallet(ctx, affUser)
+	if wltAfter.BalanceUSD != 20.0 {
+		t.Fatalf("expected exact wallet balance $20.00, got $%.2f", wltAfter.BalanceUSD)
+	}
+}
+
+func TestP10_WebhookRefundReversesAffiliateCommission(t *testing.T) {
+	st := store.NewMemoryStore()
+	ctx := context.Background()
+	bh := NewBillingHandler(&config.Config{}, st, audit.NewLogger(st, slog.Default()))
+
+	// Configure gateway secret for HMAC verification
+	secret := "p10-webhook-secret-key"
+	_ = st.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:     "stripe",
+		DisplayName: "Stripe",
+		Enabled:     true,
+		SecretKey:   secret,
+	})
+
+	partnerID := uuid.New()
+	buyerID := uuid.New()
+	orgID := uuid.New()
+	acc, _ := st.GetOrCreateAffiliateAccount(ctx, partnerID)
+	_, _ = st.RecordAffiliateReferral(ctx, acc.ID, buyerID, "first_click")
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P10-REFUND",
+		UserID:         buyerID,
+		OrganizationID: orgID,
+		Subtotal:       100.0,
+		Total:          100.0,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+	}
+	_ = st.CreateInvoice(ctx, inv)
+
+	r := chi.NewRouter()
+	r.Post("/webhook/{gateway}", bh.HandleWebhook)
+
+	signAndSend := func(p WebhookPayload) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(p)
+		mac := hmac.New(sha256.New, []byte(secret))
+		mac.Write(raw)
+		sig := hex.EncodeToString(mac.Sum(nil))
+		req := httptest.NewRequest("POST", "/webhook/stripe", bytes.NewReader(raw))
+		req.Header.Set("X-Signature", sig)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// 1. Verified paid webhook -> invoice paid & affiliate credited $15.00
+	w1 := signAndSend(WebhookPayload{
+		InvoiceID:     inv.ID.String(),
+		TransactionID: "tx_p10_paid_1",
+		Amount:        100.0,
+		Currency:      "USD",
+		Status:        "paid",
+	})
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 on paid webhook, got %d: %s", w1.Code, w1.Body.String())
+	}
+	accPaid, _ := st.GetOrCreateAffiliateAccount(ctx, partnerID)
+	if accPaid.ApprovedBalanceUSD != 15.0 {
+		t.Fatalf("expected $15.00 affiliate commission after paid webhook, got $%.2f", accPaid.ApprovedBalanceUSD)
+	}
+
+	// 2. Verified refund webhook -> invoice marked refunded & affiliate commission reversed back to $0.00
+	w2 := signAndSend(WebhookPayload{
+		InvoiceID:     inv.ID.String(),
+		TransactionID: "tx_p10_refund_1",
+		Amount:        100.0,
+		Currency:      "USD",
+		Status:        "refunded",
+	})
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on refund webhook, got %d: %s", w2.Code, w2.Body.String())
+	}
+	invAfter, _ := st.GetInvoiceByID(ctx, inv.ID)
+	if invAfter.Status != store.InvoiceStatusRefunded {
+		t.Fatalf("expected invoice status refunded, got %s", invAfter.Status)
+	}
+	accRefunded, _ := st.GetOrCreateAffiliateAccount(ctx, partnerID)
+	if accRefunded.ApprovedBalanceUSD != 0 {
+		t.Fatalf("expected $0.00 affiliate balance after refund reversal, got $%.2f", accRefunded.ApprovedBalanceUSD)
+	}
+}
+
+func TestP10_CouponInputValidationAndWalletPrecheckPreservesCoupon(t *testing.T) {
+	st := store.NewMemoryStore()
+	ctx := context.Background()
+	h := NewCommercialHandler(&config.Config{}, st, audit.NewLogger(st, slog.Default()), nil)
+
+	// 1. Reject percentage > 100 and negative discount
+	for _, bad := range []string{
+		`{"code":"BAD1","discount_type":"percentage","discount_value":150}`,
+		`{"code":"BAD2","discount_type":"fixed","discount_value":-10}`,
+		`{"code":"BAD3","discount_type":"bogus","discount_value":10}`,
+	} {
+		req := httptest.NewRequest("POST", "/coupons", bytes.NewBufferString(bad))
+		w := httptest.NewRecorder()
+		h.AdminCreateCoupon(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for invalid coupon %s, got %d", bad, w.Code)
+		}
+	}
+
+	// 2. Insufficient wallet balance MUST NOT burn single-use coupon
+	plan := &store.HostingPlan{ID: uuid.New(), Name: "Precheck Plan", Slug: "precheck-plan", PriceMonthly: 40.0, Currency: "USD", IsActive: true}
+	_ = st.CreatePlan(ctx, plan)
+	_ = st.CreateCoupon(ctx, &store.Coupon{Code: "ONCE50", DiscountType: "percentage", DiscountValue: 50, MaxUses: 1, MaxUsesPerUser: 1, IsActive: true})
+
+	buyerID := uuid.New()
+	claims := &auth.Claims{UserID: buyerID, OrganizationID: uuid.New(), Email: "u@example.com", Role: "customer"}
+	payload := `{"plan_id":"` + plan.ID.String() + `","billing_cycle":"monthly","coupon_code":"ONCE50","payment_method":"credit_wallet"}`
+
+	req1 := httptest.NewRequest("POST", "/checkout", bytes.NewBufferString(payload))
+	req1 = req1.WithContext(auth.WithClaims(req1.Context(), claims))
+	w1 := httptest.NewRecorder()
+	h.CheckoutOrder(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on insufficient wallet balance, got %d", w1.Code)
+	}
+
+	// Fund wallet with $20 (exact net price after 50% off $40) and retry with SAME coupon -> MUST succeed!
+	_, _ = st.CreditWalletAtomic(ctx, buyerID, 20.0, "topup", "t1", "idem-precheck", "Fund")
+	req2 := httptest.NewRequest("POST", "/checkout", bytes.NewBufferString(payload))
+	req2 = req2.WithContext(auth.WithClaims(req2.Context(), claims))
+	w2 := httptest.NewRecorder()
+	h.CheckoutOrder(w2, req2)
+	if w2.Code != http.StatusCreated {
+		t.Fatalf("expected 201 after funding wallet (coupon preserved), got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestP10_WalletAdjustAndWithdrawalInputValidation(t *testing.T) {
+	st := store.NewMemoryStore()
+	h := NewCommercialHandler(&config.Config{}, st, audit.NewLogger(st, slog.Default()), nil)
+
+	// Invalid direction in AdminAdjustWallet
+	req := httptest.NewRequest("POST", "/wallet/adjust", bytes.NewBufferString(`{"user_id":"`+uuid.New().String()+`","direction":"mint","amount_usd":10}`))
+	w := httptest.NewRecorder()
+	h.AdminAdjustWallet(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid wallet direction, got %d", w.Code)
+	}
+
+	// Missing payout_details for usdt_bep20 withdrawal
+	claims := &auth.Claims{UserID: uuid.New(), OrganizationID: uuid.New(), Email: "aff@example.com", Role: "customer"}
+	wReq := httptest.NewRequest("POST", "/affiliate/withdraw", bytes.NewBufferString(`{"amount_usd":10,"payout_method":"usdt_bep20","payout_details":""}`))
+	wReq = wReq.WithContext(auth.WithClaims(wReq.Context(), claims))
+	wRec := httptest.NewRecorder()
+	h.RequestAffiliateWithdrawal(wRec, wReq)
+	if wRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing crypto payout_details, got %d", wRec.Code)
 	}
 }

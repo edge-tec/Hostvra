@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	ErrCouponNotFound        = errors.New("coupon code not found")
-	ErrCouponInvalid         = errors.New("coupon is inactive, expired, or usage limit reached")
-	ErrSelfReferralForbidden = errors.New("self-referral is prohibited")
-	ErrInsufficientWallet    = errors.New("insufficient wallet credit balance")
+	ErrCouponNotFound             = errors.New("coupon code not found")
+	ErrCouponInvalid              = errors.New("coupon is inactive, expired, or usage limit reached")
+	ErrSelfReferralForbidden      = errors.New("self-referral is prohibited")
+	ErrInsufficientWallet         = errors.New("insufficient wallet credit balance")
+	ErrWithdrawalAlreadyProcessed = errors.New("withdrawal request has already been processed")
 )
 
 // ============================================================================
@@ -353,8 +354,7 @@ func (m *MemoryStore) ApproveAffiliateWithdrawal(ctx context.Context, withdrawal
 		return nil, errors.New("withdrawal request not found")
 	}
 	if w.Status != "pending" {
-		cp := *w
-		return &cp, nil
+		return nil, ErrWithdrawalAlreadyProcessed
 	}
 	now := time.Now().UTC()
 	w.ProcessedAt = &now
@@ -762,12 +762,14 @@ func (p *PostgresStore) RecordAffiliateReferral(ctx context.Context, affiliateID
 		attributionModel = "first_click"
 	}
 	ref := &AffiliateReferral{ID: uuid.New(), AffiliateID: affiliateID, ReferredUserID: referredUserID, AttributionModel: attributionModel, Status: "signed_up", CreatedAt: time.Now().UTC()}
-	_, err := p.db.ExecContext(ctx, `
+	res, err := p.db.ExecContext(ctx, `
 		INSERT INTO affiliate_referrals (id, affiliate_id, referred_user_id, attribution_model, status)
 		VALUES ($1,$2,$3,$4,$5) ON CONFLICT (referred_user_id) DO NOTHING
 	`, ref.ID, ref.AffiliateID, ref.ReferredUserID, ref.AttributionModel, ref.Status)
 	if err == nil {
-		_, _ = p.db.ExecContext(ctx, `UPDATE affiliate_accounts SET total_referrals = total_referrals + 1, updated_at = NOW() WHERE id = $1`, affiliateID)
+		if n, _ := res.RowsAffected(); n > 0 {
+			_, _ = p.db.ExecContext(ctx, `UPDATE affiliate_accounts SET total_referrals = total_referrals + 1, updated_at = NOW() WHERE id = $1`, affiliateID)
+		}
 	}
 	return ref, err
 }
@@ -847,7 +849,7 @@ func (p *PostgresStore) ApproveAffiliateWithdrawal(ctx context.Context, withdraw
 		return nil, err
 	}
 	if w.Status != "pending" {
-		return &w, nil
+		return nil, ErrWithdrawalAlreadyProcessed
 	}
 	if approve {
 		w.Status = "paid"

@@ -97,6 +97,7 @@ const (
 	InvoiceStatusUnpaid    InvoiceStatus = "unpaid"
 	InvoiceStatusOverdue   InvoiceStatus = "overdue"
 	InvoiceStatusCancelled InvoiceStatus = "cancelled"
+	InvoiceStatusRefunded  InvoiceStatus = "refunded"
 )
 
 type Invoice struct {
