@@ -250,19 +250,22 @@ export default function LandingPage() {
             </div>
           </Link>
 
-          <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
+          <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-slate-600">
             <a href="#features" className="hover:text-emerald-600 transition-colors">
               Features
             </a>
             <a href="#pricing" className="hover:text-emerald-600 transition-colors">
               Hosting Plans
             </a>
-            <a href="#architecture" className="hover:text-emerald-600 transition-colors">
-              Technology
-            </a>
-            <a href="#faq" className="hover:text-emerald-600 transition-colors">
-              FAQ
-            </a>
+            <Link href="/order" className="hover:text-emerald-600 transition-colors">
+              Order Cart
+            </Link>
+            <Link href="/affiliate" className="hover:text-emerald-600 transition-colors">
+              Affiliates
+            </Link>
+            <Link href="/status" className="hover:text-emerald-600 transition-colors">
+              Status
+            </Link>
             <Link href="/webmail" className="hover:text-emerald-600 transition-colors flex items-center gap-1">
               Webmail <ExternalLink className="w-3 h-3 text-slate-400" />
             </Link>
@@ -327,6 +330,27 @@ export default function LandingPage() {
               >
                 Frequently Asked Questions
               </a>
+              <Link
+                href="/order"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+              >
+                Order Hosting Cart
+              </Link>
+              <Link
+                href="/affiliate"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+              >
+                Affiliate Program
+              </Link>
+              <Link
+                href="/status"
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-3 py-2 rounded-lg hover:bg-slate-100 transition"
+              >
+                System Status
+              </Link>
               <Link
                 href="/webmail"
                 onClick={() => setMobileMenuOpen(false)}
@@ -1074,6 +1098,16 @@ export default function LandingPage() {
             <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Platform</h4>
             <ul className="space-y-2.5 font-medium">
               <li>
+                <Link href="/order" className="hover:text-emerald-600 transition-colors">
+                  Order Hosting
+                </Link>
+              </li>
+              <li>
+                <Link href="/affiliate" className="hover:text-emerald-600 transition-colors">
+                  Affiliate Program
+                </Link>
+              </li>
+              <li>
                 <Link href="/login" className="hover:text-emerald-600 transition-colors">
                   Control Panel
                 </Link>
@@ -1083,37 +1117,42 @@ export default function LandingPage() {
                   Webmail Client
                 </Link>
               </li>
-              <li>
-                <a href="#features" className="hover:text-emerald-600 transition-colors">
-                  In-House Mail
-                </a>
-              </li>
-              <li>
-                <a href="#architecture" className="hover:text-emerald-600 transition-colors">
-                  WAF & Security
-                </a>
-              </li>
             </ul>
           </div>
 
           <div>
-            <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Support</h4>
+            <h4 className="font-bold text-slate-900 uppercase tracking-wider mb-4">Legal &amp; Status</h4>
             <ul className="space-y-2.5 font-medium">
               <li>
-                <Link href="/login" className="hover:text-emerald-600 transition-colors">
-                  Help Desk
+                <Link href="/terms" className="hover:text-emerald-600 transition-colors">
+                  Terms of Service
                 </Link>
               </li>
               <li>
-                <a href="#faq" className="hover:text-emerald-600 transition-colors">
-                  Knowledgebase
-                </a>
+                <Link href="/privacy" className="hover:text-emerald-600 transition-colors">
+                  Privacy Policy
+                </Link>
               </li>
               <li>
-                <span className="inline-flex items-center gap-1.5 text-emerald-700 font-bold">
+                <Link href="/refund-policy" className="hover:text-emerald-600 transition-colors">
+                  Refund Policy
+                </Link>
+              </li>
+              <li>
+                <Link href="/sla" className="hover:text-emerald-600 transition-colors">
+                  Uptime SLA
+                </Link>
+              </li>
+              <li>
+                <Link href="/acceptable-use-policy" className="hover:text-emerald-600 transition-colors">
+                  Acceptable Use Policy
+                </Link>
+              </li>
+              <li>
+                <Link href="/status" className="inline-flex items-center gap-1.5 text-emerald-700 font-bold hover:underline">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Systems Operational
-                </span>
+                  Live System Status
+                </Link>
               </li>
             </ul>
           </div>

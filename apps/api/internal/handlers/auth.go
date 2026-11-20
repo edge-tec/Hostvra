@@ -43,6 +43,7 @@ type RegisterRequest struct {
 	FullName         string `json:"full_name"`
 	OrganizationName string `json:"organization_name"`
 	PlanSlug         string `json:"plan_slug,omitempty"`
+	ReferralCode     string `json:"referral_code,omitempty"`
 }
 
 type LoginRequest struct {
@@ -125,6 +126,21 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusConflict, "USER_EXISTS", "User with this email already exists", nil, "")
 		return
 	}
+
+	// Automatic Affiliate Referral Attribution (blocks self-referrals, never blocks registration on invalid code)
+	var attributedAffiliateCode string
+	if refCode := strings.ToUpper(strings.TrimSpace(req.ReferralCode)); refCode != "" {
+		if aff, err := h.store.GetAffiliateByCode(r.Context(), refCode); err == nil && aff != nil && aff.Status == "active" {
+			if _, refErr := h.store.RecordAffiliateReferral(r.Context(), aff.ID, user.ID, "first_click"); refErr == nil {
+				attributedAffiliateCode = aff.ReferralCode
+				h.audit.Log(r.Context(), r, "affiliate.referral.attributed", "user", user.ID.String(), "success", "Attributed referral "+aff.ReferralCode, map[string]interface{}{
+					"affiliate_id":  aff.ID,
+					"referral_code": aff.ReferralCode,
+				})
+			}
+		}
+	}
+	_ = attributedAffiliateCode
 
 	// Send welcome email & verification email if service is available
 	if h.emailSvc != nil {

@@ -621,6 +621,7 @@ type Store interface {
 
 	// Ultra-Enterprise Commercial Platform: Coupons, Affiliates, Credit Wallet & Dunning
 	CreateCoupon(ctx context.Context, c *Coupon) error
+	UpdateCoupon(ctx context.Context, c *Coupon) error
 	GetCouponByCode(ctx context.Context, code string) (*Coupon, error)
 	ListCoupons(ctx context.Context) ([]*Coupon, error)
 	DeleteCoupon(ctx context.Context, id uuid.UUID) error

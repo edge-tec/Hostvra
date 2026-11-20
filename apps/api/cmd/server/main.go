@@ -161,6 +161,7 @@ func main() {
 	dunningWorker := billing.NewDunningWorker(dataStore, 1*time.Hour, 3)
 	dunningWorker.Start(context.Background())
 	commercialHandler := handlers.NewCommercialHandler(cfg, dataStore, auditLogger, dunningWorker)
+	commercialHandler.SetOnInvoicePaid(billingHandler.ActivatePaidInvoice)
 
 	// Initialize ResellerClub Client & Domain Subsystem
 	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
@@ -1504,7 +1505,8 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/emergency-pause", cryptoHandler.AdminToggleEmergencyPause)
 			})
 
-			// Customer Credit Wallet & Affiliate Program (Authenticated)
+			// Customer Credit Wallet, Order Checkout & Affiliate Program (Authenticated)
+			r.Post("/billing/orders/checkout", commercialHandler.CheckoutOrder)
 			r.Route("/wallet", func(r chi.Router) {
 				r.Get("/", commercialHandler.GetWallet)
 				r.Put("/autopay", commercialHandler.ToggleWalletAutoPay)
@@ -1520,6 +1522,7 @@ func main() {
 				r.Use(rbac.RequireAdmin())
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/coupons", commercialHandler.AdminListCoupons)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/coupons", commercialHandler.AdminCreateCoupon)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Put("/coupons/{id}", commercialHandler.AdminUpdateCoupon)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Delete("/coupons/{id}", commercialHandler.AdminDeleteCoupon)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/affiliates", commercialHandler.AdminListAffiliates)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/withdrawals/{id}/process", commercialHandler.AdminProcessWithdrawal)

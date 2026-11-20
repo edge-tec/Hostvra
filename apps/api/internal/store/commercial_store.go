@@ -81,6 +81,33 @@ func (m *MemoryStore) DeleteCoupon(ctx context.Context, id uuid.UUID) error {
 	return ErrCouponNotFound
 }
 
+func (m *MemoryStore) UpdateCoupon(ctx context.Context, c *Coupon) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, existing := range m.coupons {
+		if existing.ID == c.ID {
+			newCode := strings.ToUpper(strings.TrimSpace(c.Code))
+			if newCode == "" {
+				newCode = existing.Code
+			}
+			if newCode != k {
+				if _, conflict := m.coupons[newCode]; conflict {
+					return fmt.Errorf("coupon code %s already exists", newCode)
+				}
+				delete(m.coupons, k)
+			}
+			c.Code = newCode
+			c.CurrentUses = existing.CurrentUses
+			c.CreatedAt = existing.CreatedAt
+			c.UpdatedAt = time.Now().UTC()
+			cp := *c
+			m.coupons[newCode] = &cp
+			return nil
+		}
+	}
+	return ErrCouponNotFound
+}
+
 // RedeemCouponAtomic validates limits, prevents concurrent over-redemption, and records redemption atomically.
 func (m *MemoryStore) RedeemCouponAtomic(ctx context.Context, code string, userID, invoiceID uuid.UUID, orderAmountUSD float64, isFirstOrder bool) (*CouponRedemption, error) {
 	m.mu.Lock()
@@ -591,6 +618,34 @@ func (p *PostgresStore) ListCoupons(ctx context.Context) ([]*Coupon, error) {
 func (p *PostgresStore) DeleteCoupon(ctx context.Context, id uuid.UUID) error {
 	_, err := p.db.ExecContext(ctx, `DELETE FROM coupons WHERE id = $1`, id)
 	return err
+}
+
+func (p *PostgresStore) UpdateCoupon(ctx context.Context, c *Coupon) error {
+	c.Code = strings.ToUpper(strings.TrimSpace(c.Code))
+	res, err := p.db.ExecContext(ctx, `
+		UPDATE coupons
+		SET code = COALESCE(NULLIF($2, ''), code),
+		    description = $3,
+		    discount_type = $4,
+		    discount_value = $5,
+		    max_uses = $6,
+		    max_uses_per_user = $7,
+		    min_order_usd = $8,
+		    first_order_only = $9,
+		    recurring_discount = $10,
+		    applicable_plan_ids = $11,
+		    is_active = $12,
+		    expires_at = $13,
+		    updated_at = NOW()
+		WHERE id = $1
+	`, c.ID, c.Code, c.Description, c.DiscountType, c.DiscountValue, c.MaxUses, c.MaxUsesPerUser, c.MinOrderUSD, c.FirstOrderOnly, c.RecurringDiscount, c.ApplicablePlanIDs, c.IsActive, c.ExpiresAt)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrCouponNotFound
+	}
+	return nil
 }
 
 func (p *PostgresStore) RedeemCouponAtomic(ctx context.Context, code string, userID, invoiceID uuid.UUID, orderAmountUSD float64, isFirstOrder bool) (*CouponRedemption, error) {

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -24,6 +25,7 @@ type CommercialHandler struct {
 	store         store.Store
 	audit         *audit.Logger
 	dunningWorker *billing.DunningWorker
+	onInvoicePaid func(ctx context.Context, inv *store.Invoice)
 	startedAt     time.Time
 }
 
@@ -35,6 +37,10 @@ func NewCommercialHandler(cfg *config.Config, s store.Store, a *audit.Logger, dw
 		dunningWorker: dw,
 		startedAt:     time.Now().UTC(),
 	}
+}
+
+func (h *CommercialHandler) SetOnInvoicePaid(fn func(ctx context.Context, inv *store.Invoice)) {
+	h.onInvoicePaid = fn
 }
 
 // ============================================================================
@@ -233,7 +239,202 @@ func (h *CommercialHandler) AdminDeleteCoupon(w http.ResponseWriter, r *http.Req
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", err.Error(), nil, "")
 		return
 	}
+	h.audit.Log(r.Context(), r, "commercial.coupon.delete", "coupon", id.String(), "success", "Deleted coupon", nil)
 	response.JSON(w, http.StatusOK, map[string]bool{"deleted": true}, nil)
+}
+
+func (h *CommercialHandler) AdminUpdateCoupon(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid coupon ID", nil, "")
+		return
+	}
+	var c store.Coupon
+	if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid coupon payload", nil, "")
+		return
+	}
+	c.ID = id
+	if c.DiscountType == "" {
+		c.DiscountType = "percentage"
+	}
+	if c.MaxUsesPerUser <= 0 {
+		c.MaxUsesPerUser = 1
+	}
+	if err := h.store.UpdateCoupon(r.Context(), &c); err != nil {
+		response.Error(w, http.StatusBadRequest, "COUPON_UPDATE_FAILED", err.Error(), nil, "")
+		return
+	}
+	h.audit.Log(r.Context(), r, "commercial.coupon.update", "coupon", c.Code, "success", fmt.Sprintf("Updated coupon %s (active=%v)", c.Code, c.IsActive), nil)
+	response.JSON(w, http.StatusOK, c, nil)
+}
+
+// CheckoutOrder creates an authoritative server-side invoice for a hosting plan order,
+// atomically validates & redeems any supplied coupon code, and either settles immediately
+// via customer credit wallet (triggering provisioning) or returns the invoice for Crypto/Card payment.
+func (h *CommercialHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.GetClaims(r.Context())
+	if !ok {
+		response.Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required", nil, "")
+		return
+	}
+	var req struct {
+		PlanID        string `json:"plan_id"`
+		BillingCycle  string `json:"billing_cycle"` // monthly, yearly
+		DomainName    string `json:"domain_name,omitempty"`
+		CouponCode    string `json:"coupon_code,omitempty"`
+		PaymentMethod string `json:"payment_method"` // crypto, card, credit_wallet
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid checkout payload", nil, "")
+		return
+	}
+
+	// 1. Authoritative server-side plan lookup (never trust client price)
+	var plan *store.HostingPlan
+	if pid, err := uuid.Parse(strings.TrimSpace(req.PlanID)); err == nil {
+		plan, _ = h.store.GetPlanByID(r.Context(), pid)
+	} else if req.PlanID != "" {
+		plan, _ = h.store.GetPlanBySlug(r.Context(), strings.TrimSpace(req.PlanID))
+	}
+	if plan == nil || !plan.IsActive {
+		response.Error(w, http.StatusNotFound, "PLAN_NOT_FOUND", "Selected hosting plan not found or inactive", nil, "")
+		return
+	}
+
+	cycle := strings.ToLower(strings.TrimSpace(req.BillingCycle))
+	if cycle != "yearly" {
+		cycle = "monthly"
+	}
+	subtotal := plan.PriceMonthly
+	if cycle == "yearly" {
+		if plan.PriceYearly > 0 {
+			subtotal = plan.PriceYearly
+		} else {
+			subtotal = math.Round(plan.PriceMonthly*10*100) / 100
+		}
+	}
+	if subtotal < 0 {
+		subtotal = 0
+	}
+
+	invoiceID := uuid.New()
+	now := time.Now().UTC()
+
+	// 2. Authoritative server-side coupon revalidation & atomic redemption
+	discountUSD := 0.0
+	appliedCoupon := ""
+	if code := strings.ToUpper(strings.TrimSpace(req.CouponCode)); code != "" {
+		isFirstOrder := true
+		if existingInvs, err := h.store.ListInvoices(r.Context(), claims.OrganizationID); err == nil {
+			for _, ei := range existingInvs {
+				if ei.UserID == claims.UserID && ei.Status == store.InvoiceStatusPaid {
+					isFirstOrder = false
+					break
+				}
+			}
+		}
+		red, err := h.store.RedeemCouponAtomic(r.Context(), code, claims.UserID, invoiceID, subtotal, isFirstOrder)
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "COUPON_INVALID", err.Error(), nil, "")
+			return
+		}
+		discountUSD = red.DiscountUSD
+		appliedCoupon = code
+	}
+
+	finalTotal := math.Max(0, math.Round((subtotal-discountUSD)*100)/100)
+
+	desc := fmt.Sprintf("%s (%s)", plan.Name, cycle)
+	if dom := strings.TrimSpace(req.DomainName); dom != "" {
+		desc += fmt.Sprintf(" — Domain: %s", dom)
+	}
+	if appliedCoupon != "" {
+		desc += fmt.Sprintf(" [Promo %s: -$%.2f]", appliedCoupon, discountUSD)
+	}
+
+	currency := plan.Currency
+	if currency == "" {
+		currency = "USD"
+	}
+
+	inv := &store.Invoice{
+		ID:             invoiceID,
+		InvoiceNumber:  fmt.Sprintf("INV-%d-%s", now.Unix(), strings.ToUpper(invoiceID.String()[:6])),
+		UserID:         claims.UserID,
+		OrganizationID: claims.OrganizationID,
+		PlanID:         plan.ID,
+		Subtotal:       subtotal,
+		Tax:            0,
+		Total:          finalTotal,
+		Currency:       currency,
+		Status:         store.InvoiceStatusUnpaid,
+		DueDate:        now.AddDate(0, 0, 7),
+		Description:    desc,
+		CreatedAt:      now,
+	}
+	if err := h.store.CreateInvoice(r.Context(), inv); err != nil {
+		response.Error(w, http.StatusInternalServerError, "INVOICE_CREATE_FAILED", "Failed to create order invoice", err.Error(), "")
+		return
+	}
+
+	payMethod := strings.ToLower(strings.TrimSpace(req.PaymentMethod))
+	if payMethod == "" {
+		payMethod = "crypto"
+	}
+
+	// 3. Instant settlement if paid by Credit Wallet or 100%-discounted free order
+	if payMethod == "credit_wallet" || finalTotal == 0 {
+		txnID := "promo_100pct_" + invoiceID.String()[:8]
+		methodLabel := "promo_free"
+		if finalTotal > 0 {
+			idemKey := fmt.Sprintf("wallet_pay:%s", inv.ID.String())
+			entry, err := h.store.DebitWalletAtomic(r.Context(), claims.UserID, finalTotal, "invoice_payment", inv.ID.String(), idemKey, fmt.Sprintf("Order checkout %s", inv.InvoiceNumber))
+			if err != nil {
+				response.Error(w, http.StatusBadRequest, "INSUFFICIENT_BALANCE", err.Error(), nil, "")
+				return
+			}
+			txnID = entry.ID.String()
+			methodLabel = "credit_wallet"
+		}
+		inv.Status = store.InvoiceStatusPaid
+		inv.PaymentMethod = methodLabel
+		inv.TransactionID = txnID
+		inv.PaidAt = &now
+		_ = h.store.UpdateInvoice(r.Context(), inv)
+
+		if h.onInvoicePaid != nil {
+			h.onInvoicePaid(r.Context(), inv)
+		} else {
+			_, _ = h.store.RecordAffiliateCommission(r.Context(), claims.UserID, inv.ID, inv.Total)
+		}
+
+		response.JSON(w, http.StatusCreated, map[string]interface{}{
+			"invoice":        inv,
+			"paid":           true,
+			"subtotal_usd":   subtotal,
+			"discount_usd":   discountUSD,
+			"total_usd":      finalTotal,
+			"coupon_applied": appliedCoupon,
+			"next_url":       "/billing?tab=invoices&order_paid=true",
+		}, nil)
+		return
+	}
+
+	nextURL := fmt.Sprintf("/billing?tab=invoices&pay_invoice=%s", inv.ID.String())
+	if payMethod == "crypto" {
+		nextURL = fmt.Sprintf("/billing/crypto/%s", inv.ID.String())
+	}
+
+	response.JSON(w, http.StatusCreated, map[string]interface{}{
+		"invoice":        inv,
+		"paid":           false,
+		"subtotal_usd":   subtotal,
+		"discount_usd":   discountUSD,
+		"total_usd":      finalTotal,
+		"coupon_applied": appliedCoupon,
+		"next_url":       nextURL,
+	}, nil)
 }
 
 // ============================================================================
@@ -325,8 +526,12 @@ func (h *CommercialHandler) PayInvoiceWithWallet(w http.ResponseWriter, r *http.
 	inv.PaidAt = &now
 	_ = h.store.UpdateInvoice(r.Context(), inv)
 
-	// Record affiliate commission if user was referred
-	_, _ = h.store.RecordAffiliateCommission(r.Context(), claims.UserID, inv.ID, inv.Total)
+	// Activate/provision hosting & record affiliate commission if user was referred
+	if h.onInvoicePaid != nil {
+		h.onInvoicePaid(r.Context(), inv)
+	} else {
+		_, _ = h.store.RecordAffiliateCommission(r.Context(), claims.UserID, inv.ID, inv.Total)
+	}
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
 		"invoice":      inv,

@@ -37,6 +37,10 @@ import {
   CreditCard,
   Coins,
   LifeBuoy,
+  Tag,
+  ShoppingCart,
+  Activity,
+  Gift,
 } from 'lucide-react';
 import { clearStoredAuth, getStoredUserRole, apiFetch } from '@/lib/api';
 
@@ -102,9 +106,11 @@ const adminNavGroups: NavGroup[] = [
     items: [
       { label: 'User Management', href: '/admin/users', icon: Users, badge: 'Tenants', badgeColor: 'purple' },
       { label: 'Billing & Plans', href: '/billing', icon: CreditCard, badge: 'Cloud', badgeColor: 'amber' },
+      { label: 'Coupons & Affiliates', href: '/admin/commercial', icon: Tag, badge: 'Promo', badgeColor: 'emerald' },
       { label: 'Crypto Gateway', href: '/admin/crypto', icon: Coins, badge: 'Treasury', badgeColor: 'emerald' },
       { label: 'Domain Reseller', href: '/admin/domains', icon: Globe, badge: 'Admin', badgeColor: 'purple' },
       { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
+      { label: 'System Status', href: '/status', icon: Activity, badge: 'Live', badgeColor: 'emerald' },
       { label: 'System Updates', href: '/settings/updates', icon: RefreshCw, badge: 'Live', badgeColor: 'emerald' },
       { label: 'Team', href: '/team', icon: Users },
       { label: 'API Keys', href: '/api-keys', icon: Key },
@@ -143,7 +149,10 @@ const customerNavGroups: NavGroup[] = [
   {
     title: 'ACCOUNT & BILLING',
     items: [
+      { label: 'Order Hosting', href: '/order', icon: ShoppingCart, badge: 'Cart', badgeColor: 'emerald' },
       { label: 'Package & Quotas', href: '/billing', icon: CreditCard, badge: 'Plan', badgeColor: 'emerald' },
+      { label: 'Affiliate & Wallet', href: '/affiliate', icon: Gift, badge: '15%', badgeColor: 'purple' },
+      { label: 'System Status', href: '/status', icon: Activity, badge: 'Live', badgeColor: 'blue' },
       { label: 'Support & Helpdesk', href: '/support', icon: LifeBuoy, badge: '24/7', badgeColor: 'emerald' },
       { label: 'Account Settings', href: '/settings', icon: Settings },
     ],

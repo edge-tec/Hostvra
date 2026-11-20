@@ -12,14 +12,38 @@ function RegisterForm() {
   const planSlug = searchParams.get('plan');
   const cycleParam = (searchParams.get('cycle') as 'monthly' | 'yearly') || 'monthly';
   const isTrialParam = searchParams.get('trial') === 'true';
+  const refParam = searchParams.get('ref');
+  const nextParam = searchParams.get('next');
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [orgName, setOrgName] = useState('');
   const [password, setPassword] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [selectedPlan, setSelectedPlan] = useState<HostingPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (refParam && refParam.trim()) {
+      const clean = refParam.trim().toUpperCase();
+      setReferralCode(clean);
+      try {
+        localStorage.setItem('hostvra_ref_code', JSON.stringify({ code: clean, exp: Date.now() + 30 * 86400 * 1000 }));
+      } catch {}
+    } else {
+      try {
+        const raw = localStorage.getItem('hostvra_ref_code');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.code && (!parsed.exp || parsed.exp > Date.now())) {
+            setReferralCode(String(parsed.code).toUpperCase());
+          }
+        }
+      } catch {}
+    }
+  }, [refParam]);
 
   useEffect(() => {
     if (!planSlug) return;
@@ -54,12 +78,16 @@ function RegisterForm() {
         organization_name: orgName || `${fullName.split(' ')[0]}'s Cloud`,
         password,
         plan_slug: planSlug || undefined,
+        referral_code: referralCode || undefined,
       }),
     });
 
     if (res.success && res.data) {
       setStoredToken(res.data.tokens.access_token);
       if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('hostvra_ref_code');
+        } catch {}
         localStorage.setItem(
           'hostvra_user',
           JSON.stringify({
@@ -69,6 +97,11 @@ function RegisterForm() {
             is_superadmin: Boolean(res.data.is_superadmin),
           })
         );
+      }
+
+      if (nextParam && nextParam.startsWith('/')) {
+        router.push(nextParam);
+        return;
       }
 
       // If a hosting plan was selected during registration
@@ -121,6 +154,30 @@ function RegisterForm() {
           Deploy websites, databases, and enterprise email in minutes
         </p>
       </div>
+
+      {/* Active Referral Attribution Banner */}
+      {referralCode && (
+        <div className="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 text-indigo-800 dark:text-indigo-300 font-semibold">
+            <CheckCircle2 className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+            <span>
+              Partner referral code <strong className="font-mono">{referralCode}</strong> applied
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setReferralCode('');
+              try {
+                localStorage.removeItem('hostvra_ref_code');
+              } catch {}
+            }}
+            className="text-[11px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+          >
+            Remove
+          </button>
+        </div>
+      )}
 
       {/* Selected Plan Summary Banner */}
       {selectedPlan && (

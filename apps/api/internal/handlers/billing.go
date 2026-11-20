@@ -219,11 +219,84 @@ func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *sto
 				_ = h.store.UpdateDomainOrder(ctx, domainOrder)
 			}
 
-			// 4. Send payment and order confirmation emails
+			// 4. Credit affiliate commission if customer was referred (idempotent per invoice)
+			_, _ = h.store.RecordAffiliateCommission(ctx, billingInv.UserID, billingInv.ID, billingInv.Total)
+
+			// 5. Send payment and order confirmation emails
 			h.notifyInvoicePaid(ctx, billingInv)
 		}
 	}
 	return nil
+}
+
+// ActivatePaidInvoice activates or renews the subscription, provisions hosting quotas,
+// credits any eligible affiliate commission, and dispatches confirmation emails for a settled invoice.
+func (h *BillingHandler) ActivatePaidInvoice(ctx context.Context, inv *store.Invoice) {
+	if inv == nil || inv.Status != store.InvoiceStatusPaid {
+		return
+	}
+	now := time.Now().UTC()
+	if inv.SubscriptionID != nil {
+		if sub, err := h.store.GetSubscriptionByID(ctx, *inv.SubscriptionID); err == nil && sub != nil {
+			baseDate := sub.NextBillingDate
+			if baseDate.Before(now) {
+				baseDate = now
+			}
+			if sub.BillingCycle == "yearly" {
+				sub.NextBillingDate = baseDate.AddDate(1, 0, 0)
+			} else {
+				sub.NextBillingDate = baseDate.AddDate(0, 1, 0)
+			}
+			sub.Status = store.SubStatusActive
+			_ = h.store.UpdateSubscription(ctx, sub)
+			if plan, err := h.store.GetPlanByID(ctx, sub.PlanID); err == nil && plan != nil {
+				h.provisionUserForPlan(ctx, inv.UserID, inv.OrganizationID, plan, sub)
+			}
+		}
+	} else if inv.PlanID != uuid.Nil {
+		plan, _ := h.store.GetPlanByID(ctx, inv.PlanID)
+		planName := inv.Description
+		if plan != nil {
+			planName = plan.Name
+		}
+		cycle := "monthly"
+		nextDate := now.AddDate(0, 1, 0)
+		if strings.Contains(strings.ToLower(inv.Description), "yearly") {
+			cycle = "yearly"
+			nextDate = now.AddDate(1, 0, 0)
+		}
+		subID := uuid.New()
+		newSub := &store.Subscription{
+			ID:              subID,
+			UserID:          inv.UserID,
+			OrganizationID:  inv.OrganizationID,
+			PlanID:          inv.PlanID,
+			PlanName:        planName,
+			BillingCycle:    cycle,
+			Amount:          inv.Total,
+			Currency:        inv.Currency,
+			Status:          store.SubStatusActive,
+			NextBillingDate: nextDate,
+			AutoRenew:       true,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		if err := h.store.CreateSubscription(ctx, newSub); err == nil {
+			inv.SubscriptionID = &subID
+			_ = h.store.UpdateInvoice(ctx, inv)
+			if plan != nil {
+				h.provisionUserForPlan(ctx, inv.UserID, inv.OrganizationID, plan, newSub)
+			}
+		}
+	}
+
+	if domainOrder, err := h.store.GetDomainOrderByInvoiceID(ctx, inv.ID); err == nil && domainOrder != nil {
+		domainOrder.PaymentStatus = "paid"
+		_ = h.store.UpdateDomainOrder(ctx, domainOrder)
+	}
+
+	_, _ = h.store.RecordAffiliateCommission(ctx, inv.UserID, inv.ID, inv.Total)
+	h.notifyInvoicePaid(ctx, inv)
 }
 
 // ----------------------------------------------------------------------------
@@ -1345,6 +1418,7 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt:      now,
 		ConfirmedAt:    &now,
 	})
+	_, _ = h.store.RecordAffiliateCommission(r.Context(), inv.UserID, inv.ID, inv.Total)
 
 	// If linked to domain order, provision it
 	if h.domainSvc != nil {
@@ -1669,6 +1743,8 @@ func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
+
+	_, _ = h.store.RecordAffiliateCommission(r.Context(), inv.UserID, inv.ID, inv.Total)
 
 	_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
 		ID:               uuid.New(),
@@ -2084,6 +2160,9 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+
+			// Record affiliate commission if user was referred (idempotent per invoice)
+			_, _ = h.store.RecordAffiliateCommission(r.Context(), inv.UserID, inv.ID, inv.Total)
 
 		// Record Completed Payment Transaction
 		_ = h.store.RecordPaymentTransaction(r.Context(), &store.PaymentTransaction{
