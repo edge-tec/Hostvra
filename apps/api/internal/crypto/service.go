@@ -79,8 +79,12 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 		return nil, fmt.Errorf("cryptocurrency '%s' is not active or supported", req.CurrencyID)
 	}
 
-	if req.FiatAmountUSD < cur.MinAmountUSD {
-		return nil, fmt.Errorf("minimum payment amount for %s is $%.2f USD", cur.Symbol, cur.MinAmountUSD)
+	minAmountUSD := cur.MinAmountUSD
+	if minAmountUSD <= 0 || minAmountUSD > 0.5 {
+		minAmountUSD = 0.5
+	}
+	if req.FiatAmountUSD < minAmountUSD {
+		return nil, fmt.Errorf("minimum payment amount for %s is $%.2f USD", cur.Symbol, minAmountUSD)
 	}
 
 	// Calculate crypto token amount based on live exchange rate

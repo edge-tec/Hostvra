@@ -168,12 +168,13 @@ export default function CryptoCheckoutPage() {
       const res = await apiFetch<CryptoCurrencyOption[]>('/api/v1/crypto/currencies');
       if (res.data && res.data.length > 0) {
         setOptions(res.data);
-        const firstActive = res.data.find((o) => o.has_treasury);
-        if (firstActive) {
-          setSelectedCurrencyId(firstActive.id);
-        } else {
-          setSelectedCurrencyId(res.data[0].id);
-        }
+        const preferredOrder = ['USDT_BEP20', 'BNB', 'USDT_TRC20', 'TRX', 'ETH', 'USDT_ERC20', 'BTC', 'SOL', 'POL', 'LTC', 'DOGE'];
+        const activeList = res.data.filter((o) => o.has_treasury);
+        const preferred =
+          preferredOrder.map((id) => activeList.find((o) => o.id === id)).find(Boolean) ||
+          activeList[0] ||
+          res.data[0];
+        setSelectedCurrencyId(preferred.id);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to load supported crypto currencies');
@@ -461,10 +462,10 @@ export default function CryptoCheckoutPage() {
                         )}
                       </div>
 
-                      <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate border-t border-slate-100 dark:border-slate-700/60 pt-1.5 flex items-center justify-between">
-                        <span>{opt.name}</span>
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/60 pt-1.5 flex items-center justify-between gap-1.5">
+                        <span className="truncate min-w-0">{opt.name}</span>
                         {isAvailable && (
-                          <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase text-[9px]">
+                          <span className="text-emerald-600 dark:text-emerald-400 font-bold uppercase text-[9px] shrink-0">
                             Ready
                           </span>
                         )}
@@ -489,7 +490,9 @@ export default function CryptoCheckoutPage() {
                     <p className="font-bold text-sm text-slate-900 dark:text-amber-100">
                       {error === 'NO_TREASURY_AVAILABLE'
                         ? 'Crypto Gateway Activation Required'
-                        : 'Crypto Network Setup Required'}
+                        : error.toLowerCase().includes('minimum payment')
+                          ? 'Minimum Payment Amount Notice'
+                          : 'Crypto Payment Notice'}
                     </p>
                     <p className="text-slate-600 dark:text-amber-200/90 leading-relaxed text-xs">
                       {error === 'NO_TREASURY_AVAILABLE'

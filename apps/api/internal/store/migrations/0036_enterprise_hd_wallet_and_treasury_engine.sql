@@ -98,13 +98,16 @@ CREATE INDEX IF NOT EXISTS idx_sweep_jobs_network ON treasury_sweep_jobs(network
 CREATE INDEX IF NOT EXISTS idx_sweep_logs_job ON treasury_sweep_logs(sweep_job_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_wallet_audit_time ON wallet_derivation_audit_logs(created_at DESC);
 
--- Ensure Polygon POL is seeded alongside all 9 enterprise assets
+-- Ensure Polygon POL is seeded alongside all 9 enterprise assets and lower min payment to $0.50
 INSERT INTO crypto_currencies (id, network_id, symbol, name, is_token, contract_address, decimals, min_confirmations, min_amount_usd, icon, is_active)
 VALUES
-('POL', 'polygon', 'POL', 'Polygon (POL/MATIC)', FALSE, '', 18, 5, 1.0000, 'pol', TRUE)
+('POL', 'polygon', 'POL', 'Polygon (POL/MATIC)', FALSE, '', 18, 5, 0.5000, 'pol', TRUE)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
+    min_amount_usd = 0.5000,
     is_active = TRUE;
+
+UPDATE crypto_currencies SET min_amount_usd = 0.5000 WHERE min_amount_usd > 0.5000;
 
 -- Seed default Phase 5 Treasury Engine settings
 INSERT INTO crypto_payment_settings (key, value, description)

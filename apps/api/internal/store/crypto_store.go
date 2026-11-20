@@ -92,19 +92,19 @@ func (m *MemoryStore) seedCryptoData() {
 		m.cryptoNetworks[net.ID] = net
 	}
 
-	// 2. Currencies: All 9 Enterprise Phase 5 Assets + LTC & DOGE
+	// 2. Currencies: All 9 Enterprise Phase 5 Assets + LTC & DOGE (0.50 USD minimum)
 	currencies := []*CryptoCurrency{
-		{ID: "USDT_TRC20", NetworkID: "tron", Symbol: "USDT", Name: "Tether USD (TRC20)", IsToken: true, ContractAddress: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "USDT_BEP20", NetworkID: "bsc", Symbol: "USDT", Name: "Tether USD (BEP20)", IsToken: true, ContractAddress: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "USDT_ERC20", NetworkID: "ethereum", Symbol: "USDT", Name: "Tether USD (ERC20)", IsToken: true, ContractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "BNB", NetworkID: "bsc", Symbol: "BNB", Name: "BNB Coin", IsToken: false, Decimals: 18, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "bnb", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "POL", NetworkID: "polygon", Symbol: "POL", Name: "Polygon (POL/MATIC)", IsToken: false, Decimals: 18, MinConfirmations: 5, MinAmountUSD: 1.0, Icon: "pol", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "TRX", NetworkID: "tron", Symbol: "TRX", Name: "TRON", IsToken: false, Decimals: 6, MinConfirmations: 19, MinAmountUSD: 1.0, Icon: "trx", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "BTC", NetworkID: "bitcoin", Symbol: "BTC", Name: "Bitcoin", IsToken: false, Decimals: 8, MinConfirmations: 2, MinAmountUSD: 5.0, Icon: "btc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "SOL", NetworkID: "solana", Symbol: "SOL", Name: "Solana", IsToken: false, Decimals: 9, MinConfirmations: 1, MinAmountUSD: 1.0, Icon: "sol", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "LTC", NetworkID: "litecoin", Symbol: "LTC", Name: "Litecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "ltc", IsActive: true, CreatedAt: now, UpdatedAt: now},
-		{ID: "DOGE", NetworkID: "dogecoin", Symbol: "DOGE", Name: "Dogecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 1.0, Icon: "doge", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "USDT_TRC20", NetworkID: "tron", Symbol: "USDT", Name: "Tether USD (TRC20)", IsToken: true, ContractAddress: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", Decimals: 6, MinConfirmations: 19, MinAmountUSD: 0.5, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "USDT_BEP20", NetworkID: "bsc", Symbol: "USDT", Name: "Tether USD (BEP20)", IsToken: true, ContractAddress: "0x55d398326f99059fF775485246999027B3197955", Decimals: 18, MinConfirmations: 3, MinAmountUSD: 0.5, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "USDT_ERC20", NetworkID: "ethereum", Symbol: "USDT", Name: "Tether USD (ERC20)", IsToken: true, ContractAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7", Decimals: 6, MinConfirmations: 2, MinAmountUSD: 0.5, Icon: "usdt", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "BNB", NetworkID: "bsc", Symbol: "BNB", Name: "BNB Coin", IsToken: false, Decimals: 18, MinConfirmations: 3, MinAmountUSD: 0.5, Icon: "bnb", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "ETH", NetworkID: "ethereum", Symbol: "ETH", Name: "Ethereum", IsToken: false, Decimals: 18, MinConfirmations: 2, MinAmountUSD: 0.5, Icon: "eth", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "POL", NetworkID: "polygon", Symbol: "POL", Name: "Polygon (POL/MATIC)", IsToken: false, Decimals: 18, MinConfirmations: 5, MinAmountUSD: 0.5, Icon: "pol", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "TRX", NetworkID: "tron", Symbol: "TRX", Name: "TRON", IsToken: false, Decimals: 6, MinConfirmations: 19, MinAmountUSD: 0.5, Icon: "trx", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "BTC", NetworkID: "bitcoin", Symbol: "BTC", Name: "Bitcoin", IsToken: false, Decimals: 8, MinConfirmations: 2, MinAmountUSD: 0.5, Icon: "btc", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "SOL", NetworkID: "solana", Symbol: "SOL", Name: "Solana", IsToken: false, Decimals: 9, MinConfirmations: 1, MinAmountUSD: 0.5, Icon: "sol", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "LTC", NetworkID: "litecoin", Symbol: "LTC", Name: "Litecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 0.5, Icon: "ltc", IsActive: true, CreatedAt: now, UpdatedAt: now},
+		{ID: "DOGE", NetworkID: "dogecoin", Symbol: "DOGE", Name: "Dogecoin", IsToken: false, Decimals: 8, MinConfirmations: 3, MinAmountUSD: 0.5, Icon: "doge", IsActive: true, CreatedAt: now, UpdatedAt: now},
 	}
 	for _, cur := range currencies {
 		m.cryptoCurrencies[cur.ID] = cur
