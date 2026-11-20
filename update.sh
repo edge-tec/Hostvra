@@ -39,6 +39,14 @@ fi
 cd "$HOSTVRA_DIR"
 echo "[INFO] Working directory: $(pwd)"
 
+# Ensure both /opt/hostvra and /root/Hostvra resolve cleanly on all VPS installations
+if [[ ! -e "/opt/hostvra" ]]; then
+    ln -sfn "$HOSTVRA_DIR" /opt/hostvra 2>/dev/null || true
+fi
+if [[ ! -e "/root/Hostvra" ]]; then
+    ln -sfn "$HOSTVRA_DIR" /root/Hostvra 2>/dev/null || true
+fi
+
 # 1. Concurrent Update Lock Protection
 LOCK_FILE="/tmp/hostvra-update.lock"
 if [[ -f "$LOCK_FILE" ]]; then
@@ -117,23 +125,26 @@ if command -v systemctl &>/dev/null; then
     systemctl start mariadb 2>/dev/null || systemctl start mysql 2>/dev/null || true
 fi
 
-echo "Pulling latest code from origin/main..."
-git remote set-url origin https://github.com/edge-tec/Hostvra.git 2>/dev/null || true
-git fetch origin main
-git reset --hard origin/main
-
-# Prepare backup directory for atomic rollback
+# Prepare backup directory for atomic rollback BEFORE modifying git working tree or binaries
 TIMESTAMP=$(date +%s)
 BACKUP_DIR="/var/lib/hostvra/updates_backup/${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}" 2>/dev/null || BACKUP_DIR="/tmp/hostvra_backup_${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}" "bin"
 
-# Backup current binaries, config, and data snapshot
+git rev-parse HEAD > "${BACKUP_DIR}/pre_deploy_commit.txt" 2>/dev/null || true
+if command -v systemctl &>/dev/null; then
+    systemctl is-active hostvra-api hostvra-web hostvra-agent > "${BACKUP_DIR}/service_states.txt" 2>/dev/null || true
+fi
+
+# Backup current binaries, frontend build, config, and data snapshot
 if [[ -f "/usr/local/bin/hostvra-api" ]]; then
     cp -p "/usr/local/bin/hostvra-api" "${BACKUP_DIR}/hostvra-api.bak" 2>/dev/null || true
 fi
 if [[ -f "/usr/local/bin/hostvra-agent" ]]; then
     cp -p "/usr/local/bin/hostvra-agent" "${BACKUP_DIR}/hostvra-agent.bak" 2>/dev/null || true
+fi
+if [[ -d "apps/web/.next" ]]; then
+    tar -czf "${BACKUP_DIR}/web_next_build.tar.gz" -C apps/web .next 2>/dev/null || true
 fi
 if [[ -f "/etc/hostvra/api.env" ]]; then
     cp -p "/etc/hostvra/api.env" "${BACKUP_DIR}/api.env.bak" 2>/dev/null || true
@@ -150,14 +161,28 @@ fi
 if command -v pg_dump &>/dev/null; then
     sudo -u postgres pg_dump hostvra > "${BACKUP_DIR}/hostvra_db.sql" 2>/dev/null || true
 fi
+if command -v mysqldump &>/dev/null; then
+    mysqldump --single-transaction --all-databases > "${BACKUP_DIR}/mariadb_all.sql" 2>/dev/null || true
+fi
+echo "[INFO] Pre-deployment backup snapshot created at ${BACKUP_DIR}"
+
+echo "Pulling latest code from origin/main..."
+git remote set-url origin https://github.com/edge-tec/Hostvra.git 2>/dev/null || true
+git fetch origin main
+git reset --hard origin/main
 
 rollback() {
-    echo "[ALERT] Update failed! Executing automatic rollback to prior binaries..." >&2
+    echo "[ALERT] Update failed! Executing automatic rollback to prior binaries and build..." >&2
     if [[ -f "${BACKUP_DIR}/hostvra-api.bak" ]] && [[ -w "/usr/local/bin" ]]; then
         cp -fp "${BACKUP_DIR}/hostvra-api.bak" "/usr/local/bin/hostvra-api" 2>/dev/null || true
     fi
     if [[ -f "${BACKUP_DIR}/hostvra-agent.bak" ]] && [[ -w "/usr/local/bin" ]]; then
         cp -fp "${BACKUP_DIR}/hostvra-agent.bak" "/usr/local/bin/hostvra-agent" 2>/dev/null || true
+    fi
+    if [[ -f "${BACKUP_DIR}/web_next_build.tar.gz" ]]; then
+        rm -rf apps/web/.next
+        tar -xzf "${BACKUP_DIR}/web_next_build.tar.gz" -C apps/web 2>/dev/null || true
+        ln -sfn apps/web/.next .next 2>/dev/null || true
     fi
     if [[ -f "${BACKUP_DIR}/api.env.bak" ]] && [[ -w "/etc/hostvra" ]]; then
         cp -fp "${BACKUP_DIR}/api.env.bak" "/etc/hostvra/api.env" 2>/dev/null || true
@@ -859,5 +884,10 @@ fi
 
 # Cancel error trap since all steps succeeded
 trap - ERR
+DEPLOYED_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+echo "------------------------------------------------------------------"
+echo "Deployed Commit : ${DEPLOYED_SHA}"
+echo "Repository Path : ${HOSTVRA_DIR} (symlinked to /opt/hostvra & /root/Hostvra)"
+echo "Backup Snapshot : ${BACKUP_DIR}"
 echo "=== UPDATE SUCCESS: Hostvra is successfully updated, verified, and active. ==="
 
