@@ -1125,3 +1125,57 @@ func (c *MultiChainRpcClient) SendSolanaRawTransaction(ctx context.Context, rpcU
 	}
 	return sig, nil
 }
+
+// CreateTronTRC20Tx builds an unsigned TRC20 transfer(address,uint256) TriggerSmartContract transaction via TronGrid.
+func (c *MultiChainRpcClient) CreateTronTRC20Tx(ctx context.Context, rpcURL, fromAddr, contractAddr, toAddr string, amountSmallestUnits *big.Int, feeLimitSun int64) (map[string]interface{}, string, error) {
+	baseURL := rpcURL
+	if baseURL == "" {
+		baseURL = "https://api.trongrid.io"
+	}
+	paramHex, err := EncodeTronTRC20TransferParam(toAddr, amountSmallestUnits)
+	if err != nil {
+		return nil, "", err
+	}
+	if feeLimitSun <= 0 || feeLimitSun > 50_000_000 {
+		feeLimitSun = 30_000_000 // 30 TRX hard safety cap
+	}
+	payload := map[string]interface{}{
+		"owner_address":     fromAddr,
+		"contract_address":  contractAddr,
+		"function_selector": "transfer(address,uint256)",
+		"parameter":         paramHex,
+		"fee_limit":         feeLimitSun,
+		"call_value":        0,
+		"visible":           true,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/wallet/triggersmartcontract", bytes.NewReader(body))
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	var res struct {
+		Result struct {
+			Result  bool   `json:"result"`
+			Message string `json:"message"`
+		} `json:"result"`
+		Transaction map[string]interface{} `json:"transaction"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, "", err
+	}
+	if !res.Result.Result || res.Transaction == nil {
+		return nil, "", fmt.Errorf("trongrid triggersmartcontract failed: %s", res.Result.Message)
+	}
+	txID, _ := res.Transaction["txID"].(string)
+	if txID == "" {
+		return nil, "", fmt.Errorf("empty txID from trongrid triggersmartcontract")
+	}
+	return res.Transaction, txID, nil
+}

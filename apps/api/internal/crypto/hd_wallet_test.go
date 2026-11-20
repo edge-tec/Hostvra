@@ -391,3 +391,18 @@ func TestIsolatedSigner_MultiChainTronBitcoinSolanaSigning(t *testing.T) {
 		t.Fatalf("invalid signed Solana tx: %+v", solSigned)
 	}
 }
+
+func TestTronTRC20_ABIEncoding(t *testing.T) {
+	// 25.50 USDT TRC20 (6 decimals = 25,500,000 units)
+	param, err := EncodeTronTRC20TransferParam("TEpqggfDUnVw4i12cM2RYEgwhgaruhAmKo", big.NewInt(25500000))
+	if err != nil {
+		t.Fatalf("EncodeTronTRC20TransferParam failed: %v", err)
+	}
+	if len(param) != 128 {
+		t.Fatalf("expected 128-char ABI parameter (64 addr + 64 uint256), got %d", len(param))
+	}
+	// Reject invalid address
+	if _, err := EncodeTronTRC20TransferParam("0x80beBA68E5477712B3342fE43267C947cffAe54E", big.NewInt(100)); err == nil {
+		t.Fatalf("expected error for non-TRON address in TRC20 ABI encoder")
+	}
+}

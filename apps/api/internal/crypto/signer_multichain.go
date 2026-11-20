@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2/ecdsa"
@@ -291,4 +292,22 @@ func (s *IsolatedSigner) SignSolanaSweepTx(req *SolanaSweepSignRequest, allowlis
 		From:     derivedFrom,
 		To:       strings.TrimSpace(req.Destination),
 	}, nil
+}
+
+// EncodeTronTRC20TransferParam encodes the 128-char ABI parameter for TRON TRC20 transfer(address,uint256).
+// Decodes the Base58Check TRON address, strips the 0x41 prefix to 20 bytes, pads to 32 bytes,
+// and appends the 32-byte big-endian uint256 token amount.
+func EncodeTronTRC20TransferParam(toTronAddress string, amountSmallestUnits *big.Int) (string, error) {
+	decoded := base58.Decode(strings.TrimSpace(toTronAddress))
+	if len(decoded) != 25 || decoded[0] != 0x41 {
+		return "", fmt.Errorf("invalid TRON Base58Check address for TRC20 ABI encoding: %s", toTronAddress)
+	}
+	// Strip 1-byte 0x41 prefix and 4-byte checksum -> 20-byte EVM-style address
+	addr20 := decoded[1:21]
+	addrHex := fmt.Sprintf("%064x", new(big.Int).SetBytes(addr20))
+	if amountSmallestUnits == nil || amountSmallestUnits.Sign() <= 0 {
+		return "", fmt.Errorf("invalid TRC20 transfer amount")
+	}
+	amtHex := fmt.Sprintf("%064x", amountSmallestUnits)
+	return addrHex + amtHex, nil
 }

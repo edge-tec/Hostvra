@@ -418,11 +418,13 @@ func (e *TreasurySweepEngine) tryControlledGasFunding(
 	if fundAmount <= 0 || fundAmount > maxCapNative {
 		return "", fmt.Errorf("requested gas %.8f exceeds hard native safety cap %.8f %s", fundAmount, maxCapNative, net.NativeCurrency)
 	}
-	if nativePriceUSD, pErr := e.pricing.GetPriceUSD(ctx, net.NativeCurrency); pErr == nil && nativePriceUSD > 0 {
-		fundUSD := fundAmount * nativePriceUSD
-		if fundUSD > maxCapUSD {
-			return "", fmt.Errorf("requested gas $%.2f USD exceeds hard USD safety cap $%.2f USD on %s", fundUSD, maxCapUSD, net.ID)
-		}
+	nativePriceUSD, pErr := e.pricing.GetPriceUSD(ctx, net.NativeCurrency)
+	if pErr != nil || nativePriceUSD <= 0 {
+		return "", fmt.Errorf("gas funding rejected (fail-closed): trustworthy USD price unavailable for %s", net.NativeCurrency)
+	}
+	fundUSD := fundAmount * nativePriceUSD
+	if fundUSD > maxCapUSD {
+		return "", fmt.Errorf("requested gas $%.2f USD exceeds hard USD safety cap $%.2f USD on %s", fundUSD, maxCapUSD, net.ID)
 	}
 
 	feederAddr, err := e.signer.DerivePublicAddress(net.ID, 0)
@@ -487,7 +489,35 @@ func (e *TreasurySweepEngine) executeTronSweep(
 	maxSingleUSD float64,
 ) error {
 	if cur.IsToken {
-		return e.retryOrFailJob(ctx, job, "TRC20 token sweep requires TRX energy reserve on source address; verify TRX energy before broadcast")
+		// USDT TRC20 sweep: verify TRX energy/bandwidth reserve on source address (>= 15 TRX), then TriggerSmartContract
+		trxBal, tErr := e.rpc.GetTronBalance(ctx, net.RPCURL, job.SourceAddress)
+		if tErr != nil || trxBal < 15.0 {
+			return e.retryOrFailJob(ctx, job, fmt.Sprintf("TRC20 sweep requires >= 15 TRX energy reserve on %s (current: %.4f TRX)", job.SourceAddress, trxBal))
+		}
+		scale := new(big.Float).SetFloat64(math.Pow10(cur.Decimals))
+		valF := new(big.Float).Mul(new(big.Float).SetFloat64(job.RequestedAmount), scale)
+		tokUnits, _ := valF.Int(nil)
+		txObj, txID, err := e.rpc.CreateTronTRC20Tx(ctx, net.RPCURL, job.SourceAddress, cur.ContractAddress, job.DestinationAddress, tokUnits, 30_000_000)
+		if err != nil {
+			return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to build TRC20 TriggerSmartContract tx: %v", err))
+		}
+		sigHex, err := e.signer.SignTronSweepTx(&TronSweepSignRequest{
+			DerivationIndex: uint32(job.DerivationIndex),
+			FromAddress:     job.SourceAddress,
+			Destination:     job.DestinationAddress,
+			TxIDHex:         txID,
+			AmountUSD:       job.AmountUSD,
+			MaxSweepUSD:     maxSingleUSD,
+		}, allowlist)
+		if err != nil {
+			return e.failJob(ctx, job, fmt.Sprintf("TRC20 signer policy rejected sweep: %v", err))
+		}
+		txObj["signature"] = []string{sigHex}
+		broadcastHash, err := e.rpc.BroadcastTronSignedTx(ctx, net.RPCURL, txObj)
+		if err != nil {
+			return e.retryOrFailJob(ctx, job, fmt.Sprintf("TRC20 broadcast error: %v", err))
+		}
+		return e.completeSweepJob(ctx, job, cur.Symbol, job.RequestedAmount, 15.0, broadcastHash)
 	}
 	trxBal, err := e.rpc.GetTronBalance(ctx, net.RPCURL, job.SourceAddress)
 	if err != nil {
