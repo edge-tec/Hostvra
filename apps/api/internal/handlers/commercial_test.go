@@ -977,3 +977,160 @@ func TestP14_ConcurrentPayInvoiceWithWalletAndPlanScopedCouponsAndSweepPersisten
 		t.Fatalf("expected 1 wallet derivation audit after cold disk reload, got %d err=%v", len(audits), err)
 	}
 }
+
+func TestP15_ConcurrentWebhookReplayAndCryptoPoolPersistenceAndCancelledInvoiceGuard(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbFile := filepath.Join(tmpDir, "p15_store.json")
+	st := store.NewMemoryStoreWithPath(dbFile)
+	bh := NewBillingHandler(&config.Config{AppURL: "https://hostvra.com"}, st, audit.NewLogger(st, slog.Default()))
+
+	uid := uuid.New()
+	orgID := uuid.New()
+	plan := &store.HostingPlan{
+		ID:            uuid.New(),
+		Name:          "P15 Cloud Pro",
+		Slug:          "p15-cloud-pro",
+		PriceMonthly:  25.00,
+		Currency:      "USD",
+		DiskSpaceMB:   50000,
+		BandwidthMB:   500000,
+		MaxWebsites:   10,
+		MaxDatabases:  10,
+		MaxMailboxes:  10,
+		IsActive:      true,
+	}
+	_ = st.CreatePlan(ctx, plan)
+	_ = st.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:     "stripe",
+		DisplayName: "Stripe",
+		Enabled:     true,
+		TestMode:    false,
+		SecretKey:   "p15_webhook_secret_key",
+	})
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P15-WEBHOOK-1",
+		UserID:         uid,
+		OrganizationID: orgID,
+		PlanID:         plan.ID,
+		Subtotal:       25.00,
+		Total:          25.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+		DueDate:        time.Now().UTC().AddDate(0, 0, 7),
+		Description:    "P15 Cloud Pro (monthly)",
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := st.CreateInvoice(ctx, inv); err != nil {
+		t.Fatalf("CreateInvoice failed: %v", err)
+	}
+
+	// 1. Fire 10 simultaneous signed webhook requests for the same invoice & transaction ID
+	bodyStr := fmt.Sprintf(`{"event":"invoice.paid","invoice_id":"%s","transaction_id":"pi_p15_race_1","amount":25.00,"currency":"USD","status":"paid"}`, inv.ID.String())
+	mac := hmac.New(sha256.New, []byte("p15_webhook_secret_key"))
+	mac.Write([]byte(bodyStr))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	const workers = 10
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("gateway", "stripe")
+			req := httptest.NewRequest("POST", "/api/v1/billing/webhooks/stripe", bytes.NewBufferString(bodyStr))
+			req.Header.Set("X-Signature", sig)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			w := httptest.NewRecorder()
+			bh.HandleWebhook(w, req)
+			if w.Code != http.StatusOK {
+				t.Errorf("unexpected webhook status %d: %s", w.Code, w.Body.String())
+			}
+		}()
+	}
+	wg.Wait()
+
+	// Verify exactly 1 subscription and 1 hosting account were provisioned
+	subs, err := st.ListSubscriptions(ctx, orgID)
+	if err != nil || len(subs) != 1 {
+		t.Fatalf("expected exactly 1 subscription after 10 concurrent webhooks, got %d (err=%v)", len(subs), err)
+	}
+	accs, err := st.ListHostingAccounts(ctx, orgID, nil)
+	if err != nil || len(accs) != 1 {
+		t.Fatalf("expected exactly 1 hosting account after 10 concurrent webhooks, got %d (err=%v)", len(accs), err)
+	}
+	txns, err := st.ListPaymentTransactions(ctx, orgID)
+	if err != nil || len(txns) != 1 {
+		t.Fatalf("expected exactly 1 completed payment transaction after 10 concurrent webhooks, got %d (err=%v)", len(txns), err)
+	}
+
+	// 2. Verify cancelled/refunded invoice cannot be paid via webhook
+	cancelledInv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P15-CANCELLED",
+		UserID:         uid,
+		OrganizationID: orgID,
+		PlanID:         plan.ID,
+		Subtotal:       25.00,
+		Total:          25.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusCancelled,
+		DueDate:        time.Now().UTC().AddDate(0, 0, 7),
+		CreatedAt:      time.Now().UTC(),
+	}
+	_ = st.CreateInvoice(ctx, cancelledInv)
+	cBody := fmt.Sprintf(`{"event":"invoice.paid","invoice_id":"%s","transaction_id":"pi_p15_cancelled_1","amount":25.00,"currency":"USD","status":"paid"}`, cancelledInv.ID.String())
+	cMac := hmac.New(sha256.New, []byte("p15_webhook_secret_key"))
+	cMac.Write([]byte(cBody))
+	cSig := hex.EncodeToString(cMac.Sum(nil))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("gateway", "stripe")
+	cReq := httptest.NewRequest("POST", "/api/v1/billing/webhooks/stripe", bytes.NewBufferString(cBody))
+	cReq.Header.Set("X-Signature", cSig)
+	cReq = cReq.WithContext(context.WithValue(cReq.Context(), chi.RouteCtxKey, rctx))
+	cW := httptest.NewRecorder()
+	bh.HandleWebhook(cW, cReq)
+	if cW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when webhook attempts to mark cancelled invoice paid, got %d: %s", cW.Code, cW.Body.String())
+	}
+
+	// 3. Verify CreateDepositAddress, AcquireDepositAddress, and RecordCryptoLedger persist across disk reload
+	depAddr := &store.CryptoDepositAddress{
+		ID:              uuid.New(),
+		NetworkID:       "tron",
+		CurrencyID:      "USDT_TRC20",
+		Address:         "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb",
+		DerivationIndex: 7,
+		Status:          "available",
+	}
+	if err := st.CreateDepositAddress(ctx, depAddr); err != nil {
+		t.Fatalf("CreateDepositAddress failed: %v", err)
+	}
+	acquired, err := st.AcquireDepositAddress(ctx, "tron", "USDT_TRC20", inv.ID)
+	if err != nil || acquired == nil || acquired.Status != "assigned" {
+		t.Fatalf("AcquireDepositAddress failed: %+v err=%v", acquired, err)
+	}
+	if err := st.RecordCryptoLedger(ctx, &store.CryptoInternalLedger{
+		InvoiceID: &inv.ID,
+		EntryType: "invoice_settled",
+		Amount:    25.00,
+		Currency:  "USDT",
+		Network:   "tron",
+		TxHash:    "0xp15ledgerhash",
+	}); err != nil {
+		t.Fatalf("RecordCryptoLedger failed: %v", err)
+	}
+
+	reloaded := store.NewMemoryStoreWithPath(dbFile)
+	assignedAddrs, err := reloaded.ListDepositAddresses(ctx, "tron", "assigned")
+	if err != nil || len(assignedAddrs) != 1 || assignedAddrs[0].Address != "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb" {
+		t.Fatalf("expected assigned deposit address to persist across cold disk reload, got %+v err=%v", assignedAddrs, err)
+	}
+	ledgerEntries, totalLedger, err := reloaded.ListCryptoLedger(ctx, 10, 0)
+	if err != nil || totalLedger != 1 || len(ledgerEntries) != 1 || ledgerEntries[0].TxHash != "0xp15ledgerhash" {
+		t.Fatalf("expected crypto internal ledger to persist across cold disk reload, got %+v total=%d err=%v", ledgerEntries, totalLedger, err)
+	}
+}

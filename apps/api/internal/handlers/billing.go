@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -41,6 +42,7 @@ type BillingHandler struct {
 	quotaSvc   *quota.Service
 	paymentSvc *payment.Service
 	emailSvc   *email.Service
+	settleMu   sync.Mutex
 }
 
 func NewBillingHandler(cfg *config.Config, s store.Store, a *audit.Logger) *BillingHandler {
@@ -142,6 +144,9 @@ func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *sto
 		return nil
 	}
 
+	h.settleMu.Lock()
+	defer h.settleMu.Unlock()
+
 	if cryptoInv.PayableType == "invoice" && cryptoInv.PayableID != "" {
 		invUUID, err := uuid.Parse(cryptoInv.PayableID)
 		if err != nil {
@@ -150,6 +155,10 @@ func (h *BillingHandler) SettleCryptoPayment(ctx context.Context, cryptoInv *sto
 		billingInv, err := h.store.GetInvoiceByID(ctx, invUUID)
 		if err != nil || billingInv == nil {
 			return err
+		}
+
+		if billingInv.Status == store.InvoiceStatusCancelled || billingInv.Status == store.InvoiceStatusRefunded {
+			return fmt.Errorf("cannot settle a %s invoice", billingInv.Status)
 		}
 
 		if billingInv.Status != store.InvoiceStatusPaid {
@@ -1314,6 +1323,9 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.settleMu.Lock()
+	defer h.settleMu.Unlock()
+
 	inv, err := h.store.GetInvoiceByID(r.Context(), invID)
 	if err != nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
@@ -1333,6 +1345,10 @@ func (h *BillingHandler) PayInvoice(w http.ResponseWriter, r *http.Request) {
 			"message": "Invoice has already been paid",
 			"invoice": inv,
 		}, nil)
+		return
+	}
+	if inv.Status == store.InvoiceStatusCancelled || inv.Status == store.InvoiceStatusRefunded {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_STATUS", fmt.Sprintf("Cannot pay a %s invoice", inv.Status), nil, "")
 		return
 	}
 
@@ -1489,6 +1505,10 @@ func (h *BillingHandler) CheckoutInvoice(w http.ResponseWriter, r *http.Request)
 		}, nil)
 		return
 	}
+	if inv.Status == store.InvoiceStatusCancelled || inv.Status == store.InvoiceStatusRefunded {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_STATUS", fmt.Sprintf("Cannot checkout a %s invoice", inv.Status), nil, "")
+		return
+	}
 
 	var req InvoiceCheckoutRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1613,6 +1633,10 @@ func (h *BillingHandler) VerifyInvoicePayment(w http.ResponseWriter, r *http.Req
 			"invoice":        inv,
 			"transaction_id": inv.TransactionID,
 		}, nil)
+		return
+	}
+	if inv.Status == store.InvoiceStatusCancelled || inv.Status == store.InvoiceStatusRefunded {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_STATUS", fmt.Sprintf("Cannot verify payment for a %s invoice", inv.Status), nil, "")
 		return
 	}
 
@@ -2040,6 +2064,9 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	h.settleMu.Lock()
+	defer h.settleMu.Unlock()
+
 	// Webhook replay attack check
 	eventID := payload.TransactionID
 	if eventID == "" {
@@ -2129,6 +2156,10 @@ func (h *BillingHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 			"message": "Invoice was already paid",
 			"invoice": inv,
 		}, nil)
+		return
+	}
+	if inv.Status == store.InvoiceStatusCancelled || inv.Status == store.InvoiceStatusRefunded {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_STATUS", fmt.Sprintf("Cannot mark a %s invoice as paid", inv.Status), nil, "")
 		return
 	}
 

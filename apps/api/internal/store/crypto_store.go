@@ -162,6 +162,7 @@ func (m *MemoryStore) UpdateCryptoNetwork(ctx context.Context, net *CryptoNetwor
 	net.UpdatedAt = time.Now().UTC()
 	clone := *net
 	m.cryptoNetworks[net.ID] = &clone
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -208,6 +209,7 @@ func (m *MemoryStore) UpdateCryptoCurrency(ctx context.Context, cur *CryptoCurre
 	cur.UpdatedAt = time.Now().UTC()
 	clone := *cur
 	m.cryptoCurrencies[cur.ID] = &clone
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -302,6 +304,7 @@ func (m *MemoryStore) AcquireDepositAddress(ctx context.Context, networkID, curr
 			a.AssignedInvoiceID = &invoiceID
 			a.AssignedAt = &now
 			a.UpdatedAt = now
+			m.saveToDiskLocked()
 			clone := *a
 			return &clone, nil
 		}
@@ -324,6 +327,7 @@ func (m *MemoryStore) AcquireDepositAddress(ctx context.Context, networkID, curr
 				UpdatedAt:         now,
 			}
 			m.cryptoDepositAddrs[newAddr.ID] = newAddr
+			m.saveToDiskLocked()
 			clone := *newAddr
 			return &clone, nil
 		}
@@ -346,6 +350,7 @@ func (m *MemoryStore) AcquireDepositAddress(ctx context.Context, networkID, curr
 					UpdatedAt:         now,
 				}
 				m.cryptoDepositAddrs[newAddr.ID] = newAddr
+				m.saveToDiskLocked()
 				clone := *newAddr
 				return &clone, nil
 			}
@@ -363,6 +368,7 @@ func (m *MemoryStore) ReleaseDepositAddress(ctx context.Context, addressID uuid.
 		a.AssignedInvoiceID = nil
 		a.AssignedAt = nil
 		a.UpdatedAt = time.Now().UTC()
+		m.saveToDiskLocked()
 	}
 	return nil
 }
@@ -378,6 +384,7 @@ func (m *MemoryStore) CreateDepositAddress(ctx context.Context, addr *CryptoDepo
 	addr.UpdatedAt = now
 	clone := *addr
 	m.cryptoDepositAddrs[addr.ID] = &clone
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -577,6 +584,7 @@ func (m *MemoryStore) RecordCryptoLedger(ctx context.Context, entry *CryptoInter
 	}
 	clone := *entry
 	m.cryptoLedger = append(m.cryptoLedger, &clone)
+	m.saveToDiskLocked()
 	return nil
 }
 
