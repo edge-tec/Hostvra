@@ -162,6 +162,7 @@ func (m *MemoryStore) UpdateHDWalletAddressStatus(ctx context.Context, id uuid.U
 	defer m.mu.Unlock()
 	if a, ok := m.hdWalletAddresses[id]; ok {
 		a.AddressStatus = status
+		m.saveToDiskLocked()
 	}
 	return nil
 }
@@ -224,6 +225,7 @@ func (m *MemoryStore) CreateTreasurySweepJob(ctx context.Context, job *TreasuryS
 	job.UpdatedAt = now
 	cp := *job
 	m.treasurySweepJobs[job.ID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -277,6 +279,7 @@ func (m *MemoryStore) UpdateTreasurySweepJob(ctx context.Context, job *TreasuryS
 	job.UpdatedAt = time.Now().UTC()
 	cp := *job
 	m.treasurySweepJobs[job.ID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -303,6 +306,7 @@ func (m *MemoryStore) RecordTreasurySweepLog(ctx context.Context, entry *Treasur
 	}
 	cp := *entry
 	m.treasurySweepLogs = append(m.treasurySweepLogs, &cp)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -331,6 +335,7 @@ func (m *MemoryStore) RecordWalletDerivationAudit(ctx context.Context, entry *Wa
 	}
 	cp := *entry
 	m.walletDerivationAudits = append(m.walletDerivationAudits, &cp)
+	m.saveToDiskLocked()
 	return nil
 }
 

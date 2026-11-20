@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,7 @@ type CommercialHandler struct {
 	audit         *audit.Logger
 	dunningWorker *billing.DunningWorker
 	onInvoicePaid func(ctx context.Context, inv *store.Invoice)
+	payMu         sync.Mutex
 	startedAt     time.Time
 }
 
@@ -150,10 +152,28 @@ func (h *CommercialHandler) GetPublicSystemStatus(w http.ResponseWriter, r *http
 // 2. COUPON & PROMOTION ENGINE
 // ============================================================================
 
+func isCouponApplicableToPlan(applicableCSV string, plan *store.HostingPlan) bool {
+	clean := strings.TrimSpace(applicableCSV)
+	if clean == "" || plan == nil {
+		return true
+	}
+	for _, token := range strings.Split(clean, ",") {
+		t := strings.TrimSpace(token)
+		if t == "" {
+			continue
+		}
+		if strings.EqualFold(t, plan.ID.String()) || strings.EqualFold(t, plan.Slug) || strings.EqualFold(t, plan.Name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *CommercialHandler) ValidateCoupon(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Code           string  `json:"code"`
 		OrderAmountUSD float64 `json:"order_amount_usd"`
+		PlanID         string  `json:"plan_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.Error(w, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON payload", nil, "")
@@ -182,6 +202,18 @@ func (h *CommercialHandler) ValidateCoupon(w http.ResponseWriter, r *http.Reques
 	if req.OrderAmountUSD < c.MinOrderUSD {
 		response.Error(w, http.StatusBadRequest, "MIN_ORDER_NOT_MET", fmt.Sprintf("Minimum order amount for %s is $%.2f", c.Code, c.MinOrderUSD), nil, "")
 		return
+	}
+	if strings.TrimSpace(c.ApplicablePlanIDs) != "" && strings.TrimSpace(req.PlanID) != "" {
+		var plan *store.HostingPlan
+		if pid, pErr := uuid.Parse(strings.TrimSpace(req.PlanID)); pErr == nil {
+			plan, _ = h.store.GetPlanByID(r.Context(), pid)
+		} else {
+			plan, _ = h.store.GetPlanBySlug(r.Context(), strings.TrimSpace(req.PlanID))
+		}
+		if plan != nil && !isCouponApplicableToPlan(c.ApplicablePlanIDs, plan) {
+			response.Error(w, http.StatusBadRequest, "COUPON_PLAN_INELIGIBLE", fmt.Sprintf("Coupon %s is not applicable to the %s plan", c.Code, plan.Name), nil, "")
+			return
+		}
 	}
 
 	var discount float64
@@ -377,6 +409,12 @@ func (h *CommercialHandler) CheckoutOrder(w http.ResponseWriter, r *http.Request
 	discountUSD := 0.0
 	appliedCoupon := ""
 	if code := strings.ToUpper(strings.TrimSpace(req.CouponCode)); code != "" {
+		if c, cErr := h.store.GetCouponByCode(r.Context(), code); cErr == nil && c != nil {
+			if !isCouponApplicableToPlan(c.ApplicablePlanIDs, plan) {
+				response.Error(w, http.StatusBadRequest, "COUPON_PLAN_INELIGIBLE", fmt.Sprintf("Coupon %s is not applicable to the %s plan", c.Code, plan.Name), nil, "")
+				return
+			}
+		}
 		isFirstOrder := true
 		if existingInvs, err := h.store.ListInvoices(r.Context(), claims.OrganizationID); err == nil {
 			for _, ei := range existingInvs {
@@ -545,6 +583,11 @@ func (h *CommercialHandler) PayInvoiceWithWallet(w http.ResponseWriter, r *http.
 		response.Error(w, http.StatusBadRequest, "INVALID_ID", "Invalid invoice_id", nil, "")
 		return
 	}
+
+	// Serialize wallet invoice settlement to prevent concurrent double-provisioning on the same invoice
+	h.payMu.Lock()
+	defer h.payMu.Unlock()
+
 	inv, err := h.store.GetInvoiceByID(r.Context(), invID)
 	if err != nil || inv == nil {
 		response.Error(w, http.StatusNotFound, "NOT_FOUND", "Invoice not found", nil, "")
@@ -558,18 +601,27 @@ func (h *CommercialHandler) PayInvoiceWithWallet(w http.ResponseWriter, r *http.
 		response.JSON(w, http.StatusOK, inv, nil)
 		return
 	}
-
-	idemKey := fmt.Sprintf("wallet_pay:%s", inv.ID.String())
-	entry, err := h.store.DebitWalletAtomic(r.Context(), claims.UserID, inv.Total, "invoice_payment", inv.ID.String(), idemKey, fmt.Sprintf("Paid invoice %s", inv.InvoiceNumber))
-	if err != nil {
-		response.Error(w, http.StatusBadRequest, "INSUFFICIENT_BALANCE", err.Error(), nil, "")
+	if inv.Status == store.InvoiceStatusCancelled || inv.Status == store.InvoiceStatusRefunded {
+		response.Error(w, http.StatusBadRequest, "INVALID_INVOICE_STATUS", fmt.Sprintf("Cannot pay a %s invoice", inv.Status), nil, "")
 		return
+	}
+
+	var entry *store.WalletLedgerEntry
+	txnID := "wallet_free_" + inv.ID.String()[:8]
+	if inv.Total > 0 {
+		idemKey := fmt.Sprintf("wallet_pay:%s", inv.ID.String())
+		entry, err = h.store.DebitWalletAtomic(r.Context(), claims.UserID, inv.Total, "invoice_payment", inv.ID.String(), idemKey, fmt.Sprintf("Paid invoice %s", inv.InvoiceNumber))
+		if err != nil {
+			response.Error(w, http.StatusBadRequest, "INSUFFICIENT_BALANCE", err.Error(), nil, "")
+			return
+		}
+		txnID = entry.ID.String()
 	}
 
 	now := time.Now().UTC()
 	inv.Status = store.InvoiceStatusPaid
 	inv.PaymentMethod = "credit_wallet"
-	inv.TransactionID = entry.ID.String()
+	inv.TransactionID = txnID
 	inv.PaidAt = &now
 	_ = h.store.UpdateInvoice(r.Context(), inv)
 

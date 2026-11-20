@@ -839,3 +839,141 @@ func TestP13_RealOnDiskDatabaseBackupAndRestore(t *testing.T) {
 	}
 	t.Logf("[P13 ON-DISK DR CERTIFIED] FileBytes=%d SHA256=%s BackupTime=%v RestoreRTO=%v RPO=0", len(rawDB), backupSHA[:16], backupDuration, restoreRTO)
 }
+
+func TestP14_ConcurrentPayInvoiceWithWalletAndPlanScopedCouponsAndSweepPersistence(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbFile := filepath.Join(tmpDir, "p14_store.json")
+	st := store.NewMemoryStoreWithPath(dbFile)
+
+	// 1. Concurrent PayInvoiceWithWallet race test: 10 concurrent requests for the same $25 invoice
+	// must debit wallet strictly once ($25) and invoke onInvoicePaid provisioning callback strictly once!
+	uid := uuid.New()
+	orgID := uuid.New()
+	_, _ = st.CreditWalletAtomic(ctx, uid, 100.00, "topup", "p14-topup", "idem-p14-topup", "Seed $100")
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P14-RACE",
+		UserID:         uid,
+		OrganizationID: orgID,
+		Subtotal:       25.00,
+		Total:          25.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+	}
+	_ = st.CreateInvoice(ctx, inv)
+
+	provisionCalls := 0
+	var provMu sync.Mutex
+	h := NewCommercialHandler(&config.Config{}, st, audit.NewLogger(st, slog.Default()), nil)
+	h.SetOnInvoicePaid(func(c context.Context, paidInv *store.Invoice) {
+		provMu.Lock()
+		provisionCalls++
+		provMu.Unlock()
+	})
+
+	claims := &auth.Claims{UserID: uid, OrganizationID: orgID, Email: "p14@example.com", Role: "customer"}
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest("POST", "/api/v1/wallet/pay-invoice", bytes.NewBufferString(`{"invoice_id":"`+inv.ID.String()+`"}`))
+			req = req.WithContext(auth.WithClaims(req.Context(), claims))
+			w := httptest.NewRecorder()
+			h.PayInvoiceWithWallet(w, req)
+			if w.Code != http.StatusOK {
+				t.Errorf("unexpected status %d from PayInvoiceWithWallet", w.Code)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if provisionCalls != 1 {
+		t.Fatalf("expected onInvoicePaid to be called strictly once under 10-way concurrency, got %d", provisionCalls)
+	}
+	wlt, _ := st.GetOrCreateCustomerWallet(ctx, uid)
+	if wlt.BalanceUSD != 75.00 {
+		t.Fatalf("expected wallet balance $75.00 after single $25 payment, got $%.2f", wlt.BalanceUSD)
+	}
+
+	// Paying a cancelled or refunded invoice MUST be rejected with 400
+	cancelledInv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P14-CANCELLED",
+		UserID:         uid,
+		OrganizationID: orgID,
+		Total:          10.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusCancelled,
+	}
+	_ = st.CreateInvoice(ctx, cancelledInv)
+	cReq := httptest.NewRequest("POST", "/api/v1/wallet/pay-invoice", bytes.NewBufferString(`{"invoice_id":"`+cancelledInv.ID.String()+`"}`))
+	cReq = cReq.WithContext(auth.WithClaims(cReq.Context(), claims))
+	cW := httptest.NewRecorder()
+	h.PayInvoiceWithWallet(cW, cReq)
+	if cW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 paying cancelled invoice, got %d", cW.Code)
+	}
+
+	// 2. Plan-scoped coupon (ApplicablePlanIDs = "enterprise-only") must reject ineligible plan checkout
+	starterPlan := &store.HostingPlan{ID: uuid.New(), Name: "Starter P14", Slug: "starter-p14", PriceMonthly: 10.0, Currency: "USD", IsActive: true}
+	entPlan := &store.HostingPlan{ID: uuid.New(), Name: "Enterprise P14", Slug: "enterprise-p14", PriceMonthly: 50.0, Currency: "USD", IsActive: true}
+	_ = st.CreatePlan(ctx, starterPlan)
+	_ = st.CreatePlan(ctx, entPlan)
+	_ = st.CreateCoupon(ctx, &store.Coupon{
+		Code:              "ENTONLY30",
+		DiscountType:      "percentage",
+		DiscountValue:     30,
+		ApplicablePlanIDs: "enterprise-p14",
+		IsActive:          true,
+	})
+
+	badChk := httptest.NewRequest("POST", "/checkout", bytes.NewBufferString(`{"plan_id":"`+starterPlan.ID.String()+`","billing_cycle":"monthly","coupon_code":"ENTONLY30","payment_method":"crypto"}`))
+	badChk = badChk.WithContext(auth.WithClaims(badChk.Context(), claims))
+	badW := httptest.NewRecorder()
+	h.CheckoutOrder(badW, badChk)
+	if badW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 redeeming plan-restricted coupon on ineligible plan, got %d", badW.Code)
+	}
+
+	goodChk := httptest.NewRequest("POST", "/checkout", bytes.NewBufferString(`{"plan_id":"`+entPlan.ID.String()+`","billing_cycle":"monthly","coupon_code":"ENTONLY30","payment_method":"crypto"}`))
+	goodChk = goodChk.WithContext(auth.WithClaims(goodChk.Context(), claims))
+	goodW := httptest.NewRecorder()
+	h.CheckoutOrder(goodW, goodChk)
+	if goodW.Code != http.StatusCreated {
+		t.Fatalf("expected 201 redeeming plan-restricted coupon on eligible plan, got %d: %s", goodW.Code, goodW.Body.String())
+	}
+
+	// 3. Verify TreasurySweepJob & WalletDerivationAudit survive cold restart from disk (p14_store.json)
+	sweepJob := &store.TreasurySweepJob{
+		ID:                 uuid.New(),
+		NetworkID:          "bsc",
+		AssetID:            "USDT_BEP20",
+		SourceAddress:      "0x6Fac4D18c912343BF86fa7049364Dd4E424Ab9C0",
+		DestinationAddress: "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+		RequestedAmount:    50.00,
+		AmountUSD:          50.00,
+		Status:             "completed",
+		IdempotencyKey:     "p14-sweep-1",
+	}
+	if err := st.CreateTreasurySweepJob(ctx, sweepJob); err != nil {
+		t.Fatalf("CreateTreasurySweepJob failed: %v", err)
+	}
+	_ = st.RecordWalletDerivationAudit(ctx, &store.WalletDerivationAuditLog{
+		EventType:    "address_derived",
+		ActorID:      claims.UserID.String(),
+		EventDetails: "p14_audit bsc index=1",
+	})
+
+	reloaded := store.NewMemoryStoreWithPath(dbFile)
+	gotJob, err := reloaded.GetTreasurySweepJobByID(ctx, sweepJob.ID)
+	if err != nil || gotJob == nil || gotJob.Status != "completed" {
+		t.Fatalf("expected treasury sweep job to persist across cold disk reload, got %+v err=%v", gotJob, err)
+	}
+	audits, err := reloaded.ListWalletDerivationAudits(ctx, 10)
+	if err != nil || len(audits) != 1 {
+		t.Fatalf("expected 1 wallet derivation audit after cold disk reload, got %d err=%v", len(audits), err)
+	}
+}
