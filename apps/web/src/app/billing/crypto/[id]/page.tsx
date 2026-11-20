@@ -661,7 +661,7 @@ export default function CryptoCheckoutPage() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                            invoice.qr_uri || invoice.deposit_address
+                            invoice.deposit_address
                           )}`}
                           alt="Crypto Deposit QR"
                           className="w-36 h-36 sm:w-40 sm:h-40"
