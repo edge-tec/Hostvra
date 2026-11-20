@@ -291,7 +291,7 @@ func (m *MemoryStore) RecordAffiliateCommission(ctx context.Context, referredUse
 		ApprovedAt:     &now,
 	}
 	m.affiliateCommissions[invoiceID] = comm
-	owner.ApprovedBalanceUSD += commUSD
+	owner.ApprovedBalanceUSD = math.Round((owner.ApprovedBalanceUSD+commUSD)*100) / 100
 	owner.UpdatedAt = now
 	ref.Status = "converted"
 	cp := *comm
@@ -308,9 +308,9 @@ func (m *MemoryStore) ReverseAffiliateCommissionByInvoice(ctx context.Context, i
 	for _, a := range m.affiliateAccounts {
 		if a.ID == comm.AffiliateID {
 			if comm.Status == "approved" {
-				a.ApprovedBalanceUSD = math.Max(0, a.ApprovedBalanceUSD-comm.CommissionUSD)
+				a.ApprovedBalanceUSD = math.Max(0, math.Round((a.ApprovedBalanceUSD-comm.CommissionUSD)*100)/100)
 			} else if comm.Status == "pending" {
-				a.PendingBalanceUSD = math.Max(0, a.PendingBalanceUSD-comm.CommissionUSD)
+				a.PendingBalanceUSD = math.Max(0, math.Round((a.PendingBalanceUSD-comm.CommissionUSD)*100)/100)
 			}
 			a.UpdatedAt = time.Now().UTC()
 			break
@@ -327,10 +327,11 @@ func (m *MemoryStore) RequestAffiliateWithdrawal(ctx context.Context, userID uui
 	if !ok {
 		return nil, errors.New("affiliate account not found")
 	}
-	if amountUSD <= 0 || amountUSD > acc.ApprovedBalanceUSD {
+	amountUSD = math.Round(amountUSD*100) / 100
+	if amountUSD < 0.01 || amountUSD > acc.ApprovedBalanceUSD+1e-9 {
 		return nil, errors.New("requested withdrawal exceeds approved affiliate balance")
 	}
-	acc.ApprovedBalanceUSD -= amountUSD
+	acc.ApprovedBalanceUSD = math.Max(0, math.Round((acc.ApprovedBalanceUSD-amountUSD)*100)/100)
 	w := &AffiliateWithdrawal{
 		ID:            uuid.New(),
 		AffiliateID:   acc.ID,
@@ -362,12 +363,12 @@ func (m *MemoryStore) ApproveAffiliateWithdrawal(ctx context.Context, withdrawal
 	if approve {
 		w.Status = "paid"
 		if acc, ok := m.affiliateAccounts[w.UserID]; ok {
-			acc.TotalPaidUSD += w.AmountUSD
+			acc.TotalPaidUSD = math.Round((acc.TotalPaidUSD+w.AmountUSD)*100) / 100
 		}
 	} else {
 		w.Status = "rejected"
 		if acc, ok := m.affiliateAccounts[w.UserID]; ok {
-			acc.ApprovedBalanceUSD += w.AmountUSD
+			acc.ApprovedBalanceUSD = math.Round((acc.ApprovedBalanceUSD+w.AmountUSD)*100) / 100
 		}
 	}
 	cp := *w
@@ -825,7 +826,8 @@ func (p *PostgresStore) RequestAffiliateWithdrawal(ctx context.Context, userID u
 	if err := tx.QueryRowContext(ctx, `SELECT id, approved_balance_usd FROM affiliate_accounts WHERE user_id=$1 FOR UPDATE`, userID).Scan(&affID, &approved); err != nil {
 		return nil, err
 	}
-	if amountUSD <= 0 || amountUSD > approved {
+	amountUSD = math.Round(amountUSD*100) / 100
+	if amountUSD < 0.01 || amountUSD > approved+1e-9 {
 		return nil, errors.New("requested withdrawal exceeds approved balance")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE affiliate_accounts SET approved_balance_usd = approved_balance_usd - $1, updated_at = NOW() WHERE id=$2`, amountUSD, affID); err != nil {

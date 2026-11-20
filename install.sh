@@ -216,9 +216,11 @@ setup_database_and_environment() {
     # Read existing credentials if api.env already exists to preserve them
     EXISTING_JWT=""
     EXISTING_DB_URL=""
+    EXISTING_ADMIN_PASS=""
     if [[ -f "${ENV_FILE}" ]]; then
         EXISTING_JWT=$(grep "^JWT_SECRET=" "${ENV_FILE}" | cut -d= -f2- || true)
         EXISTING_DB_URL=$(grep "^DATABASE_URL=" "${ENV_FILE}" | cut -d= -f2- || true)
+        EXISTING_ADMIN_PASS=$(grep "^INITIAL_ADMIN_PASSWORD=" "${ENV_FILE}" | cut -d= -f2- || true)
         log_info "Existing environment file found at ${ENV_FILE}. Preserving existing secrets."
     fi
 
@@ -228,7 +230,13 @@ setup_database_and_environment() {
         JWT_SECRET=$(openssl rand -hex 32)
     fi
 
-    ADMIN_PASSWORD="${INITIAL_ADMIN_PASSWORD:-Miz@n2129}"
+    if [[ -n "${INITIAL_ADMIN_PASSWORD:-}" ]]; then
+        ADMIN_PASSWORD="${INITIAL_ADMIN_PASSWORD}"
+    elif [[ -n "${EXISTING_ADMIN_PASS}" ]]; then
+        ADMIN_PASSWORD="${EXISTING_ADMIN_PASS}"
+    else
+        ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')!A9"
+    fi
     ADMIN_EMAIL="${INITIAL_ADMIN_EMAIL:-admin@hostvra.com}"
 
     # Setup PostgreSQL if service is available

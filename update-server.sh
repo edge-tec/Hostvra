@@ -36,7 +36,7 @@ fi
 
 # 1. Locate repository directory
 REPO_DIR=""
-POSSIBLE_DIRS=("/root/Hostvra" "/var/www/Hostvra" "/var/www/hostvra" "$(pwd)")
+POSSIBLE_DIRS=("/root/Hostvra" "/opt/hostvra" "/var/lib/hostvra/repo" "/var/www/Hostvra" "/var/www/hostvra" "$(pwd)")
 for dir in "${POSSIBLE_DIRS[@]}"; do
     if [[ -f "${dir}/apps/api/cmd/server/main.go" && -f "${dir}/apps/web/package.json" ]]; then
         REPO_DIR="${dir}"
@@ -52,39 +52,15 @@ fi
 echo -e "${BLUE}[INFO]${NC} Located Hostvra repository at: ${BOLD}${REPO_DIR}${NC}"
 cd "${REPO_DIR}"
 
-# 2. Update environment credentials in /etc/hostvra/api.env
 CONFIG_FILE="/etc/hostvra/api.env"
-if [[ -f "${CONFIG_FILE}" ]]; then
-    echo -e "${BLUE}[INFO]${NC} Synchronizing admin credentials in ${CONFIG_FILE}..."
-    # Update or append INITIAL_ADMIN_EMAIL
-    if grep -q "^INITIAL_ADMIN_EMAIL=" "${CONFIG_FILE}"; then
-        sed -i 's/^INITIAL_ADMIN_EMAIL=.*/INITIAL_ADMIN_EMAIL=admin@hostvra.com/' "${CONFIG_FILE}"
-    else
-        echo "INITIAL_ADMIN_EMAIL=admin@hostvra.com" >> "${CONFIG_FILE}"
-    fi
 
-    # Update or append INITIAL_ADMIN_PASSWORD
-    if grep -q "^INITIAL_ADMIN_PASSWORD=" "${CONFIG_FILE}"; then
-        sed -i 's/^INITIAL_ADMIN_PASSWORD=.*/INITIAL_ADMIN_PASSWORD=Miz@n2129/' "${CONFIG_FILE}"
-    else
-        echo "INITIAL_ADMIN_PASSWORD=Miz@n2129" >> "${CONFIG_FILE}"
-    fi
-    chmod 600 "${CONFIG_FILE}"
-    echo -e "${GREEN}[SUCCESS]${NC} Admin credentials updated in ${CONFIG_FILE}"
-fi
-
-# 3. Pull latest changes from GitHub
-echo -e "${BLUE}[INFO]${NC} Pulling latest commits from GitHub main branch..."
-git fetch origin main
-git reset --hard origin/main
-echo -e "${GREEN}[SUCCESS]${NC} Codebase updated to: $(git log -1 --oneline)"
-
-# Create pre-update backup snapshot
+# 2. Create pre-update backup snapshot BEFORE modifying git working tree or config
 TIMESTAMP=$(date +%s)
 BACKUP_DIR="/var/lib/hostvra/updates_backup/${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}" 2>/dev/null || BACKUP_DIR="/tmp/hostvra_server_backup_${TIMESTAMP}"
 mkdir -p "${BACKUP_DIR}"
 
+git rev-parse HEAD > "${BACKUP_DIR}/pre_deploy_commit.txt" 2>/dev/null || true
 if [[ -f "/usr/local/bin/hostvra-api" ]]; then
     cp -p "/usr/local/bin/hostvra-api" "${BACKUP_DIR}/hostvra-api.bak" 2>/dev/null || true
 fi
@@ -94,6 +70,23 @@ fi
 if [[ -f "${CONFIG_FILE}" ]]; then
     cp -p "${CONFIG_FILE}" "${BACKUP_DIR}/api.env.bak" 2>/dev/null || true
 fi
+
+# Only update INITIAL_ADMIN_PASSWORD if explicitly requested via environment variable (never overwrite with hardcoded plaintext)
+if [[ -f "${CONFIG_FILE}" && -n "${INITIAL_ADMIN_PASSWORD:-}" ]]; then
+    echo -e "${BLUE}[INFO]${NC} Updating INITIAL_ADMIN_PASSWORD from operator environment..."
+    if grep -q "^INITIAL_ADMIN_PASSWORD=" "${CONFIG_FILE}"; then
+        sed -i "s|^INITIAL_ADMIN_PASSWORD=.*|INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD}|" "${CONFIG_FILE}"
+    else
+        echo "INITIAL_ADMIN_PASSWORD=${INITIAL_ADMIN_PASSWORD}" >> "${CONFIG_FILE}"
+    fi
+    chmod 600 "${CONFIG_FILE}"
+fi
+
+# 3. Pull latest changes from GitHub
+echo -e "${BLUE}[INFO]${NC} Pulling latest commits from GitHub main branch..."
+git fetch origin main
+git reset --hard origin/main
+echo -e "${GREEN}[SUCCESS]${NC} Codebase updated to: $(git log -1 --oneline)"
 
 rollback_server() {
     echo -e "${RED}[ALERT] Update failed! Rolling back to prior release to guarantee Zero Data Loss...${NC}" >&2
@@ -162,24 +155,15 @@ fi
 
 sleep 3
 
-# 7. Verification Test
-echo -e "${BLUE}[INFO]${NC} Verifying admin login API on localhost..."
-LOGIN_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/api/v1/auth/login \
-    -H "Content-Type: application/json" \
-    -d '{"email":"admin@hostvra.com","password":"Miz@n2129"}' 2>/dev/null || echo "failed")
+# 7. Verification Test (Health & Public Status without exposing credentials)
+echo -e "${BLUE}[INFO]${NC} Verifying API health and public status on localhost..."
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/health 2>/dev/null || echo "failed")
+PUB_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/api/v1/public/status 2>/dev/null || echo "failed")
 
-if [[ "${LOGIN_STATUS}" == "200" ]]; then
-    echo -e "${GREEN}${BOLD}[SUCCESS] Admin login verified! HTTP 200 OK with email admin@hostvra.com and password Miz@n2129${NC}"
+if [[ "${HEALTH_STATUS}" == "200" ]]; then
+    echo -e "${GREEN}${BOLD}[SUCCESS] API /health verified (HTTP 200 OK) | Public status: HTTP ${PUB_STATUS}${NC}"
 else
-    echo -e "${YELLOW}[WARN] Local test returned HTTP ${LOGIN_STATUS}. Retrying via domain...${NC}"
-    LOGIN_STATUS_PUB=$(curl -s -o /dev/null -w "%{http_code}" -X POST https://hostvra.com/api/v1/auth/login \
-        -H "Content-Type: application/json" \
-        -d '{"email":"admin@hostvra.com","password":"Miz@n2129"}' 2>/dev/null || echo "failed")
-    if [[ "${LOGIN_STATUS_PUB}" == "200" ]]; then
-        echo -e "${GREEN}${BOLD}[SUCCESS] Admin login verified via HTTPS! HTTP 200 OK${NC}"
-    else
-        echo -e "${YELLOW}[INFO] Verification status: ${LOGIN_STATUS_PUB}. Services are active.${NC}"
-    fi
+    echo -e "${YELLOW}[WARN] Local /health returned HTTP ${HEALTH_STATUS}. Check systemctl status hostvra-api.${NC}"
 fi
 
 trap - ERR
@@ -188,6 +172,5 @@ echo -e "\n${GREEN}${BOLD}======================================================
 echo -e "${GREEN}${BOLD}   Hostvra Successfully Updated & Live!             ${NC}"
 echo -e "${GREEN}${BOLD}======================================================${NC}"
 echo -e "  • ${BOLD}Admin URL:${NC}      https://hostvra.com/login"
-echo -e "  • ${BOLD}Email:${NC}          admin@hostvra.com"
-echo -e "  • ${BOLD}Password:${NC}       Miz@n2129"
+echo -e "  • ${BOLD}Backup Dir:${NC}     ${BACKUP_DIR}"
 echo -e "======================================================\n"

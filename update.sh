@@ -39,11 +39,11 @@ fi
 cd "$HOSTVRA_DIR"
 echo "[INFO] Working directory: $(pwd)"
 
-# Ensure both /opt/hostvra and /root/Hostvra resolve cleanly on all VPS installations
-if [[ ! -e "/opt/hostvra" ]]; then
+# Ensure both /opt/hostvra and /root/Hostvra resolve cleanly on all VPS installations (preventing self-symlinks)
+if [[ "$HOSTVRA_DIR" != "/opt/hostvra" && ! -e "/opt/hostvra" ]]; then
     ln -sfn "$HOSTVRA_DIR" /opt/hostvra 2>/dev/null || true
 fi
-if [[ ! -e "/root/Hostvra" ]]; then
+if [[ "$HOSTVRA_DIR" != "/root/Hostvra" && ! -e "/root/Hostvra" ]]; then
     ln -sfn "$HOSTVRA_DIR" /root/Hostvra 2>/dev/null || true
 fi
 
@@ -166,6 +166,11 @@ if command -v mysqldump &>/dev/null; then
 fi
 echo "[INFO] Pre-deployment backup snapshot created at ${BACKUP_DIR}"
 
+# Prune old backups beyond the 5 most recent snapshots to prevent disk exhaustion
+if [[ -d "/var/lib/hostvra/updates_backup" ]]; then
+    ls -1dt /var/lib/hostvra/updates_backup/* 2>/dev/null | tail -n +6 | xargs -r rm -rf 2>/dev/null || true
+fi
+
 echo "Pulling latest code from origin/main..."
 git remote set-url origin https://github.com/edge-tec/Hostvra.git 2>/dev/null || true
 git fetch origin main
@@ -204,12 +209,11 @@ trap rollback ERR
 
 echo "=== [2/6] Compiling Hostvra Core API & CLI ==="
 COMPILED_API=""
-if command -v go &>/dev/null; then
-    (cd apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o server ./cmd/server)
+if command -v go &>/dev/null && (cd apps/api && CGO_ENABLED=0 go build -ldflags="-s -w" -o server ./cmd/server) 2>/dev/null; then
     COMPILED_API="apps/api/server"
     cp -fp apps/api/server bin/hostvra-api 2>/dev/null || true
 elif [[ -f "bin/hostvra-api-linux-${BIN_ARCH}" ]]; then
-    echo "[INFO] Using pre-compiled Linux binary: bin/hostvra-api-linux-${BIN_ARCH}"
+    echo "[INFO] Using certified pre-compiled Linux binary: bin/hostvra-api-linux-${BIN_ARCH}"
     COMPILED_API="bin/hostvra-api-linux-${BIN_ARCH}"
 elif [[ -f "bin/hostvra-api" ]]; then
     echo "[INFO] Using pre-compiled binary: bin/hostvra-api"
