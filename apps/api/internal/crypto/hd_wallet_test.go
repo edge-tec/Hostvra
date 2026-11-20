@@ -127,6 +127,19 @@ func TestHDWallet_ConcurrentUniqueAllocationAndIdempotency(t *testing.T) {
 	if first.DepositAddress != second.DepositAddress || first.DerivationIndex != second.DerivationIndex {
 		t.Fatalf("idempotency violated: first=%s(#%d) second=%s(#%d)", first.DepositAddress, first.DerivationIndex, second.DepositAddress, second.DerivationIndex)
 	}
+
+	// Verify new invoice for the SAME user generates a BRAND-NEW unique HD address (index >= 1, never index 0)
+	invID2 := uuid.New()
+	third, err := hdSvc.AllocateUserAddress(ctx, uid, invID2, "tron", "USDT_TRC20", time.Now().Add(30*time.Minute))
+	if err != nil {
+		t.Fatalf("third tron allocation failed: %v", err)
+	}
+	if third.DepositAddress == first.DepositAddress || third.DerivationIndex == first.DerivationIndex {
+		t.Fatalf("expected brand-new address for new invoice, got duplicate: %s (#%d)", third.DepositAddress, third.DerivationIndex)
+	}
+	if first.DerivationIndex < 1 || third.DerivationIndex < 2 {
+		t.Fatalf("expected derivation indices >= 1 (skipping merchant index 0), got first=%d third=%d", first.DerivationIndex, third.DerivationIndex)
+	}
 }
 
 func TestIsolatedSigner_PolicyEnforcementAndNoSecretLeakage(t *testing.T) {

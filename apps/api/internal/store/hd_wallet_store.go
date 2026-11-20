@@ -70,6 +70,7 @@ func (m *MemoryStore) ListHDWalletAccounts(ctx context.Context) ([]*HDWalletAcco
 }
 
 // ReserveNextDerivationIndex atomically reserves and increments the derivation index for a network.
+// Starts at index 1 (skipping index 0, which corresponds to the merchant's primary Trust Wallet address).
 // Guarantees concurrent invoice creation can NEVER collide on the same index.
 func (m *MemoryStore) ReserveNextDerivationIndex(ctx context.Context, networkID string) (int, *HDWalletAccount, error) {
 	m.mu.Lock()
@@ -78,6 +79,9 @@ func (m *MemoryStore) ReserveNextDerivationIndex(ctx context.Context, networkID 
 	acc, ok := m.hdWalletAccounts[key]
 	if !ok {
 		return 0, nil, ErrHDAccountNotFound
+	}
+	if acc.NextDerivationIndex < 1 {
+		acc.NextDerivationIndex = 1
 	}
 	reserved := acc.NextDerivationIndex
 	acc.NextDerivationIndex++
@@ -400,14 +404,15 @@ func (d *PostgresStore) ListHDWalletAccounts(ctx context.Context) ([]*HDWalletAc
 }
 
 // ReserveNextDerivationIndex uses UPDATE ... RETURNING for atomic row-level locking in PostgreSQL.
+// Always starts at >= 1 (skipping index 0 so customer addresses never collide with the merchant's primary Trust Wallet).
 func (d *PostgresStore) ReserveNextDerivationIndex(ctx context.Context, networkID string) (int, *HDWalletAccount, error) {
 	var a HDWalletAccount
 	var reserved int
 	err := d.db.QueryRowContext(ctx, `
 		UPDATE hd_wallet_accounts
-		SET next_derivation_index = next_derivation_index + 1, updated_at = NOW()
+		SET next_derivation_index = GREATEST(next_derivation_index, 1) + 1, updated_at = NOW()
 		WHERE network_id = $1 AND status = 'active'
-		RETURNING id, account_name, wallet_type, network_id, derivation_scheme, derivation_path, public_derivation_reference, next_derivation_index - 1, next_derivation_index, status, created_at, updated_at
+		RETURNING id, account_name, wallet_type, network_id, derivation_scheme, derivation_path, public_derivation_reference, GREATEST(next_derivation_index - 1, 1), next_derivation_index, status, created_at, updated_at
 	`, strings.ToLower(networkID)).Scan(
 		&a.ID, &a.AccountName, &a.WalletType, &a.NetworkID, &a.DerivationScheme,
 		&a.DerivationPath, &a.PublicDerivationReference, &reserved, &a.NextDerivationIndex,

@@ -109,6 +109,7 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 	// falling back to configured treasury pool for backward compatibility.
 	var depositAddressStr string
 	var poolAddrID uuid.UUID
+	var allocatedHDAddr *store.HDWalletAddress
 	useHD := !strings.EqualFold(settings["hd_wallet_enabled"], "false") && s.signer.Status().Initialized
 
 	// Verify merchant has an active Trust Wallet destination configured before accepting deposits
@@ -121,9 +122,10 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 		depositAddressStr = depositAddr.Address
 		poolAddrID = depositAddr.ID
 	} else if useHD {
-		hdAddr, hdErr := s.hdWallet.AllocateUserAddress(ctx, req.UserID, invoiceID, net.ID, cur.ID, expiresAt)
+		hdAddr, hdErr := s.hdWallet.AllocateUserAddress(ctx, req.UserID, uuid.Nil, net.ID, cur.ID, expiresAt)
 		if hdErr == nil && hdAddr != nil {
 			depositAddressStr = hdAddr.DepositAddress
+			allocatedHDAddr = hdAddr
 		}
 	}
 
@@ -189,6 +191,19 @@ func (s *CryptoService) CreateInvoice(ctx context.Context, req *CreateCryptoInvo
 			_ = s.store.ReleaseDepositAddress(ctx, poolAddrID)
 		}
 		return nil, fmt.Errorf("failed to persist crypto payment invoice: %w", err)
+	}
+
+	// Link HD allocation after invoice row exists (satisfies PostgreSQL FK constraint)
+	if allocatedHDAddr != nil {
+		_ = s.store.CreateDepositAddressAllocation(ctx, &store.DepositAddressAllocation{
+			UserID:           req.UserID,
+			InvoiceID:        invoice.ID,
+			AddressID:        allocatedHDAddr.ID,
+			NetworkID:        net.ID,
+			AssetID:          cur.ID,
+			AllocationStatus: "allocated",
+			ExpiresAt:        expiresAt,
+		})
 	}
 
 	return invoice, nil

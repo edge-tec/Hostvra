@@ -107,26 +107,8 @@ func (h *HDWalletService) AllocateUserAddress(
 		}
 	}
 
-	// 2. Check if this user already has a dedicated HD deposit address on this network
-	// (Supports sharing same EVM/TRON account address across native + token on the SAME network for the SAME user)
-	if userID != uuid.Nil {
-		if existingAddr, _ := h.store.GetHDWalletAddressByUserAndNetwork(ctx, userID, netID); existingAddr != nil {
-			if invoiceID != uuid.Nil {
-				_ = h.store.CreateDepositAddressAllocation(ctx, &store.DepositAddressAllocation{
-					UserID:           userID,
-					InvoiceID:        invoiceID,
-					AddressID:        existingAddr.ID,
-					NetworkID:        netID,
-					AssetID:          assetID,
-					AllocationStatus: "allocated",
-					ExpiresAt:        expiresAt,
-				})
-			}
-			return existingAddr, nil
-		}
-	}
-
-	// 3. Atomically reserve next derivation index (safe under concurrency)
+	// 2. Atomically reserve next monotonic derivation index (>= 1, skipping index 0 which is the merchant's primary Trust Wallet)
+	// Every new invoice receives its own fresh unique HD deposit address.
 	index, acc, err := h.store.ReserveNextDerivationIndex(ctx, netID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reserve derivation index for %s: %w", netID, err)

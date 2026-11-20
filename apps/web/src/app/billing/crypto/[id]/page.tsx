@@ -688,7 +688,7 @@ export default function CryptoCheckoutPage() {
                           <div className="text-xs text-slate-500 font-mono mt-1">
                             ≈ ${invoice.fiat_amount_usd.toFixed(2)} USD
                             <span className="text-slate-400 ml-2">
-                              (1 {currentOption?.symbol} ≈ ${(1 / invoice.exchange_rate).toFixed(2)})
+                              (1 {currentOption?.symbol} ≈ ${Number(invoice.exchange_rate || 0).toFixed(2)})
                             </span>
                           </div>
                         </div>
