@@ -888,6 +888,21 @@ type memoryDumpData struct {
 	CryptoInvoices           map[uuid.UUID]*CryptoPaymentInvoice          `json:"crypto_invoices,omitempty"`
 	CryptoLedger             []*CryptoInternalLedger                      `json:"crypto_ledger,omitempty"`
 	CryptoSettings           map[string]string                            `json:"crypto_settings,omitempty"`
+	HDWalletAccounts         map[string]*HDWalletAccount                  `json:"hd_wallet_accounts,omitempty"`
+	HDWalletAddresses        map[uuid.UUID]*HDWalletAddress               `json:"hd_wallet_addresses,omitempty"`
+	DepositAllocations       map[uuid.UUID]*DepositAddressAllocation      `json:"deposit_allocations,omitempty"`
+	TreasurySweepJobs        map[uuid.UUID]*TreasurySweepJob              `json:"treasury_sweep_jobs,omitempty"`
+	TreasurySweepLogs        []*TreasurySweepLog                          `json:"treasury_sweep_logs,omitempty"`
+	WalletDerivationAudits   []*WalletDerivationAuditLog                  `json:"wallet_derivation_audits,omitempty"`
+	Coupons                  map[string]*Coupon                           `json:"coupons,omitempty"`
+	CouponRedemptions        []*CouponRedemption                          `json:"coupon_redemptions,omitempty"`
+	AffiliateAccounts        map[uuid.UUID]*AffiliateAccount              `json:"affiliate_accounts,omitempty"`
+	AffiliateReferrals       map[uuid.UUID]*AffiliateReferral             `json:"affiliate_referrals,omitempty"`
+	AffiliateCommissions     map[uuid.UUID]*AffiliateCommission           `json:"affiliate_commissions,omitempty"`
+	AffiliateWithdrawals     map[uuid.UUID]*AffiliateWithdrawal           `json:"affiliate_withdrawals,omitempty"`
+	CustomerWallets          map[uuid.UUID]*CustomerWallet                `json:"customer_wallets,omitempty"`
+	WalletLedger             []*WalletLedgerEntry                         `json:"wallet_ledger,omitempty"`
+	DunningEvents            map[string]*BillingDunningEvent              `json:"dunning_events,omitempty"`
 }
 
 func determineStoreFilePath() string {
@@ -1011,6 +1026,21 @@ func (m *MemoryStore) saveToDiskLocked() {
 		CryptoInvoices:           m.cryptoInvoices,
 		CryptoLedger:             m.cryptoLedger,
 		CryptoSettings:           m.cryptoSettings,
+		HDWalletAccounts:         m.hdWalletAccounts,
+		HDWalletAddresses:        m.hdWalletAddresses,
+		DepositAllocations:       m.depositAllocations,
+		TreasurySweepJobs:        m.treasurySweepJobs,
+		TreasurySweepLogs:        m.treasurySweepLogs,
+		WalletDerivationAudits:   m.walletDerivationAudits,
+		Coupons:                  m.coupons,
+		CouponRedemptions:        m.couponRedemptions,
+		AffiliateAccounts:        m.affiliateAccounts,
+		AffiliateReferrals:       m.affiliateReferrals,
+		AffiliateCommissions:     m.affiliateCommissions,
+		AffiliateWithdrawals:     m.affiliateWithdrawals,
+		CustomerWallets:          m.customerWallets,
+		WalletLedger:             m.walletLedger,
+		DunningEvents:            m.dunningEvents,
 	}
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -1328,6 +1358,51 @@ func (m *MemoryStore) loadFromDisk() {
 		for k, v := range data.CryptoSettings {
 			m.cryptoSettings[k] = v
 		}
+	}
+	if data.HDWalletAccounts != nil {
+		m.hdWalletAccounts = data.HDWalletAccounts
+	}
+	if data.HDWalletAddresses != nil {
+		m.hdWalletAddresses = data.HDWalletAddresses
+	}
+	if data.DepositAllocations != nil {
+		m.depositAllocations = data.DepositAllocations
+	}
+	if data.TreasurySweepJobs != nil {
+		m.treasurySweepJobs = data.TreasurySweepJobs
+	}
+	if data.TreasurySweepLogs != nil {
+		m.treasurySweepLogs = data.TreasurySweepLogs
+	}
+	if data.WalletDerivationAudits != nil {
+		m.walletDerivationAudits = data.WalletDerivationAudits
+	}
+	if data.Coupons != nil {
+		m.coupons = data.Coupons
+	}
+	if data.CouponRedemptions != nil {
+		m.couponRedemptions = data.CouponRedemptions
+	}
+	if data.AffiliateAccounts != nil {
+		m.affiliateAccounts = data.AffiliateAccounts
+	}
+	if data.AffiliateReferrals != nil {
+		m.affiliateReferrals = data.AffiliateReferrals
+	}
+	if data.AffiliateCommissions != nil {
+		m.affiliateCommissions = data.AffiliateCommissions
+	}
+	if data.AffiliateWithdrawals != nil {
+		m.affiliateWithdrawals = data.AffiliateWithdrawals
+	}
+	if data.CustomerWallets != nil {
+		m.customerWallets = data.CustomerWallets
+	}
+	if data.WalletLedger != nil {
+		m.walletLedger = data.WalletLedger
+	}
+	if data.DunningEvents != nil {
+		m.dunningEvents = data.DunningEvents
 	}
 
 	// Double-shield: if store.json had no treasuries, fallback to disk backup files

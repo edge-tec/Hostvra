@@ -44,6 +44,7 @@ func (m *MemoryStore) CreateCoupon(ctx context.Context, c *Coupon) error {
 	c.UpdatedAt = now
 	cp := *c
 	m.coupons[code] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -76,6 +77,7 @@ func (m *MemoryStore) DeleteCoupon(ctx context.Context, id uuid.UUID) error {
 	for k, c := range m.coupons {
 		if c.ID == id {
 			delete(m.coupons, k)
+			m.saveToDiskLocked()
 			return nil
 		}
 	}
@@ -103,6 +105,7 @@ func (m *MemoryStore) UpdateCoupon(ctx context.Context, c *Coupon) error {
 			c.UpdatedAt = time.Now().UTC()
 			cp := *c
 			m.coupons[newCode] = &cp
+			m.saveToDiskLocked()
 			return nil
 		}
 	}
@@ -166,6 +169,7 @@ func (m *MemoryStore) RedeemCouponAtomic(ctx context.Context, code string, userI
 		CreatedAt:   now,
 	}
 	m.couponRedemptions = append(m.couponRedemptions, red)
+	m.saveToDiskLocked()
 	cp := *red
 	return &cp, nil
 }
@@ -190,6 +194,7 @@ func (m *MemoryStore) GetOrCreateAffiliateAccount(ctx context.Context, userID uu
 		UpdatedAt:         now,
 	}
 	m.affiliateAccounts[userID] = acc
+	m.saveToDiskLocked()
 	cp := *acc
 	return &cp, nil
 }
@@ -252,6 +257,7 @@ func (m *MemoryStore) RecordAffiliateReferral(ctx context.Context, affiliateID, 
 	m.affiliateReferrals[referredUserID] = ref
 	owner.TotalReferrals++
 	owner.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	cp := *ref
 	return &cp, nil
 }
@@ -294,6 +300,7 @@ func (m *MemoryStore) RecordAffiliateCommission(ctx context.Context, referredUse
 	owner.ApprovedBalanceUSD = math.Round((owner.ApprovedBalanceUSD+commUSD)*100) / 100
 	owner.UpdatedAt = now
 	ref.Status = "converted"
+	m.saveToDiskLocked()
 	cp := *comm
 	return &cp, nil
 }
@@ -317,6 +324,7 @@ func (m *MemoryStore) ReverseAffiliateCommissionByInvoice(ctx context.Context, i
 		}
 	}
 	comm.Status = "reversed"
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -343,6 +351,7 @@ func (m *MemoryStore) RequestAffiliateWithdrawal(ctx context.Context, userID uui
 		CreatedAt:     time.Now().UTC(),
 	}
 	m.affiliateWithdrawals[w.ID] = w
+	m.saveToDiskLocked()
 	cp := *w
 	return &cp, nil
 }
@@ -371,6 +380,7 @@ func (m *MemoryStore) ApproveAffiliateWithdrawal(ctx context.Context, withdrawal
 			acc.ApprovedBalanceUSD = math.Round((acc.ApprovedBalanceUSD+w.AmountUSD)*100) / 100
 		}
 	}
+	m.saveToDiskLocked()
 	cp := *w
 	return &cp, nil
 }
@@ -408,6 +418,7 @@ func (m *MemoryStore) GetOrCreateCustomerWallet(ctx context.Context, userID uuid
 		UpdatedAt:      now,
 	}
 	m.customerWallets[userID] = w
+	m.saveToDiskLocked()
 	cp := *w
 	return &cp, nil
 }
@@ -421,6 +432,7 @@ func (m *MemoryStore) SetWalletAutoPay(ctx context.Context, userID uuid.UUID, en
 	defer m.mu.Unlock()
 	m.customerWallets[userID].AutoPayEnabled = enabled
 	m.customerWallets[userID].UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	w.AutoPayEnabled = enabled
 	return w, nil
 }
@@ -463,6 +475,7 @@ func (m *MemoryStore) CreditWalletAtomic(ctx context.Context, userID uuid.UUID, 
 		CreatedAt:        time.Now().UTC(),
 	}
 	m.walletLedger = append(m.walletLedger, entry)
+	m.saveToDiskLocked()
 	cp := *entry
 	return &cp, nil
 }
@@ -506,6 +519,7 @@ func (m *MemoryStore) DebitWalletAtomic(ctx context.Context, userID uuid.UUID, a
 		CreatedAt:        time.Now().UTC(),
 	}
 	m.walletLedger = append(m.walletLedger, entry)
+	m.saveToDiskLocked()
 	cp := *entry
 	return &cp, nil
 }
@@ -544,6 +558,7 @@ func (m *MemoryStore) RecordBillingDunningEvent(ctx context.Context, ev *Billing
 	}
 	cp := *ev
 	m.dunningEvents[key] = &cp
+	m.saveToDiskLocked()
 	return true, nil
 }
 

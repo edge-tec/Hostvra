@@ -43,6 +43,7 @@ func (m *MemoryStore) UpsertHDWalletAccount(ctx context.Context, acc *HDWalletAc
 	}
 	cp := *acc
 	m.hdWalletAccounts[key] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -86,6 +87,7 @@ func (m *MemoryStore) ReserveNextDerivationIndex(ctx context.Context, networkID 
 	reserved := acc.NextDerivationIndex
 	acc.NextDerivationIndex++
 	acc.UpdatedAt = time.Now().UTC()
+	m.saveToDiskLocked()
 	cp := *acc
 	return reserved, &cp, nil
 }
@@ -112,6 +114,7 @@ func (m *MemoryStore) CreateHDWalletAddress(ctx context.Context, addr *HDWalletA
 	}
 	cp := *addr
 	m.hdWalletAddresses[addr.ID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -174,6 +177,7 @@ func (m *MemoryStore) CreateDepositAddressAllocation(ctx context.Context, alloc 
 	}
 	cp := *alloc
 	m.depositAllocations[alloc.InvoiceID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 

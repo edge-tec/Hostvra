@@ -12,6 +12,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"testing"
@@ -739,4 +741,101 @@ func TestP12_PerformanceThroughputAndLatencyMetrics(t *testing.T) {
 	if p99 > 250*time.Millisecond {
 		t.Fatalf("P99 latency %v exceeded 250ms threshold", p99)
 	}
+}
+
+func TestP13_RealOnDiskDatabaseBackupAndRestore(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbFile := filepath.Join(tmpDir, "store.json")
+	bakFile := filepath.Join(tmpDir, "store.json.bak")
+
+	// 1. Initialize file-backed store on disk & populate commercial, financial & HD wallet state
+	primary := store.NewMemoryStoreWithPath(dbFile)
+	uid := uuid.New()
+	affID := uuid.New()
+	invID := uuid.New()
+
+	if err := primary.CreateCoupon(ctx, &store.Coupon{
+		Code:           "DISKDR50",
+		DiscountType:   "percentage",
+		DiscountValue:  50,
+		MaxUses:        10,
+		MaxUsesPerUser: 1,
+		IsActive:       true,
+	}); err != nil {
+		t.Fatalf("CreateCoupon failed: %v", err)
+	}
+	if _, err := primary.RedeemCouponAtomic(ctx, "DISKDR50", uid, invID, 100.0, true); err != nil {
+		t.Fatalf("RedeemCouponAtomic failed: %v", err)
+	}
+	if _, err := primary.CreditWalletAtomic(ctx, uid, 200.00, "topup", "disk-topup", "idem-disk-1", "On-disk credit"); err != nil {
+		t.Fatalf("CreditWalletAtomic failed: %v", err)
+	}
+	if _, err := primary.DebitWalletAtomic(ctx, uid, 24.75, "invoice_payment", invID.String(), "idem-disk-2", "On-disk debit"); err != nil {
+		t.Fatalf("DebitWalletAtomic failed: %v", err)
+	}
+	affAcc, _ := primary.GetOrCreateAffiliateAccount(ctx, affID)
+	_, _ = primary.RecordAffiliateReferral(ctx, affAcc.ID, uid, "first_click")
+	_, _ = primary.RecordAffiliateCommission(ctx, uid, invID, 120.00) // $18.00 commission
+	_ = primary.UpsertHDWalletAccount(ctx, &store.HDWalletAccount{
+		NetworkID:           "bsc",
+		NextDerivationIndex: 1,
+	})
+	idx, _, err := primary.ReserveNextDerivationIndex(ctx, "bsc")
+	if err != nil || idx != 1 {
+		t.Fatalf("ReserveNextDerivationIndex failed: idx=%d err=%v", idx, err)
+	}
+
+	// 2. Perform real disk backup copy & compute SHA-256 checksum
+	tBackupStart := time.Now()
+	rawDB, err := os.ReadFile(dbFile)
+	if err != nil || len(rawDB) == 0 {
+		t.Fatalf("failed reading on-disk store.json: err=%v len=%d", err, len(rawDB))
+	}
+	if err := os.WriteFile(bakFile, rawDB, 0600); err != nil {
+		t.Fatalf("failed writing on-disk backup store.json.bak: %v", err)
+	}
+	backupDuration := time.Since(tBackupStart)
+	sum := sha256.Sum256(rawDB)
+	backupSHA := hex.EncodeToString(sum[:])
+
+	// 3. Simulate catastrophic primary database destruction on disk
+	if err := os.Remove(dbFile); err != nil {
+		t.Fatalf("failed removing primary dbFile: %v", err)
+	}
+
+	// 4. Restore store.json from backup on disk and reload a fresh MemoryStore instance
+	tRestoreStart := time.Now()
+	restoredBytes, err := os.ReadFile(bakFile)
+	if err != nil {
+		t.Fatalf("failed reading backup file: %v", err)
+	}
+	if err := os.WriteFile(dbFile, restoredBytes, 0600); err != nil {
+		t.Fatalf("failed restoring dbFile on disk: %v", err)
+	}
+	recovered := store.NewMemoryStoreWithPath(dbFile)
+	restoreRTO := time.Since(tRestoreStart)
+
+	// 5. Verify RPO=0 across all restored disk tables
+	c, err := recovered.GetCouponByCode(ctx, "DISKDR50")
+	if err != nil || c.CurrentUses != 1 {
+		t.Fatalf("on-disk coupon recovery mismatch: %+v err=%v", c, err)
+	}
+	wlt, err := recovered.GetOrCreateCustomerWallet(ctx, uid)
+	if err != nil || wlt.BalanceUSD != 175.25 {
+		t.Fatalf("on-disk wallet balance mismatch: expected $175.25, got $%.2f (err=%v)", wlt.BalanceUSD, err)
+	}
+	ledger, _ := recovered.ListWalletLedger(ctx, uid, 10)
+	if len(ledger) != 2 {
+		t.Fatalf("expected 2 restored wallet ledger entries from disk, got %d", len(ledger))
+	}
+	recAff, _ := recovered.GetOrCreateAffiliateAccount(ctx, affID)
+	if recAff.ApprovedBalanceUSD != 18.00 || recAff.TotalReferrals != 1 {
+		t.Fatalf("on-disk affiliate recovery mismatch: %+v", recAff)
+	}
+	nextIdx, _, err := recovered.ReserveNextDerivationIndex(ctx, "bsc")
+	if err != nil || nextIdx != 2 {
+		t.Fatalf("on-disk HD wallet derivation index recovery mismatch: expected 2, got %d (err=%v)", nextIdx, err)
+	}
+	t.Logf("[P13 ON-DISK DR CERTIFIED] FileBytes=%d SHA256=%s BackupTime=%v RestoreRTO=%v RPO=0", len(rawDB), backupSHA[:16], backupDuration, restoreRTO)
 }
