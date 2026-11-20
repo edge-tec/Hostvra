@@ -324,6 +324,7 @@ func (m *MemoryStore) CreateDomainOrder(ctx context.Context, order *DomainOrder)
 	order.DomainName = strings.ToLower(strings.TrimSpace(order.DomainName))
 	cp := *order
 	m.domainOrders[order.ID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -407,6 +408,7 @@ func (m *MemoryStore) UpdateDomainOrder(ctx context.Context, order *DomainOrder)
 	order.UpdatedAt = time.Now().UTC()
 	cp := *order
 	m.domainOrders[order.ID] = &cp
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -537,6 +539,7 @@ func (m *MemoryStore) CreateDomainTransfer(ctx context.Context, transfer *Domain
 	transfer.CreatedAt = now
 	transfer.UpdatedAt = now
 	m.domainTransfers[transfer.ID] = transfer
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -573,6 +576,7 @@ func (m *MemoryStore) UpdateDomainTransfer(ctx context.Context, transfer *Domain
 	}
 	transfer.UpdatedAt = time.Now().UTC()
 	m.domainTransfers[transfer.ID] = transfer
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -585,6 +589,7 @@ func (m *MemoryStore) CreateDomainRenewal(ctx context.Context, renewal *DomainRe
 	}
 	renewal.CreatedAt = time.Now().UTC()
 	m.domainRenewals[renewal.DomainID] = append(m.domainRenewals[renewal.DomainID], renewal)
+	m.saveToDiskLocked()
 	return nil
 }
 
@@ -616,6 +621,7 @@ func (m *MemoryStore) RecordDomainWebhook(ctx context.Context, hook *DomainWebho
 	hook.CreatedAt = time.Now().UTC()
 	hook.ProcessedAt = time.Now().UTC()
 	m.domainWebhooks[key] = hook
+	m.saveToDiskLocked()
 	return nil
 }
 

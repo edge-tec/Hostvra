@@ -220,6 +220,9 @@ func (s *CryptoService) GetInvoiceByCode(ctx context.Context, code string) (*sto
 
 // VerifyInvoiceOnChain performs real-time on-chain verification for a specific invoice.
 func (s *CryptoService) VerifyInvoiceOnChain(ctx context.Context, invoiceCode string, manualTxHash string) (*store.CryptoPaymentInvoice, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	inv, err := s.store.GetCryptoInvoiceByCode(ctx, invoiceCode)
 	if err != nil {
 		return nil, err

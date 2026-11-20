@@ -1134,3 +1134,119 @@ func TestP15_ConcurrentWebhookReplayAndCryptoPoolPersistenceAndCancelledInvoiceG
 		t.Fatalf("expected crypto internal ledger to persist across cold disk reload, got %+v total=%d err=%v", ledgerEntries, totalLedger, err)
 	}
 }
+
+func TestP16_WebhookReplayDeduplicationPersistsAcrossColdRestartAndDomainOrdersPersist(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbFile := filepath.Join(tmpDir, "p16_store.json")
+	st := store.NewMemoryStoreWithPath(dbFile)
+	bh := NewBillingHandler(&config.Config{AppURL: "https://hostvra.com"}, st, audit.NewLogger(st, slog.Default()))
+
+	uid := uuid.New()
+	orgID := uuid.New()
+	plan := &store.HostingPlan{
+		ID:            uuid.New(),
+		Name:          "P16 Enterprise",
+		Slug:          "p16-enterprise",
+		PriceMonthly:  40.00,
+		Currency:      "USD",
+		DiskSpaceMB:   100000,
+		BandwidthMB:   1000000,
+		MaxWebsites:   25,
+		MaxDatabases:  25,
+		MaxMailboxes:  25,
+		IsActive:      true,
+	}
+	_ = st.CreatePlan(ctx, plan)
+	_ = st.SaveGatewayConfig(ctx, &store.PaymentGatewayConfig{
+		Gateway:     "stripe",
+		DisplayName: "Stripe",
+		Enabled:     true,
+		TestMode:    false,
+		SecretKey:   "p16_webhook_secret_key",
+	})
+
+	inv := &store.Invoice{
+		ID:             uuid.New(),
+		InvoiceNumber:  "INV-P16-WEBHOOK-1",
+		UserID:         uid,
+		OrganizationID: orgID,
+		PlanID:         plan.ID,
+		Subtotal:       40.00,
+		Total:          40.00,
+		Currency:       "USD",
+		Status:         store.InvoiceStatusUnpaid,
+		DueDate:        time.Now().UTC().AddDate(0, 0, 7),
+		Description:    "P16 Enterprise (monthly)",
+		CreatedAt:      time.Now().UTC(),
+	}
+	if err := st.CreateInvoice(ctx, inv); err != nil {
+		t.Fatalf("CreateInvoice failed: %v", err)
+	}
+
+	// Create a domain order linked to this invoice and verify it persists across restart
+	domOrder := &store.DomainOrder{
+		ID:             uuid.New(),
+		UserID:         uid,
+		OrganizationID: &orgID,
+		DomainName:     "p16-certified.com",
+		OrderType:      "register",
+		Years:          1,
+		Amount:         14.99,
+		Currency:       "USD",
+		PaymentStatus:  "pending",
+		IdempotencyKey: "dom-order-p16-1",
+		InvoiceID:      &inv.ID,
+	}
+	if err := st.CreateDomainOrder(ctx, domOrder); err != nil {
+		t.Fatalf("CreateDomainOrder failed: %v", err)
+	}
+
+	// Deliver signed webhook once
+	bodyStr := fmt.Sprintf(`{"event":"invoice.paid","invoice_id":"%s","transaction_id":"pi_p16_restart_1","amount":40.00,"currency":"USD","status":"paid"}`, inv.ID.String())
+	mac := hmac.New(sha256.New, []byte("p16_webhook_secret_key"))
+	mac.Write([]byte(bodyStr))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("gateway", "stripe")
+	req := httptest.NewRequest("POST", "/api/v1/billing/webhooks/stripe", bytes.NewBufferString(bodyStr))
+	req.Header.Set("X-Signature", sig)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+	bh.HandleWebhook(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on first webhook delivery, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Simulate full process restart from disk (p16_store.json)
+	reloadedStore := store.NewMemoryStoreWithPath(dbFile)
+	reloadedBH := NewBillingHandler(&config.Config{AppURL: "https://hostvra.com"}, reloadedStore, audit.NewLogger(reloadedStore, slog.Default()))
+
+	// Verify webhook deduplication record survived restart
+	hookRec, err := reloadedStore.GetDomainWebhook(ctx, "stripe", "pi_p16_restart_1")
+	if err != nil || hookRec == nil {
+		t.Fatalf("expected webhook deduplication record to persist across cold restart, got %+v err=%v", hookRec, err)
+	}
+
+	// Replay the exact same webhook after cold restart — must return idempotent_duplicate immediately
+	rctx2 := chi.NewRouteContext()
+	rctx2.URLParams.Add("gateway", "stripe")
+	req2 := httptest.NewRequest("POST", "/api/v1/billing/webhooks/stripe", bytes.NewBufferString(bodyStr))
+	req2.Header.Set("X-Signature", sig)
+	req2 = req2.WithContext(context.WithValue(req2.Context(), chi.RouteCtxKey, rctx2))
+	w2 := httptest.NewRecorder()
+	reloadedBH.HandleWebhook(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 on post-restart webhook replay, got %d: %s", w2.Code, w2.Body.String())
+	}
+	if !bytes.Contains(w2.Body.Bytes(), []byte("idempotent_duplicate")) {
+		t.Fatalf("expected idempotent_duplicate response after cold restart, got: %s", w2.Body.String())
+	}
+
+	// Verify domain order and its paid status survived cold restart
+	gotOrder, err := reloadedStore.GetDomainOrderByInvoiceID(ctx, inv.ID)
+	if err != nil || gotOrder == nil || gotOrder.PaymentStatus != "paid" {
+		t.Fatalf("expected paid domain order to persist across cold restart, got %+v err=%v", gotOrder, err)
+	}
+}

@@ -849,6 +849,7 @@ type memoryDumpData struct {
 	DomainDNSRecords     map[uuid.UUID][]*DomainDNSRecord       `json:"domain_dns_records,omitempty"`
 	DomainTransfers      map[uuid.UUID]*DomainTransfer          `json:"domain_transfers,omitempty"`
 	DomainRenewals       map[uuid.UUID][]*DomainRenewal         `json:"domain_renewals,omitempty"`
+	DomainWebhooks       map[string]*DomainWebhook              `json:"domain_webhooks,omitempty"`
 	Tickets              []Ticket                               `json:"tickets,omitempty"`
 	TicketReplies        []TicketReply                          `json:"ticket_replies,omitempty"`
 	Articles             []KnowledgeArticle                     `json:"articles,omitempty"`
@@ -987,6 +988,7 @@ func (m *MemoryStore) saveToDiskLocked() {
 		DomainDNSRecords:     m.domainDNSRecords,
 		DomainTransfers:      m.domainTransfers,
 		DomainRenewals:       m.domainRenewals,
+		DomainWebhooks:       m.domainWebhooks,
 		Tickets:              m.tickets,
 		TicketReplies:        m.ticketReplies,
 		Articles:             m.articles,
@@ -1230,6 +1232,9 @@ func (m *MemoryStore) loadFromDisk() {
 	}
 	if data.DomainRenewals != nil {
 		m.domainRenewals = data.DomainRenewals
+	}
+	if data.DomainWebhooks != nil {
+		m.domainWebhooks = data.DomainWebhooks
 	}
 	if len(data.Tickets) > 0 {
 		m.tickets = data.Tickets
