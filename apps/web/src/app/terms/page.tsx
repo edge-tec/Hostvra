@@ -8,10 +8,10 @@ export const metadata = {
 
 export default function TermsPage() {
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 py-12 px-4">
-      <article className="max-w-3xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 space-y-6 shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">Terms of Service</h1>
+    <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-200 py-6 sm:py-12 px-3 sm:px-4">
+      <article className="max-w-3xl mx-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-5 sm:p-8 space-y-5 sm:space-y-6 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">Terms of Service</h1>
           <Link href="/" className="text-xs font-bold text-emerald-600 hover:underline">&larr; Home</Link>
         </div>
         <p className="text-xs text-slate-500">Effective Date: November 2026 • Hostvra Cloud Infrastructure</p>

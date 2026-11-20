@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { DashboardShell } from '@/components/DashboardShell';
 import { apiFetch } from '@/lib/api';
 import {
   Coins,
@@ -410,8 +411,9 @@ export default function AdminCryptoPage() {
   const pendingCount = invoices.filter((inv) => inv.status === 'pending' || inv.status === 'confirming').length;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
+    <DashboardShell>
+      <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
+        {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <div className="flex items-center gap-2.5">
@@ -605,10 +607,10 @@ export default function AdminCryptoPage() {
       )}
 
       {/* Tabs */}
-      <div className="border-b border-slate-200 dark:border-slate-700 flex gap-2">
+      <div className="border-b border-slate-200 dark:border-slate-700 flex gap-1.5 sm:gap-2 overflow-x-auto whitespace-nowrap">
         <button
           onClick={() => setActiveTab('invoices')}
-          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-3 sm:px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
             activeTab === 'invoices'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -620,7 +622,7 @@ export default function AdminCryptoPage() {
 
         <button
           onClick={() => setActiveTab('treasuries')}
-          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-3 sm:px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
             activeTab === 'treasuries'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -635,7 +637,7 @@ export default function AdminCryptoPage() {
             setActiveTab('hdwallet');
             fetchHDWalletAndSweeps();
           }}
-          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-3 sm:px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
             activeTab === 'hdwallet'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -647,7 +649,7 @@ export default function AdminCryptoPage() {
 
         <button
           onClick={() => setActiveTab('ledger')}
-          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-3 sm:px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
             activeTab === 'ledger'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -659,7 +661,7 @@ export default function AdminCryptoPage() {
 
         <button
           onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 ${
+          className={`px-3 sm:px-4 py-2.5 font-semibold text-xs border-b-2 transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
             activeTab === 'settings'
               ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
               : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
@@ -1231,7 +1233,7 @@ export default function AdminCryptoPage() {
           )}
 
           {/* KPI Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="p-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl">
               <div className="text-[11px] text-slate-500 uppercase font-bold">HD Accounts</div>
               <div className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{hdOverview?.accounts?.length || 0}</div>
@@ -1483,7 +1485,7 @@ export default function AdminCryptoPage() {
             <button
               onClick={handleSaveSettings}
               disabled={savingSettings}
-              className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition cursor-pointer flex items-center gap-2"
+              className="w-full sm:w-auto justify-center px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition cursor-pointer flex items-center gap-2"
             >
               {savingSettings && <RefreshCw className="w-4 h-4 animate-spin" />}
               <span>Save Gateway Policies</span>
@@ -1491,6 +1493,7 @@ export default function AdminCryptoPage() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </DashboardShell>
   );
 }

@@ -125,12 +125,12 @@ function OrderCartContent() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4">
-      <div className="max-w-5xl mx-auto space-y-8">
-        <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-6 sm:py-10 px-3 sm:px-4">
+      <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8">
+        <div className="flex items-start sm:items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight flex items-center gap-2">
-              <ShoppingCart className="w-6 h-6 text-emerald-600" />
+            <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600 shrink-0" />
               <span>Configure Your Cloud Hosting Order</span>
             </h1>
             <p className="text-xs text-slate-500 mt-1">
@@ -159,8 +159,8 @@ function OrderCartContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {/* Step 1: Select Hosting Plan */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">1. Choose Hosting Plan</h2>
                 <div className="inline-flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-bold">
                   <button

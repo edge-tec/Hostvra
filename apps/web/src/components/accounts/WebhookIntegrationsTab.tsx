@@ -501,7 +501,7 @@ export function WebhookIntegrationsTab({ servers, plans, showNotify }: WebhookIn
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                   Billing Provider
                 </label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   {(['whmcs', 'blesta', 'custom'] as const).map(p => (
                     <button
                       type="button"

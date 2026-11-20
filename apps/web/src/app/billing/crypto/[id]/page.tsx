@@ -397,7 +397,7 @@ export default function CryptoCheckoutPage() {
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center p-4 sm:p-8 antialiased">
       <div className="max-w-2xl w-full mx-auto space-y-4">
         {/* Navigation Bar */}
-        <div className="flex items-center justify-between text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <button
             onClick={() => router.push('/billing')}
             className="inline-flex items-center gap-2 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer py-1.5 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm font-semibold"
@@ -447,12 +447,12 @@ export default function CryptoCheckoutPage() {
 
           {/* Currency Selection Grid - Fully visible, NO CUT-OFF SCROLLBARS */}
           {displayOptions.length > 0 && (!invoice || invoice.status === 'pending') && (
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-950/20 space-y-3">
+            <div className="p-4 sm:p-6 border-b border-slate-100 dark:border-slate-800 bg-slate-50/30 dark:bg-slate-950/20 space-y-3">
               <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block">
                 Choose Payment Coin &amp; Network:
               </label>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 select-none">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 sm:gap-3 select-none">
                 {displayOptions.map((opt) => {
                   const isSelected = selectedCurrencyId === opt.id;
                   const isAvailable = !!opt.has_treasury;
@@ -612,8 +612,8 @@ export default function CryptoCheckoutPage() {
                 ) : (
                   <>
                     {/* 2. REAL-TIME PROGRESS TRACKER */}
-                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-3">
-                      <div className="flex items-center justify-between text-xs">
+                    <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                         <div className="flex items-center gap-2.5">
                           {invoice.status === 'confirming' ? (
                             <RefreshCw className="w-4 h-4 text-sky-500 animate-spin" />
@@ -709,8 +709,8 @@ export default function CryptoCheckoutPage() {
                           <span className="text-xs text-slate-500 uppercase font-bold tracking-wider block">
                             Send Exact Amount
                           </span>
-                          <div className="flex items-baseline justify-center sm:justify-start gap-2 mt-1">
-                            <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight">
+                          <div className="flex flex-wrap items-baseline justify-center sm:justify-start gap-2 mt-1">
+                            <span className="text-2xl sm:text-4xl font-extrabold text-slate-900 dark:text-white font-mono tracking-tight break-all">
                               {invoice.crypto_amount}
                             </span>
                             <span className={`text-base font-bold ${coinMeta.textLight}`}>
@@ -806,7 +806,7 @@ export default function CryptoCheckoutPage() {
                           <p className="text-xs text-slate-500">
                             Paste the blockchain transaction hash (txid) from your Trust Wallet or exchange:
                           </p>
-                          <div className="flex gap-2">
+                          <div className="flex flex-col sm:flex-row gap-2">
                             <input
                               type="text"
                               placeholder="0x... or transaction hash (optional)..."
@@ -817,7 +817,7 @@ export default function CryptoCheckoutPage() {
                             <button
                               onClick={handleManualVerify}
                               disabled={verifyingTx}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold rounded-xl text-white transition cursor-pointer flex items-center gap-1.5 shadow-md shrink-0"
+                              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-xs font-bold rounded-xl text-white transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md shrink-0"
                             >
                               {verifyingTx && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
                               <span>{txHashInput.trim() ? 'Verify Tx' : 'Check On-Chain Now'}</span>

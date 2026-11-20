@@ -55,15 +55,15 @@ export default function PublicStatusPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-10 px-4">
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between flex-wrap gap-3">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-6 sm:py-10 px-3 sm:px-4">
+      <div className="max-w-4xl mx-auto space-y-5 sm:space-y-6">
+        <div className="flex items-start sm:items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-              <Activity className="w-6 h-6" />
+            <div className="p-2.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 shrink-0">
+              <Activity className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold tracking-tight">Hostvra System Status</h1>
+              <h1 className="text-xl sm:text-2xl font-extrabold tracking-tight">Hostvra System Status</h1>
               <p className="text-xs text-slate-500">Live real-time telemetry from production probes (no fabricated uptime numbers)</p>
             </div>
           </div>

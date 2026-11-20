@@ -317,11 +317,11 @@ export default function AdminCommercialPage() {
 
   return (
     <DashboardShell>
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="max-w-7xl mx-auto space-y-5 sm:space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
-              <Tag className="w-6 h-6 text-emerald-600" />
+            <h1 className="text-lg sm:text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+              <Tag className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-600 shrink-0" />
               <span>Commercial Management — Coupons, Affiliates &amp; Billing Ops</span>
             </h1>
             <p className="text-xs text-slate-500 mt-1">
@@ -367,10 +367,10 @@ export default function AdminCommercialPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+        <div className="flex gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto whitespace-nowrap">
           <button
             onClick={() => setActiveTab('coupons')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 shrink-0 ${
               activeTab === 'coupons'
                 ? 'bg-emerald-600 text-white'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -381,7 +381,7 @@ export default function AdminCommercialPage() {
           </button>
           <button
             onClick={() => setActiveTab('affiliates')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 shrink-0 ${
               activeTab === 'affiliates'
                 ? 'bg-emerald-600 text-white'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -397,7 +397,7 @@ export default function AdminCommercialPage() {
           </button>
           <button
             onClick={() => setActiveTab('ops')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 ${
+            className={`px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-2 shrink-0 ${
               activeTab === 'ops'
                 ? 'bg-emerald-600 text-white'
                 : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -804,10 +804,10 @@ export default function AdminCommercialPage() {
 
         {/* CREATE / EDIT COUPON MODAL */}
         {showModal && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
             <form
               onSubmit={handleSaveCoupon}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 w-full max-w-lg space-y-4 shadow-2xl"
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto space-y-4 shadow-2xl"
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-extrabold">{editingCoupon ? `Edit Coupon ${editingCoupon.code}` : 'Create Promotional Coupon'}</h2>
@@ -815,7 +815,7 @@ export default function AdminCommercialPage() {
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase">Coupon Code</label>
                   <input
@@ -849,7 +849,7 @@ export default function AdminCommercialPage() {
                   className="w-full mt-1 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs"
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase">Value</label>
                   <input
@@ -880,7 +880,7 @@ export default function AdminCommercialPage() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-bold text-slate-500 uppercase">Min Order USD</label>
                   <input
