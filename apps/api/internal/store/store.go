@@ -619,6 +619,29 @@ type Store interface {
 	RecordWalletDerivationAudit(ctx context.Context, entry *WalletDerivationAuditLog) error
 	ListWalletDerivationAudits(ctx context.Context, limit int) ([]*WalletDerivationAuditLog, error)
 
+	// Ultra-Enterprise Commercial Platform: Coupons, Affiliates, Credit Wallet & Dunning
+	CreateCoupon(ctx context.Context, c *Coupon) error
+	GetCouponByCode(ctx context.Context, code string) (*Coupon, error)
+	ListCoupons(ctx context.Context) ([]*Coupon, error)
+	DeleteCoupon(ctx context.Context, id uuid.UUID) error
+	RedeemCouponAtomic(ctx context.Context, code string, userID, invoiceID uuid.UUID, orderAmountUSD float64, isFirstOrder bool) (*CouponRedemption, error)
+	GetOrCreateAffiliateAccount(ctx context.Context, userID uuid.UUID) (*AffiliateAccount, error)
+	GetAffiliateByCode(ctx context.Context, code string) (*AffiliateAccount, error)
+	ListAffiliateAccounts(ctx context.Context) ([]*AffiliateAccount, error)
+	RecordAffiliateReferral(ctx context.Context, affiliateID, referredUserID uuid.UUID, attributionModel string) (*AffiliateReferral, error)
+	RecordAffiliateCommission(ctx context.Context, referredUserID, invoiceID uuid.UUID, orderAmountUSD float64) (*AffiliateCommission, error)
+	ReverseAffiliateCommissionByInvoice(ctx context.Context, invoiceID uuid.UUID) error
+	RequestAffiliateWithdrawal(ctx context.Context, userID uuid.UUID, amountUSD float64, method, details string) (*AffiliateWithdrawal, error)
+	ApproveAffiliateWithdrawal(ctx context.Context, withdrawalID uuid.UUID, approve bool, adminNotes string) (*AffiliateWithdrawal, error)
+	ListAffiliateWithdrawals(ctx context.Context, userID uuid.UUID) ([]*AffiliateWithdrawal, error)
+	GetOrCreateCustomerWallet(ctx context.Context, userID uuid.UUID) (*CustomerWallet, error)
+	SetWalletAutoPay(ctx context.Context, userID uuid.UUID, enabled bool) (*CustomerWallet, error)
+	CreditWalletAtomic(ctx context.Context, userID uuid.UUID, amountUSD float64, entryType, refID, idempotencyKey, notes string) (*WalletLedgerEntry, error)
+	DebitWalletAtomic(ctx context.Context, userID uuid.UUID, amountUSD float64, entryType, refID, idempotencyKey, notes string) (*WalletLedgerEntry, error)
+	ListWalletLedger(ctx context.Context, userID uuid.UUID, limit int) ([]*WalletLedgerEntry, error)
+	RecordBillingDunningEvent(ctx context.Context, ev *BillingDunningEvent) (bool, error)
+	ListBillingDunningEvents(ctx context.Context, subID uuid.UUID, limit int) ([]*BillingDunningEvent, error)
+
 	// Close
 	Close() error
 }
@@ -755,6 +778,17 @@ type MemoryStore struct {
 	treasurySweepJobs      map[uuid.UUID]*TreasurySweepJob
 	treasurySweepLogs      []*TreasurySweepLog
 	walletDerivationAudits []*WalletDerivationAuditLog
+
+	// Ultra-Enterprise Commercial Platform
+	coupons              map[string]*Coupon
+	couponRedemptions    []*CouponRedemption
+	affiliateAccounts    map[uuid.UUID]*AffiliateAccount
+	affiliateReferrals   map[uuid.UUID]*AffiliateReferral
+	affiliateCommissions map[uuid.UUID]*AffiliateCommission
+	affiliateWithdrawals map[uuid.UUID]*AffiliateWithdrawal
+	customerWallets      map[uuid.UUID]*CustomerWallet
+	walletLedger         []*WalletLedgerEntry
+	dunningEvents        map[string]*BillingDunningEvent
 
 	filePath            string
 }
@@ -1445,6 +1479,15 @@ func NewMemoryStoreWithPath(storePath string) *MemoryStore {
 		treasurySweepJobs:          make(map[uuid.UUID]*TreasurySweepJob),
 		treasurySweepLogs:          make([]*TreasurySweepLog, 0),
 		walletDerivationAudits:     make([]*WalletDerivationAuditLog, 0),
+		coupons:                    make(map[string]*Coupon),
+		couponRedemptions:          make([]*CouponRedemption, 0),
+		affiliateAccounts:          make(map[uuid.UUID]*AffiliateAccount),
+		affiliateReferrals:         make(map[uuid.UUID]*AffiliateReferral),
+		affiliateCommissions:       make(map[uuid.UUID]*AffiliateCommission),
+		affiliateWithdrawals:       make(map[uuid.UUID]*AffiliateWithdrawal),
+		customerWallets:            make(map[uuid.UUID]*CustomerWallet),
+		walletLedger:               make([]*WalletLedgerEntry, 0),
+		dunningEvents:              make(map[string]*BillingDunningEvent),
 	}
 	m.loadFromDisk()
 	m.seedBillingData()

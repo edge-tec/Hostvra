@@ -132,36 +132,112 @@ type ScheduleUpdateRequest struct {
 	AutoRollback   bool   `json:"auto_rollback"`
 }
 
-// GetStatus returns the current installation status, version matrix, and update availability
+// GetStatus returns the current installation status, version matrix, and live GitHub update availability
 func (h *UpdateHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	activeJob, _ := h.repo.GetActiveJob(ctx)
 
-	// Simulated latest production release metadata
-	latestRel := &update.ReleaseMetadata{
-		Version:             "1.1.0",
-		Channel:             h.channel,
-		Component:           "bundle",
-		ReleaseNotes:        "Hostvra 1.1.0: Live Update System, OpenLiteSpeed engine improvements, automated TLS handshake fixes.",
-		MinSupportedVersion: "1.0.0",
-		PackageURL:          "https://updates.hostvra.com/releases/hostvra-1.1.0.tar.gz",
-		PackageSizeBytes:    18452010,
-		ArchCompatibility:   []string{"amd64", "arm64"},
-		OSCompatibility:     []string{"ubuntu", "debian"},
-		ReleasedAt:          time.Now().UTC().Add(-24 * time.Hour),
-	}
+	latestRel := h.fetchLatestGitHubRelease(ctx)
 
 	sysInfo := h.relService.GetSystemVersionInfo(ctx, latestRel)
 	sysInfo.Channel = h.channel
 
-	compat, _ := update.EvaluateCompatibility(sysInfo.APIVersion, "ubuntu-22.04", runtime.GOARCH, latestRel)
+	compat, _ := update.EvaluateCompatibility(sysInfo.APIVersion, "ubuntu-24.04", runtime.GOARCH, latestRel)
 
 	response.JSON(w, http.StatusOK, map[string]interface{}{
-		"system":        sysInfo,
+		"system":         sysInfo,
 		"latest_release": latestRel,
-		"compatibility": compat,
-		"active_job":    activeJob,
+		"compatibility":  compat,
+		"active_job":     activeJob,
+		"source":         "github:edge-tec/Hostvra",
 	}, nil)
+}
+
+// fetchLatestGitHubRelease queries the live edge-tec/Hostvra GitHub repository for the latest release or main commit.
+func (h *UpdateHandler) fetchLatestGitHubRelease(ctx context.Context) *update.ReleaseMetadata {
+	client := &http.Client{Timeout: 5 * time.Second}
+	repo := "edge-tec/Hostvra"
+
+	// 1. Try official GitHub Releases API first
+	if req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+repo+"/releases/latest", nil); err == nil {
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("User-Agent", "Hostvra-Updater/2.0")
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var ghRel struct {
+					TagName     string    `json:"tag_name"`
+					Name        string    `json:"name"`
+					Body        string    `json:"body"`
+					TarballURL  string    `json:"tarball_url"`
+					PublishedAt time.Time `json:"published_at"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&ghRel) == nil && ghRel.TagName != "" {
+					notes := ghRel.Body
+					if notes == "" {
+						notes = ghRel.Name
+					}
+					return &update.ReleaseMetadata{
+						Version:             ghRel.TagName,
+						Channel:             h.channel,
+						Component:           "bundle",
+						ReleaseNotes:        notes,
+						MinSupportedVersion: "1.0.0",
+						PackageURL:          ghRel.TarballURL,
+						ArchCompatibility:   []string{"amd64", "arm64"},
+						OSCompatibility:     []string{"ubuntu", "debian"},
+						ReleasedAt:          ghRel.PublishedAt,
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Fallback to latest commit on main branch from GitHub API
+	if req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/repos/"+repo+"/commits/main", nil); err == nil {
+		req.Header.Set("Accept", "application/vnd.github+json")
+		req.Header.Set("User-Agent", "Hostvra-Updater/2.0")
+		if resp, err := client.Do(req); err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var ghCommit struct {
+					SHA    string `json:"sha"`
+					Commit struct {
+						Message string `json:"message"`
+						Author  struct {
+							Date time.Time `json:"date"`
+						} `json:"author"`
+					} `json:"commit"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&ghCommit) == nil && len(ghCommit.SHA) >= 7 {
+					shortSHA := ghCommit.SHA[:7]
+					return &update.ReleaseMetadata{
+						Version:             "main-" + shortSHA,
+						Channel:             h.channel,
+						Component:           "bundle",
+						ReleaseNotes:        ghCommit.Commit.Message,
+						MinSupportedVersion: "1.0.0",
+						PackageURL:          "https://github.com/" + repo + "/archive/" + ghCommit.SHA + ".tar.gz",
+						ArchCompatibility:   []string{"amd64", "arm64"},
+						OSCompatibility:     []string{"ubuntu", "debian"},
+						ReleasedAt:          ghCommit.Commit.Author.Date,
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Offline / rate-limited safe metadata (explicitly marks offline, never fabricates a fake update)
+	return &update.ReleaseMetadata{
+		Version:             "unknown-offline",
+		Channel:             h.channel,
+		Component:           "bundle",
+		ReleaseNotes:        "Unable to reach GitHub API (edge-tec/Hostvra). Check outbound HTTPS connectivity or retry.",
+		MinSupportedVersion: "1.0.0",
+		ArchCompatibility:   []string{"amd64", "arm64"},
+		OSCompatibility:     []string{"ubuntu", "debian"},
+		ReleasedAt:          time.Now().UTC(),
+	}
 }
 
 // CheckUpdates queries update server for fresh release metadata

@@ -226,8 +226,13 @@ func (e *TreasurySweepEngine) executeEVMSweep(
 
 	if cur.IsToken {
 		// Token sweep: ensure source address has sufficient native gas
-		if nativeBal < feeNative*1.15 {
-			return e.retryOrFailJob(ctx, job, fmt.Sprintf("insufficient native gas on deposit address (have %.8f, need %.8f %s)", nativeBal, feeNative*1.15, net.NativeCurrency))
+		requiredGas := feeNative * 1.15
+		if nativeBal < requiredGas {
+			// Controlled EVM Gas Station: fund exact needed gas (strictly capped) from HD index 0 gas reserve
+			if fundedTx, gErr := e.tryControlledGasFunding(ctx, job, net, gasPriceWei, requiredGas-nativeBal); gErr == nil && fundedTx != "" {
+				return e.retryOrFailJob(ctx, job, fmt.Sprintf("gas station funded %.8f %s (tx=%s); awaiting confirmation before token sweep", requiredGas-nativeBal, net.NativeCurrency, fundedTx))
+			}
+			return e.retryOrFailJob(ctx, job, fmt.Sprintf("insufficient native gas on deposit address (have %.8f, need %.8f %s)", nativeBal, requiredGas, net.NativeCurrency))
 		}
 		tokBal, tErr := e.rpc.GetEVMTokenBalance(ctx, net.RPCURL, cur.ContractAddress, job.SourceAddress, cur.Decimals)
 		if tErr != nil || tokBal <= 0 {
@@ -382,4 +387,80 @@ func parseSettingFloat(val string, fallback float64) float64 {
 		return f
 	}
 	return fallback
+}
+
+// tryControlledGasFunding sends an exact, strictly capped native gas top-up from the HD index-0
+// hot gas-feeder wallet to a customer deposit address so an ERC20/BEP20 USDT sweep can execute.
+// Never sends unlimited gas; enforces max_gas_funding_native safety cap and emergency pause.
+func (e *TreasurySweepEngine) tryControlledGasFunding(
+	ctx context.Context,
+	job *store.TreasurySweepJob,
+	net *store.CryptoNetwork,
+	gasPriceWei *big.Int,
+	neededNative float64,
+) (string, error) {
+	settings, _ := e.store.GetCryptoSettings(ctx)
+	if !strings.EqualFold(settings["gas_station_enabled"], "true") {
+		return "", fmt.Errorf("gas station disabled")
+	}
+	if strings.EqualFold(settings["emergency_sweep_pause"], "true") || e.signer.IsEmergencyPaused() {
+		return "", fmt.Errorf("emergency pause active")
+	}
+
+	maxCapNative := parseSettingFloat(settings["max_gas_funding_native"], 0.005)
+	fundAmount := neededNative * 1.15
+	if fundAmount <= 0 || fundAmount > maxCapNative {
+		return "", fmt.Errorf("requested gas %.8f exceeds hard safety cap %.8f %s", fundAmount, maxCapNative, net.NativeCurrency)
+	}
+
+	feederAddr, err := e.signer.DerivePublicAddress(net.ID, 0)
+	if err != nil {
+		return "", err
+	}
+	feederBal, err := e.rpc.GetEVMBalance(ctx, net.RPCURL, feederAddr.Address)
+	if err != nil || feederBal < fundAmount*1.5 {
+		return "", fmt.Errorf("gas feeder wallet %s has insufficient balance (%.8f %s)", feederAddr.Address, feederBal, net.NativeCurrency)
+	}
+
+	nonce, err := e.rpc.GetEVMNonce(ctx, net.RPCURL, feederAddr.Address)
+	if err != nil {
+		return "", err
+	}
+
+	valF := new(big.Float).Mul(new(big.Float).SetFloat64(fundAmount), new(big.Float).SetFloat64(1e18))
+	valWei, _ := valF.Int(nil)
+
+	// Explicitly allowlist ONLY the target deposit address for this controlled gas top-up
+	gasAllowlist := map[string]bool{
+		strings.ToLower(strings.TrimSpace(job.SourceAddress)): true,
+	}
+
+	signed, err := e.signer.SignEVMLegacySweepTx(&EVMSweepSignRequest{
+		NetworkID:       net.ID,
+		ChainID:         net.ChainID,
+		DerivationIndex: 0,
+		FromAddress:     feederAddr.Address,
+		ToAddress:       job.SourceAddress,
+		Nonce:           nonce,
+		GasPriceWei:     gasPriceWei,
+		GasLimit:        21000,
+		ValueWei:        valWei,
+		AmountUSD:       1.0,
+		MaxSweepUSD:     50.0,
+	}, gasAllowlist)
+	if err != nil {
+		return "", err
+	}
+
+	txHash, err := e.rpc.SendEVMRawTransaction(ctx, net.RPCURL, signed.RawTxHex)
+	if err != nil {
+		return "", err
+	}
+
+	_ = e.store.RecordTreasurySweepLog(ctx, &store.TreasurySweepLog{
+		SweepJobID:   job.ID,
+		EventType:    "gas_station_funded",
+		EventDetails: fmt.Sprintf("Controlled gas funding %.8f %s from feeder %s -> %s (tx=%s)", fundAmount, net.NativeCurrency, feederAddr.Address, job.SourceAddress, txHash),
+	})
+	return txHash, nil
 }

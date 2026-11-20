@@ -23,6 +23,7 @@ import (
 	"hostvra/api/internal/alerts"
 	"hostvra/api/internal/audit"
 	"hostvra/api/internal/auth"
+	"hostvra/api/internal/billing"
 	"hostvra/api/internal/config"
 	"hostvra/api/internal/crypto"
 	"hostvra/api/internal/dns"
@@ -155,6 +156,11 @@ func main() {
 	cryptoHandler := handlers.NewCryptoHandler(cfg, dataStore, auditLogger, cryptoService)
 	cryptoScanner := crypto.NewBackgroundScanner(cryptoService, 20*time.Second)
 	cryptoScanner.Start(context.Background())
+
+	// Initialize Automated Billing Dunning Worker & Ultra-Enterprise Commercial Platform
+	dunningWorker := billing.NewDunningWorker(dataStore, 1*time.Hour, 3)
+	dunningWorker.Start(context.Background())
+	commercialHandler := handlers.NewCommercialHandler(cfg, dataStore, auditLogger, dunningWorker)
 
 	// Initialize ResellerClub Client & Domain Subsystem
 	rcClient, _ := resellerclub.NewClient(resellerclub.Config{
@@ -449,6 +455,10 @@ func main() {
 		r.Get("/support/articles", supportHandler.ListArticles)
 		r.Get("/support/articles/{idOrSlug}", supportHandler.GetArticle)
 		r.Post("/support/ai-assistant", supportHandler.AskAIAssistant)
+
+		// Public Real-Time System Status & Coupon Validation
+		r.Get("/public/status", commercialHandler.GetPublicSystemStatus)
+		r.Post("/billing/coupons/validate", commercialHandler.ValidateCoupon)
 
 		// Public & Agency Client Crypto Payment Gateway Endpoints
 		r.Route("/crypto", func(r chi.Router) {
@@ -1492,6 +1502,29 @@ func main() {
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/sweeps", cryptoHandler.AdminListSweepJobs)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/sweeps/{id}/execute", cryptoHandler.AdminExecuteSweepJob)
 				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/emergency-pause", cryptoHandler.AdminToggleEmergencyPause)
+			})
+
+			// Customer Credit Wallet & Affiliate Program (Authenticated)
+			r.Route("/wallet", func(r chi.Router) {
+				r.Get("/", commercialHandler.GetWallet)
+				r.Put("/autopay", commercialHandler.ToggleWalletAutoPay)
+				r.Post("/pay-invoice", commercialHandler.PayInvoiceWithWallet)
+			})
+			r.Route("/affiliate", func(r chi.Router) {
+				r.Get("/dashboard", commercialHandler.GetAffiliateDashboard)
+				r.Post("/withdraw", commercialHandler.RequestAffiliateWithdrawal)
+			})
+
+			// Super Admin Commercial Management (Coupons, Affiliates, Wallet Adjustments, Dunning)
+			r.Route("/admin/commercial", func(r chi.Router) {
+				r.Use(rbac.RequireAdmin())
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/coupons", commercialHandler.AdminListCoupons)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/coupons", commercialHandler.AdminCreateCoupon)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Delete("/coupons/{id}", commercialHandler.AdminDeleteCoupon)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Get("/affiliates", commercialHandler.AdminListAffiliates)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/withdrawals/{id}/process", commercialHandler.AdminProcessWithdrawal)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/wallet/adjust", commercialHandler.AdminAdjustWallet)
+				r.With(rbac.RequirePermission(rbac.PermBillingManage)).Post("/dunning/run", commercialHandler.AdminRunDunningPass)
 			})
 
 			// Support Tickets, Stats & Canned Macros
