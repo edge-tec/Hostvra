@@ -184,9 +184,14 @@ func (e *TreasurySweepEngine) ExecuteSweepJob(ctx context.Context, jobID uuid.UU
 	switch job.NetworkID {
 	case "bsc", "ethereum", "polygon":
 		return e.executeEVMSweep(ctx, job, net, cur, allowlist, maxSingleUSD)
+	case "tron":
+		return e.executeTronSweep(ctx, job, net, cur, allowlist, maxSingleUSD)
+	case "bitcoin":
+		return e.executeBitcoinSweep(ctx, job, net, cur, allowlist, maxSingleUSD)
+	case "solana":
+		return e.executeSolanaSweep(ctx, job, net, cur, allowlist, maxSingleUSD)
 	default:
-		// Non-EVM networks (TRON, BTC, SOL, LTC, DOGE): log readiness & require network-specific signer broadcast
-		return e.failJob(ctx, job, fmt.Sprintf("network %s sweep queued for external/HSM broadcast (EVM direct broadcast active)", job.NetworkID))
+		return e.failJob(ctx, job, fmt.Sprintf("unsupported sweep network: %s", job.NetworkID))
 	}
 }
 
@@ -408,9 +413,16 @@ func (e *TreasurySweepEngine) tryControlledGasFunding(
 	}
 
 	maxCapNative := parseSettingFloat(settings["max_gas_funding_native"], 0.005)
+	maxCapUSD := parseSettingFloat(settings["max_gas_funding_usd"], 5.0)
 	fundAmount := neededNative * 1.15
 	if fundAmount <= 0 || fundAmount > maxCapNative {
-		return "", fmt.Errorf("requested gas %.8f exceeds hard safety cap %.8f %s", fundAmount, maxCapNative, net.NativeCurrency)
+		return "", fmt.Errorf("requested gas %.8f exceeds hard native safety cap %.8f %s", fundAmount, maxCapNative, net.NativeCurrency)
+	}
+	if nativePriceUSD, pErr := e.pricing.GetPriceUSD(ctx, net.NativeCurrency); pErr == nil && nativePriceUSD > 0 {
+		fundUSD := fundAmount * nativePriceUSD
+		if fundUSD > maxCapUSD {
+			return "", fmt.Errorf("requested gas $%.2f USD exceeds hard USD safety cap $%.2f USD on %s", fundUSD, maxCapUSD, net.ID)
+		}
 	}
 
 	feederAddr, err := e.signer.DerivePublicAddress(net.ID, 0)
@@ -463,4 +475,177 @@ func (e *TreasurySweepEngine) tryControlledGasFunding(
 		EventDetails: fmt.Sprintf("Controlled gas funding %.8f %s from feeder %s -> %s (tx=%s)", fundAmount, net.NativeCurrency, feederAddr.Address, job.SourceAddress, txHash),
 	})
 	return txHash, nil
+}
+
+// executeTronSweep executes a real TRON (TRX) sweep to the allowlisted Trust Wallet TRON treasury.
+func (e *TreasurySweepEngine) executeTronSweep(
+	ctx context.Context,
+	job *store.TreasurySweepJob,
+	net *store.CryptoNetwork,
+	cur *store.CryptoCurrency,
+	allowlist map[string]bool,
+	maxSingleUSD float64,
+) error {
+	if cur.IsToken {
+		return e.retryOrFailJob(ctx, job, "TRC20 token sweep requires TRX energy reserve on source address; verify TRX energy before broadcast")
+	}
+	trxBal, err := e.rpc.GetTronBalance(ctx, net.RPCURL, job.SourceAddress)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to query TRON balance: %v", err))
+	}
+	const feeReserveTRX = 1.1 // bandwidth/activation safety buffer
+	sendable := trxBal - feeReserveTRX
+	if sendable <= 0 {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("TRON balance %.6f TRX too low to cover %.2f TRX fee reserve", trxBal, feeReserveTRX))
+	}
+	amountSun := int64(math.Floor(sendable * 1e6))
+	txObj, txID, err := e.rpc.CreateTronNativeTx(ctx, net.RPCURL, job.SourceAddress, job.DestinationAddress, amountSun)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to build TRON tx: %v", err))
+	}
+	sigHex, err := e.signer.SignTronSweepTx(&TronSweepSignRequest{
+		DerivationIndex: uint32(job.DerivationIndex),
+		FromAddress:     job.SourceAddress,
+		Destination:     job.DestinationAddress,
+		TxIDHex:         txID,
+		AmountUSD:       job.AmountUSD,
+		MaxSweepUSD:     maxSingleUSD,
+	}, allowlist)
+	if err != nil {
+		return e.failJob(ctx, job, fmt.Sprintf("TRON signer policy rejected sweep: %v", err))
+	}
+	txObj["signature"] = []string{sigHex}
+	broadcastHash, err := e.rpc.BroadcastTronSignedTx(ctx, net.RPCURL, txObj)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("TRON broadcast error: %v", err))
+	}
+	return e.completeSweepJob(ctx, job, cur.Symbol, sendable, feeReserveTRX, broadcastHash)
+}
+
+// executeBitcoinSweep executes a real BIP-84 Native SegWit P2WPKH UTXO sweep to Trust Wallet BTC.
+func (e *TreasurySweepEngine) executeBitcoinSweep(
+	ctx context.Context,
+	job *store.TreasurySweepJob,
+	net *store.CryptoNetwork,
+	cur *store.CryptoCurrency,
+	allowlist map[string]bool,
+	maxSingleUSD float64,
+) error {
+	utxos, err := e.rpc.GetBitcoinUTXOs(ctx, net.RPCURL, job.SourceAddress)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to fetch BTC UTXOs: %v", err))
+	}
+	if len(utxos) == 0 {
+		return e.retryOrFailJob(ctx, job, "no confirmed BTC UTXOs available on deposit address")
+	}
+	var totalSats int64
+	for _, u := range utxos {
+		totalSats += u.Amount
+	}
+	// Estimate P2WPKH vbytes: ~68 vB per input + 31 vB output + 11 vB overhead at 10 sat/vB
+	estVBytes := int64(len(utxos)*68 + 42)
+	feeSats := estVBytes * 10
+	if totalSats-feeSats < 546 {
+		return e.failJob(ctx, job, fmt.Sprintf("BTC balance %d sats is uneconomical dust after %d sat fee", totalSats, feeSats))
+	}
+
+	signed, err := e.signer.SignBitcoinSegWitSweepTx(&BitcoinSweepSignRequest{
+		DerivationIndex: uint32(job.DerivationIndex),
+		FromAddress:     job.SourceAddress,
+		Destination:     job.DestinationAddress,
+		UTXOs:           utxos,
+		FeeSatoshis:     feeSats,
+		AmountUSD:       job.AmountUSD,
+		MaxSweepUSD:     maxSingleUSD,
+	}, allowlist)
+	if err != nil {
+		return e.failJob(ctx, job, fmt.Sprintf("BTC signer policy rejected sweep: %v", err))
+	}
+
+	txHash, err := e.rpc.BroadcastBitcoinRawTx(ctx, net.RPCURL, signed.RawTxHex)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("BTC broadcast error: %v", err))
+	}
+	return e.completeSweepJob(ctx, job, cur.Symbol, float64(totalSats-feeSats)/1e8, float64(feeSats)/1e8, txHash)
+}
+
+// executeSolanaSweep executes a real SLIP-0010 Ed25519 SystemProgram::Transfer sweep to Trust Wallet SOL.
+func (e *TreasurySweepEngine) executeSolanaSweep(
+	ctx context.Context,
+	job *store.TreasurySweepJob,
+	net *store.CryptoNetwork,
+	cur *store.CryptoCurrency,
+	allowlist map[string]bool,
+	maxSingleUSD float64,
+) error {
+	solBal, err := e.rpc.GetSolanaBalance(ctx, net.RPCURL, job.SourceAddress)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to query SOL balance: %v", err))
+	}
+	totalLamports := uint64(math.Floor(solBal * 1e9))
+	const txFeeLamports uint64 = 5000
+	if totalLamports <= txFeeLamports {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("SOL balance %d lamports insufficient to cover 5000 lamport fee", totalLamports))
+	}
+	sendLamports := totalLamports - txFeeLamports
+
+	blockhash, err := e.rpc.GetSolanaRecentBlockhash(ctx, net.RPCURL)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("failed to fetch Solana recent blockhash: %v", err))
+	}
+
+	signed, err := e.signer.SignSolanaSweepTx(&SolanaSweepSignRequest{
+		DerivationIndex: uint32(job.DerivationIndex),
+		FromAddress:     job.SourceAddress,
+		Destination:     job.DestinationAddress,
+		RecentBlockhash: blockhash,
+		Lamports:        sendLamports,
+		AmountUSD:       job.AmountUSD,
+		MaxSweepUSD:     maxSingleUSD,
+	}, allowlist)
+	if err != nil {
+		return e.failJob(ctx, job, fmt.Sprintf("SOL signer policy rejected sweep: %v", err))
+	}
+
+	txSig, err := e.rpc.SendSolanaRawTransaction(ctx, net.RPCURL, signed.RawTxHex)
+	if err != nil {
+		return e.retryOrFailJob(ctx, job, fmt.Sprintf("SOL broadcast error: %v", err))
+	}
+	return e.completeSweepJob(ctx, job, cur.Symbol, float64(sendLamports)/1e9, float64(txFeeLamports)/1e9, txSig)
+}
+
+func (e *TreasurySweepEngine) completeSweepJob(ctx context.Context, job *store.TreasurySweepJob, symbol string, actualAmt, feeAmt float64, txHash string) error {
+	now := time.Now().UTC()
+	job.TransactionHash = txHash
+	job.ActualAmount = actualAmt
+	job.ActualNetworkFee = feeAmt
+	job.Status = "completed"
+	job.CompletedAt = &now
+	job.LastError = ""
+	_ = e.store.UpdateTreasurySweepJob(ctx, job)
+
+	if job.SourceAddressID != nil {
+		_ = e.store.UpdateHDWalletAddressStatus(ctx, *job.SourceAddressID, "swept")
+	}
+
+	_ = e.store.RecordTreasurySweepLog(ctx, &store.TreasurySweepLog{
+		SweepJobID:   job.ID,
+		EventType:    "sweep_broadcast_completed",
+		EventDetails: fmt.Sprintf("Swept %.8f %s (fee=%.8f) to Trust Wallet %s | tx=%s", actualAmt, symbol, feeAmt, job.DestinationAddress, txHash),
+	})
+
+	_ = e.store.RecordCryptoLedger(ctx, &store.CryptoInternalLedger{
+		ID:          uuid.New(),
+		InvoiceID:   job.InvoiceID,
+		EntryType:   "treasury_sweep",
+		Amount:      actualAmt,
+		Currency:    symbol,
+		Network:     job.NetworkID,
+		FromAddress: job.SourceAddress,
+		ToAddress:   job.DestinationAddress,
+		TxHash:      txHash,
+		Notes:       fmt.Sprintf("Automated HD Treasury Sweep to Trust Wallet (job=%s, fee=%.8f)", job.ID.String(), feeAmt),
+		CreatedAt:   now,
+	})
+	return nil
 }

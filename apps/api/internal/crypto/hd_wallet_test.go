@@ -310,3 +310,84 @@ func TestTreasurySweepEngine_IdempotentEnqueue(t *testing.T) {
 		t.Fatalf("sweep idempotency violated: created duplicate jobs %s and %s", job1.ID, job2.ID)
 	}
 }
+
+func TestIsolatedSigner_MultiChainTronBitcoinSolanaSigning(t *testing.T) {
+	signer, err := NewTestIsolatedSigner(testVectorMnemonic)
+	if err != nil {
+		t.Fatalf("NewTestIsolatedSigner failed: %v", err)
+	}
+
+	// 1. TRON secp256k1 65-byte [R|S|V] signing + allowlist enforcement
+	tronSrc, _ := signer.DerivePublicAddress("tron", 1)
+	tronDest := "TEpqggfDUnVw4i12cM2RYEgwhgaruhAmKo"
+	tronAllow := map[string]bool{strings.ToLower(tronDest): true}
+	tronSig, err := signer.SignTronSweepTx(&TronSweepSignRequest{
+		DerivationIndex: 1,
+		FromAddress:     tronSrc.Address,
+		Destination:     tronDest,
+		TxIDHex:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		AmountUSD:       20,
+		MaxSweepUSD:     50000,
+	}, tronAllow)
+	if err != nil {
+		t.Fatalf("SignTronSweepTx failed: %v", err)
+	}
+	if len(tronSig) != 130 { // 65 bytes hex
+		t.Fatalf("expected 130-char TRON signature hex, got %d", len(tronSig))
+	}
+
+	// 2. Bitcoin BIP-143 Native SegWit P2WPKH signing + dust protection
+	btcSrc, _ := signer.DerivePublicAddress("bitcoin", 1)
+	btcDest := "bc1qvusq0he9jmka3kr9e92nem9h08vrmshndaj2c6"
+	btcAllow := map[string]bool{strings.ToLower(btcDest): true}
+
+	// Dust (< 546 sats) must be rejected
+	if _, err := signer.SignBitcoinSegWitSweepTx(&BitcoinSweepSignRequest{
+		DerivationIndex: 1,
+		FromAddress:     btcSrc.Address,
+		Destination:     btcDest,
+		UTXOs:           []BitcoinUTXO{{TxID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Vout: 0, Amount: 1000}},
+		FeeSatoshis:     600,
+		AmountUSD:       1,
+		MaxSweepUSD:     50000,
+	}, btcAllow); err == nil {
+		t.Fatalf("expected dust rejection for 400 sat output")
+	}
+
+	btcSigned, err := signer.SignBitcoinSegWitSweepTx(&BitcoinSweepSignRequest{
+		DerivationIndex: 1,
+		FromAddress:     btcSrc.Address,
+		Destination:     btcDest,
+		UTXOs:           []BitcoinUTXO{{TxID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Vout: 0, Amount: 50000}},
+		FeeSatoshis:     1100,
+		AmountUSD:       30,
+		MaxSweepUSD:     50000,
+	}, btcAllow)
+	if err != nil {
+		t.Fatalf("SignBitcoinSegWitSweepTx failed: %v", err)
+	}
+	if len(btcSigned.RawTxHex) < 100 || !IsHexTxHash(btcSigned.TxHash) {
+		t.Fatalf("invalid signed BTC SegWit tx: hash=%s", btcSigned.TxHash)
+	}
+
+	// 3. Solana SLIP-0010 Ed25519 SystemProgram::Transfer signing
+	solSrc, _ := signer.DerivePublicAddress("solana", 1)
+	solDestRes, _ := signer.DerivePublicAddress("solana", 0)
+	solAllow := map[string]bool{strings.ToLower(solDestRes.Address): true}
+
+	solSigned, err := signer.SignSolanaSweepTx(&SolanaSweepSignRequest{
+		DerivationIndex: 1,
+		FromAddress:     solSrc.Address,
+		Destination:     solDestRes.Address,
+		RecentBlockhash: solDestRes.Address, // valid 32-byte Base58 blockhash fixture
+		Lamports:        100000000,          // 0.1 SOL
+		AmountUSD:       20,
+		MaxSweepUSD:     50000,
+	}, solAllow)
+	if err != nil {
+		t.Fatalf("SignSolanaSweepTx failed: %v", err)
+	}
+	if solSigned.RawTxHex == "" || solSigned.TxHash == "" {
+		t.Fatalf("invalid signed Solana tx: %+v", solSigned)
+	}
+}

@@ -954,3 +954,174 @@ func (c *MultiChainRpcClient) VerifySolanaTransaction(ctx context.Context, rpcUR
 	}
 	return nil, fmt.Errorf("no matching SOL deposit to %s found in signature %s", depositAddr, signature)
 }
+
+// ----------------------------------------------------------------------------
+// TRON, Bitcoin & Solana Broadcast Helpers (Phase 4 Multi-Chain Auto-Sweep)
+// ----------------------------------------------------------------------------
+
+func (c *MultiChainRpcClient) CreateTronNativeTx(ctx context.Context, rpcURL, fromAddr, toAddr string, amountSun int64) (map[string]interface{}, string, error) {
+	baseURL := rpcURL
+	if baseURL == "" {
+		baseURL = "https://api.trongrid.io"
+	}
+	payload := map[string]interface{}{
+		"owner_address": fromAddr,
+		"to_address":    toAddr,
+		"amount":        amountSun,
+		"visible":       true,
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/wallet/createtransaction", bytes.NewReader(body))
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	var txObj map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&txObj); err != nil {
+		return nil, "", err
+	}
+	txID, _ := txObj["txID"].(string)
+	if txID == "" {
+		return nil, "", fmt.Errorf("trongrid createtransaction failed: %v", txObj["Error"])
+	}
+	return txObj, txID, nil
+}
+
+func (c *MultiChainRpcClient) BroadcastTronSignedTx(ctx context.Context, rpcURL string, signedTx map[string]interface{}) (string, error) {
+	baseURL := rpcURL
+	if baseURL == "" {
+		baseURL = "https://api.trongrid.io"
+	}
+	body, _ := json.Marshal(signedTx)
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/wallet/broadcasttransaction", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var res struct {
+		Result  bool   `json:"result"`
+		TxID    string `json:"txid"`
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	if !res.Result {
+		return "", fmt.Errorf("tron broadcast rejected: %s", res.Message)
+	}
+	if res.TxID != "" {
+		return res.TxID, nil
+	}
+	txID, _ := signedTx["txID"].(string)
+	return txID, nil
+}
+
+func (c *MultiChainRpcClient) GetBitcoinUTXOs(ctx context.Context, apiURL, address string) ([]BitcoinUTXO, error) {
+	baseURL := apiURL
+	if baseURL == "" {
+		baseURL = "https://blockstream.info/api"
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/address/%s/utxo", baseURL, address), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var raw []struct {
+		TxID   string `json:"txid"`
+		Vout   uint32 `json:"vout"`
+		Value  int64  `json:"value"`
+		Status struct {
+			Confirmed bool `json:"confirmed"`
+		} `json:"status"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	out := make([]BitcoinUTXO, 0, len(raw))
+	for _, u := range raw {
+		if u.Status.Confirmed && u.Value > 0 {
+			out = append(out, BitcoinUTXO{TxID: u.TxID, Vout: u.Vout, Amount: u.Value})
+		}
+	}
+	return out, nil
+}
+
+func (c *MultiChainRpcClient) BroadcastBitcoinRawTx(ctx context.Context, apiURL, rawTxHex string) (string, error) {
+	baseURL := apiURL
+	if baseURL == "" {
+		baseURL = "https://blockstream.info/api"
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", baseURL+"/tx", strings.NewReader(strings.TrimSpace(rawTxHex)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(resp.Body)
+	txt := strings.TrimSpace(buf.String())
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("bitcoin broadcast failed (%d): %s", resp.StatusCode, txt)
+	}
+	return txt, nil
+}
+
+func (c *MultiChainRpcClient) GetSolanaRecentBlockhash(ctx context.Context, rpcURL string) (string, error) {
+	endpoint := rpcURL
+	if endpoint == "" {
+		endpoint = "https://api.mainnet-beta.solana.com"
+	}
+	raw, err := c.callEVM(ctx, endpoint, "getLatestBlockhash", []interface{}{map[string]string{"commitment": "finalized"}})
+	if err != nil {
+		return "", err
+	}
+	var res struct {
+		Value struct {
+			Blockhash string `json:"blockhash"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return "", err
+	}
+	if res.Value.Blockhash == "" {
+		return "", fmt.Errorf("empty solana recent blockhash")
+	}
+	return res.Value.Blockhash, nil
+}
+
+func (c *MultiChainRpcClient) SendSolanaRawTransaction(ctx context.Context, rpcURL, base64Tx string) (string, error) {
+	endpoint := rpcURL
+	if endpoint == "" {
+		endpoint = "https://api.mainnet-beta.solana.com"
+	}
+	raw, err := c.callEVM(ctx, endpoint, "sendTransaction", []interface{}{
+		base64Tx,
+		map[string]interface{}{"encoding": "base64", "preflightCommitment": "confirmed"},
+	})
+	if err != nil {
+		return "", err
+	}
+	var sig string
+	if err := json.Unmarshal(raw, &sig); err != nil {
+		return "", err
+	}
+	return sig, nil
+}
