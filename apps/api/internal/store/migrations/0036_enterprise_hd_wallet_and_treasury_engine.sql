@@ -109,6 +109,11 @@ ON CONFLICT (id) DO UPDATE SET
 
 UPDATE crypto_currencies SET min_amount_usd = 0.5000 WHERE min_amount_usd > 0.5000;
 
+-- Replace deprecated cloudflare-eth.com RPC with live reliable publicnode endpoints
+UPDATE crypto_networks SET rpc_url = 'https://ethereum-rpc.publicnode.com', fallback_rpc_url = 'https://eth.llamarpc.com' WHERE id = 'ethereum' AND rpc_url LIKE '%cloudflare-eth.com%';
+UPDATE crypto_networks SET fallback_rpc_url = 'https://bsc-rpc.publicnode.com' WHERE id = 'bsc';
+UPDATE crypto_networks SET rpc_url = 'https://polygon-bor-rpc.publicnode.com', fallback_rpc_url = 'https://polygon-rpc.com' WHERE id = 'polygon';
+
 -- Seed default Phase 5 Treasury Engine settings
 INSERT INTO crypto_payment_settings (key, value, description)
 VALUES

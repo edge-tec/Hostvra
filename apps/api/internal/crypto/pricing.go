@@ -44,18 +44,18 @@ func NewPricingService(cacheTTL time.Duration) *PricingService {
 		},
 		cacheTTL: cacheTTL,
 	}
-	// Seed initial baseline fallback rates
-	now := time.Now().UTC()
-	ps.cache["USDT"] = &PriceInfo{PriceUSD: 1.0, UpdatedAt: now, Source: "pegged"}
-	ps.cache["USDC"] = &PriceInfo{PriceUSD: 1.0, UpdatedAt: now, Source: "pegged"}
-	ps.cache["BTC"] = &PriceInfo{PriceUSD: 95000.0, UpdatedAt: now, Source: "seed"}
-	ps.cache["ETH"] = &PriceInfo{PriceUSD: 3400.0, UpdatedAt: now, Source: "seed"}
-	ps.cache["BNB"] = &PriceInfo{PriceUSD: 650.0, UpdatedAt: now, Source: "seed"}
-	ps.cache["TRX"] = &PriceInfo{PriceUSD: 0.20, UpdatedAt: now, Source: "seed"}
-	ps.cache["POL"] = &PriceInfo{PriceUSD: 0.50, UpdatedAt: now, Source: "seed"}
-	ps.cache["SOL"] = &PriceInfo{PriceUSD: 210.0, UpdatedAt: now, Source: "seed"}
-	ps.cache["LTC"] = &PriceInfo{PriceUSD: 95.0, UpdatedAt: now, Source: "seed"}
-	ps.cache["DOGE"] = &PriceInfo{PriceUSD: 0.38, UpdatedAt: now, Source: "seed"}
+	// Seed initial baseline fallback rates with zero UpdatedAt so the first call ALWAYS fetches live market prices
+	var zeroTime time.Time
+	ps.cache["USDT"] = &PriceInfo{PriceUSD: 1.0, UpdatedAt: time.Now().UTC(), Source: "pegged"}
+	ps.cache["USDC"] = &PriceInfo{PriceUSD: 1.0, UpdatedAt: time.Now().UTC(), Source: "pegged"}
+	ps.cache["BTC"] = &PriceInfo{PriceUSD: 95000.0, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["ETH"] = &PriceInfo{PriceUSD: 3400.0, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["BNB"] = &PriceInfo{PriceUSD: 650.0, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["TRX"] = &PriceInfo{PriceUSD: 0.20, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["POL"] = &PriceInfo{PriceUSD: 0.50, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["SOL"] = &PriceInfo{PriceUSD: 210.0, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["LTC"] = &PriceInfo{PriceUSD: 95.0, UpdatedAt: zeroTime, Source: "seed"}
+	ps.cache["DOGE"] = &PriceInfo{PriceUSD: 0.38, UpdatedAt: zeroTime, Source: "seed"}
 	return ps
 }
 

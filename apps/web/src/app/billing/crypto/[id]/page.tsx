@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch, getStoredUserRole } from '@/lib/api';
 import {
@@ -135,6 +135,22 @@ const COIN_METADATA: Record<
     tag: 'USDC',
     color: '#3b82f6',
   },
+  POL: {
+    bgLight: 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-500/10 dark:text-purple-400 dark:border-purple-500/20',
+    textLight: 'text-purple-600 dark:text-purple-400',
+    borderLight: 'border-purple-500',
+    symbol: 'POL',
+    tag: 'POL',
+    color: '#8b5cf6',
+  },
+  SOL: {
+    bgLight: 'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200 dark:bg-fuchsia-500/10 dark:text-fuchsia-400 dark:border-fuchsia-500/20',
+    textLight: 'text-fuchsia-600 dark:text-fuchsia-400',
+    borderLight: 'border-fuchsia-500',
+    symbol: 'SOL',
+    tag: 'SOL',
+    color: '#d946ef',
+  },
 };
 
 export default function CryptoCheckoutPage() {
@@ -181,10 +197,14 @@ export default function CryptoCheckoutPage() {
     }
   }, []);
 
-  // 2. Fetch or Create Crypto Invoice
+  const initialAutoInitDoneRef = useRef<boolean>(false);
+  const invoiceReqSeqRef = useRef<number>(0);
+
+  // 2. Fetch or Create Crypto Invoice (race-safe: ignores stale responses on rapid coin switching)
   const initInvoice = useCallback(
     async (curId: string) => {
       if (!invoiceId) return;
+      const reqSeq = ++invoiceReqSeqRef.current;
       setSelectedCurrencyId(curId);
       setCreating(true);
       setError(null);
@@ -193,18 +213,22 @@ export default function CryptoCheckoutPage() {
         const selected = options.find((o) => o.id === curId) || options.find((o) => o.has_treasury) || options[0];
 
         if (options.length > 0 && !options.some((o) => o.has_treasury)) {
-          setError('NO_TREASURY_AVAILABLE');
-          setLoading(false);
-          setCreating(false);
+          if (reqSeq === invoiceReqSeqRef.current) {
+            setError('NO_TREASURY_AVAILABLE');
+            setLoading(false);
+            setCreating(false);
+          }
           return;
         }
 
         if (selected && !selected.has_treasury) {
-          setError(
-            `The merchant has not yet configured on-chain recipient addresses for ${selected.name} (${selected.symbol}). Please select an active cryptocurrency marked as Ready.`
-          );
-          setLoading(false);
-          setCreating(false);
+          if (reqSeq === invoiceReqSeqRef.current) {
+            setError(
+              `The merchant has not yet configured on-chain recipient addresses for ${selected.name} (${selected.symbol}). Please select an active cryptocurrency marked as Ready.`
+            );
+            setLoading(false);
+            setCreating(false);
+          }
           return;
         }
 
@@ -218,6 +242,9 @@ export default function CryptoCheckoutPage() {
           }),
         });
 
+        // Ignore stale response if user switched to another coin while request was in-flight
+        if (reqSeq !== invoiceReqSeqRef.current) return;
+
         if (res.data) {
           setInvoice(res.data);
           const expMs = new Date(res.data.expires_at).getTime() - Date.now();
@@ -226,10 +253,14 @@ export default function CryptoCheckoutPage() {
           setError(res.error?.message || 'Failed to generate crypto invoice');
         }
       } catch (e: any) {
-        setError(e.message || 'Failed to initialize payment invoice');
+        if (reqSeq === invoiceReqSeqRef.current) {
+          setError(e.message || 'Failed to initialize payment invoice');
+        }
       } finally {
-        setCreating(false);
-        setLoading(false);
+        if (reqSeq === invoiceReqSeqRef.current) {
+          setCreating(false);
+          setLoading(false);
+        }
       }
     },
     [invoiceId, options]
@@ -240,10 +271,11 @@ export default function CryptoCheckoutPage() {
   }, [fetchCurrencies]);
 
   useEffect(() => {
-    if (options.length > 0 && !invoice && selectedCurrencyId) {
+    if (!initialAutoInitDoneRef.current && options.length > 0 && selectedCurrencyId) {
+      initialAutoInitDoneRef.current = true;
       initInvoice(selectedCurrencyId);
     }
-  }, [options, invoice, selectedCurrencyId, initInvoice]);
+  }, [options, selectedCurrencyId, initInvoice]);
 
   // 3. Countdown Timer
   useEffect(() => {
